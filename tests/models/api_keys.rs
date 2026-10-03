@@ -1,9 +1,9 @@
 use crate::requests::boot_request;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::api_keys::Entity as ApiKeys;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::auth::ApiKeyScope;
 
 async fn setup_workspace(ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
     let tenant = tenant_tenants::ActiveModel {

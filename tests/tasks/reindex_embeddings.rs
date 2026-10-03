@@ -6,10 +6,10 @@ use sea_orm::FromQueryResult;
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::entity_embeddings;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{entity_entities, schema_schemas};
 use yorishiro::services::embedding::EmbeddingProvider;
-use yorishiro::services::embedding::sync;
 
 fn note_definition() -> serde_json::Value {
     serde_json::json!({
@@ -203,10 +203,14 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
             calls: AtomicUsize::new(0),
             succeeds_before_failing: 1,
         };
-        let outcome =
-            sync::reindex_workspace(&ctx.db, workspace.id, &[first.id, second.id], &provider)
-                .await
-                .expect("reindex_workspace runs even with per-entity failures");
+        let outcome = entity_embeddings::reindex_workspace(
+            &ctx.db,
+            workspace.id,
+            &[first.id, second.id],
+            &provider,
+        )
+        .await
+        .expect("reindex_workspace runs even with per-entity failures");
 
         assert_eq!(outcome.total, 2);
         assert_eq!(
@@ -236,7 +240,7 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
         let second = insert_entity(&ctx, workspace.id, "second entity").await;
 
         let provider = WorkingProvider("intfloat/multilingual-e5-base");
-        let outcome = sync::reindex_workspace(
+        let outcome = entity_embeddings::reindex_workspace(
             &ctx.db,
             workspace.id,
             &[first.id, second.id],
@@ -279,10 +283,14 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
             target_entity_id: first.id,
             triggered: std::sync::atomic::AtomicBool::new(false),
         };
-        let outcome =
-            sync::reindex_workspace(&ctx.db, workspace.id, &[first.id, second.id], &provider)
-                .await
-                .expect("reindex_workspace runs even with a concurrent modification");
+        let outcome = entity_embeddings::reindex_workspace(
+            &ctx.db,
+            workspace.id,
+            &[first.id, second.id],
+            &provider,
+        )
+        .await
+        .expect("reindex_workspace runs even with a concurrent modification");
 
         assert_eq!(outcome.total, 2);
         assert_eq!(

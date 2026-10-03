@@ -2,9 +2,9 @@ use super::boot_request;
 use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::auth::ApiKeyScope;
 
 /// Creates a tenant and one active workspace, for tests that need somewhere to attach members.
 async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {

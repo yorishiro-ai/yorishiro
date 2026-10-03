@@ -2,7 +2,7 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::services::auth::ApiKeyScope;
+use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::boot_request;
 use super::fixtures::{self, TenantArgs, issue_api_key};

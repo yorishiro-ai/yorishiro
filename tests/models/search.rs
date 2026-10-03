@@ -4,10 +4,10 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, S
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::entity_embeddings;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{entity_entities, schema_schemas, search};
 use yorishiro::services::embedding::EmbeddingProvider;
-use yorishiro::services::embedding::sync;
 
 fn note_definition() -> serde_json::Value {
     serde_json::json!({
@@ -221,7 +221,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
 
         let mismatched_provider = FixedWidthProvider(1024);
         let result =
-            sync::sync_embedding_for_record(
+            entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
                 &entity,
@@ -357,7 +357,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         let result =
-            sync::sync_embedding_for_record(
+            entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
                 &entity,
@@ -449,7 +449,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         let result =
-            sync::sync_embedding_for_record(
+            entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
                 &entity,
@@ -497,7 +497,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         let result2 =
-            sync::sync_embedding_for_record(
+            entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
                 &entity2,
@@ -565,8 +565,14 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         // Provider is 768-dimensional, not the workspace's 1024: the dimension check fires
         // first and rejects the write before the model check is reached.
         let provider = FixedWidthProvider(768);
-        let result =
-            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &provider, true).await;
+        let result = entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            workspace.id,
+            &entity,
+            &provider,
+            true,
+        )
+        .await;
 
         assert!(
             matches!(result, Err(YorishiroError::ValidationFailed { .. })),
@@ -865,7 +871,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 .await
                 .expect("find entity")
                 .expect("entity exists");
-            sync::sync_embedding_for_record(
+            entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
                 &entity_record.into(),

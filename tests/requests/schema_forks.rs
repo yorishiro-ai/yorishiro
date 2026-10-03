@@ -10,8 +10,8 @@ use yorishiro::models::_entities::{
     entity_entities, schema_schemas, tenant_tenants, workspace_schema_fork_heads,
     workspace_schema_forks, workspace_workspaces,
 };
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::auth::ApiKeyScope;
 
 async fn create_workspace(
     ctx: &loco_rs::app::AppContext,

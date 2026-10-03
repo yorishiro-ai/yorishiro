@@ -7,7 +7,7 @@ use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
-use yorishiro::services::auth::ApiKeyScope;
+use yorishiro::models::api_keys::ApiKeyScope;
 
 async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {
     let tenant = tenant_tenants::ActiveModel {

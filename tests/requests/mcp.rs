@@ -7,8 +7,8 @@ use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::template_templates;
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::{entity_entities, schema_schemas, template_templates as templates};
-use yorishiro::services::auth::ApiKeyScope;
 
 use super::boot_request;
 use super::fixtures::{self, TenantArgs, issue_api_key};

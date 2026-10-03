@@ -5,7 +5,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::services::auth::ApiKeyScope;
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::workers::dispatch::ReindexDispatcher;
 use yorishiro::workers::reindex::ReindexArgs;
 

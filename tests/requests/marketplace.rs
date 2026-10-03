@@ -5,7 +5,7 @@ use serde_json::json;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
-use yorishiro::services::auth::ApiKeyScope;
+use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{self, TenantArgs};
 

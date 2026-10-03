@@ -1,8 +1,8 @@
 use super::boot_request;
 use axum::http::StatusCode;
 use yorishiro::app::App;
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy::{self, MembershipRole};
-use yorishiro::services::auth::ApiKeyScope;
 
 use super::fixtures::{self, TenantArgs, issue_api_key};
 
