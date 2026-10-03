@@ -4,14 +4,15 @@
 //! This module holds only the writes, calling into `models::marketplace` for the insert/update itself once a decision allows it.
 
 use crate::db;
+use crate::ee::models::marketplace;
 use crate::error::{ResultExt, YorishiroError};
 use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
 use uuid::Uuid;
 
 use super::{
-    self as marketplace, InsertForkOutcome, PublishVersionRequest, SubmitReviewRequest,
-    TemplateReviewRecord, TemplateVersionRecord,
+    InsertForkOutcome, PublishVersionRequest, SubmitReviewRequest, TemplateReviewRecord,
+    TemplateVersionRecord,
 };
 use crate::models::template_templates::TemplateVisibility;
 
