@@ -1,6 +1,5 @@
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type WorkspaceSchemaForks = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

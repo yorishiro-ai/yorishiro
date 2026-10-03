@@ -14,7 +14,7 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
 
 #[derive(Deserialize, JsonSchema)]
-pub struct RecallContextArgs {
+pub(crate) struct RecallContextArgs {
     pub entity_id: Uuid,
     /// Maximum number of relations/neighbors to include per hop (defaults to 20 if omitted).
     pub limit: Option<i64>,

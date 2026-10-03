@@ -3,7 +3,7 @@
 //! These operations use Loco's control-plane connection rather than the RLS-scoped tenant pool because a new tenant has no workspace context yet.
 //! This module keeps the historical `crate::models::tenancy` API stable while its implementations live in private modules.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use sea_orm::{ConnectionTrait, DatabaseTransaction};
 use serde::Serialize;
 use uuid::Uuid;
@@ -78,28 +78,8 @@ pub struct WorkspaceSummary {
     pub name: String,
 }
 
-/// A user account returned by tenancy operations.
-#[derive(Serialize)]
-pub struct UserRecord {
-    pub id: Uuid,
-    pub email: String,
-    pub display_name: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
-
-impl From<user_users::Model> for UserRecord {
-    fn from(model: user_users::Model) -> Self {
-        Self {
-            id: model.id,
-            email: model.email,
-            display_name: model.display_name,
-            created_at: model.created_at.into(),
-        }
-    }
-}
-
 /// Counts real tenants and excludes `INFRASTRUCTURE_TENANT_ID`.
-pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
+pub(crate) async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
     tenant::count_tenants(conn).await
 }
 
@@ -136,7 +116,7 @@ pub async fn create_user(
 
 /// Verifies an email and password against the stored Argon2id hash.
 /// Accounts without a password hash never match.
-pub async fn verify_login(
+pub(crate) async fn verify_login(
     conn: &impl ConnectionTrait,
     email: &str,
     password: &str,
@@ -157,7 +137,7 @@ pub async fn add_member(
 }
 
 /// Looks up an existing user by email without creating an account.
-pub async fn get_user_by_email(
+pub(crate) async fn get_user_by_email(
     conn: &impl ConnectionTrait,
     email: &str,
 ) -> Result<Option<user_users::Model>, YorishiroError> {
@@ -196,7 +176,7 @@ pub async fn create_invite(
 
 /// Redeems an invite if its token is valid, unused, and unexpired.
 /// Redemption marks the invite used atomically, so concurrent attempts cannot both succeed.
-pub async fn redeem_invite(
+pub(crate) async fn redeem_invite(
     conn: &impl ConnectionTrait,
     raw_token: &str,
 ) -> Result<Option<RedeemedInvite>, YorishiroError> {
@@ -204,7 +184,7 @@ pub async fn redeem_invite(
 }
 
 /// Lists a tenant's workspaces using the supplied pagination parameters.
-pub async fn list_workspaces(
+pub(crate) async fn list_workspaces(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     page: crate::models::pagination::ListParams,
@@ -266,7 +246,7 @@ pub async fn get_workspace(
 /// Deletes a workspace while refusing to remove a tenant's last remaining workspace.
 /// On PostgreSQL, `conn` must be a `DatabaseTransaction` because deletion uses the same transaction-scoped per-tenant advisory lock as workspace creation.
 /// The shared lock serializes the count and delete with concurrent workspace creation and deletion for the same tenant.
-pub async fn delete_workspace(
+pub(crate) async fn delete_workspace(
     conn: &DatabaseTransaction,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
@@ -276,6 +256,8 @@ pub async fn delete_workspace(
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support {
+    use chrono::{DateTime, Utc};
+
     use super::*;
 
     pub async fn create_invite_at(

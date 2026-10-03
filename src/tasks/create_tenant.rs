@@ -6,7 +6,7 @@ use crate::error::YorishiroError;
 /// `cargo loco task create_tenant name:acme`
 ///
 /// Runs on `ctx.db` (Loco's own connection, not the RLS-scoped tenant pool): a control-plane operation with no workspace to scope RLS to.
-pub struct CreateTenant;
+pub(crate) struct CreateTenant;
 
 #[async_trait]
 impl Task for CreateTenant {

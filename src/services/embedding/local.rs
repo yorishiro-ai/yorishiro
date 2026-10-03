@@ -27,7 +27,7 @@ pub struct LocalEmbeddingConfig {
     pub tokenizer_path: PathBuf,
     /// Which model these files are expected to hold: decides architecture, output dimensionality, sequence-length bound, and query/document prefixes.
     /// `load` runs a probe inference and fails startup if the loaded model's actual output dimension doesn't match `def.dimensions`.
-    pub def: &'static LocalModelDef,
+    pub(crate) def: &'static LocalModelDef,
     /// Maximum sequence length for tokenization.
     /// Text longer than this is truncated. Must not exceed `def.max_sequence_length`; see [`LocalEmbeddingProvider::load`].
     pub max_sequence_length: usize,

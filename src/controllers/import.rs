@@ -11,7 +11,7 @@ use crate::models::import::{self, ImportResult};
 ///
 /// All-or-nothing: on the first error the request fails with that error and, because the handler never reaches `Authorized::commit()`, nothing imported so far is applied.
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/import.jsonl", request_body(content = String, content_type = "application/x-ndjson"), responses((status = 200, body = crate::models::import::ImportResult), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
-pub async fn import_jsonl(
+pub(crate) async fn import_jsonl(
     authorized: Authorized<SchemaScope>,
     body: String,
 ) -> Result<Json<ImportResult>, ApiError> {

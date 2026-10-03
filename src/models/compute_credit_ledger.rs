@@ -1,6 +1,5 @@
 pub use crate::models::_entities::compute_credit_ledger::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type ComputeCreditLedger = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

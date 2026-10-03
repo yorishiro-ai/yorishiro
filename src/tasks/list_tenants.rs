@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
 /// `cargo loco task list_tenants`
-pub struct ListTenants;
+pub(crate) struct ListTenants;
 
 #[async_trait]
 impl Task for ListTenants {

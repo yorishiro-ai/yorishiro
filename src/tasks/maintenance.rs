@@ -9,7 +9,7 @@ use crate::models::system_maintenance::{self, MaintenanceMode};
 /// `mode` is one of `off`/`read_only`/`full_lock`.
 /// `read_only` refuses writes with 423; `full_lock` refuses everything with 503; `off` serves normally.
 /// The state is shared by every node (one row in the database), and `/_ping`/`/_health`/`/_readiness` keep answering so an orchestrator does not restart a server that is deliberately paused (see `controllers::middleware::maintenance::always_served`).
-pub struct Maintenance;
+pub(crate) struct Maintenance;
 
 #[async_trait]
 impl Task for Maintenance {

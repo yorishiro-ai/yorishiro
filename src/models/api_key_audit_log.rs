@@ -54,7 +54,7 @@ db_enum! {
 /// The acting key, for [`record`]: what an audited operation attributes itself to.
 /// A thin, owned copy of the fields of `api_keys::AuthContext`/`api_keys::CreatedApiKey` that `record` actually needs, so this module doesn't have to depend on the guard for a handful of UUIDs.
 #[derive(Clone, Copy)]
-pub struct AuditActor {
+pub(crate) struct AuditActor {
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,
     pub api_key_id: Uuid,
@@ -73,7 +73,7 @@ pub struct AuditActor {
 /// `actor.workspace_id` (and is not the migration role, which the policy does not apply to) fails
 /// the insert with a policy violation. An `Authorized<R>` handler gets the right scoping for free
 /// from `TenantDb::begin_for_workspace`.
-pub async fn record(
+pub(crate) async fn record(
     conn: &impl ConnectionTrait,
     actor: AuditActor,
     action: AuditAction,

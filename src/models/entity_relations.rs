@@ -73,22 +73,7 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// The state a relation is created in, and the only one traversal follows.
-/// Every state a relation may hold, matching the check constraint on `entity_relations`.
-pub const RELATION_STATUSES: [RelationStatus; 3] = [
-    RelationStatus::Active,
-    RelationStatus::Deprecated,
-    RelationStatus::Archived,
-];
-pub const RELATION_STATUS_ACTIVE: &str = RelationStatus::Active.as_db_str();
-
-/// Whether `status` names a state a relation may hold.
-/// Callers validate before writing so an unknown value is a 422 naming the field, not a constraint violation surfacing as a 500.
-pub fn is_valid_relation_status(status: RelationStatus) -> bool {
-    RELATION_STATUSES.contains(&status)
-}
-
-pub fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {
+pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {
     RelationStatus::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
         message: format!("'{value}' is not a relation status"),
         details: vec![ValidationDetail {
@@ -109,13 +94,13 @@ pub struct CreateRelationInput {
     pub properties: Value,
 }
 
-pub struct SetRelationStatusInput {
+pub(crate) struct SetRelationStatusInput {
     pub id: Uuid,
     pub status: RelationStatus,
 }
 
 #[derive(Default)]
-pub struct ListRelationsQuery {
+pub(crate) struct ListRelationsQuery {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
@@ -216,7 +201,7 @@ pub async fn create(
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub async fn get(
+pub(crate) async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     id: Uuid,
@@ -237,7 +222,7 @@ pub async fn get(
 /// Retiring a relation this way keeps the record that it existed, which deleting it does not; traversal stops following it either way.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub async fn set_status(
+pub(crate) async fn set_status(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     input: SetRelationStatusInput,
@@ -288,7 +273,7 @@ pub async fn delete(
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub async fn list(
+pub(crate) async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     query: ListRelationsQuery,
@@ -334,7 +319,7 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
 /// Fetches every relation for the workspace, with no pagination limit, for a full-workspace data export.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub async fn export_all(
+pub(crate) async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
@@ -349,14 +334,14 @@ pub async fn export_all(
         .and_then(|rows| rows.into_iter().map(TryInto::try_into).collect())
 }
 
-pub const MIN_NEIGHBORS_LIMIT: i64 = 1;
-pub const MAX_NEIGHBORS_LIMIT: i64 = 200;
-pub const DEFAULT_NEIGHBORS_LIMIT: i64 = 20;
+pub(crate) const MIN_NEIGHBORS_LIMIT: i64 = 1;
+pub(crate) const MAX_NEIGHBORS_LIMIT: i64 = 200;
+pub(crate) const DEFAULT_NEIGHBORS_LIMIT: i64 = 20;
 
 /// A relation together with the entity on the other end of it, relative to the entity `neighbors_batch` was called for.
 /// `direction` is `"out"` when the queried entity is the relation's source (the neighbor is the target) and `"in"` when it's the target (the neighbor is the source).
 #[derive(Clone, Serialize)]
-pub struct Neighbor {
+pub(crate) struct Neighbor {
     pub relation_id: Uuid,
     pub relation_type: String,
     pub direction: String,
@@ -415,7 +400,7 @@ impl BatchNeighborRow {
 /// A duplicate id in `pivot_ids` contributes only once (deduped before querying).
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub async fn neighbors_batch(
+pub(crate) async fn neighbors_batch(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     pivot_ids: &[Uuid],

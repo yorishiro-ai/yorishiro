@@ -1,6 +1,5 @@
 pub use crate::models::_entities::tenant_reindex_schedules::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type IdentityTenantReindexSchedules = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

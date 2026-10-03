@@ -36,7 +36,7 @@ async fn get_workspace_in_tenant(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
-pub async fn list_workspaces(
+pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
@@ -98,7 +98,7 @@ pub async fn get_workspace(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
-pub async fn delete_workspace(
+pub(crate) async fn delete_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,

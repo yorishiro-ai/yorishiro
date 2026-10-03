@@ -13,7 +13,7 @@ use crate::models::api_keys::Entity as ApiKeys;
 /// `audit` is optional (`audit:true` to set it, anything else or omitted is `false`): the independent grant that lets this key read `GET /api/audit-log`, regardless of `scope`.
 ///
 /// Wraps `api_keys::Entity::create_api_key`, which does the actual insert (and the workspace-exists check) on `ctx.db`.
-pub struct CreateApiKey;
+pub(crate) struct CreateApiKey;
 
 #[async_trait]
 impl Task for CreateApiKey {

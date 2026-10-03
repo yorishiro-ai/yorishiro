@@ -79,7 +79,7 @@ pub(crate) async fn stamped_for_reindex(
         .internal()
 }
 
-pub async fn list_for_tenant(
+pub(crate) async fn list_for_tenant(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
@@ -104,7 +104,7 @@ pub(crate) async fn models_for_tenant(
         .internal()
 }
 
-pub async fn stamp_embedding_if_missing(
+pub(crate) async fn stamp_embedding_if_missing(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     model: String,
@@ -132,7 +132,7 @@ pub async fn stamp_embedding_if_missing(
 /// API-facing workspace record with a typed status.
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct WorkspaceRecord {
+pub(crate) struct WorkspaceRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
@@ -176,13 +176,12 @@ db_enum! {
     }
 }
 
-pub const WORKSPACE_STATUS_SCHEMA_PENDING: &str = WorkspaceStatus::SchemaPending.as_db_str();
 pub const WORKSPACE_STATUS_ACTIVE: &str = WorkspaceStatus::Active.as_db_str();
 
 /// Whether the workspace is still waiting for its first schema.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
-pub async fn is_schema_pending(
+pub(crate) async fn is_schema_pending(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<bool, YorishiroError> {
@@ -200,7 +199,7 @@ pub async fn is_schema_pending(
 /// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other's write.
 ///
 /// Raw SQL, not `ActiveModel`: `COALESCE(...)` can't be expressed via `Set(...)`, and `yorishiro_app` holds UPDATE only on `workspace_workspaces (status, schema_id)` (a column-level GRANT), so the statement must touch exactly those two columns.
-pub async fn mark_active(
+pub(crate) async fn mark_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     schema_id: Uuid,

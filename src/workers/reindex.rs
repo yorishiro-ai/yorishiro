@@ -179,7 +179,10 @@ pub(crate) async fn enqueue_reindex_with_dispatcher(
 }
 
 /// Enqueue a reindex job for `workspace_id` through Loco's queue.
-pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::Result<String> {
+pub(crate) async fn enqueue_reindex(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+) -> loco_rs::Result<String> {
     if ctx.queue_provider.is_none() {
         return Err(loco_rs::Error::Message(
             "no queue provider configured".into(),

@@ -5,7 +5,7 @@ use loco_rs::task::Vars;
 
 use crate::initializers::db_load_guard;
 
-pub struct DbLoadGuard;
+pub(crate) struct DbLoadGuard;
 
 #[async_trait]
 impl Task for DbLoadGuard {

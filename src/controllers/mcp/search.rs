@@ -18,7 +18,7 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::search;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct SearchEntitiesArgs {
+pub(crate) struct SearchEntitiesArgs {
     /// Natural-language query text.
     /// Vectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.
     /// Also used, as-is, for an auxiliary pg_trgm fuzzy text match against entities that have no embedding.
@@ -35,7 +35,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Vector similarity search over entities using a natural-language query (requires read scope)"
     )]
-    pub async fn search_entities(
+    pub(crate) async fn search_entities(
         &self,
         Parameters(args): Parameters<SearchEntitiesArgs>,
         Extension(parts): Extension<Parts>,

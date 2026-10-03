@@ -50,8 +50,6 @@ pub struct CreatedApiKey {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
-    pub user_id: Option<Uuid>,
-    pub audit: bool,
     /// The raw API key string.
     /// Only its hash is stored in the DB, so this return value is the only place it can ever be obtained.
     pub plaintext: String,
@@ -151,7 +149,7 @@ impl Entity {
     ///
     /// Deliberately not run on the request's `DatabaseTransaction`: a read-only handler drops that transaction without committing, which would silently roll this update back along with it.
     /// Every caller uses a short-lived connection from `TenantDb::acquire_for_workspace` instead.
-    pub async fn touch_last_used_on_connection(
+    pub(crate) async fn touch_last_used_on_connection(
         conn: &mut sqlx::PgConnection,
         api_key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
@@ -260,8 +258,6 @@ impl Entity {
             id: inserted.id,
             workspace_id,
             scope,
-            user_id,
-            audit,
             plaintext,
         })
     }

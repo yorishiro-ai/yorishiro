@@ -153,7 +153,7 @@ pub async fn get_template(
 /// Parsing decides which, so neither lookup runs against an id that could not name it, and a library miss reports the library's own not-found rather than the built-in one.
 ///
 /// The returned id is the origin to record: `Some` for a library template, whose later edits the schema can then be told about, and `None` for a built-in, which has no row to point at.
-pub async fn resolve_template_definition(
+pub(crate) async fn resolve_template_definition(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     template_id: &str,
@@ -170,7 +170,7 @@ pub async fn resolve_template_definition(
 /// Input for creating a new template.
 /// `visibility` is not settable here: every template starts as tenant-private.
 #[derive(Clone, serde::Deserialize)]
-pub struct CreateTemplateInput {
+pub(crate) struct CreateTemplateInput {
     pub name: String,
     pub description: Option<String>,
     pub definition: MetaSchemaDefinition,
@@ -191,7 +191,7 @@ pub struct UpdateTemplateInput {
     pub locale: Option<String>,
 }
 
-pub async fn create_template(
+pub(crate) async fn create_template(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     created_by: Option<uuid::Uuid>,
@@ -298,7 +298,7 @@ pub async fn update_template(
 
 /// Deletes a template.
 /// Only the owning tenant may delete it.
-pub async fn delete_template(
+pub(crate) async fn delete_template(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     template_id: uuid::Uuid,

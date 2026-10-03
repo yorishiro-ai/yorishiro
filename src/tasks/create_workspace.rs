@@ -8,7 +8,7 @@ use crate::models::tenancy;
 /// `cargo loco task create_workspace tenant_id:<uuid> name:acme-prod`
 ///
 /// The operator-assisted second step of invite-less signup: run this, then `create_api_key`.
-pub struct CreateWorkspace;
+pub(crate) struct CreateWorkspace;
 
 #[async_trait]
 impl Task for CreateWorkspace {

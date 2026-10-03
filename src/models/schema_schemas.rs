@@ -57,9 +57,6 @@ db_enum! {
     }
 }
 
-pub const ORIGIN_STATUS_LINKED: &str = SchemaOriginStatus::Linked.as_db_str();
-pub const ORIGIN_STATUS_DETACHED: &str = SchemaOriginStatus::Detached.as_db_str();
-
 /// Serializes every producer of a schema version for one workspace and name.
 /// Fork heads use this same lock as ordinary schema creation, so both paths
 /// observe one version sequence even when they run concurrently.
@@ -160,7 +157,7 @@ pub async fn get_active_schema(
 
 /// Counts a workspace's currently *active* schemas: one row per distinct name, since `create_schema` archives the previous version before activating a new one.
 /// For workspace-detail summaries, this is a more meaningful "how many schemas does this workspace define" figure than counting every archived version too.
-pub async fn count_active(
+pub(crate) async fn count_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<i64, YorishiroError> {
@@ -258,7 +255,7 @@ pub struct MergeDiffSummary {
 /// A lightweight summary that omits the `definition` body.
 #[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct SchemaSummary {
+pub(crate) struct SchemaSummary {
     pub id: Uuid,
     pub name: String,
     pub version: i32,
@@ -279,7 +276,7 @@ impl From<Model> for SchemaSummary {
 }
 
 /// Lists all of a workspace's schemas (every version, including archived) ordered by name and version.
-pub async fn list(
+pub(crate) async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     page: crate::models::pagination::ListParams,
@@ -303,7 +300,7 @@ pub async fn list(
 ///
 /// Sets `origin_updated_at` to `NULL` for all linked schemas referencing the template.
 /// The merge endpoint clears it back to `Some(NOW())` after applying the upstream change.
-pub async fn notify_upstream_change(
+pub(crate) async fn notify_upstream_change(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
 ) -> Result<usize, YorishiroError> {

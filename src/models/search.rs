@@ -18,8 +18,8 @@ use crate::models::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 const DEFAULT_SEARCH_LIMIT: i64 = 10;
-pub const MIN_SEARCH_LIMIT: i64 = 1;
-pub const MAX_SEARCH_LIMIT: i64 = 200;
+pub(crate) const MIN_SEARCH_LIMIT: i64 = 1;
+pub(crate) const MAX_SEARCH_LIMIT: i64 = 200;
 
 pub struct SearchQuery {
     pub entity_type: Option<String>,
@@ -88,7 +88,7 @@ impl SearchRow {
 /// On request paths, call this before acquiring a DB connection: embedding generation can
 /// take a long time (an external API call), and holding a connection while waiting would
 /// let pool exhaustion spill over onto unrelated endpoints.
-pub async fn embed_query(
+pub(crate) async fn embed_query(
     provider: &dyn EmbeddingProvider,
     query_text: &str,
 ) -> Result<Vec<f32>, YorishiroError> {

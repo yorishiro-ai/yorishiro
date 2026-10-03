@@ -10,7 +10,7 @@ use serde::Serialize;
 use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 
-pub const DEFAULT_RETRY_AFTER_SECONDS: u32 = 300;
+pub(crate) const DEFAULT_RETRY_AFTER_SECONDS: u32 = 300;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

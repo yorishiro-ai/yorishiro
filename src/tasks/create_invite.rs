@@ -13,7 +13,7 @@ const DEFAULT_INVITE_TTL_HOURS: i64 = 72;
 /// `role` is one of `owner`/`admin`/`member`/`viewer`.
 /// `ttl_hours` is optional, defaulting to 72.
 /// This is the invite step of the real invite→signup→login path: a key minted directly instead carries no `user_id`, so writes made with it are unattributed.
-pub struct CreateInvite;
+pub(crate) struct CreateInvite;
 
 #[async_trait]
 impl Task for CreateInvite {

@@ -4,7 +4,7 @@ pub mod local;
 mod model_fetch;
 pub mod openai;
 
-pub const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
+pub(crate) const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 
 pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
@@ -93,7 +93,7 @@ pub trait WorkspaceEmbeddingResolver: Send + Sync {
 }
 
 /// This crate's own rule: no workspace has its own provider, so every caller falls back to the deployment default.
-pub struct DefaultEmbeddingResolver;
+pub(crate) struct DefaultEmbeddingResolver;
 
 #[async_trait]
 impl WorkspaceEmbeddingResolver for DefaultEmbeddingResolver {
@@ -107,7 +107,7 @@ impl WorkspaceEmbeddingResolver for DefaultEmbeddingResolver {
 }
 
 /// The resolver a deployment gets when it does not choose one.
-pub fn default_embedding_resolver() -> Arc<dyn WorkspaceEmbeddingResolver> {
+pub(crate) fn default_embedding_resolver() -> Arc<dyn WorkspaceEmbeddingResolver> {
     Arc::new(DefaultEmbeddingResolver)
 }
 

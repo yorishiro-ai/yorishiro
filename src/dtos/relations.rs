@@ -19,7 +19,7 @@ pub struct ListRelationsParams {
     pub relation_type: Option<String>,
     /// Restricts the listing to one state.
     /// Omitted, every state is listed.
-    pub status: Option<RelationStatus>,
+    pub(crate) status: Option<RelationStatus>,
     #[serde(flatten)]
     pub page: crate::dtos::common::PageParams,
 }
@@ -28,7 +28,7 @@ pub struct ListRelationsParams {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetRelationStatusRequest {
     /// `active`, `deprecated` or `archived`.
-    pub status: RelationStatus,
+    pub(crate) status: RelationStatus,
 }
 
 impl From<CreateRelationRequest> for entity_relations::CreateRelationInput {

@@ -69,7 +69,7 @@ impl RateLimiter {
     /// Charging the token count instead bounds the work rather than the call count.
     ///
     /// A single request larger than the whole window is still admitted, once: rejecting it would make that query permanently impossible rather than merely expensive, and the bucket is left exhausted so the next one waits.
-    pub fn allow_cost(&self, key: &str, cost: u32) -> bool {
+    pub(crate) fn allow_cost(&self, key: &str, cost: u32) -> bool {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let now = Instant::now();
 

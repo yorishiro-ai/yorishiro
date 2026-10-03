@@ -22,7 +22,7 @@ use crate::services::embedding;
 /// This loads every candidate `EntityRecord` into memory in one batch, the same shape `resync_embeddings` already uses, rather than paging: consistent with that task, not a new consideration introduced here.
 ///
 /// PostgreSQL only, for the same reason as `resync_embeddings`: `entity_entities` has no `embedding` column at all on SQLite.
-pub struct ReindexEmbeddings;
+pub(crate) struct ReindexEmbeddings;
 
 #[async_trait]
 impl Task for ReindexEmbeddings {

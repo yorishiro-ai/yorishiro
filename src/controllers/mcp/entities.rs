@@ -15,7 +15,7 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_entities;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct CreateEntityArgs {
+pub(crate) struct CreateEntityArgs {
     /// Name of the schema this entity conforms to.
     /// The workspace's current active version is used.
     pub schema_name: String,
@@ -26,12 +26,12 @@ pub struct CreateEntityArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetEntityArgs {
+pub(crate) struct GetEntityArgs {
     pub id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct UpdateEntityArgs {
+pub(crate) struct UpdateEntityArgs {
     pub id: Uuid,
     /// Replacement entity body.
     /// Validated against the schema version in effect when the entity was created.
@@ -39,23 +39,23 @@ pub struct UpdateEntityArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct DeleteEntityArgs {
+pub(crate) struct DeleteEntityArgs {
     pub id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct MigrationDryRunArgs {
+pub(crate) struct MigrationDryRunArgs {
     pub name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct FillDefaultsArgs {
+pub(crate) struct FillDefaultsArgs {
     /// Name of the schema whose active version supplies the missing fields.
     pub schema_name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ListEntitiesArgs {
+pub(crate) struct ListEntitiesArgs {
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
     pub filter: Option<Value>,
@@ -145,7 +145,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(description = "Replace the data of an existing entity (requires write scope)")]
-    pub async fn update_entity(
+    pub(crate) async fn update_entity(
         &self,
         Parameters(args): Parameters<UpdateEntityArgs>,
         Extension(parts): Extension<Parts>,
@@ -179,7 +179,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(description = "Delete an entity (requires write scope)")]
-    pub async fn delete_entity(
+    pub(crate) async fn delete_entity(
         &self,
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
@@ -229,7 +229,7 @@ impl YorishiroMcpServer {
                            tell an absent field apart from an unfilled one before answering from \
                            the entity's data."
     )]
-    pub async fn get_entity_drift(
+    pub(crate) async fn get_entity_drift(
         &self,
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,

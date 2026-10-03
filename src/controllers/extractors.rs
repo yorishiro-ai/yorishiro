@@ -171,7 +171,7 @@ where
 }
 
 /// Marker for declaring an endpoint's required API key scope at the type level.
-pub trait RequiredScope {
+pub(crate) trait RequiredScope {
     const SCOPE: ApiKeyScope;
 }
 
@@ -180,7 +180,7 @@ impl RequiredScope for ReadScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Read;
 }
 
-pub struct WriteScope;
+pub(crate) struct WriteScope;
 impl RequiredScope for WriteScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Write;
 }
@@ -190,7 +190,7 @@ impl RequiredScope for SchemaScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Schema;
 }
 
-pub struct MigrationScope;
+pub(crate) struct MigrationScope;
 impl RequiredScope for MigrationScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
 }
@@ -265,7 +265,7 @@ where
 
 /// As `Authorized<R>`, but for the `audit` grant rather than a `RequiredScope`.
 /// Not generic over `R` the way `Authorized<R>` is: `audit` is one grant, not a family of scopes, so there is nothing for a type parameter to select between.
-pub struct AuditAuthorized {
+pub(crate) struct AuditAuthorized {
     pub ctx: api_keys::AuthContext,
     txn: sea_orm::DatabaseTransaction,
 }

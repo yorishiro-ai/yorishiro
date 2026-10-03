@@ -99,7 +99,7 @@ pub async fn update_template(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Template deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
-pub async fn delete_template(
+pub(crate) async fn delete_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,

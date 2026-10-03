@@ -15,11 +15,13 @@ pub use crate::models::_entities::entity_entities::{ActiveModel, Entity, Model};
 use crate::models::schema_schemas::metaschema;
 
 pub use crud::{count, create, delete, export_all, get, get_batch, list, update};
-pub use migration::{drift, fill_defaults, migration_dry_run};
-pub use snapshots::{delete_snapshot, snapshot, undo_job};
+pub(crate) use migration::fill_defaults;
+pub use migration::{drift, migration_dry_run};
+pub use snapshots::undo_job;
+pub use snapshots::{delete_snapshot, snapshot};
 pub use validation::validate_data;
 
-pub async fn ids_for_workspace(
+pub(crate) async fn ids_for_workspace(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<Uuid>, DbErr> {
@@ -170,7 +172,7 @@ pub struct DryRunByType {
 
 /// Result of a fill-defaults operation.
 #[derive(Clone, Serialize)]
-pub struct FillDefaultsReport {
+pub(crate) struct FillDefaultsReport {
     pub schema_name: String,
     pub job_id: Uuid,
     pub entities_updated: i64,
@@ -179,7 +181,7 @@ pub struct FillDefaultsReport {
 
 /// An entity's data as it stood before something overwrote it.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult)]
-pub struct EntitySnapshot {
+pub(crate) struct EntitySnapshot {
     pub id: Uuid,
     /// Groups the snapshots taken by one operation, so a batch is undone as a batch.
     pub job_id: Uuid,

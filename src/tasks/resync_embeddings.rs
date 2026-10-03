@@ -20,7 +20,7 @@ use crate::services::embedding;
 /// This calls `sync_embedding_for_record`, the same guarded path a normal entity write uses, deliberately: if the deployment's configured provider does not match a workspace's stamped model (`services/embedding/sync.rs`'s write-time model check), every candidate here fails for that reason and none get a vector.
 /// That is correct, not a bug to route around: filling NULLs with vectors from a model the workspace is not stamped for would create the same silent model mix that check exists to prevent, just via this recovery path instead of an ordinary write.
 /// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
-pub struct ResyncEmbeddings;
+pub(crate) struct ResyncEmbeddings;
 
 #[derive(FromQueryResult, Clone)]
 struct CandidateRow {

@@ -187,7 +187,7 @@ pub async fn migration_dry_run(
 /// Returns a report counting entities updated and total fields filled.
 ///
 /// `updated_by` is the acting user's ID, or `None` for an unattributed API key.
-pub async fn fill_defaults(
+pub(crate) async fn fill_defaults(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     schema_name: &str,

@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::error::YorishiroError;
 
 /// `cargo loco task list_workspaces tenant_id:<uuid>`
-pub struct ListWorkspaces;
+pub(crate) struct ListWorkspaces;
 
 #[async_trait]
 impl Task for ListWorkspaces {

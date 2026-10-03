@@ -33,7 +33,7 @@ fn is_write(request: &Request) -> bool {
     !matches!(request.method().as_str(), "GET" | "HEAD" | "OPTIONS")
 }
 
-pub async fn maintenance_guard(
+pub(crate) async fn maintenance_guard(
     State(ctx): State<AppContext>,
     request: Request,
     next: Next,

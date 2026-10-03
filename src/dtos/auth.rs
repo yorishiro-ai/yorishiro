@@ -24,7 +24,7 @@ pub struct SignupResponse {
     pub role: MembershipRole,
     /// The workspaces the new member can now log into.
     /// The client picks one and passes its id to `/auth/login`.
-    pub workspaces: Vec<WorkspaceSummary>,
+    pub(crate) workspaces: Vec<WorkspaceSummary>,
 }
 
 #[derive(Deserialize)]

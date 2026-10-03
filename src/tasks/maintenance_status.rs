@@ -5,7 +5,7 @@ use crate::error::ResultExt;
 use crate::models::system_maintenance;
 
 /// `cargo loco task maintenance_status`
-pub struct MaintenanceStatus;
+pub(crate) struct MaintenanceStatus;
 
 #[async_trait]
 impl Task for MaintenanceStatus {

@@ -87,7 +87,7 @@ pub trait WorkerClassResolver: Send + Sync {
 }
 
 /// This crate's own rule: no workspace has a worker-class assignment, so every job stays `Shared`.
-pub struct DefaultWorkerClassResolver;
+pub(crate) struct DefaultWorkerClassResolver;
 
 #[async_trait]
 impl WorkerClassResolver for DefaultWorkerClassResolver {
@@ -102,7 +102,7 @@ impl WorkerClassResolver for DefaultWorkerClassResolver {
 
 /// The resolver a deployment gets when it does not choose one.
 #[must_use]
-pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
+pub(crate) fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
     Arc::new(DefaultWorkerClassResolver)
 }
 

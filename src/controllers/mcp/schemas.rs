@@ -17,17 +17,17 @@ use crate::models::schema_schemas;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetActiveSchemaArgs {
+pub(crate) struct GetActiveSchemaArgs {
     pub name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetSchemaByIdArgs {
+pub(crate) struct GetSchemaByIdArgs {
     pub schema_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetEntityTypeJsonSchemaArgs {
+pub(crate) struct GetEntityTypeJsonSchemaArgs {
     /// Name of the active schema.
     pub schema_name: String,
     /// entity_type name within that schema.
@@ -35,7 +35,7 @@ pub struct GetEntityTypeJsonSchemaArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ListSchemasArgs {
+pub(crate) struct ListSchemasArgs {
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
@@ -43,7 +43,7 @@ pub struct ListSchemasArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct CreateSchemaArgs {
+pub(crate) struct CreateSchemaArgs {
     /// JSON object conforming to `MetaSchemaDefinition` (name/description/entity_types/relation_types).
     /// If a schema with the same name already exists, whether the change is breaking or non-breaking is detected automatically and it is registered as a new version.
     /// Mutually exclusive with `template_id`; exactly one of the two must be set.
@@ -61,7 +61,7 @@ impl YorishiroMcpServer {
                            versions, including archived). Use this to discover what schemas \
                            exist (requires read scope)"
     )]
-    pub async fn list_schemas(
+    pub(crate) async fn list_schemas(
         &self,
         Parameters(args): Parameters<ListSchemasArgs>,
         Extension(parts): Extension<Parts>,
@@ -107,7 +107,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Get a specific version of a schema definition by ID (requires read scope)"
     )]
-    pub async fn get_schema_by_id(
+    pub(crate) async fn get_schema_by_id(
         &self,
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
@@ -232,7 +232,7 @@ impl YorishiroMcpServer {
                            (requires read scope). Use this to let an agent learn field types, \
                            required fields, enums, etc. ahead of time."
     )]
-    pub async fn get_entity_type_json_schema(
+    pub(crate) async fn get_entity_type_json_schema(
         &self,
         Parameters(args): Parameters<GetEntityTypeJsonSchemaArgs>,
         Extension(parts): Extension<Parts>,

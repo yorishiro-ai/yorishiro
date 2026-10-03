@@ -12,13 +12,13 @@ use crate::models::entity_entities::{self, EntityRecord};
 use crate::models::entity_relations::{self, DEFAULT_NEIGHBORS_LIMIT};
 use crate::models::schema_schemas::{self, SchemaRecord};
 
-pub const DEFAULT_RECALL_LIMIT: i64 = DEFAULT_NEIGHBORS_LIMIT;
+pub(crate) const DEFAULT_RECALL_LIMIT: i64 = DEFAULT_NEIGHBORS_LIMIT;
 
 /// Default number of hops `recall_context` traverses when `depth` is omitted.
-pub const DEFAULT_RECALL_DEPTH: i64 = 1;
+pub(crate) const DEFAULT_RECALL_DEPTH: i64 = 1;
 
 /// Upper bound on `depth`, clamped in `recall_context`, to prevent runaway fan-out queries on dense graphs.
-pub const MAX_RECALL_DEPTH: i64 = 3;
+pub(crate) const MAX_RECALL_DEPTH: i64 = 3;
 
 #[derive(Clone, Serialize)]
 pub struct RecallRelation {

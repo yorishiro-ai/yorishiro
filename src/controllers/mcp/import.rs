@@ -13,7 +13,7 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::import;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ImportJsonlArgs {
+pub(crate) struct ImportJsonlArgs {
     /// JSON Lines document in the same format `export_jsonl`/`GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line, newline-separated.
     pub jsonl: String,
 }

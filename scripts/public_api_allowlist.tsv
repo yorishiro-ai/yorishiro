@@ -304,3 +304,6 @@ ee/controllers/openapi.rs	struct	UpdateForkRequest	openapi-transport: enterprise
 ee/controllers/openapi.rs	struct	UpstreamChange	openapi-transport: enterprise OpenAPI contract type, moved out of the community `controllers/openapi.rs` into its overlay.
 ee/controllers/openapi.rs	struct	WorkerClassRequest	openapi-transport: enterprise OpenAPI contract type, moved out of the community `controllers/openapi.rs` into its overlay.
 ee/controllers/openapi.rs	struct	WorkerClassResponse	openapi-transport: enterprise OpenAPI contract type, moved out of the community `controllers/openapi.rs` into its overlay.
+src/models/entity_entities.rs	use	migration::{drift,migration_dry_run}	seaorm-facade: re-export of model operations that the integration-test crate calls; split from a wider re-export when the unused operations were narrowed to the crate.
+src/models/entity_entities.rs	use	snapshots::undo_job	seaorm-facade: re-export of model operations that the integration-test crate calls; split from a wider re-export when the unused operations were narrowed to the crate.
+src/models/entity_entities.rs	use	snapshots::{delete_snapshot,snapshot}	seaorm-facade: re-export of model operations that the integration-test crate calls; split from a wider re-export when the unused operations were narrowed to the crate.

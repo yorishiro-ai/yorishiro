@@ -14,12 +14,12 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::template_templates;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetTemplateLibraryItemArgs {
+pub(crate) struct GetTemplateLibraryItemArgs {
     pub id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ListTemplateLibraryArgs {
+pub(crate) struct ListTemplateLibraryArgs {
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
@@ -34,7 +34,7 @@ impl YorishiroMcpServer {
                            lists the built-in templates shipped with the server (requires read \
                            scope)"
     )]
-    pub async fn list_template_library(
+    pub(crate) async fn list_template_library(
         &self,
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
@@ -58,7 +58,7 @@ impl YorishiroMcpServer {
         description = "Get a single template from the tenant's DB-backed template library by \
                            ID (requires read scope)"
     )]
-    pub async fn get_template_library_item(
+    pub(crate) async fn get_template_library_item(
         &self,
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,

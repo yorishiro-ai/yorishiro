@@ -14,7 +14,7 @@ use crate::dtos::relations::{
 use crate::models::entity_relations::{self, RelationRecord};
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/relations", request_body = crate::dtos::relations::CreateRelationRequest, responses((status = 201, body = crate::models::entity_relations::RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
-pub async fn create_relation(
+pub(crate) async fn create_relation(
     authorized: Authorized<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -26,7 +26,7 @@ pub async fn create_relation(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/relations/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::models::entity_relations::RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
-pub async fn get_relation(
+pub(crate) async fn get_relation(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<RelationRecord>, ApiError> {
@@ -36,7 +36,7 @@ pub async fn get_relation(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/relations/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Relation deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
-pub async fn delete_relation(
+pub(crate) async fn delete_relation(
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
@@ -47,7 +47,7 @@ pub async fn delete_relation(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/relations", params(("source_id" = Option<Uuid>, Query), ("target_id" = Option<Uuid>, Query), ("relation_type" = Option<String>, Query), ("status" = Option<crate::models::entity_relations::RelationStatus>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::entity_relations::RelationRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
-pub async fn list_relations(
+pub(crate) async fn list_relations(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListRelationsParams>,
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
@@ -59,7 +59,7 @@ pub async fn list_relations(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/relations/{id}/status", params(("id" = Uuid, Path)), request_body = crate::dtos::relations::SetRelationStatusRequest, responses((status = 200, body = crate::models::entity_relations::RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
-pub async fn set_relation_status(
+pub(crate) async fn set_relation_status(
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
     Json(body): Json<SetRelationStatusRequest>,

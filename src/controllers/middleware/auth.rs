@@ -14,7 +14,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity};
 
 /// Copies readable request headers into the authenticator input shape.
-pub fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
+pub(crate) fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
     parts
         .headers
         .iter()
@@ -28,7 +28,7 @@ pub fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
 }
 
 /// Extracts the bearer credential from an Authorization header.
-pub fn extract_bearer_key(parts: &Parts) -> Option<&str> {
+pub(crate) fn extract_bearer_key(parts: &Parts) -> Option<&str> {
     bearer_credential(
         parts
             .headers
@@ -68,7 +68,7 @@ pub trait Authenticator: Send + Sync {
 }
 
 /// This crate's own rule: a key is bound to exactly one workspace, recorded on the key itself, and the request's headers do not affect which one it resolves to.
-pub struct DefaultAuthenticator;
+pub(crate) struct DefaultAuthenticator;
 
 #[async_trait]
 impl Authenticator for DefaultAuthenticator {
@@ -148,7 +148,7 @@ pub async fn authorize(
 
 /// As `authorize`, but checking `require_audit` instead of a scope.
 /// Kept as its own function rather than a parameter on `authorize`, since the two checks are different shapes (`ApiKeyScope` vs. a bare grant) and forcing them through one signature would mean threading an `Option<ApiKeyScope>`/enum through every existing `authorize` call site for the sake of the one caller that needs this.
-pub async fn authorize_audit(
+pub(crate) async fn authorize_audit(
     db: &DbHandle,
     authenticator: &dyn Authenticator,
     presented_key: &str,
@@ -176,7 +176,7 @@ pub async fn authorize_audit(
 /// If concurrent SQLite request handling is ever observed to fail on `SQLITE_BUSY` in practice, `Immediate` is reachable here (unlike inside `lock_for_update`, which never opens its own transaction).
 ///
 /// No RLS to scope on this backend, so no `set_config` call; scope/audit is still enforced the same way `authorize`/`authorize_audit` enforce it, just against a plain transaction rather than an RLS-scoped one.
-pub async fn authorize_sqlite(
+pub(crate) async fn authorize_sqlite(
     db: &sea_orm::DatabaseConnection,
     presented_key: &str,
     required: ApiKeyScope,
@@ -191,7 +191,7 @@ pub async fn authorize_sqlite(
 }
 
 /// As `authorize_sqlite`, but checking `require_audit` instead of a scope: the SQLite counterpart to `authorize_audit`.
-pub async fn authorize_audit_sqlite(
+pub(crate) async fn authorize_audit_sqlite(
     db: &sea_orm::DatabaseConnection,
     presented_key: &str,
 ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
@@ -205,7 +205,7 @@ pub async fn authorize_audit_sqlite(
 }
 
 /// Touches `last_used_at` through a connection freshly acquired for this workspace, logging (never failing the caller) on either call's error.
-pub async fn touch_last_used_on(
+pub(crate) async fn touch_last_used_on(
     db: &DbHandle,
     tenant_id: uuid::Uuid,
     workspace_id: uuid::Uuid,
@@ -229,7 +229,7 @@ pub async fn touch_last_used_on(
 }
 
 /// A connection-free variant of `authorize`, used on paths that need to run a slow operation (like embedding generation) before touching the DB: it only authenticates and validates scope, updating `last_used_at` through a short-lived connection that's returned immediately.
-pub async fn authorize_scope(
+pub(crate) async fn authorize_scope(
     db: &DbHandle,
     authenticator: &dyn Authenticator,
     presented_key: &str,
@@ -247,7 +247,7 @@ pub async fn authorize_scope(
 }
 
 /// SQLite equivalent of [`authorize_scope`]: no `DbHandle` exists on this backend, so this authenticates directly against `ctx.db` and validates scope without opening a transaction.
-pub async fn authorize_scope_sqlite(
+pub(crate) async fn authorize_scope_sqlite(
     db: &sea_orm::DatabaseConnection,
     presented_key: &str,
     required: ApiKeyScope,

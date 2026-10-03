@@ -11,7 +11,7 @@ use crate::models::schema_schemas::{self, SchemaRecord};
 /// `Deserialize` is derived so `models::import::import_jsonl` can read the same shape back in.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "record", rename_all = "snake_case")]
-pub enum ExportRecord {
+pub(crate) enum ExportRecord {
     Schema(SchemaRecord),
     Entity(EntityRecord),
     Relation(RelationRecord),
@@ -19,7 +19,7 @@ pub enum ExportRecord {
 
 /// Fetches every schema (all versions, including archived), entity, and relation for the workspace.
 /// Schemas come first so a reader can resolve the entity_types/relation_types that entities and relations after them reference.
-pub async fn export_all(
+pub(crate) async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<ExportRecord>, YorishiroError> {

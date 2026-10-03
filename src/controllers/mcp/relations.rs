@@ -15,7 +15,7 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_relations::{self, SetRelationStatusInput};
 
 #[derive(Deserialize, JsonSchema)]
-pub struct CreateRelationArgs {
+pub(crate) struct CreateRelationArgs {
     pub source_id: Uuid,
     pub target_id: Uuid,
     /// relation_type name declared in the schema's `relation_types` definition.
@@ -25,17 +25,17 @@ pub struct CreateRelationArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetRelationArgs {
+pub(crate) struct GetRelationArgs {
     pub id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct DeleteRelationArgs {
+pub(crate) struct DeleteRelationArgs {
     pub id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ListRelationsArgs {
+pub(crate) struct ListRelationsArgs {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
@@ -49,7 +49,7 @@ pub struct ListRelationsArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct SetRelationStatusArgs {
+pub(crate) struct SetRelationStatusArgs {
     pub id: Uuid,
     /// "active", "deprecated" or "archived".
     /// Traversal follows "active" relations only.
@@ -135,7 +135,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(description = "Delete a relation (requires write scope)")]
-    pub async fn delete_relation(
+    pub(crate) async fn delete_relation(
         &self,
         Parameters(args): Parameters<DeleteRelationArgs>,
         Extension(parts): Extension<Parts>,
