@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379
 
-.PHONY: check clippy fmt fmt-check python-lint public-api-check coverage test-postgres test-sqlite test-redis build task doctor entities check-all
+.PHONY: check clippy fmt fmt-check python-lint public-api-check coverage test-postgres test-sqlite test-redis build task doctor migrate entities check-all
 
 check:
 	cargo check --locked --workspace
@@ -66,6 +66,10 @@ ifndef DATABASE_URL
 	$(error DATABASE_URL is required for doctor: set it explicitly)
 endif
 	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=test_postgres ./target/debug/yorishiro doctor
+
+migrate: build
+	docker compose up -d --wait testdb
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
 
 # Generate SeaORM entity structs from the current schema.
 # Starts a disposable pgvector/pgvector:pg18 container on port 15432,

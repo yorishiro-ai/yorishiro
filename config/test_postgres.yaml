@@ -67,6 +67,10 @@ queue:
 workers:
   mode: BackgroundQueue
 
+settings:
+  embedding:
+    provider: none
+
 # Initializers Configuration
 # initializers:
 #  oauth2:
