@@ -24,7 +24,7 @@ jobs:
         language: [rust]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # This job holds security-events: write, and CodeQL's rust extractor evaluates
           # build.rs from the checked-out tree; persist-credentials: false keeps that
