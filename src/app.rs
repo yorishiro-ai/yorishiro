@@ -53,9 +53,10 @@ impl Hooks for App {
     async fn boot(
         mode: StartMode,
         environment: &Environment,
-        config: Config,
+        mut config: Config,
     ) -> Result<BootResult> {
         crate::data::config::validate_queue_policy(&config)?;
+        crate::data::config::serve_worker_queues(&mut config, &worker_queues());
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         crate::db::register_sqlite_extensions();
@@ -410,6 +411,14 @@ impl Hooks for App {
         }
         Ok(())
     }
+}
+
+/// Every named queue this build's workers enqueue to: the base's, then the edition's.
+fn worker_queues() -> Vec<String> {
+    let queues = crate::workers::queue::class_queues();
+    #[cfg(feature = "enterprise")]
+    let queues = [queues, crate::ee::app::worker_queues()].concat();
+    queues
 }
 
 /// Builds the pools and shared services every entry point, tasks included, depends on.

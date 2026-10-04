@@ -33,9 +33,9 @@ use crate::workers::dispatch::EmbeddingSyncDispatcher;
 db_enum! {
     /// Which class of worker process a queued job is meant for.
     ///
-    /// Routes jobs by `BackgroundWorker::tags()` rather than by named queue: `queue: Option<String>` is
-    /// silently discarded by the Postgres provider's `enqueue` (it has no column for it), so a
-    /// named-queue split would mean switching to Redis first.
+    /// Routes jobs by `BackgroundWorker::tags()`, which every provider honours, and also by a named queue per class (`queue()`), which only Redis honours: the SQL providers discard `queue: Option<String>` because their tables have no column for it.
+    /// Redis filters tags client-side over the first 1000 entries of a queue, so without a queue per class a backlog of one class would hide every other class's jobs from its workers.
+    /// `App::boot` adds these queue names to a Redis queue's `queues`, since Redis workers poll only the queues the configuration names.
     ///
     /// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.2.0's
     /// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
@@ -66,6 +66,13 @@ impl WorkerClass {
             Self::Official => "worker-class:official",
             Self::Shared => "worker-class:shared",
         }
+    }
+
+    /// The named queue this class routes through on a provider that honours one (Redis).
+    ///
+    /// Decided here rather than at each worker, so a class and its queue cannot drift apart; it merely equals the tag today.
+    pub(crate) fn queue(self) -> &'static str {
+        self.tag()
     }
 }
 
@@ -204,6 +211,10 @@ macro_rules! embedding_sync_worker_for_class {
 
             fn tags() -> Vec<String> {
                 vec![$class.tag().to_string()]
+            }
+
+            fn queue() -> Option<String> {
+                Some($class.queue().to_string())
             }
 
             async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
