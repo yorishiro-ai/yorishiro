@@ -1,0 +1,39 @@
+name: Docker manifest
+description: Joins the per-architecture images of one edition into a multi-arch tag
+
+inputs:
+  image:
+    description: Image repository without a tag (e.g. ghcr.io/org/name)
+    required: true
+  tag:
+    description: Release tag
+    required: true
+  edition:
+    description: Edition, ce or ee
+    required: true
+  token:
+    description: Registry token
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+
+    - name: Create multi-arch manifest
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        TAG: ${{ inputs.tag }}
+        EDITION: ${{ inputs.edition }}
+      run: |
+        docker buildx imagetools create \
+          -t "${IMAGE}:${TAG}-${EDITION}" \
+          "${IMAGE}:${TAG}-${EDITION}-amd64" \
+          "${IMAGE}:${TAG}-${EDITION}-arm64"

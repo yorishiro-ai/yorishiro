@@ -1,0 +1,53 @@
+name: Smoke test
+description: Boots a published image against the job's postgres service and waits for /_ping
+
+inputs:
+  image:
+    description: Image repository without a tag (e.g. ghcr.io/org/name)
+    required: true
+  tag:
+    description: Release tag
+    required: true
+  edition:
+    description: Edition, ce or ee
+    required: true
+  token:
+    description: Registry token
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+
+    - name: Boot the published image
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        TAG: ${{ inputs.tag }}
+        EDITION: ${{ inputs.edition }}
+      run: |
+        db=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro
+        psql "$db" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
+        docker run -d --name smoke --network host \
+          -e DATABASE_URL="$db" \
+          -e QUEUE_URL="$db" \
+          -e HOST=http://127.0.0.1:5150 \
+          -e YORISHIRO_EMBEDDING_PROVIDER=none \
+          "${IMAGE}:${TAG}-${EDITION}"
+
+        for _ in $(seq 1 60); do
+          curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
+          sleep 3
+        done
+        curl -fsS http://127.0.0.1:5150/_ping || {
+          echo "::error::the published image never answered /_ping" >&2
+          docker logs smoke
+          exit 1
+        }
+        docker rm -f smoke

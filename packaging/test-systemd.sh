@@ -38,6 +38,8 @@ pass=0 fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
+# The container's PID 1 is systemd, so `docker logs` never carries the service's output.
+dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -n 40 --no-pager >&2; }
 
 DEB="$(basename "$PKG_FILE")"
 NET="ysr-sd-$$" APP="ysr-sd-app-$$" PG="ysr-sd-pg-$$"
@@ -106,6 +108,7 @@ if grep -q 'ping=200' <<<"$state"; then
   ok "the unconfigured service answers /_ping"
 else
   bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
+  dump_logs
 fi
 
 # --------------------------------------------------------------------------------------------
@@ -119,47 +122,24 @@ docker exec "$PG" psql -U yorishiro -d yorishiro \
 # lookups stop working: an artefact of running systemd in Docker, not something an operator meets
 # on a real host.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-docker exec "$APP" bash -c "cat > /etc/yorishiro/production.yaml <<EOF
-logger:
-  enable: true
-  pretty_backtrace: false
-  level: info
-  format: json
-server:
-  port: 5150
-  binding: 0.0.0.0
-  host: http://127.0.0.1:5150
-  middlewares:
-    request_id:
-      enable: true
-    logger:
-      enable: true
-queue:
-  kind: Postgres
-  uri: postgres://yorishiro:secret@$PGIP:5432/yorishiro
-  dangerously_flush: false
-  num_workers: 2
-  reaper:
-    age_minutes: 30
-    interval_seconds: 60
-workers:
-  mode: BackgroundQueue
-database:
-  uri: postgres://yorishiro:secret@$PGIP:5432/yorishiro
-  enable_logging: false
-  connect_timeout: 5000
-  idle_timeout: 500
-  min_connections: 1
-  max_connections: 100
-  auto_migrate: true
-  dangerously_truncate: false
-  dangerously_recreate: false
-EOF"
 
+# The package ships /etc/yorishiro/production.yaml and its header documents the variables an
+# operator sets to point it at PostgreSQL, so this sets those instead of writing a second
+# configuration. A hand-written copy drifts from the shipped one: it once omitted `settings:`
+# and the server exited at start with "missing field `max_tenants`".
+docker exec "$APP" systemctl set-environment \
+  DATABASE_URL="postgres://yorishiro:secret@$PGIP:5432/yorishiro" \
+  HOST=http://127.0.0.1:5150 \
+  DB_CONNECT_TIMEOUT=5000
+
+# `restart`, not `enable --now`: the unconfigured section above left the server running on
+# SQLite, and `start` on an active unit does nothing, so the new environment would never be read
+# while the old server kept answering /_ping.
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
-  systemctl enable --now yorishiro yorishiro-worker' >/dev/null 2>&1
+  systemctl enable yorishiro yorishiro-worker
+  systemctl restart yorishiro yorishiro-worker' >/dev/null 2>&1
 
 for _ in $(seq 1 120); do
   docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
@@ -187,7 +167,13 @@ grep -q 'worker-enabled=enabled' <<<"$state" \
   || bad "expected worker enabled, got: $(grep -o 'worker-enabled=[a-z-]*' <<<"$state")"
 grep -q 'ping=200' <<<"$state" \
   && ok "it answers /_ping" \
-  || bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
+  || { bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"; dump_logs; }
+
+tables=$(docker exec "$PG" psql -U yorishiro -d yorishiro -Atc \
+  "select count(*) from information_schema.tables where table_schema = 'public'" 2>/dev/null)
+[ "${tables:-0}" -gt 0 ] 2>/dev/null \
+  && ok "it applied its migrations to PostgreSQL" \
+  || bad "PostgreSQL has no tables: the service is not running against it"
 
 # It runs as the unpriviliged account the package creates, not as root: the unit says `User=`,
 # and a package that installed a unit systemd silently ran as root would look identical here

@@ -1,0 +1,70 @@
+name: Build and package
+description: Builds one edition of yorishiro for one architecture and packages it as deb and rpm (checkout stays in each caller)
+
+inputs:
+  edition:
+    description: Edition, ce or ee
+    required: true
+  target:
+    description: Rust target triple (e.g. x86_64-unknown-linux-gnu)
+    required: true
+  arch:
+    description: Package architecture, amd64 or arm64
+    required: true
+  version:
+    description: Version used in package metadata and file names, without any v prefix
+    required: true
+  build-tag:
+    description: Value exported to the build as BUILD_SHA
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/rust-setup
+      with:
+        targets: ${{ inputs.target }}
+
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        cache-directories: ~/.cache/ort.pyke.io
+
+    - name: Build
+      shell: bash
+      env:
+        BUILD_SHA: ${{ inputs.build-tag }}
+        EDITION: ${{ inputs.edition }}
+      run: |
+        if [ "$EDITION" = ce ]; then
+          cargo build --locked --no-default-features --features community --release --bin yorishiro
+        else
+          cargo build --locked --features enterprise --release --bin yorishiro
+        fi
+
+    - uses: ./.github/actions/install-nfpm
+
+    - name: Package (deb and rpm)
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        ARCH: ${{ inputs.arch }}
+        EDITION: ${{ inputs.edition }}
+      run: |
+        mkdir -p dist
+        case "$ARCH" in amd64) rpm_arch=x86_64 ;; arm64) rpm_arch=aarch64 ;; esac
+        for pkg in deb rpm; do
+          nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
+          if [ "$pkg" = deb ]; then
+            source="dist/yorishiro-${EDITION}_${VERSION}_${ARCH}.deb"
+          else
+            source="dist/yorishiro-${EDITION}-${VERSION}-1.${rpm_arch}.rpm"
+          fi
+          mv "$source" "dist/yorishiro-${EDITION}-${VERSION}-${ARCH}.${pkg}"
+        done
+        ls -1 dist/
+
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      if: ${{ !cancelled() }}
+      with:
+        name: binary-linux-${{ inputs.edition }}-${{ inputs.arch }}
+        path: dist/*

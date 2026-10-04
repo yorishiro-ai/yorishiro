@@ -265,49 +265,25 @@ else
   docker exec "app-$$" bash -c "
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y -qq /pkg/$(basename "$(deb)") curl >/dev/null 2>&1
-    cat > /etc/yorishiro/production.yaml <<EOF
-logger:
-  enable: true
-  pretty_backtrace: false
-  level: info
-  format: json
-server:
-  port: 5150
-  binding: 0.0.0.0
-  host: http://127.0.0.1:5150
-  middlewares:
-    request_id:
-      enable: true
-    logger:
-      enable: true
-queue:
-  kind: Postgres
-  uri: postgres://yorishiro:secret@pg-$$:5432/yorishiro
-  dangerously_flush: false
-  num_workers: 2
-  reaper:
-    age_minutes: 30
-    interval_seconds: 60
-workers:
-  mode: BackgroundQueue
-database:
-  uri: postgres://yorishiro:secret@pg-$$:5432/yorishiro
-  enable_logging: false
-  connect_timeout: 5000
-  idle_timeout: 500
-  min_connections: 1
-  max_connections: 100
-  auto_migrate: true
-  dangerously_truncate: false
-  dangerously_recreate: false
-EOF
   " >/dev/null 2>&1
   # Started the way the unit does, since there is no systemd here: the same Loco environment
-  # selects the editable production configuration.
-  docker exec -d "app-$$" bash -c \
+  # selects the packaged production configuration.
+  #
+  # The package ships /etc/yorishiro/production.yaml and its header documents the variables an
+  # operator sets to point it at PostgreSQL, so this sets those instead of writing a second
+  # configuration. A hand-written copy drifts from the shipped one: it once omitted `settings:`
+  # and the server exited at start with "missing field `max_tenants`".
+  #
+  # The output goes to a file because `docker exec -d` discards it and PID 1 here is `sleep`,
+  # so `docker logs` never shows the server.
+  docker exec -d \
+    -e DATABASE_URL="postgres://yorishiro:secret@pg-$$:5432/yorishiro" \
+    -e HOST=http://127.0.0.1:5150 \
+    -e DB_CONNECT_TIMEOUT=5000 \
+    "app-$$" bash -c \
     'cd /var/lib/yorishiro && exec su -s /bin/sh yorishiro -c \
       "env LOCO_ENV=production LOCO_CONFIG_FOLDER=/etc/yorishiro \
-      YORISHIRO_EMBEDDING_PROVIDER=none /usr/bin/yorishiro start"'
+      YORISHIRO_EMBEDDING_PROVIDER=none /usr/bin/yorishiro start" >/tmp/yorishiro.log 2>&1'
 
   up=
   for _ in $(seq 1 120); do
@@ -317,8 +293,7 @@ EOF
 
   if [ -z "$up" ]; then
     bad "configured server never answered /_ping"
-    # Dump logs for the failed start so the operator can see what went wrong.
-    docker logs "app-$$" 2>&1 | tail -30 >&2
+    docker exec "app-$$" tail -n 30 /tmp/yorishiro.log >&2
   else
     ok "starts and applies its migrations"
 
