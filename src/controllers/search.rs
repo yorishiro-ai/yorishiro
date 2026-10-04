@@ -11,7 +11,7 @@ use crate::controllers::extractors::{
 use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::db::AppContextBackend;
 use crate::dtos::search::SearchEntitiesParams;
-use crate::error::YorishiroError;
+use crate::error::ResultExt;
 use crate::models::search::{self, SearchHit};
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/search", params(("query_text" = String, Query, description = "Text to embed and search for"), ("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query, description = "JSON-encoded containment filter"), ("limit" = Option<i64>, Query)), responses((status = 200, body = [crate::models::search::SearchHit]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
@@ -44,16 +44,13 @@ pub(crate) async fn search_entities(
 
     // A read-only transaction: dropped without committing when this returns, a no-op since nothing was written.
     let txn = if ctx.is_sqlite() {
-        ctx.db
-            .begin()
-            .await
-            .map_err(|err| YorishiroError::Internal(err.into()))?
+        ctx.db.begin().await.internal()?
     } else {
         let db = db_handle(&ctx)?;
         db.tenant
             .begin_for_workspace(verified.ctx.tenant_id, workspace_id)
             .await
-            .map_err(|err| YorishiroError::Internal(err.into()))?
+            .internal()?
     };
 
     let hits =

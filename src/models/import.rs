@@ -5,7 +5,7 @@ use sea_orm::ConnectionTrait;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_entities::{self, CreateEntityInput};
 use crate::models::entity_relations::{self, CreateRelationInput};
 use crate::models::schema_schemas;
@@ -47,7 +47,7 @@ pub async fn import_jsonl(
 
     for (line_no, line) in reader.lines().enumerate() {
         let line_no = line_no + 1;
-        let line = line.map_err(|err| YorishiroError::Internal(err.into()))?;
+        let line = line.internal()?;
         let line = line.trim();
         if line.is_empty() {
             continue;

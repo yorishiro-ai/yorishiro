@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::error::YorishiroError;
+use crate::error::ResultExt;
 
 /// `cargo loco task create_tenant name:acme`
 ///
@@ -27,7 +27,7 @@ impl Task for CreateTenant {
         let tenant =
             crate::models::tenant_tenants::create_tenant(&app_context.db, name, max_tenants)
                 .await
-                .map_err(|err| YorishiroError::Internal(err.into()))?;
+                .internal()?;
 
         println!("tenant id: {}", tenant.id);
         Ok(())

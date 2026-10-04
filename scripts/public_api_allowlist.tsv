@@ -654,3 +654,7 @@ src/models/workspace_workspaces.rs	field	WorkspaceRecord::schema_id	integration-
 src/models/workspace_workspaces.rs	field	WorkspaceRecord::created_at	integration-test: named by the integration-test crate, or exposed by a public signature that the integration-test crate calls, after the refactor moved this surface into the model that owns it.
 src/models/workspace_workspaces.rs	const	WORKSPACE_STATUS_ACTIVE	integration-test: named by the integration-test crate, or exposed by a public signature that the integration-test crate calls, after the refactor moved this surface into the model that owns it.
 src/models/workspace_workspaces.rs	use	crate::models::_entities::workspace_workspaces::{ActiveModel,Entity,Model}	seaorm-facade: Loco generator layout re-exports the generated entity types from the table's model module, which the integration-test crate and other models name.
+src/error.rs	enum	YorishiroErrorCode	API contract: error code sent in every error response body; clients switch on this enum to render localized messages.
+src/error.rs	fn	YorishiroErrorCode::as_str	API contract: string representation of the error code sent in API responses.
+src/error.rs	fn	YorishiroErrorCode::http_status	API contract: fixed HTTP status code per error code; part of the API contract.
+src/error.rs	fn	YorishiroErrorCode::description	API contract: human-readable description of the error code for API responses and logs.

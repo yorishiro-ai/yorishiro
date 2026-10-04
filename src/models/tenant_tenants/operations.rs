@@ -8,6 +8,9 @@ use sea_orm::{
     QueryFilter,
 };
 
+/// Maximum tenants on SQLite (which has no RLS): one.
+const SQLITE_MAX_TENANTS: i32 = 1;
+
 /// Counts real (non-infrastructure) tenants: every row except `INFRASTRUCTURE_TENANT_ID`.
 pub(crate) async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
     Entity::find()
@@ -28,7 +31,7 @@ pub async fn create_tenant(
     // SQLite has no database-enforced tenant isolation (no RLS, no roles), so a second tenant on that backend would be a silent isolation break rather than merely an unwanted one.
     // The cap is hardcoded rather than read from YORISHIRO_MAX_TENANTS: an operator raising that variable must not be able to loosen a constraint that exists because the isolation mechanism itself is absent, not because of a configurable policy choice.
     let effective_max = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        Some(1)
+        Some(SQLITE_MAX_TENANTS)
     } else {
         configured_max
     };

@@ -217,7 +217,7 @@ impl<R> Authorized<R> {
         self.txn
             .commit()
             .await
-            .map_err(|e| ApiError(YorishiroError::Internal(anyhow::anyhow!(e))))
+            .map_err(|e| ApiError(YorishiroError::Internal(e.into())))
     }
 }
 

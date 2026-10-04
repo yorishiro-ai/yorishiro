@@ -14,7 +14,7 @@ use crate::controllers::members::require_tenant_admin;
 use crate::dtos::template_library::{
     CreateTemplateRequest, ForkTemplateRequest, UpdateTemplateRequest,
 };
-use crate::error::YorishiroError;
+use crate::error::ResultExt;
 use crate::models::template_templates::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
 };
@@ -74,11 +74,7 @@ pub async fn update_template(
 ) -> Result<Json<TemplateRecord>, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
 
-    let txn = ctx
-        .db
-        .begin()
-        .await
-        .map_err(|err| ApiError(YorishiroError::Internal(anyhow::anyhow!(err))))?;
+    let txn = ctx.db.begin().await.internal()?;
     let template = template_templates::update_template(
         &txn,
         auth.tenant_id,
@@ -92,9 +88,7 @@ pub async fn update_template(
         },
     )
     .await?;
-    txn.commit()
-        .await
-        .map_err(|err| ApiError(YorishiroError::Internal(anyhow::anyhow!(err))))?;
+    txn.commit().await.internal()?;
     Ok(Json(template))
 }
 
