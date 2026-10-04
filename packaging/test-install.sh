@@ -60,9 +60,9 @@ rpm() {
 edition() { basename "$PKG_FILE" | grep -q '^yorishiro-ee-' && echo ee || echo ce; }
 
 # --------------------------------------------------------------------------------------------
-note "deb on ubuntu:26.04 — the supported case"
+note "deb on ubuntu:24.04 — the supported case"
 # --------------------------------------------------------------------------------------------
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   /usr/bin/yorishiro --help >/dev/null 2>&1 && echo "RUNS"
@@ -93,7 +93,7 @@ note "every file the package declares survives the install"
 # `ee/LICENSE` shipping as `/usr/share/doc/yorishiro/copyright.ee` is exactly that case: the
 # `path-include` covers the name `copyright` exactly, so the package would deliver everything
 # except one of the licences it is distributed under, on every minimal image.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   dpkg-deb -c /pkg/'"$(basename "$(deb)")"' | awk "\$6 ~ /^\.\// && \$1 !~ /^d/ { print substr(\$6, 2) }" > /tmp/declared
@@ -111,11 +111,11 @@ else
 fi
 
 # --------------------------------------------------------------------------------------------
-note "deb refused on ubuntu:24.04 — below the glibc floor"
+note "deb refused on ubuntu:22.04 — below the glibc floor"
 # --------------------------------------------------------------------------------------------
 # Asserting the reason, not merely a nonzero exit: a network failure also exits nonzero, and
 # would otherwise read as the refusal working.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:22.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y /pkg/'"$(basename "$(deb)")"' 2>&1' 2>&1)
 if grep -qiE 'depends|not installable|unmet' <<<"$out"; then
@@ -123,6 +123,49 @@ if grep -qiE 'depends|not installable|unmet' <<<"$out"; then
 else
   bad "apt did not refuse for a dependency reason: $(echo "$out" | tail -3 | tr '\n' ' ')"
 fi
+
+# --------------------------------------------------------------------------------------------
+note "rpm on almalinux:10 — the current RPM-family release this supports"
+# --------------------------------------------------------------------------------------------
+# This project supports the current LTS releases, which on the RPM side is AlmaLinux 10: glibc
+# 2.39, measured, against a declared floor of 2.39. There is no GLIBCXX floor to check against:
+# the candle-based embedding provider links no C++ standard library dynamically.
+#
+# This is the only block that installs an rpm at all: the others install its counterpart deb. So
+# it is not a second opinion on the deb tests, it is the only evidence that the other half of
+# what a release publishes can be unpacked and run.
+# The image is pulled first, and its progress goes to the terminal rather than into `$out`.
+# Docker writes that to stderr, and folding it in with `2>&1` below puts a paragraph of layer
+# names in front of every assertion's failure message, which is what this looked like the first
+# time it failed for a real reason.
+docker pull -q almalinux:10 >/dev/null 2>&1 || true
+# The exit code is captured into a variable and always printed, rather than being consumed by an
+# `if`. When this first failed, `RUNS` was simply absent: no marker said whether the binary had
+# been run at all, and an `if` with an `echo` in both branches would have been just as silent if
+# the command never reached either. A line that is always emitted cannot fail to appear.
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro almalinux:10 bash -c '
+  dnf install -y -q /pkg/'"$(basename "$(rpm)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
+  /usr/bin/yorishiro --help >/dev/null 2>/tmp/help.err
+  rc=$?
+  echo "HELP_EXIT:$rc"
+  [ "$rc" = 0 ] && echo "RUNS"
+  [ -s /tmp/help.err ] && echo "HELP_STDERR: $(head -c 300 /tmp/help.err | tr "\n" " ")"
+  [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
+  getent passwd yorishiro >/dev/null && echo "USER"
+' 2>&1)
+# Reported separately from the marker loop below, so a missing `RUNS` always comes with the
+# reason next to it rather than only in the raw output dump.
+case "$out" in
+  *HELP_EXIT:0*) ;;
+  *HELP_EXIT:*) bad "almalinux:10 --help exited $(sed -n 's/.*HELP_EXIT:\([0-9]*\).*/\1/p' <<<"$out")" ;;
+  *) bad "almalinux:10 --help never reported an exit code: $(echo "$out" | tr '\n' ' ')" ;;
+esac
+for want in RUNS COPYRIGHT USER; do
+  case "$out" in
+    *"$want"*) ok "almalinux:10 $want" ;;
+    *) bad "almalinux:10 $want (output: $(echo "$out" | tr '\n' ' '))" ;;
+  esac
+done
 
 # --------------------------------------------------------------------------------------------
 note "rpm refused on rockylinux:9 — below the floor"
@@ -140,7 +183,7 @@ note "the systemd unit is valid"
 # --------------------------------------------------------------------------------------------
 # `systemd-analyze` resolves ExecStart, so a unit checked without its binary reports a missing
 # command: a failure about the test environment rather than about the unit.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq systemd /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service 2>&1' 2>&1)
@@ -150,7 +193,7 @@ else
   bad "systemd-analyze verify complained: $(echo "$out" | head -3 | tr '\n' ' ')"
 fi
 
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   grep -Fx "ExecStart=/usr/bin/yorishiro start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill" \
@@ -172,11 +215,7 @@ fi
 # Two exclusions, each because the path is not a file the package ships: systemd's own
 # `WantedBy=` targets (`multi-user.target` is a unit name, and appears without a directory), and
 # anything under `/proc` or `/sys`.
-#
-# A third exclusion: unit file paths themselves are not "paths the package installs" — they are
-# the files being checked. Without this, `grep` on the unit list returns the unit filenames
-# themselves as "paths" and reports them as missing.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
@@ -184,10 +223,9 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
   for unit in $units; do
     [ -f "$unit" ] || { echo "NO_UNIT:$unit"; exit 1; }
   done
-  grep -oE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" $units \
+  grep -hoE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" $units \
     | sed -e "s/^[[:space:]=\"]//" -e "s/[.,]$//" \
     | grep -vE "^/(proc|sys)(/|$)" \
-    | grep -vxFf <(echo "$units") \
     | sort -u | while read -r p; do
       [ -e "$p" ] || echo "MISSING:$p"
   done
@@ -223,7 +261,7 @@ else
   docker exec "pg-$$" psql -U yorishiro -d yorishiro \
     -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null 2>&1
 
-  docker run -d --name "app-$$" --network "$NET" -v "$PKG_DIR":/pkg:ro ubuntu:26.04 sleep infinity >/dev/null
+  docker run -d --name "app-$$" --network "$NET" -v "$PKG_DIR":/pkg:ro ubuntu:24.04 sleep infinity >/dev/null
   docker exec "app-$$" bash -c "
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y -qq /pkg/$(basename "$(deb)") curl >/dev/null 2>&1

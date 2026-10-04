@@ -48,9 +48,9 @@ depends:
 # source, same dependencies. The C library's own headers decide which versioned symbols the
 # compiler selects.
 #
-# `2.43` matches Ubuntu 26.04, which is what the GitHub-hosted build runners use and what the
-# package tests validate against. AlmaLinux 10 (glibc 2.39) and Ubuntu 24.04 (glibc 2.39) are
-# below the declared floor and will be refused at install time.
+# `2.39` matches what this project supports: Ubuntu 24.04 and AlmaLinux 10,
+# both of which ship glibc 2.39. Package tests enforce compatibility with both targets even when
+# the GitHub-hosted build runner uses a newer Ubuntu release.
 #
 # Read this from the binary rather than from its symbol table. `objdump -T` shows the two
 # `pidfd` symbols as weak, which reads as "2.39 is optional"; the loader does not consult symbol
@@ -67,13 +67,13 @@ overrides:
   deb:
     depends:
       - ca-certificates
-      - libc6 (>= 2.43)
+      - libc6 (>= 2.39)
       - libgcc-s1
       - libstdc++6
   rpm:
     depends:
       - ca-certificates
-      - libc.so.6(GLIBC_2.43)(64bit)
+      - libc.so.6(GLIBC_2.39)(64bit)
       - libgcc
       - libstdc++
 
