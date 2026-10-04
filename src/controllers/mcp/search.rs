@@ -83,8 +83,10 @@ impl YorishiroMcpServer {
         let workspace_id = auth_ctx.workspace_id;
 
         // A read-only transaction, same as `Authorized`'s: dropped without committing when this returns, which is a no-op since nothing was written.
-        let txn = if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            match self.ctx.db.begin().await {
+        let txn = if self.app_context().db.get_database_backend()
+            == sea_orm::DatabaseBackend::Sqlite
+        {
+            match self.app_context().db.begin().await {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(YorishiroError::Internal(err.into()))),
             }

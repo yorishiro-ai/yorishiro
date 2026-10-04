@@ -51,7 +51,7 @@ struct MissingEmbeddingRow {
 
 /// Finds every entity in a workspace that has no corresponding embedding row.
 ///
-/// Raw SQL keeps the portable anti-join explicit: `entity_embeddings` is an application facade over backend-specific vector tables and has no generated SeaORM relation from this entity.
+/// Raw SQL keeps the portable anti-join across the width-specific embedding tables explicit.
 pub(crate) async fn missing_embeddings(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -62,7 +62,13 @@ pub(crate) async fn missing_embeddings(
          e.entity_type, e.data, e.created_at, e.updated_at, \
          e.created_by, e.updated_by \
          FROM entity_entities e \
-         LEFT JOIN entity_embeddings ee ON ee.entity_id = e.id \
+         LEFT JOIN ( \
+             SELECT entity_id FROM entity_embeddings_768 \
+             UNION \
+             SELECT entity_id FROM entity_embeddings_1024 \
+             UNION \
+             SELECT entity_id FROM entity_embeddings_1536 \
+         ) ee ON ee.entity_id = e.id \
          WHERE e.workspace_id = $1 AND ee.entity_id IS NULL",
         [workspace_id.into()],
     ))

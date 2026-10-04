@@ -330,6 +330,10 @@ mod redis_routing {
             eprintln!("skipping Redis routing test: explicit URL is not Redis");
             return;
         }
+        if reqwest::Url::parse(&uri).map_or(true, |url| url.path() != "/15") {
+            eprintln!("skipping Redis routing test: URL must select reserved test database 15");
+            return;
+        }
 
         let queue = Arc::new(
             bgworker::redis::create_provider(&RedisQueueConfig {

@@ -75,7 +75,7 @@ services:
       timeout: 3s
       retries: 5
     ports:
-      - "15432:5432"
+      - "127.0.0.1:15432:5432"
 
   redis:
     image: valkey/valkey:9.1
@@ -86,7 +86,7 @@ services:
       timeout: 3s
       retries: 5
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   app:
     <<: *yorishiro

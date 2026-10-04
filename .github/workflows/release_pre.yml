@@ -354,6 +354,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -393,9 +394,14 @@ jobs:
 
       - name: Tag the verified prerelease commit
         env:
+          GH_TOKEN: ${{ github.token }}
           REF: ${{ needs.prepare.outputs.ref }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
+          token_header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${token_header}"
           if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
             echo "Tag ${TAG} already exists on remote." >&2
             exit 1
