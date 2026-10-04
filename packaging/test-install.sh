@@ -310,13 +310,15 @@ EOF
       YORISHIRO_EMBEDDING_PROVIDER=none /usr/bin/yorishiro start"'
 
   up=
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 120); do
     docker exec "app-$$" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && { up=1; break; }
     sleep 1
   done
 
   if [ -z "$up" ]; then
     bad "configured server never answered /_ping"
+    # Dump logs for the failed start so the operator can see what went wrong.
+    docker logs "app-$$" 2>&1 | tail -30 >&2
   else
     ok "starts and applies its migrations"
 

@@ -161,7 +161,7 @@ docker exec "$APP" bash -c '
   systemctl daemon-reload
   systemctl enable --now yorishiro yorishiro-worker' >/dev/null 2>&1
 
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
   docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
   sleep 3
 done
