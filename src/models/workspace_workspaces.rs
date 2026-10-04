@@ -214,6 +214,8 @@ pub(crate) async fn is_schema_pending(
 /// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other's write.
 ///
 /// Raw SQL, not `ActiveModel`: `COALESCE(...)` can't be expressed via `Set(...)`, and `yorishiro_app` holds UPDATE only on `workspace_workspaces (status, schema_id)` (a column-level GRANT), so the statement must touch exactly those two columns.
+///
+/// SeaORM cannot express `COALESCE` in a `Set` clause, nor can it target a column subset for UPDATE.
 pub(crate) async fn mark_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

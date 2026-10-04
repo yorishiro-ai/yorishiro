@@ -3,7 +3,7 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::db::DbHandle;
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_embeddings;
 use crate::services::embedding;
 
@@ -79,7 +79,7 @@ impl Task for ReindexEmbeddings {
                 provider.dimensions(),
             )
             .await
-            .map_err(|err| YorishiroError::Internal(err.into()))?;
+            .internal()?;
             if chain.workspace_model.as_deref() == Some(provider.model_name().as_str()) {
                 println!(
                     "workspace {} already stamped with model {:?}; nothing to reindex \
@@ -94,7 +94,7 @@ impl Task for ReindexEmbeddings {
         let candidate_ids =
             crate::models::entity_entities::ids_for_workspace(&app_context.db, workspace_id)
                 .await
-                .map_err(|err| YorishiroError::Internal(err.into()))?;
+                .internal()?;
 
         // Serialize concurrent reindex runs against the same workspace: two runs with different
         // providers would both bypass the write-time model check by design, and embedding writes
@@ -119,7 +119,7 @@ impl Task for ReindexEmbeddings {
             provider.as_ref(),
         )
         .await
-        .map_err(|err| YorishiroError::Internal(err.into()))?;
+        .internal()?;
 
         if !outcome.failures.is_empty() {
             for failure in &outcome.failures {

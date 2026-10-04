@@ -12,6 +12,8 @@ pub(super) struct VectorWriteInput {
 }
 
 /// Writes a vector to the width-specific table and guards it with the entity snapshot.
+///
+/// SeaORM cannot express `INSERT ... SELECT WHERE EXISTS ... ON CONFLICT ... DO UPDATE WHERE EXISTS ... RETURNING` (conditional upsert with a subquery in both INSERT and UPDATE branches, returning a count).
 pub(super) async fn embed_and_write(
     conn: &impl ConnectionTrait,
     input: VectorWriteInput,

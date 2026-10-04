@@ -19,8 +19,7 @@ pub async fn create_user(
     password: &str,
     display_name: Option<&str>,
 ) -> Result<Model, YorishiroError> {
-    let password_hash =
-        hash::hash_password(password).map_err(|err| YorishiroError::Internal(err.into()))?;
+    let password_hash = hash::hash_password(password).internal()?;
 
     let active = ActiveModel {
         email: ActiveValue::Set(email.to_string()),

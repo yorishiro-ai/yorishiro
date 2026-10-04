@@ -152,6 +152,8 @@ impl Entity {
     ///
     /// Deliberately not run on the request's `DatabaseTransaction`: a read-only handler drops that transaction without committing, which would silently roll this update back along with it.
     /// Every caller uses a short-lived connection from `TenantDb::acquire_for_workspace` instead.
+    ///
+    /// Raw SQL: `sqlx::query` on a bare `PgConnection` avoids SeaORM's transaction overhead for this fire-and-forget update.
     pub(crate) async fn touch_last_used_on_connection(
         conn: &mut sqlx::PgConnection,
         api_key_id: uuid::Uuid,

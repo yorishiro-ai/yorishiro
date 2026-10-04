@@ -182,6 +182,8 @@ impl TenantDb {
     ) -> Result<DatabaseTransaction, DbErr> {
         let txn = self.orm.begin().await?;
 
+        // `set_config` sets PostgreSQL session variables for RLS scoping.
+        // SeaORM has no API for executing non-SELECT configuration statements, so raw SQL is required.
         txn.execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
             "SELECT set_config('app.current_tenant', $1, true)",

@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::schema_schemas::metaschema;
 
 /// Escapes `~`/`/` per RFC 6901 before embedding a value as a JSON Pointer segment.
@@ -28,8 +28,7 @@ pub fn validate_data(
     data: &Value,
 ) -> Result<(), YorishiroError> {
     let schema = metaschema::entity_type_to_json_schema(entity_type_def);
-    let validator = jsonschema::validator_for(&schema)
-        .map_err(|err| YorishiroError::Internal(anyhow::anyhow!(err.to_string())))?;
+    let validator = jsonschema::validator_for(&schema).internal()?;
 
     let details: Vec<ValidationDetail> = validator
         .iter_errors(data)

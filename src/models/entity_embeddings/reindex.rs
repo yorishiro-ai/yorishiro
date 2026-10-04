@@ -1,7 +1,7 @@
 use sea_orm::ConnectionTrait;
 use uuid::Uuid;
 
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
@@ -77,7 +77,7 @@ pub async fn reindex_workspace(
 ) -> Result<ReindexOutcome, YorishiroError> {
     let records = crate::models::entity_entities::get_batch(conn, workspace_id, candidate_ids)
         .await
-        .map_err(|err| YorishiroError::Internal(err.into()))?;
+        .internal()?;
 
     let mut reindexed = 0;
     let mut failures = Vec::new();
