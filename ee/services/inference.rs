@@ -603,7 +603,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, YorishiroError::ProviderUnreachable { .. }));
-        assert_eq!(error.code(), "provider_unreachable");
+        assert_eq!(error.code().unwrap().as_str(), "provider_unreachable");
         assert!(error.to_string().contains(message));
     }
 
