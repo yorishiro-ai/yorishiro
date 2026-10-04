@@ -3,8 +3,41 @@
 #
 #   docker compose up --build
 #
-# The database credentials here are development ones and are meant to stay on the loopback port
-# binding below. A deployment sets its own through the environment.
+# The queue is Redis-compatible (valkey) and jobs run in a separate `worker` container from the
+# same image: `start` serves HTTP only and consumes nothing, so without the worker every queued
+# job (embedding sync, reindex, infer-fill) would sit in the queue.
+#
+# The database credentials here are development ones. A deployment sets its own through the
+# environment.
+
+# One image and one configuration for the server and the worker, so they cannot disagree about
+# the database, the queue, or the embedding provider.
+x-yorishiro: &yorishiro
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: &yorishiro-environment
+    # These override their documented counterparts in /app/config/production.yaml.
+    DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
+    # `Redis` is Loco's provider name for Redis-compatible services such as valkey. Without it the
+    # queue kind follows DATABASE_URL's scheme and lands on Postgres.
+    YORISHIRO_QUEUE_KIND: Redis
+    QUEUE_URL: redis://redis:6379
+    HOST: http://localhost:5150
+    LOG_LEVEL: info
+    # Explicitly retain the packaged default: run the local embedding provider and fetch its
+    # model into the container cache when no read-only model mount is supplied.
+    # `YORISHIRO_EMBEDDING_PROVIDER=none docker compose up` skips the model download.
+    YORISHIRO_EMBEDDING_PROVIDER: ${YORISHIRO_EMBEDDING_PROVIDER:-local}
+    # YORISHIRO_LOCAL_MODEL_PATH and YORISHIRO_LOCAL_TOKENIZER_PATH were removed: the
+    # operator-chosen path was structurally unbound from the model identifier, so the
+    # separation was eliminated entirely. The files live at models/<short_id>/ or are
+    # fetched automatically on first use when absent.
+    # Also the binary's own default: `src/bin/main.rs` sets YORISHIRO_MAX_TENANTS to "1" when
+    # it is unset, which is what keeps the first-run setup wizard reachable. Set it to "0" for
+    # multiple tenants, which turns that wizard off.
+    YORISHIRO_MAX_TENANTS: "1"
+
 services:
   db:
     image: pgvector/pgvector:pg18
@@ -13,8 +46,6 @@ services:
       POSTGRES_USER: yorishiro
       POSTGRES_PASSWORD: yorishiro
       POSTGRES_DB: yorishiro
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
       # Runs once, only against an empty data directory.
@@ -33,8 +64,6 @@ services:
       POSTGRES_USER: yorishiro
       POSTGRES_PASSWORD: yorishiro
       POSTGRES_DB: yorishiro
-    ports:
-      - "127.0.0.1:15432:5432"
     volumes:
       - test_pgdata:/var/lib/postgresql
       # Runs once, only against an empty data directory.
@@ -49,8 +78,6 @@ services:
   redis:
     image: valkey/valkey:9.1
     container_name: redis
-    ports:
-      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
@@ -58,9 +85,7 @@ services:
       retries: 5
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *yorishiro
     container_name: app
     # To use a model this machine already has, put `model.safetensors` and `tokenizer.json` in
     # `models/` and add:
@@ -73,27 +98,32 @@ services:
     # the model on first use into $HOME/.cache/yorishiro/models instead, which blocks that first
     # start for about 522 MiB. Both files or neither, though: exactly one present is a startup
     # error rather than a partial fetch.
-    environment:
-      # These override their documented counterparts in /app/config/production.yaml.
-      DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
-      QUEUE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
-      HOST: http://localhost:5150
-      LOG_LEVEL: info
-      # Explicitly retain the packaged default: run the local embedding provider and fetch its
-      # model into the container cache when no read-only model mount is supplied.
-      YORISHIRO_EMBEDDING_PROVIDER: local
-      # YORISHIRO_LOCAL_MODEL_PATH and YORISHIRO_LOCAL_TOKENIZER_PATH were removed: the
-      # operator-chosen path was structurally unbound from the model identifier, so the
-      # separation was eliminated entirely. The files live at models/<short_id>/ or are
-      # fetched automatically on first use when absent.
-      # Also the binary's own default: `src/bin/main.rs` sets YORISHIRO_MAX_TENANTS to "1" when
-      # it is unset, which is what keeps the first-run setup wizard reachable. Set it to "0" for
-      # multiple tenants, which turns that wizard off.
-      YORISHIRO_MAX_TENANTS: "1"
     ports:
       - "5150:5150"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *yorishiro
+    container_name: worker
+    # The same tags `packaging/yorishiro-worker.service` starts with. Bare `--worker`,
+    # `--server-and-worker` and `--all` pass an empty tag list, which dequeues none of these jobs.
+    # `infer-fill` is an enterprise queue; a community build has no such jobs and ignores it.
+    command:
+      - start
+      - --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
+    # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
+    # reported unhealthy forever.
+    healthcheck:
+      disable: true
+    # After the server is healthy, which is after it has applied the migrations the worker needs.
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:
