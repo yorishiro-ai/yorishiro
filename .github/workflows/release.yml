@@ -53,7 +53,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -182,7 +182,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
@@ -191,7 +191,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
 
@@ -226,7 +226,7 @@ jobs:
           done
           ls -1 dist/
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: binary-linux-${{ matrix.edition }}-${{ matrix.arch }}
@@ -236,8 +236,8 @@ jobs:
     needs: [binary, prepare]
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           pattern: binary-*
@@ -309,7 +309,7 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
@@ -449,12 +449,12 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           pattern: binary-*
@@ -486,7 +486,7 @@ jobs:
           ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
           cat dist/checksums.txt
 
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      - uses: actions/attest-build-provenance@v2
         with:
           subject-path: 'dist/*.deb, dist/*.rpm'
 
@@ -507,7 +507,7 @@ jobs:
           git tag "$TAG" "$REF"
           git push origin "$TAG"
 
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+      - uses: softprops/action-gh-release@v6
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           prerelease: false
