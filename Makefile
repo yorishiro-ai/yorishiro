@@ -24,7 +24,7 @@ clippy-ce:
 	cargo clippy --locked --no-default-features --features community --workspace --lib --bins -- -D warnings
 
 clippy-ee:
-	cargo clippy --locked --workspace --tests --features test-support -- -D warnings
+	cargo clippy --locked --workspace --tests -- -D warnings
 
 fmt:
 	cargo fmt --all

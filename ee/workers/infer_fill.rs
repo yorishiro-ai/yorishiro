@@ -10,8 +10,6 @@
 use async_trait::async_trait;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "test-support")]
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::db::{self, DbHandle};
@@ -41,37 +39,13 @@ impl InferFillArgs {
     pub(crate) const JOB_NAME: &'static str = "infer_fill";
 }
 
+/// The dispatch seam for infer-fill jobs.
+///
+/// `compose_context` stores the production adapter as `Arc<dyn InferFillDispatcher>` in `AppContext::shared_store`.
+/// A caller that needs a different dispatcher inserts its own `Arc<dyn InferFillDispatcher>` there afterwards.
 #[async_trait]
-pub(crate) trait InferFillDispatcher: Send + Sync {
+pub trait InferFillDispatcher: Send + Sync {
     async fn dispatch(&self, ctx: &AppContext, args: InferFillArgs) -> loco_rs::Result<String>;
-}
-
-#[cfg(feature = "test-support")]
-#[async_trait]
-pub trait TestInferFillDispatcher: Send + Sync {
-    async fn dispatch(&self, ctx: &AppContext, args: InferFillArgs) -> loco_rs::Result<String>;
-}
-
-#[cfg(feature = "test-support")]
-struct TestInferFillDispatcherAdapter(Arc<dyn TestInferFillDispatcher>);
-
-#[cfg(feature = "test-support")]
-#[async_trait]
-impl InferFillDispatcher for TestInferFillDispatcherAdapter {
-    async fn dispatch(&self, ctx: &AppContext, args: InferFillArgs) -> loco_rs::Result<String> {
-        self.0.dispatch(ctx, args).await
-    }
-}
-
-#[cfg(feature = "test-support")]
-/// Installs a fake infer-fill dispatcher for request-level tests.
-pub fn install_test_infer_fill_dispatcher(
-    ctx: &AppContext,
-    dispatcher: Arc<dyn TestInferFillDispatcher>,
-) {
-    ctx.shared_store.insert(
-        Arc::new(TestInferFillDispatcherAdapter(dispatcher)) as Arc<dyn InferFillDispatcher>
-    );
 }
 
 /// Shared implementation of the infer-fill worker's perform body.

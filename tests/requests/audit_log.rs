@@ -213,7 +213,8 @@ async fn reindex_audit_detail_is_workspace_id_and_is_committed_before_dispatch()
         let dispatcher = Arc::new(AuditBeforeDispatch {
             detail: Mutex::new(None),
         });
-        yorishiro::workers::dispatch::install_test_reindex_dispatcher(&ctx, dispatcher.clone());
+        ctx.shared_store
+            .insert(dispatcher.clone() as Arc<dyn yorishiro::workers::dispatch::ReindexDispatcher>);
 
         let response = request
             .post("/api/migration-jobs/reindex")

@@ -5,19 +5,13 @@ use crate::models::tenant_memberships::MembershipRole;
 
 mod operations;
 
-pub use operations::create_invite;
 pub(crate) use operations::redeem_invite;
+pub use operations::{create_invite, create_invite_at, redeem_invite_at};
 
 pub struct RedeemedInvite {
     pub tenant_id: Uuid,
     pub email: String,
     pub role: MembershipRole,
-}
-
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub mod test_support {
-    pub use super::operations::test_support::{create_invite_at, redeem_invite_at};
 }
 
 #[async_trait::async_trait]

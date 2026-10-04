@@ -21,7 +21,6 @@ enterprise = [
   "dep:jsonwebtoken",
 ]
 openapi = ["dep:utoipa", "dep:utoipa-swagger-ui"]
-test-support = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

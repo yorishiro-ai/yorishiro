@@ -1,6 +1,4 @@
 use std::future::Future;
-#[cfg(feature = "test-support")]
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
@@ -21,6 +19,10 @@ pub(crate) trait EmbeddingSyncDispatcher: Send + Sync {
     async fn dispatch(&self, ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<String>;
 }
 
+/// The dispatch seam for reindex jobs.
+///
+/// `App::after_context` stores the production adapter as `Arc<dyn ReindexDispatcher>` in `AppContext::shared_store`.
+/// A caller that needs a different dispatcher inserts its own `Arc<dyn ReindexDispatcher>` there afterwards.
 #[async_trait]
 pub trait ReindexDispatcher: Send + Sync {
     async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String>;
@@ -267,12 +269,6 @@ async fn close_unavailable(ctx: &AppContext, lifecycle_id: Uuid, diagnostic: &st
     {
         tracing::warn!(lifecycle_id = %lifecycle_id, diagnostic = %error, "unavailable job could not be closed");
     }
-}
-
-#[cfg(feature = "test-support")]
-/// Installs a fake reindex dispatcher for request-level tests.
-pub fn install_test_reindex_dispatcher(ctx: &AppContext, dispatcher: Arc<dyn ReindexDispatcher>) {
-    ctx.shared_store.insert(dispatcher);
 }
 
 #[cfg(test)]

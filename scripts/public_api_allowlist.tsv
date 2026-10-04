@@ -1,9 +1,5 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
-src/models/workspace_invites.rs	mod	test_support	integration-test: timestamp seam moved with invite persistence to the table-owning model.
-src/models/workspace_invites.rs	use	test_support::super::operations::test_support::{create_invite_at,redeem_invite_at}	integration-test: timestamp seam moved with invite persistence to the table-owning model.
-src/models/workspace_invites/operations.rs	fn	test_support::create_invite_at	integration-test: timestamp seam moved with invite persistence to the table-owning model.
-src/models/workspace_invites/operations.rs	fn	test_support::redeem_invite_at	integration-test: timestamp seam moved with invite persistence to the table-owning model.
 src/models/workspace_invites.rs	struct	RedeemedInvite	seaorm-facade: invite result moved from the cross-table facade to the table-owning model.
 src/models/workspace_invites.rs	field	RedeemedInvite::tenant_id	seaorm-facade: invite result field moved with its existing public type.
 src/models/workspace_invites.rs	field	RedeemedInvite::email	seaorm-facade: invite result field moved with its existing public type.
@@ -26,14 +22,13 @@ src/models/tenant_tenants.rs	use	operations::create_tenant	integration-test: ten
 src/models/tenant_tenants/operations.rs	fn	create_tenant	integration-test: tenant cap and locking behavior are exercised by the external test crate.
 src/models/user_users.rs	use	operations::create_user	integration-test: user creation moved from the cross-table facade to the table-owning model.
 src/models/user_users/operations.rs	fn	create_user	integration-test: request fixtures create users through the owning model.
-src/models/workspace_invites.rs	use	operations::create_invite	integration-test: invite creation moved from the cross-table facade to the table-owning model.
+src/models/workspace_invites.rs	use	operations::{create_invite,create_invite_at,redeem_invite_at}	integration-test: invite creation and redemption, including the variants that take the current time, are exercised on both database backends.
 src/models/workspace_invites/operations.rs	fn	create_invite	integration-test: invite persistence is exercised on both database backends.
-src/workers/mod.rs	mod	dispatch	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-src/workers/dispatch.rs	trait	TestReindexDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-src/workers/dispatch.rs	trait	ReindexDispatcher	Test-support dispatcher seam is public so integration tests can install a typed dispatcher.
-src/workers/dispatch.rs	fn	install_test_reindex_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-ee/workers/infer_fill.rs	trait	TestInferFillDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-ee/workers/infer_fill.rs	fn	install_test_infer_fill_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
+src/models/workspace_invites/operations.rs	fn	create_invite_at	integration-test: the injected-time variant lets backend tests pin the `expires_at == now` boundary without a clock.
+src/models/workspace_invites/operations.rs	fn	redeem_invite_at	integration-test: the injected-time variant lets backend tests pin the expiry boundary without a clock.
+src/workers/mod.rs	mod	dispatch	integration-test: the module that names the dispatcher seam traits integration tests substitute through `AppContext::shared_store`.
+src/workers/dispatch.rs	trait	ReindexDispatcher	integration-test: reindex dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
+ee/workers/infer_fill.rs	trait	InferFillDispatcher	integration-test: infer-fill dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
 ee/controllers/inference.rs	field	InferJobStatus::proposed	Public JSON response field for the durable proposal count.
 ee/models/inference_jobs.rs	field	InferenceJobRecord::proposed	Public durable job record field for the proposal count.
 ee/models/inference_jobs.rs	fn	complete_proposals	Enterprise worker lifecycle operation for proposal-producing jobs.

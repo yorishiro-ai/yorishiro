@@ -83,7 +83,6 @@ async fn an_invite_gets_an_id_on_sqlite() {
     );
 }
 
-#[cfg(feature = "test-support")]
 #[tokio::test]
 async fn invite_expiry_boundaries_match_sqlite_gt() {
     if !super::super::require_sqlite_backend() {
