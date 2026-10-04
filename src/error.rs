@@ -77,7 +77,9 @@ pub enum YorishiroError {
     /// An unexpected internal error occurred.
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
-} for every `YorishiroError` variant.
+}
+
+/// Machine-readable error code for every `YorishiroError` variant.
 ///
 /// This is the **single source of truth**: the code, HTTP status, and
 /// description are all defined on this enum.  Looking up the code tells you
