@@ -78,7 +78,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
 
       - name: Install Python tools
         run: uv sync --locked
@@ -207,7 +207,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
 
       - name: Install Python tools
         run: uv sync --locked
@@ -303,7 +303,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
 
       - name: Install Python tools
         run: uv sync --locked

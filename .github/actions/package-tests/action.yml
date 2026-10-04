@@ -1,35 +1,28 @@
-name: Test installed packages
-description: Installs packages and verifies they run correctly
+name: Package tests
+description: Verifies the built packages and installs them in containers (checkout stays in each caller)
 
 inputs:
-  tag:
-    description: Release tag for artifact names
+  version:
+    description: Version in the package file names, without any v prefix
     required: true
-    default: ''
-  ce_package:
-    description: Path to the CE package file
-    required: true
-    default: ''
-  ee_package:
-    description: Path to the EE package file
-    required: true
-    default: ''
 
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v7
-    - uses: actions/download-artifact@v8
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         path: dist
         pattern: binary-*
         merge-multiple: true
+
     - name: Install package tooling
-      run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev rpm
-    - name: Assert exact artifacts and metadata
-      env:
-        VERSION: ${{ inputs.tag }}
       shell: bash
+      run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev rpm
+
+    - name: Assert exact artifacts and metadata
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
         for edition in ce ee; do
@@ -47,11 +40,14 @@ runs:
           rpm -qp --conflicts "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
           rpm -qp --obsoletes "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
         done
+
     - uses: ./.github/actions/install-nfpm
+
     - name: Build retired unified packages for migration tests
-      env:
-        VERSION: ${{ inputs.tag }}
       shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        ARCH: amd64
       run: |
         set -euo pipefail
         mkdir -p target/release /tmp/unified
@@ -61,13 +57,17 @@ runs:
         nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager rpm --target /tmp/unified
         mv "/tmp/unified/yorishiro_${VERSION}_amd64.deb" "/tmp/unified/yorishiro-${VERSION}-amd64.deb"
         mv "/tmp/unified/yorishiro-${VERSION}-1.x86_64.rpm" "/tmp/unified/yorishiro-${VERSION}-amd64.rpm"
+
     - name: Test package transitions and co-install refusal
-      env:
-        VERSION: ${{ inputs.tag }}
       shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
       run: ./packaging/test-transitions.sh dist /tmp/unified "$VERSION"
+
     - name: Test representative installed packages
       shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
       run: |
-        ./packaging/test-install.sh "${{ inputs.ce_package }}"
-        ./packaging/test-systemd.sh "${{ inputs.ee_package }}"
+        ./packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
+        ./packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"

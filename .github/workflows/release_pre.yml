@@ -47,7 +47,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -96,21 +96,28 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
       - uses: ./.github/actions/build-and-package
         with:
           edition: ${{ matrix.edition }}
           target: ${{ matrix.target }}
-          tag: ${{ needs.prepare.outputs.tag }}
+          arch: ${{ matrix.arch }}
+          version: ${{ needs.prepare.outputs.tag }}
+          build-tag: ${{ needs.prepare.outputs.tag }}
 
   package-tests:
     needs: [binary, prepare]
     runs-on: ubuntu-26.04
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - uses: ./.github/actions/package-tests
         with:
-          tag: ${{ needs.prepare.outputs.tag }}
-          ce_package: "dist/yorishiro-ce-${{ needs.prepare.outputs.tag }}-amd64.deb"
-          ee_package: "dist/yorishiro-ee-${{ needs.prepare.outputs.tag }}-amd64.deb"
+          version: ${{ needs.prepare.outputs.tag }}
 
   docker:
     needs: [prepare, package-tests]
@@ -134,12 +141,19 @@ jobs:
       packages: write
 
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
       - uses: ./.github/actions/build-docker
         with:
-          edition: ${{ matrix.edition }}
+          image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
+          edition: ${{ matrix.edition }}
           arch: ${{ matrix.arch }}
           push: ${{ !inputs.dry_run }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   docker-manifest:
     needs: [docker, prepare]
@@ -152,10 +166,16 @@ jobs:
         edition: [ce, ee]
 
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: ./.github/actions/docker-manifest
         with:
+          image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
           edition: ${{ matrix.edition }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   smoke:
     needs: [docker-manifest, prepare]
@@ -183,10 +203,16 @@ jobs:
           --health-retries 10
 
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: ./.github/actions/smoke
         with:
+          image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
           edition: ${{ matrix.edition }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   github-release:
     needs: [binary, smoke, prepare]
@@ -198,12 +224,12 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
           pattern: binary-*
@@ -235,7 +261,7 @@ jobs:
           ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
           cat dist/checksums.txt
 
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: 'dist/*.deb, dist/*.rpm'
 
@@ -256,7 +282,7 @@ jobs:
           git tag "$TAG" "$REF"
           git push origin "$TAG"
 
-      - uses: softprops/action-gh-release@v6
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           prerelease: true
@@ -265,7 +291,7 @@ jobs:
             dist/*.rpm
             dist/checksums.txt
           body: |
-            Prerelease ${{ needs.prepare.outputs.tag }} built from `develop`.
+            Prerelease ${{ needs.prepare.outputs.tag }} built from `${{ github.ref_name }}`.
 
             Commit: ${{ github.sha }}
 
