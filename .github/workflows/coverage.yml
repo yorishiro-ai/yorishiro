@@ -53,6 +53,9 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Build workspace
         run: cargo build --locked --workspace
 
