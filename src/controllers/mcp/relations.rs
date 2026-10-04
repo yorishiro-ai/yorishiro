@@ -15,7 +15,7 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_relations::{self, SetRelationStatusInput};
 
 #[derive(Deserialize, JsonSchema)]
-pub(crate) struct CreateRelationArgs {
+pub struct CreateRelationArgs {
     pub source_id: Uuid,
     pub target_id: Uuid,
     /// relation_type name declared in the schema's `relation_types` definition.
@@ -35,7 +35,7 @@ pub(crate) struct DeleteRelationArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub(crate) struct ListRelationsArgs {
+pub struct ListRelationsArgs {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,

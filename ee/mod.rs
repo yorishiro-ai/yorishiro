@@ -12,7 +12,7 @@
 
 pub(crate) mod app;
 pub mod controllers;
-pub(crate) mod data;
+pub mod data;
 pub mod db;
 pub(crate) mod dtos;
 pub mod models;

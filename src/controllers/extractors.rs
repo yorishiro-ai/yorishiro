@@ -37,7 +37,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
 }
 
 /// Also used by the MCP adapter (`controllers::mcp`), which authorizes per-tool rather than through this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of `shared_store`.
-pub(crate) fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
+pub fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
     ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
         ApiError(YorishiroError::Internal(anyhow::anyhow!(
             "DbHandle missing"
@@ -46,7 +46,7 @@ pub(crate) fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
 }
 
 /// See `db_handle`'s doc comment: also used by `controllers::mcp`.
-pub(crate) fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, ApiError> {
+pub fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, ApiError> {
     ctx.shared_store
         .get::<Arc<dyn Authenticator>>()
         .ok_or_else(|| {

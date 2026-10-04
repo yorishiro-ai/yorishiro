@@ -7,7 +7,7 @@ use utoipa::openapi::{RefOr, Schema};
 
 /// Whether a route is part of the public REST contract or an implementation endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RouteClass {
+pub enum RouteClass {
     Public,
     #[cfg(feature = "openapi")]
     Infrastructure,
@@ -15,19 +15,19 @@ pub(crate) enum RouteClass {
 
 /// One operation expanded from a mounted Loco route group.
 #[derive(Clone, Debug)]
-pub(crate) struct RouteEntry {
-    pub(crate) path: String,
-    pub(crate) method: Method,
-    pub(crate) operation_id: String,
+pub struct RouteEntry {
+    pub path: String,
+    pub method: Method,
+    pub operation_id: String,
     #[cfg(feature = "openapi")]
-    pub(crate) class: RouteClass,
+    pub class: RouteClass,
 }
 
 /// The route inventory produced while the application route tree is composed.
 #[derive(Clone, Default)]
-pub(crate) struct RouteInventory {
-    pub(crate) entries: Vec<RouteEntry>,
-    pub(crate) exclusions: Vec<InfrastructureExclusion>,
+pub struct RouteInventory {
+    pub entries: Vec<RouteEntry>,
+    pub exclusions: Vec<InfrastructureExclusion>,
     #[cfg(feature = "openapi")]
     pub(crate) docs: Vec<RouteDoc>,
 }
@@ -35,7 +35,7 @@ pub(crate) struct RouteInventory {
 /// OpenAPI metadata emitted next to the handler that serves an operation.
 #[cfg(feature = "openapi")]
 #[derive(Clone)]
-pub(crate) struct RouteDoc {
+pub struct RouteDoc {
     pub(crate) path: String,
     pub(crate) methods: Vec<HttpMethod>,
     pub(crate) operation: Operation,
@@ -73,9 +73,9 @@ where
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct InfrastructureExclusion {
-    pub(crate) path: &'static str,
-    pub(crate) reason: &'static str,
+pub struct InfrastructureExclusion {
+    pub path: &'static str,
+    pub reason: &'static str,
 }
 
 impl RouteInventory {
@@ -118,7 +118,7 @@ impl RouteInventory {
     }
 
     #[cfg(feature = "openapi")]
-    pub(crate) fn public(&self) -> impl Iterator<Item = &RouteEntry> {
+    pub fn public(&self) -> impl Iterator<Item = &RouteEntry> {
         self.entries
             .iter()
             .filter(|entry| entry.class == RouteClass::Public)
@@ -185,7 +185,7 @@ impl RouteInventory {
         }
     }
 
-    pub(crate) fn add_allowlisted_exclusions(&mut self) {
+    pub fn add_allowlisted_exclusions(&mut self) {
         self.exclusions = vec![
             InfrastructureExclusion {
                 path: "/docs",
@@ -207,7 +207,7 @@ impl RouteInventory {
     }
 }
 
-fn operation_id(method: &Method, path: &str) -> String {
+pub fn operation_id(method: &Method, path: &str) -> String {
     let suffix = path
         .trim_matches('/')
         .replace(['/', '{', '}', '-', '.'], "_")
@@ -230,40 +230,5 @@ fn infrastructure_reason(path: &str) -> Option<&'static str> {
         "/_health" => Some("Loco health probe, not a product API operation"),
         "/_readiness" => Some("Loco readiness probe, not a product API operation"),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{RouteInventory, operation_id};
-    use axum::http::Method;
-
-    #[test]
-    fn operation_ids_are_stable_and_path_safe() {
-        assert_eq!(
-            operation_id(&Method::GET, "/api/entities/{id}"),
-            "get_api_entities_id"
-        );
-        assert_eq!(operation_id(&Method::POST, "/setup"), "post_setup");
-    }
-
-    #[test]
-    fn allowlisted_non_api_paths_have_explicit_exclusions() {
-        let mut inventory = RouteInventory::default();
-        inventory.add_allowlisted_exclusions();
-
-        assert_eq!(inventory.exclusions.len(), 4);
-        assert!(
-            inventory
-                .exclusions
-                .iter()
-                .any(|item| item.path == "/mcp" && item.reason.contains("MCP"))
-        );
-        assert!(
-            inventory
-                .exclusions
-                .iter()
-                .any(|item| item.path == "/docs/openapi.json")
-        );
     }
 }

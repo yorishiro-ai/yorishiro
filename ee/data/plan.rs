@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Plan {
+pub enum Plan {
     Free,
     Pro,
     Team,
@@ -15,7 +15,7 @@ pub(crate) enum Plan {
 /// Internal scheduling priority derived from the tenant's subscription plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum PriorityTier {
+pub enum PriorityTier {
     Low,
     Normal,
     High,
@@ -23,21 +23,11 @@ pub(crate) enum PriorityTier {
 
 /// Bounded compute policy used by the worker-class resolver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ComputePolicy {
-    pub(crate) priority: PriorityTier,
-    pub(crate) queue_start_objective_seconds: Option<u32>,
-    pub(crate) base_official_concurrency: u32,
-    pub(crate) burst_ceiling: u32,
-}
-
-impl ComputePolicy {
-    #[cfg(test)]
-    #[must_use]
-    fn is_eligible_burst(self, observed_official_demand: u32, available_credits: i64) -> bool {
-        observed_official_demand > self.base_official_concurrency
-            && observed_official_demand <= self.burst_ceiling
-            && available_credits > 0
-    }
+pub struct ComputePolicy {
+    pub priority: PriorityTier,
+    pub queue_start_objective_seconds: Option<u32>,
+    pub base_official_concurrency: u32,
+    pub burst_ceiling: u32,
 }
 
 /// Caps applied when a tenant is on a given plan.
@@ -92,7 +82,7 @@ impl Plan {
 
     /// Returns the bounded scheduling policy for this plan.
     #[must_use]
-    pub(crate) fn compute_policy(self) -> ComputePolicy {
+    pub fn compute_policy(self) -> ComputePolicy {
         let (priority, queue_start_objective_seconds, base_official_concurrency) = match self {
             Self::Free => (PriorityTier::Low, None, 1),
             Self::Pro => (PriorityTier::Normal, Some(60), 4),
@@ -115,40 +105,6 @@ impl Plan {
                 "unknown plan value: {other:?}"
             ))),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Plan, PriorityTier};
-
-    #[test]
-    fn compute_policies_match_the_published_bounds() {
-        let free = Plan::Free.compute_policy();
-        assert_eq!(free.priority, PriorityTier::Low);
-        assert_eq!(free.queue_start_objective_seconds, None);
-        assert_eq!((free.base_official_concurrency, free.burst_ceiling), (1, 2));
-        let pro = Plan::Pro.compute_policy();
-        assert_eq!(pro.priority, PriorityTier::Normal);
-        assert_eq!(pro.queue_start_objective_seconds, Some(60));
-        assert_eq!((pro.base_official_concurrency, pro.burst_ceiling), (4, 6));
-        let team = Plan::Team.compute_policy();
-        assert_eq!(team.priority, PriorityTier::High);
-        assert_eq!(team.queue_start_objective_seconds, Some(15));
-        assert_eq!(
-            (team.base_official_concurrency, team.burst_ceiling),
-            (8, 12)
-        );
-    }
-
-    #[test]
-    fn burst_boundaries_require_demand_and_credits() {
-        let policy = Plan::Pro.compute_policy();
-        assert!(!policy.is_eligible_burst(4, 1));
-        assert!(policy.is_eligible_burst(5, 1));
-        assert!(policy.is_eligible_burst(6, 1));
-        assert!(!policy.is_eligible_burst(7, 1));
-        assert!(!policy.is_eligible_burst(5, 0));
     }
 }
 

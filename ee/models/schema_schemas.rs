@@ -1,6 +1,6 @@
 //! Enterprise schema operations layered over the community schema model.
 
-mod merge;
+pub mod merge;
 mod origin;
 mod query;
 

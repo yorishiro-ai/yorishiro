@@ -1,7 +1,7 @@
 //! Embedding provider trait and implementations.
 
 pub mod local;
-mod model_fetch;
+pub mod model_fetch;
 pub mod openai;
 
 pub(crate) const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;

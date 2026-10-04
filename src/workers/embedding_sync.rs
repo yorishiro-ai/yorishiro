@@ -60,7 +60,7 @@ impl WorkerClass {
     /// The `tags()` value this class routes through.
     ///
     /// `worker-class:<variant>` rather than the bare variant name: a future tag dimension (region, priority band) added to the same job would otherwise collide on an unprefixed string with no way to tell which dimension it came from.
-    pub(crate) fn tag(self) -> &'static str {
+    pub fn tag(self) -> &'static str {
         match self {
             Self::TenantPrivate => "worker-class:tenant-private",
             Self::Official => "worker-class:official",
@@ -246,7 +246,7 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loc
     enqueue_for_class_with_dispatcher(ctx, args, dispatcher.as_ref()).await
 }
 
-pub(crate) async fn enqueue_for_class_with_dispatcher(
+pub async fn enqueue_for_class_with_dispatcher(
     ctx: &AppContext,
     args: EmbeddingSyncArgs,
     dispatcher: &dyn EmbeddingSyncDispatcher,
@@ -297,81 +297,4 @@ pub(crate) async fn enqueue_after_write_with_dispatcher(
         worker_class,
     };
     enqueue_for_class_with_dispatcher(ctx, args, dispatcher).await
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-
-    use super::*;
-
-    struct RecordingDispatcher {
-        args: Mutex<Vec<EmbeddingSyncArgs>>,
-        fail: bool,
-    }
-
-    #[async_trait]
-    impl EmbeddingSyncDispatcher for RecordingDispatcher {
-        async fn dispatch(
-            &self,
-            _ctx: &AppContext,
-            args: EmbeddingSyncArgs,
-        ) -> loco_rs::Result<String> {
-            self.args.lock().unwrap().push(args);
-            if self.fail {
-                Err(loco_rs::Error::Message("dispatch failed".into()))
-            } else {
-                Ok("embedding-job".into())
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn dispatches_the_original_args_and_returns_success() {
-        let ctx = crate::workers::dispatch::test_context().await;
-        let args = EmbeddingSyncArgs {
-            lifecycle_id: None,
-            workspace_id: Uuid::now_v7(),
-            entity_id: Uuid::now_v7(),
-            worker_class: WorkerClass::Official,
-        };
-        let dispatcher = RecordingDispatcher {
-            args: Mutex::new(Vec::new()),
-            fail: false,
-        };
-
-        enqueue_for_class_with_dispatcher(&ctx, args.clone(), &dispatcher)
-            .await
-            .expect("dispatch");
-
-        let recorded = dispatcher.args.lock().unwrap();
-        assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].workspace_id, args.workspace_id);
-        assert_eq!(recorded[0].entity_id, args.entity_id);
-        assert_eq!(recorded[0].worker_class, args.worker_class);
-    }
-
-    #[tokio::test]
-    async fn preserves_dispatch_failure() {
-        let ctx = crate::workers::dispatch::test_context().await;
-        let dispatcher = RecordingDispatcher {
-            args: Mutex::new(Vec::new()),
-            fail: true,
-        };
-
-        let error = enqueue_for_class_with_dispatcher(
-            &ctx,
-            EmbeddingSyncArgs {
-                lifecycle_id: None,
-                workspace_id: Uuid::now_v7(),
-                entity_id: Uuid::now_v7(),
-                worker_class: WorkerClass::Shared,
-            },
-            &dispatcher,
-        )
-        .await
-        .expect_err("dispatch must fail");
-
-        assert_eq!(error.to_string(), "dispatch failed");
-    }
 }

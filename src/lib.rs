@@ -2,7 +2,7 @@ pub mod app;
 pub mod controllers;
 pub mod data;
 pub mod db;
-mod db_enum;
+pub mod db_enum;
 pub mod dtos;
 
 /// The enterprise edition.
@@ -18,7 +18,7 @@ pub mod dtos;
 #[path = "../ee/mod.rs"]
 pub mod ee;
 pub mod error;
-pub(crate) mod initializers;
+pub mod initializers;
 pub mod models;
 pub mod services;
 pub mod tasks;

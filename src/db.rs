@@ -81,25 +81,11 @@ pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::Yori
 /// A vector in the BLOB layout `sqlite-vec` reads: consecutive little-endian `f32` values.
 ///
 /// Written out value by value, so the bytes are little-endian on every host rather than whatever order the host happens to use.
-pub(crate) fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
+pub fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
     vector
         .iter()
         .flat_map(|value| value.to_le_bytes())
         .collect()
-}
-
-#[cfg(test)]
-mod vector_blob_tests {
-    use super::sqlite_vec_blob;
-
-    #[test]
-    fn blob_is_little_endian_f32_in_order() {
-        assert_eq!(
-            sqlite_vec_blob(&[1.0, -2.0]),
-            [0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0xc0]
-        );
-        assert!(sqlite_vec_blob(&[]).is_empty());
-    }
 }
 
 /// Public entry point for `main.rs` and `App::boot` to call.

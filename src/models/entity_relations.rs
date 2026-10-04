@@ -100,7 +100,7 @@ pub(crate) struct SetRelationStatusInput {
 }
 
 #[derive(Default)]
-pub(crate) struct ListRelationsQuery {
+pub struct ListRelationsQuery {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,

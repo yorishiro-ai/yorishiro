@@ -59,15 +59,29 @@ make entities
 The integration tests are one binary rooted at `tests/mod.rs`:
 
 - `tests/licence.rs` — licence verification, expiry boundaries
+- `tests/config/`, `tests/data/` — configuration loading and validation, typed settings, built-in templates
+- `tests/controllers/` — MCP tool routing, route inventory, OpenAPI assembly
+- `tests/db.rs`, `tests/db_enum.rs` — connection primitives and the `db_enum!` conversions
+- `tests/initializers/` — process-lifetime initializers (`db_load_guard`)
 - `tests/metaschema/` — nesting, projection, validation, type resolution, versioning
 - `tests/migration/` — `postgres.rs`, `sqlite.rs`
-- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall
+- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle
 - `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
 - `tests/services/` — embedding, rate limiting
 - `tests/tasks/` — task commands (reindex_embeddings)
-- `tests/workers/` — embedding_sync
+- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle
+- `tests/ee/` — mirrors `ee/`; compiled only with the `enterprise` feature
 
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
+
+## Where tests live
+
+Every test is under `tests/`. `src/` and `ee/` contain no `#[test]` and no `#[cfg(test)]`: CI rejects both.
+A test that needs an item the crate keeps private widens it to `pub` and records it in `scripts/public_api_allowlist.tsv` under the `integration-test` boundary.
+Test-only seams in production code are not allowed either: a dispatcher is replaced by inserting an `Arc<dyn Trait>` into `AppContext::shared_store`, the same call production makes.
+
+`tests/` builds without the enterprise feature (`--no-default-features --features community`).
+A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and a test that asserts an enterprise-only behaviour is gated the same way.
 
 ## SQLite gate
 
