@@ -44,7 +44,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Set up nightly for branch coverage
-        uses: dtolnay/rust-toolchain@v2
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly
 

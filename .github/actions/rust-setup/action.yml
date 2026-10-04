@@ -31,7 +31,7 @@ runs:
         echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
 
     - name: Set up Rust toolchain
-      uses: dtolnay/rust-toolchain@v2
+      uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ steps.resolve.outputs.toolchain }}
         components: ${{ inputs.components }}
