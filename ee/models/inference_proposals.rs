@@ -75,6 +75,9 @@ pub struct ProposalActionReport {
     pub changed: i64,
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn record_batch(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -153,6 +156,9 @@ pub(crate) async fn record_batch_attempt(
     Ok(inserted)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn for_job(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -231,6 +237,9 @@ pub(crate) async fn discard_pending_for_job(
     transition_pending(conn, workspace_id, job_id, ProposalStatus::Discarded).await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn reject(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -244,6 +253,9 @@ pub async fn reject(
     })
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn discard(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -257,6 +269,9 @@ pub async fn discard(
     })
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn confirm(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

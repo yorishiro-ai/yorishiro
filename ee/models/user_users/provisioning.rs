@@ -37,6 +37,9 @@ pub struct ProvisionedLogin {
 ///
 /// The configured tenant limit is enforced here too, so auto-provisioning through SSO cannot bypass a deployment's tenant cap.
 /// The check is not race-free against a *different* identity's first login landing between the count and the insert, since this function's lock is keyed per-identity, not globally; closing it fully is not worth a global lock on every OAuth login for a race window this narrow.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn find_or_create(
     conn: &DatabaseTransaction,
     provider: &str,

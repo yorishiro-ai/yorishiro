@@ -89,6 +89,9 @@ impl MaintenanceState {
 
 /// Reads the current state.
 /// Runs on the request connection, so the row is readable by the application role.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, YorishiroError> {
     // Primary key is a boolean singleton (CHECK constraint enforces exactly TRUE).
     let row = Entity::find_by_id(true).one(conn).await.internal()?;
@@ -119,6 +122,9 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
 
 /// Sets the state.
 /// Takes the migration-role connection (`ctx.db`): the request role has SELECT only, since entering maintenance is an operator action.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn set(
     conn: &impl ConnectionTrait,
     mode: MaintenanceMode,
@@ -147,6 +153,9 @@ pub async fn set(
 ///
 /// This is reserved for automatic transitions, whose read and write are otherwise separate pool operations.
 /// A zero-row update means an operator or another guard changed the state first.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn set_if_current(
     conn: &impl ConnectionTrait,
     expected: &MaintenanceState,

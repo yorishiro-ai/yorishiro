@@ -23,6 +23,9 @@ pub(crate) async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yo
 /// Creates a tenant, enforcing a tenant cap against `count_tenants`.
 /// On Postgres `conn` must be a transaction: this takes `db::lock_for_update` before counting, to close the TOCTOU gap a bare count-then-insert would leave.
 /// On SQLite the lock is a no-op (see `db::lock_for_update`'s doc comment for why that is still race-safe) and the cap is not `YORISHIRO_MAX_TENANTS` but a hardcoded 1.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,

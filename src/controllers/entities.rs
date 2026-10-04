@@ -34,6 +34,9 @@ pub(crate) async fn create_entity(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::models::entity_entities::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_entity(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
@@ -79,6 +82,9 @@ pub(crate) async fn delete_entity(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities", params(("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query), ("schema_version" = Option<i32>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::entity_entities::EntityRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list_entities(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListEntitiesParams>,

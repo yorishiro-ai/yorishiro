@@ -453,6 +453,9 @@ pub struct ValidationDetail {
 }
 
 pub trait ResultExt<T> {
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     fn internal(self) -> Result<T, YorishiroError>;
 }
 

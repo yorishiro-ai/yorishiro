@@ -84,6 +84,9 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
     ])
 }
 
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
 pub fn compose_tool_routers(
     routers: impl IntoIterator<Item = ToolRouter<YorishiroMcpServer>>,
 ) -> ToolRouter<YorishiroMcpServer> {

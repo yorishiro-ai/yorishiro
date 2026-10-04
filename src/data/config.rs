@@ -13,6 +13,9 @@ use loco_rs::{
 };
 use sqlx::sqlite::SqliteConnectOptions;
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn load(environment: &Environment) -> Result<Config> {
     let environment = test_environment(environment);
     let config = environment.load()?;
@@ -62,6 +65,9 @@ fn validate(config: &Config) -> Result<()> {
     validate_queue_policy(config)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn validate_queue_policy(config: &Config) -> Result<()> {
     if config.workers.mode != WorkerMode::BackgroundQueue {
         return Err(Error::Message(

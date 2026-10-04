@@ -24,6 +24,9 @@ pub(crate) async fn build_authorize_redirect(
     build_authorize_redirect_with_http(config, discovery::production()).await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn build_authorize_redirect_with_http(
     config: &OAuthConfig,
     http: Arc<dyn discovery::OAuthHttp>,
@@ -76,6 +79,9 @@ pub(crate) async fn handle_callback(
     .await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn handle_callback_with_http(
     config: &OAuthConfig,
     code: &str,

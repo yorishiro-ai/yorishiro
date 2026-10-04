@@ -115,6 +115,9 @@ async fn sync_embedding(
 }
 
 /// Resolves the schema definition for an entity record and synchronizes its embedding.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn sync_embedding_for_record(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

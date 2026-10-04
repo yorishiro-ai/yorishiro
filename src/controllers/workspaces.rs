@@ -46,6 +46,9 @@ pub(crate) async fn list_workspaces(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = crate::dtos::workspaces::CreateWorkspaceRequest, responses((status = 201, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -68,6 +71,9 @@ pub async fn create_workspace(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::dtos::workspaces::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<ReadScope>,

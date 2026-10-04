@@ -21,10 +21,10 @@ check-ee:
 clippy: clippy-ce
 
 clippy-ce:
-	cargo clippy --locked --no-default-features --features community --workspace --lib --bins -- -D warnings
+	cargo clippy --locked --no-default-features --features community --workspace --all-targets -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc
 
 clippy-ee:
-	cargo clippy --locked --workspace --tests -- -D warnings
+	cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc
 
 fmt:
 	cargo fmt --all

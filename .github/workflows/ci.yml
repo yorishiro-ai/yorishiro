@@ -186,18 +186,13 @@ jobs:
             -D rustdoc::invalid_html_tags
             -D rustdoc::bare_urls
 
-      - name: Clippy (tests + complexity report)
-        # Merges the hard-fail lint gate (`-D warnings`) with the warn-only complexity
-        # report (`cognitive_complexity`, `too_many_lines`) into a single invocation.
-        # Both lints are nursery/pedantic, off by default, so --force-warn opts them in.
-        # Step 3 (doc coverage) stays separate because `--lib` is a different target set
-        # from `--tests` and does not fire missing_errors_doc/missing_panics_doc on lib code.
-        run: cargo clippy --locked --workspace --tests --features enterprise -- -D warnings --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
+      - name: Clippy
+        # Keep CI aligned with rust-analyzer: every target and public API documentation.
+        run: make clippy-ee
 
-      - name: Clippy doc coverage report
-        # Warn-only (see clippy.toml): ~200 existing violations of missing_errors_doc
-        # and missing_panics_doc; new/changed code is expected to add those comments.
-        run: cargo clippy --locked --workspace --lib --features enterprise -- --force-warn clippy::missing_errors_doc --force-warn clippy::missing_panics_doc
+      - name: Clippy complexity report
+        # Existing complexity debt remains report-only.
+        run: cargo clippy --locked --workspace --all-targets --features enterprise -- --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
 
   msrv:
     name: MSRV

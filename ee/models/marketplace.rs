@@ -58,6 +58,9 @@ crate::db_enum::db_enum! {
 }
 
 impl TemplateVersionStatus {
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub fn parse_publish(value: &str) -> Result<Self, YorishiroError> {
         Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("unknown publish status '{value}'"),
@@ -281,6 +284,9 @@ impl TryFrom<ForkSourceDbRecord> for ForkSource {
 /// That is also why the whole `SELECT` is raw SQL: three of its nine columns are those subqueries,
 /// which no entity projection can produce. Putting the other six on the entity API would split one
 /// query across two code paths without reducing drift, since the struct lists all nine either way.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
@@ -320,6 +326,9 @@ pub async fn list_marketplace(
 ///
 /// **Drafts are the caller's own only.**
 /// The database does not enforce this: `template_versions` carries no RLS, matching `template_templates`, so this WHERE clause is the enforcement, and dropping it publishes every tenant's unfinished work.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list_versions(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -406,6 +415,9 @@ pub(crate) async fn insert_next_version(
 }
 
 /// Reviews of a template, readable by anyone who can see the template itself.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list_reviews(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

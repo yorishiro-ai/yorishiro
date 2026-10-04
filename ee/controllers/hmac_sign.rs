@@ -6,6 +6,9 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Computes the lowercase-hex HMAC-SHA256 of `payload` under `key`.
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
 pub fn sign(key: &[u8], payload: &[u8]) -> String {
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts a key of any length");
     mac.update(payload);

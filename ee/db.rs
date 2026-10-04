@@ -32,6 +32,9 @@ impl SchedulerOwnership {
     }
 
     /// Explicitly releases ownership, then drops the detached session or file handle.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn release(mut self) -> Result<(), String> {
         match &mut self {
             Self::Postgres { conn, key } => {
@@ -80,6 +83,9 @@ impl Drop for SchedulerOwnership {
 ///
 /// PostgreSQL uses a detached session-scoped advisory lock so it remains held through dispatch.
 /// SQLite uses a non-blocking lock file beside the configured database file.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn acquire_scheduler_ownership(
     ctx: &loco_rs::app::AppContext,
     key: &str,
@@ -97,6 +103,9 @@ pub async fn acquire_scheduler_ownership(
     Err("scheduler ownership is unsupported for this database backend".into())
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn acquire_postgres_scheduler_lock(
     pool: PgPool,
     key: &str,
@@ -129,6 +138,9 @@ pub async fn acquire_postgres_scheduler_lock(
     }))
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn acquire_sqlite_scheduler_lock(
     uri: &str,
     _key: &str,
@@ -143,6 +155,9 @@ pub fn acquire_sqlite_scheduler_lock(
     }))
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
     let options = SqliteConnectOptions::from_str(uri)
         .map_err(|err| format!("invalid SQLite database URI for scheduler lock: {err}"))?;
@@ -226,6 +241,9 @@ fn try_lock_sqlite_scheduler_file(path: &Path) -> Result<Option<File>, String> {
 }
 
 #[cfg(unix)]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn lock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     unsafe extern "C" {
@@ -242,6 +260,9 @@ pub fn lock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn unlock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     unsafe extern "C" {

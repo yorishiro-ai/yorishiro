@@ -53,6 +53,9 @@ pub fn default_queue_policy() -> Arc<dyn QueuePolicy> {
 }
 
 /// The concurrency policy `class` is admitted under for `workspace_id`, from whichever [`QueuePolicy`] is installed.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn concurrency_for(
     ctx: &AppContext,
     workspace_id: Uuid,
@@ -116,6 +119,9 @@ pub(crate) async fn decide_for_dispatch(
     decide_for_dispatch_at(db, class, Utc::now().fixed_offset()).await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn decide_for_dispatch_at(
     db: &sea_orm::DatabaseConnection,
     class: WorkerClass,

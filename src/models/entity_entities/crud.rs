@@ -43,6 +43,9 @@ async fn check_entity_quota(
 }
 
 /// Counts how many entities a workspace holds, for quota enforcement and workspace-detail summaries.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
     use crate::models::_entities::entity_entities::Column;
 
@@ -58,6 +61,9 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
 /// `created_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
 ///
 /// The quota check and insert are serialized with a workspace-scoped advisory lock: without it, concurrent creates could each read a count under `max_entities` and both insert, overshooting the cap.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -104,6 +110,9 @@ pub async fn create(
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -125,6 +134,9 @@ pub async fn get(
 /// An id with no matching row (deleted, or belonging to another workspace) is simply absent from
 /// the returned map, mirroring `entity_relations::neighbors_batch`'s own no-match-is-no-entry
 /// convention rather than erroring.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_batch(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -150,6 +162,9 @@ pub async fn get_batch(
 /// Fully replaces an existing entity's `data`.
 /// Validation is done against the schema version the entity was actually created with (the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
 /// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn update(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -171,6 +186,9 @@ pub async fn update(
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn delete(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -195,6 +213,9 @@ pub async fn delete(
 }
 
 /// `query.filter` (JSONB containment, `data @> filter`) is the one condition here `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated to Postgres's `@>` operator), so it's built with `sea_query::extension::postgres::PgExpr::contains`, the builder for `PgBinOper::Contains`, instead of a raw SQL string.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -230,6 +251,9 @@ pub async fn list(
 /// Fetches every entity for the workspace, with no pagination limit, for a full-workspace data export.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

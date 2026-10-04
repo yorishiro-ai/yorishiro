@@ -18,6 +18,9 @@ const INVITE_TOKEN_BYTES: usize = 24;
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
 /// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
 /// Callers must surface it themselves (printed by the admin CLI today; a transactional-email integration is not provided).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_invite(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -29,6 +32,9 @@ pub async fn create_invite(
 }
 
 /// [`create_invite`] with the issue time supplied by the caller, so expiry boundaries can be tested without a clock.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_invite_at(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -65,6 +71,9 @@ pub(crate) async fn redeem_invite(
 }
 
 /// [`redeem_invite`] with the redemption time supplied by the caller, so expiry boundaries can be tested without a clock.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn redeem_invite_at(
     conn: &impl ConnectionTrait,
     raw_token: &str,

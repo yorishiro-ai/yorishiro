@@ -138,6 +138,9 @@ reindex_worker_for_class!(ReindexWorkerShared, WorkerClass::Shared);
 ///
 /// Exhaustively matched, with no `_` arm: a fourth `WorkerClass` without its worker type
 /// fails to compile rather than falling through to the wrong queue.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn enqueue_for_class(ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<()> {
     let dispatcher = ctx
         .shared_store
@@ -146,6 +149,9 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: ReindexArgs) -> loco_rs::
     enqueue_for_class_with_dispatcher(ctx, args, dispatcher.as_ref()).await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn enqueue_for_class_with_dispatcher(
     ctx: &AppContext,
     args: ReindexArgs,
@@ -155,6 +161,9 @@ pub async fn enqueue_for_class_with_dispatcher(
 }
 
 /// Enqueue a reindex job with a substituted dispatcher.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn enqueue_reindex_with_dispatcher(
     ctx: &AppContext,
     workspace_id: Uuid,

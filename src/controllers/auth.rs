@@ -26,6 +26,9 @@ use crate::models::{tenancy, tenant_tenants, user_users, workspace_invites, work
     security(()),
     tag = "community"
 ))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,
@@ -139,6 +142,12 @@ async fn signup_without_invite(
     security(()),
     tag = "community"
 ))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
 pub async fn login(
     State(ctx): State<AppContext>,
     Json(body): Json<LoginRequest>,

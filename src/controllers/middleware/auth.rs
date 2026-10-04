@@ -89,6 +89,9 @@ pub fn default_authenticator() -> Arc<dyn Authenticator> {
 
 /// Enforces that an authenticated context satisfies the required scope, returning
 /// `YorishiroError::ScopeInsufficient` when it doesn't.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), YorishiroError> {
     if ctx.scope.satisfies(required) {
         Ok(())
@@ -105,6 +108,9 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
 
 /// Enforces that an authenticated context holds the independent `audit` grant.
 /// Deliberately not folded into `require_scope`/`ApiKeyScope::satisfies`: `audit` is not one more rung above `Migration` on the read/write/schema/migration ladder, so it is never compared with `Ord`, only checked for `true`/`false`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn require_audit(ctx: &AuthContext) -> Result<(), YorishiroError> {
     if ctx.audit {
         Ok(())
@@ -123,6 +129,9 @@ pub fn require_audit(ctx: &AuthContext) -> Result<(), YorishiroError> {
 /// The caller owns the returned transaction's lifetime: a write handler must call `txn.commit().await` explicitly, or every write in it is silently discarded when the transaction drops.
 ///
 /// `last_used_at` is touched through `touch_last_used_on`'s independent short-lived connection, not on the returned transaction: a read-only handler drops its transaction without committing, which would silently roll the update back if it ran there.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn authorize(
     db: &DbHandle,
     authenticator: &dyn Authenticator,

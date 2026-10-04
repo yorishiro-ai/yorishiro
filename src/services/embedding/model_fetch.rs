@@ -165,6 +165,9 @@ async fn ensure_file(
     ensure_file_with_http(dir, def, artifact, &client, &ReqwestArtifactHttp).await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn ensure_file_with_http(
     dir: &Path,
     def: &LocalModelDef,
@@ -385,6 +388,9 @@ pub fn sweep_stale_partials(dir: &Path, artifact: &Artifact) {
 }
 
 /// Streams `url` into `temp` and checks the result against `artifact`'s expected length and digest.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn download_verified(
     url: &str,
     temp: &Path,

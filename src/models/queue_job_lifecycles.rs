@@ -30,6 +30,9 @@ db_enum! {
 
 impl LifecycleStatus {
     /// A stored status this crate does not define is a corrupt row, not a missing one.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub fn from_row(value: &str) -> Result<Self, DbErr> {
         Self::from_db_str(value)
             .ok_or_else(|| DbErr::Type(format!("unknown queue lifecycle status {value:?}")))
@@ -69,6 +72,9 @@ impl Entity {
             .await
     }
 
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn record_enqueue(
         db: &impl ConnectionTrait,
         enqueue: Enqueue<'_>,
@@ -115,6 +121,9 @@ impl Entity {
         row.update(db).await.map(|_| ())
     }
 
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn defer(
         db: &impl ConnectionTrait,
         id: Uuid,
@@ -153,6 +162,9 @@ impl Entity {
         Ok(())
     }
 
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn defer_at(
         db: &impl ConnectionTrait,
         id: Uuid,
@@ -197,6 +209,9 @@ impl Entity {
         Self::renew_at(db, id, attempt, now).await
     }
 
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn renew_at(
         db: &impl ConnectionTrait,
         id: Uuid,
@@ -236,6 +251,9 @@ impl Entity {
         Self::start_at(db, id, Utc::now().fixed_offset()).await
     }
 
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn start_at(
         db: &DatabaseConnection,
         id: Uuid,
@@ -259,6 +277,9 @@ impl Entity {
         Ok(admission)
     }
 
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn finish(
         db: &impl ConnectionTrait,
         id: Uuid,

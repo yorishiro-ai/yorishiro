@@ -92,6 +92,9 @@ db_enum! {
 }
 
 impl TemplateVisibility {
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub fn parse_input(value: &str) -> Result<Self, YorishiroError> {
         Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("unknown visibility '{value}'"),
@@ -109,6 +112,9 @@ fn visible_to(tenant_id: uuid::Uuid) -> Condition {
 }
 
 /// Lists templates visible to `tenant_id`: its own templates plus any published with community visibility.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list_templates(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
@@ -127,6 +133,9 @@ pub async fn list_templates(
 }
 
 /// Fetches a single template, allowed when it belongs to `tenant_id` or is community-visible.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_template(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
@@ -232,6 +241,9 @@ pub(crate) async fn create_template(
 
 /// Updates a template's editable fields.
 /// Only the owning tenant may update its own template (community-visible templates from other tenants are read-only to everyone but their owner).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn update_template(
     conn: &DatabaseTransaction,
     tenant_id: uuid::Uuid,

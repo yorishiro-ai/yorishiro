@@ -27,6 +27,9 @@ pub(crate) async fn list_schemas(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, responses((status = 201, body = crate::dtos::schemas::CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_schema(
     State(ctx): State<AppContext>,
     authorized: Authorized<SchemaScope>,
@@ -70,6 +73,9 @@ pub async fn create_schema(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/active/{name}", params(("name" = String, Path)), responses((status = 200, body = crate::models::schema_schemas::SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_active_schema(
     authorized: Authorized<ReadScope>,
     Path(name): Path<String>,
@@ -97,6 +103,9 @@ pub(crate) async fn list_templates(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/templates/{id}", params(("id" = String, Path)), responses((status = 200, body = super::openapi::JsonSchema), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_template(
     _authorized: Authorized<ReadScope>,
     Path(id): Path<String>,

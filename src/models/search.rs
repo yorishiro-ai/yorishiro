@@ -202,6 +202,9 @@ impl VectorKnn {
 /// width-specific table. Returns the width and the table name.
 ///
 /// Falls back to the deployment default (YORISHIRO_EMBEDDING_DIMENSIONS, default 768).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn resolve_search_table(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -233,6 +236,9 @@ async fn resolve_search_table_with_dimensions(
     Ok((dimension, format!("entity_embeddings_{dimension}")))
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn search_by_vector(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

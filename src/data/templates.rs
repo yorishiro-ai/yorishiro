@@ -36,6 +36,9 @@ pub struct TemplateSummary {
     pub description: Option<String>,
 }
 
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
 pub fn parse(template: &BuiltinTemplate) -> MetaSchemaDefinition {
     serde_json::from_str(template.source)
         .unwrap_or_else(|err| panic!("built-in template '{}' failed to parse: {err}", template.id))
@@ -55,6 +58,9 @@ pub fn list_templates() -> Vec<TemplateSummary> {
         .collect()
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn get_template(id: &str) -> Result<MetaSchemaDefinition, YorishiroError> {
     TEMPLATES
         .iter()

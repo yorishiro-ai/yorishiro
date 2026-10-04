@@ -12,6 +12,9 @@ use sea_orm::{
 
 /// Whether `event_id` has already been applied.
 /// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `stripe_events`, so this is a plain existence check.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn is_event_processed(
     conn: &impl ConnectionTrait,
     event_id: &str,
@@ -26,6 +29,9 @@ pub async fn is_event_processed(
 
 /// Whether `created` is older than the most recently applied event's `created` for the same `customer_id`.
 /// Stripe does not guarantee delivery order, so a delayed/retried delivery of a stale event must not be allowed to undo a newer one that already landed for that customer.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn is_stale_for_customer(
     conn: &impl ConnectionTrait,
     customer_id: &str,
@@ -47,6 +53,9 @@ pub async fn is_stale_for_customer(
 ///
 /// `event_type` is written but never read back by any query here, which makes it look removable.
 /// It isn't: this table is the billing audit trail, and dropping the column would leave an investigator able to see that an event was applied but not what it did.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn record_processed_event(
     conn: &impl ConnectionTrait,
     event_id: &str,

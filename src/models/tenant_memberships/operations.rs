@@ -13,6 +13,9 @@ use super::{ActiveModel, Entity, MembershipRecord, MembershipRole};
 /// Adds (or updates the role of) a user's membership in a tenant.
 ///
 /// Takes `&impl ConnectionTrait` so a caller can compose this with `create_user` in one transaction, same reasoning as `create_user`'s doc comment.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn add_member(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

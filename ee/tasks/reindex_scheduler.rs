@@ -42,6 +42,12 @@ pub struct ScheduleDescription {
 
 /// Stores or replaces a tenant's reindex schedule.
 #[allow(clippy::too_many_arguments)]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
 pub async fn set(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -110,6 +116,9 @@ pub async fn set(
 
 /// Removes a tenant's schedule.
 /// The tenant is no longer picked up by the ticker.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn clear(conn: &impl ConnectionTrait, tenant_id: Uuid) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::TenantId.eq(tenant_id))
@@ -120,6 +129,9 @@ pub async fn clear(conn: &impl ConnectionTrait, tenant_id: Uuid) -> Result<(), Y
 }
 
 /// What is configured, for an endpoint to report.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn describe(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -135,6 +147,9 @@ pub async fn describe(
 }
 
 /// The schedule row itself, as the ticker reads it.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -171,6 +186,12 @@ impl Task for TenantReindexScheduler {
 }
 
 impl TenantReindexScheduler {
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
+    ///
+    /// # Panics
+    /// Panics if an internal invariant required by this operation is violated.
     pub async fn run_at(
         &self,
         app_context: &AppContext,

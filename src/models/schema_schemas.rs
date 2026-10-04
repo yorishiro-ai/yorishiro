@@ -60,6 +60,9 @@ db_enum! {
 /// Serializes every producer of a schema version for one workspace and name.
 /// Fork heads use this same lock as ordinary schema creation, so both paths
 /// observe one version sequence even when they run concurrently.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn lock_version(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -129,6 +132,9 @@ impl TryFrom<Model> for SchemaRecord {
 /// Fetches the currently active schema (the latest version with status='active') for the given workspace and name.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_active_schema(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -175,6 +181,9 @@ pub(crate) async fn count_active(
 /// Fetches every schema version (active and archived) for the workspace, ordered by `(name, version)`, for a full-workspace data export.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -318,6 +327,9 @@ pub(crate) async fn notify_upstream_change(
     Ok(result.rows_affected as usize)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_schema(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

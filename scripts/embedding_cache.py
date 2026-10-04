@@ -83,7 +83,7 @@ def download(path: Path, url: str, size: str, digest: str) -> None:
 def validate_source(values: dict[str, str]) -> None:
     source = (ROOT / "src/services/embedding/model_fetch.rs").read_text()
     definition = source.split("pub(super) static MULTILINGUAL_E5_BASE", 1)[1].split(
-        "pub(super) const DEFAULT_MODEL", 1
+        "pub const DEFAULT_MODEL", 1
     )[0]
     model, tokenizer = definition.split("tokenizer: Artifact", 1)
     expected = {
@@ -105,7 +105,7 @@ def validate_source(values: dict[str, str]) -> None:
         if actual != values[name].replace("_", ""):
             raise SystemExit(f"{name} does not match model_fetch.rs")
     if not re.search(
-        r"pub\(super\) const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;", source
+        r"pub const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;", source
     ):
         raise SystemExit("DEFAULT_MODEL does not alias MULTILINGUAL_E5_BASE")
 

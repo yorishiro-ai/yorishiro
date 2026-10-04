@@ -10,8 +10,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `make test-sqlite` | Full suite with Rust's default parallel execution and backend-gate verification | SQLite |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
-| `make clippy-ce` | Clippy for CE library and binaries | CE |
-| `make clippy-ee` | Clippy for EE and integration tests | EE |
+| `make clippy-ce` | Clippy for every CE target, including public error and panic docs | CE |
+| `make clippy-ee` | Clippy for every EE target, including public error and panic docs | EE |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
 | `make check-all` | Formatting, Python/public API checks, CE check, and CE Clippy | CE |
 | `make check-all-ee` | Formatting, Python/public API checks, EE check, and EE Clippy | EE |
@@ -82,6 +82,12 @@ Test-only seams in production code are not allowed either: a dispatcher is repla
 
 `tests/` builds without the enterprise feature (`--no-default-features --features community`).
 A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and a test that asserts an enterprise-only behaviour is gated the same way.
+
+## rust-analyzer is authoritative
+
+The repository Clippy commands must cover the same targets rust-analyzer checks.
+Run `make clippy-ce` and `make clippy-ee`; both use `--all-targets`, deny warnings, and require `# Errors` and `# Panics` documentation on public APIs.
+Do not dismiss an editor diagnostic because a narrower CI command omits its target or lint.
 
 ## SQLite gate
 

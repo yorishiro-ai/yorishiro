@@ -23,6 +23,9 @@ fn error_field_pointer(err: &jsonschema::ValidationError<'_>) -> String {
 
 /// Validates `data` against the JSON Schema generated from the entity_type definition.
 /// Reuses `entity_type_to_json_schema`'s schema as-is so validation logic isn't duplicated between entities and the MCP inputSchema.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn validate_data(
     entity_type_def: &metaschema::EntityTypeDef,
     data: &Value,

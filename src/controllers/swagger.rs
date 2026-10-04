@@ -21,6 +21,9 @@ pub mod implementation {
 
     use super::super::route_inventory::{RouteDoc, RouteEntry, RouteInventory};
 
+    ///
+    /// # Panics
+    /// Panics if an internal invariant required by this operation is violated.
     pub fn openapi_method(method: &Method) -> HttpMethod {
         match *method {
             Method::GET => HttpMethod::Get,
@@ -47,6 +50,9 @@ pub mod implementation {
             })
     }
 
+    ///
+    /// # Panics
+    /// Panics if an internal invariant required by this operation is violated.
     pub fn add_schema(components: &mut Components, name: String, schema: RefOr<Schema>) {
         if let Some(existing) = components.schemas.get(&name) {
             if existing != &schema {
@@ -76,6 +82,9 @@ pub mod implementation {
         }
     }
 
+    ///
+    /// # Panics
+    /// Panics if an internal invariant required by this operation is violated.
     pub fn validate_schema_refs(
         operations: impl IntoIterator<Item = serde_json::Value>,
         components: &Components,
@@ -104,6 +113,9 @@ pub mod implementation {
     }
 
     /// Build the document for the operations in the runtime route inventory.
+    ///
+    /// # Panics
+    /// Panics if an internal invariant required by this operation is violated.
     pub fn openapi_for(inventory: &RouteInventory) -> utoipa::openapi::OpenApi {
         let mut paths = PathsBuilder::new();
         let mut components = Components::new();

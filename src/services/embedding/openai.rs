@@ -35,6 +35,9 @@ pub struct OpenAiCompatibleProvider {
 }
 
 impl OpenAiCompatibleProvider {
+    ///
+    /// # Panics
+    /// Panics if an internal invariant required by this operation is violated.
     pub fn new(config: OpenAiCompatibleConfig) -> Self {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)

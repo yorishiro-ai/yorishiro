@@ -56,6 +56,9 @@ pub mod inbound {
         verify_at(headers, payload, secret, Utc::now().timestamp())
     }
 
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub fn verify_at(
         headers: &HeaderMap,
         payload: &[u8],

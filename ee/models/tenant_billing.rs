@@ -30,6 +30,9 @@ impl From<crate::models::_entities::tenant_billing::Model> for TenantBillingReco
 
 /// Reads a tenant's billing state.
 /// `None` means the tenant is unbilled, not that it is missing: the caller decides what an unbilled tenant looks like (the dashboard renders it as no plan and no cap).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get_billing(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -58,6 +61,9 @@ pub(crate) async fn get_by_stripe_customer(
 
 /// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via [`get_by_stripe_customer`].
 /// Upserts, because checkout can be completed for a tenant that already has a billing row (a resubscribe after cancellation).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn link_stripe_customer(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -91,6 +97,9 @@ pub async fn link_stripe_customer(
 ///
 /// The workspace cap that comes with the plan is not written here: it lives on `tenant_tenants.max_workspaces`, which base owns and enforces at workspace-creation time.
 /// The caller applies both.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn set_plan(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

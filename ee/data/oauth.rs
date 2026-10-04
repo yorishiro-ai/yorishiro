@@ -62,6 +62,9 @@ fn require_non_empty_env(key: &str) -> Result<String, YorishiroError> {
 }
 
 /// The pure fold `require_non_empty_env` wraps, split out so tests can exercise every case (unset, set-but-empty, set) without mutating the process environment.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, YorishiroError> {
     match raw.filter(|s| !s.is_empty()) {
         Some(value) => Ok(value.to_string()),

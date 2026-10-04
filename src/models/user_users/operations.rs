@@ -13,6 +13,9 @@ use crate::models::_entities::user_users::Column;
 /// The password is hashed with `loco_rs::hash` (Argon2id) before ever reaching the database.
 ///
 /// Takes `&impl ConnectionTrait` rather than a pool handle so a caller can compose this with `add_member` in one transaction: the two must succeed or fail together, or a failure between them leaves an orphaned user row that can never join a tenant (see `signup`, which wraps both in one transaction).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_user(
     conn: &impl ConnectionTrait,
     email: &str,

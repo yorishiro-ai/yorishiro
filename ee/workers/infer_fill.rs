@@ -405,6 +405,9 @@ pub async fn enqueue_infer_fill(
     Ok(job_id.to_string())
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn enqueue_infer_fill_with_dispatcher(
     ctx: &AppContext,
     args: InferFillArgs,

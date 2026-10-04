@@ -48,6 +48,9 @@ pub(crate) fn resolve_licence_key(from_env: Option<String>) -> Option<String> {
 ///
 /// Split from [`LicenceState::from_env`] so tests can verify against their own key rather than the compiled-in one.
 /// Failures are logged in detail, unlike OAuth token failures: the caller here is an operator debugging a key they hold, not an untrusted client whose probing should not be helped along.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, YorishiroError> {
     let key = DecodingKey::from_rsa_pem(public_key_pem).map_err(|err| {
         YorishiroError::Internal(anyhow::anyhow!(

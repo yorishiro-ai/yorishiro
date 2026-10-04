@@ -61,6 +61,9 @@ impl TryFrom<Model> for InferenceJobRecord {
     }
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -82,6 +85,9 @@ pub async fn create(
     Ok(())
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -96,6 +102,9 @@ pub async fn get(
 
 /// Claims a queued job exactly once.
 /// A running job is never reclaimed because its worker may still be executing an inference.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn claim(conn: &impl ConnectionTrait, id: Uuid) -> Result<bool, YorishiroError> {
     claim_attempt(conn, id, None).await
 }
@@ -132,6 +141,9 @@ pub(crate) async fn claim_attempt(
 
 /// Repairs the inference row after lifecycle admission committed before the worker claimed it.
 /// The target attempt is the lifecycle attempt, so repeated deliveries and recovery are idempotent.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn reconcile_attempt(
     conn: &sea_orm::DatabaseConnection,
     id: Uuid,
@@ -195,6 +207,9 @@ pub async fn reconcile_attempt(
     Ok(result.rows_affected == 1)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn complete(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -221,6 +236,9 @@ pub async fn complete(
 }
 
 /// Completes a proposal-producing job without claiming that entity data was applied.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn complete_proposals_attempt(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -249,6 +267,9 @@ pub async fn complete_proposals_attempt(
     Ok(result.rows_affected == 1)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn fail(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -278,6 +299,9 @@ pub async fn fail(
     Ok(())
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn fail_attempt(
     conn: &impl ConnectionTrait,
     id: Uuid,

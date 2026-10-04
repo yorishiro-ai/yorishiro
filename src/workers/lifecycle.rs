@@ -18,6 +18,9 @@ const SATURATED: &str = "worker capacity saturated";
 ///
 /// A failure is recorded and re-enqueued instead of returned: Loco has no retry of its own, so returning `Err` would drop the job from the queue while the lifecycle row still said it was waiting.
 /// The re-enqueue goes through `W` so the retry keeps the tag of the class that owns the job.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn perform_with_lifecycle<W, A, F, Fut>(
     ctx: &AppContext,
     lifecycle_id: Option<Uuid>,

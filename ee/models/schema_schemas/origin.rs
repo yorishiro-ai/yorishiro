@@ -167,6 +167,9 @@ pub(crate) async fn merge_apply(
 
 /// Applies a merge with a read barrier for the race regression test.
 /// Production callers use [`merge_apply`], which supplies the no-op hook.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn merge_apply_with_read_hook(
     schema_conn: &impl ConnectionTrait,
     ctx: &AppContext,

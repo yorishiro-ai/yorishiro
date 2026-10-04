@@ -98,6 +98,9 @@ impl Entity {
     /// At this point neither the workspace nor the tenant is known yet, so RLS's `app.current_workspace`/`app.current_tenant` can't be set, which is why this takes the whole [`DbHandle`] rather than a scoped connection.
     ///
     /// Raw SQL: `authenticate_api_key` is a SECURITY DEFINER function, so this bypasses RLS on api_keys/workspace_workspaces, and limits the columns it returns to id/workspace_id/tenant_id/scope/user_id/audit (never key_hash itself).
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn authenticate(
         db: &DbHandle,
         presented_key: &str,
@@ -129,6 +132,9 @@ impl Entity {
     /// Matches the SQL function's single-argument overload exactly: only a workspace-scoped key (`workspace_id` set) resolves; a tenant-scoped key matches nothing here either, same as on Postgres.
     ///
     /// Deliberately not routed through the `Authenticator` trait: that trait exists so `ee/` can swap the authentication rule, and `ee/` does not run against SQLite, so there is no second implementation for the trait to replace on this backend.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn authenticate_sqlite(
         conn: &impl ConnectionTrait,
         presented_key: &str,
@@ -211,6 +217,9 @@ impl Entity {
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
     /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or OAuth provisioning a key for an ordinary user.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn create_api_key(
         db: &sea_orm::DatabaseConnection,
         workspace_id: uuid::Uuid,
@@ -272,6 +281,9 @@ impl Entity {
 
     /// Every API key issued for a workspace, oldest first.
     /// Never returns `key_hash`: the plaintext key is shown once, at creation, and this listing exists for operators to see what exists and revoke by id, not to recover a lost key.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn list_for_workspace(
         conn: &impl ConnectionTrait,
         workspace_id: uuid::Uuid,
@@ -306,6 +318,9 @@ impl Entity {
     }
 
     /// Deletes an API key by id, revoking it immediately: authentication looks up the key on every request, so there is no cached credential to also invalidate.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn revoke(
         conn: &impl ConnectionTrait,
         key_id: uuid::Uuid,

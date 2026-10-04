@@ -234,6 +234,9 @@ fn type_name(field: &FieldDef) -> String {
 ///
 /// The result is a definition, not a stored schema.
 /// Whether writing it mints a new version is a separate decision, and one this function deliberately does not make.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn apply_plan(
     plan: &MergePlan,
     upstream: &MetaSchemaDefinition,

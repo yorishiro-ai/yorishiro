@@ -293,6 +293,9 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
     })
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list<C: ConnectionTrait>(
     conn: &C,
     tenant_id: Uuid,
@@ -312,6 +315,9 @@ pub async fn list<C: ConnectionTrait>(
     Ok(records)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get<C: ConnectionTrait>(
     conn: &C,
     tenant_id: Uuid,
@@ -325,6 +331,9 @@ pub async fn get<C: ConnectionTrait>(
     .await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create<C: ConnectionTrait>(
     conn: &C,
     tenant_id: Uuid,
@@ -413,6 +422,9 @@ pub async fn create<C: ConnectionTrait>(
     to_record(conn, row).await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn update<C: ConnectionTrait>(
     conn: &C,
     tenant_id: Uuid,
@@ -515,6 +527,9 @@ pub async fn update<C: ConnectionTrait>(
     get(conn, tenant_id, workspace_id, fork_id).await
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn delete<C: ConnectionTrait>(
     conn: &C,
     tenant_id: Uuid,

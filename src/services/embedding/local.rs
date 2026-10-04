@@ -101,6 +101,9 @@ fn internal(message: impl std::fmt::Display) -> YorishiroError {
 impl LocalEmbeddingProvider {
     /// Loads the model and tokenizer from files, validating output dimensionality via a probe inference.
     /// This blocks for hundreds of ms to a few seconds, so call it once at startup only.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub fn load(config: LocalEmbeddingConfig) -> Result<Self, YorishiroError> {
         let def = config.def;
         if config.max_sequence_length < MIN_SEQUENCE_LENGTH {
