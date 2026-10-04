@@ -10,8 +10,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `make test-sqlite` | Full suite with Rust's default parallel execution and backend-gate verification | SQLite |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
-| `make clippy-ce` | Clippy for CE library and binaries | CE |
-| `make clippy-ee` | Clippy for EE and integration tests | EE |
+| `make clippy-ce` | Clippy for every CE target, including public error and panic docs | CE |
+| `make clippy-ee` | Clippy for every EE target, including public error and panic docs | EE |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
 | `make check-all` | Formatting, Python/public API checks, CE check, and CE Clippy | CE |
 | `make check-all-ee` | Formatting, Python/public API checks, EE check, and EE Clippy | EE |
@@ -59,15 +59,35 @@ make entities
 The integration tests are one binary rooted at `tests/mod.rs`:
 
 - `tests/licence.rs` — licence verification, expiry boundaries
+- `tests/config/`, `tests/data/` — configuration loading and validation, typed settings, built-in templates
+- `tests/controllers/` — MCP tool routing, route inventory, OpenAPI assembly
+- `tests/db.rs`, `tests/db_enum.rs` — connection primitives and the `db_enum!` conversions
+- `tests/initializers/` — process-lifetime initializers (`db_load_guard`)
 - `tests/metaschema/` — nesting, projection, validation, type resolution, versioning
 - `tests/migration/` — `postgres.rs`, `sqlite.rs`
-- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall
+- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle
 - `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
 - `tests/services/` — embedding, rate limiting
 - `tests/tasks/` — task commands (reindex_embeddings)
-- `tests/workers/` — embedding_sync
+- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle
+- `tests/ee/` — mirrors `ee/`; compiled only with the `enterprise` feature
 
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
+
+## Where tests live
+
+Every test is under `tests/`. `src/` and `ee/` contain no `#[test]` and no `#[cfg(test)]`: CI rejects both.
+A test that needs an item the crate keeps private widens it to `pub` and records it in `scripts/public_api_allowlist.tsv` under the `integration-test` boundary.
+Test-only seams in production code are not allowed either: a dispatcher is replaced by inserting an `Arc<dyn Trait>` into `AppContext::shared_store`, the same call production makes.
+
+`tests/` builds without the enterprise feature (`--no-default-features --features community`).
+A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and a test that asserts an enterprise-only behaviour is gated the same way.
+
+## rust-analyzer is authoritative
+
+The repository Clippy commands must cover the same targets rust-analyzer checks.
+Run `make clippy-ce` and `make clippy-ee`; both use `--all-targets`, deny warnings, and require `# Errors` and `# Panics` documentation on public APIs.
+Do not dismiss an editor diagnostic because a narrower CI command omits its target or lint.
 
 ## SQLite gate
 

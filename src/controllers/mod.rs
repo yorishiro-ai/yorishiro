@@ -16,7 +16,7 @@ pub mod route_inventory;
 pub mod schemas;
 pub mod search;
 pub mod setup;
-pub(crate) mod swagger;
+pub mod swagger;
 pub mod system;
 pub mod template_library;
 pub mod whoami;

@@ -6,14 +6,17 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Computes the lowercase-hex HMAC-SHA256 of `payload` under `key`.
-pub(crate) fn sign(key: &[u8], payload: &[u8]) -> String {
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
+pub fn sign(key: &[u8], payload: &[u8]) -> String {
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts a key of any length");
     mac.update(payload);
     hex::encode(mac.finalize().into_bytes())
 }
 
 /// Verifies that `candidate_hex` is the HMAC-SHA256 of `payload` under `key`, using the `hmac` crate's constant-time `verify_slice` rather than comparing hex strings byte-by-byte.
-pub(crate) fn verify(key: &[u8], payload: &[u8], candidate_hex: &str) -> bool {
+pub fn verify(key: &[u8], payload: &[u8], candidate_hex: &str) -> bool {
     let Ok(candidate_bytes) = hex::decode(candidate_hex) else {
         return false;
     };
@@ -23,29 +26,4 @@ pub(crate) fn verify(key: &[u8], payload: &[u8], candidate_hex: &str) -> bool {
     mac.chain_update(payload)
         .verify_slice(&candidate_bytes)
         .is_ok()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sign_and_verify_round_trip() {
-        let key = b"a signing key";
-        let payload = b"a payload";
-        let signature = sign(key, payload);
-        assert!(verify(key, payload, &signature));
-    }
-
-    #[test]
-    fn verify_rejects_a_wrong_key_payload_or_signature() {
-        let key = b"a signing key";
-        let payload = b"a payload";
-        let signature = sign(key, payload);
-
-        assert!(!verify(b"a different key", payload, &signature));
-        assert!(!verify(key, b"a different payload", &signature));
-        assert!(!verify(key, payload, "not even hex"));
-        assert!(!verify(key, payload, &sign(b"a different key", payload)));
-    }
 }

@@ -10,6 +10,9 @@ use crate::models::workspace_workspaces::WorkspaceSummary;
 mod orchestration;
 
 /// Lists every workspace a user can log into across all tenant memberships.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list_workspaces_for_user(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
@@ -18,6 +21,9 @@ pub async fn list_workspaces_for_user(
 }
 
 /// Creates a workspace while enforcing its tenant-owned workspace limit.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_workspace(
     conn: &DatabaseTransaction,
     tenant_id: Uuid,

@@ -26,7 +26,7 @@ def main() -> int:
         env = os.environ.copy()
         env["YORISHIRO_BACKEND_MARKER_DIR"] = marker_dir
         result = subprocess.run(
-            ["cargo", "test", "--locked", "--workspace", "--features", "test-support", *cargo_args],
+            ["cargo", "test", "--locked", "--workspace", *cargo_args],
             cwd=ROOT,
             env=env,
             check=False,

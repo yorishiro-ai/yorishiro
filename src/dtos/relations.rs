@@ -19,7 +19,7 @@ pub struct ListRelationsParams {
     pub relation_type: Option<String>,
     /// Restricts the listing to one state.
     /// Omitted, every state is listed.
-    pub(crate) status: Option<RelationStatus>,
+    pub status: Option<RelationStatus>,
     #[serde(flatten)]
     pub page: crate::dtos::common::PageParams,
 }

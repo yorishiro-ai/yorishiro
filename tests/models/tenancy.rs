@@ -1,7 +1,5 @@
 use crate::requests::boot_request;
-#[cfg(feature = "test-support")]
 use chrono::{DateTime, Duration, Utc};
-#[cfg(feature = "test-support")]
 use sea_orm::ActiveModelTrait;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
@@ -10,7 +8,6 @@ use yorishiro::app::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::{tenancy, tenant_memberships, workspace_invites};
 
-#[cfg(feature = "test-support")]
 pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnection) {
     let txn = db.begin().await.expect("begin invite boundary transaction");
     let tenant = tenant_tenants::ActiveModel {
@@ -24,7 +21,7 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
         .expect("parse fixed timestamp")
         .with_timezone(&Utc);
 
-    let (at_expiry, token) = workspace_invites::test_support::create_invite_at(
+    let (at_expiry, token) = workspace_invites::create_invite_at(
         &txn,
         tenant.id,
         "at-expiry@example.com",
@@ -36,13 +33,13 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
     .expect("create at-expiry invite");
     assert_eq!(DateTime::<Utc>::from(at_expiry.expires_at), now);
     assert!(
-        workspace_invites::test_support::redeem_invite_at(&txn, &token, now)
+        workspace_invites::redeem_invite_at(&txn, &token, now)
             .await
             .expect("redeem at-expiry invite")
             .is_none()
     );
 
-    let (before_expiry, token) = workspace_invites::test_support::create_invite_at(
+    let (before_expiry, token) = workspace_invites::create_invite_at(
         &txn,
         tenant.id,
         "before-expiry@example.com",
@@ -57,13 +54,13 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
         now + Duration::seconds(1)
     );
     assert!(
-        workspace_invites::test_support::redeem_invite_at(&txn, &token, now)
+        workspace_invites::redeem_invite_at(&txn, &token, now)
             .await
             .expect("redeem before-expiry invite")
             .is_some()
     );
 
-    let (after_expiry, token) = workspace_invites::test_support::create_invite_at(
+    let (after_expiry, token) = workspace_invites::create_invite_at(
         &txn,
         tenant.id,
         "after-expiry@example.com",
@@ -78,14 +75,14 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
         now + Duration::seconds(1)
     );
     assert!(
-        workspace_invites::test_support::redeem_invite_at(&txn, &token, now + Duration::seconds(2))
+        workspace_invites::redeem_invite_at(&txn, &token, now + Duration::seconds(2))
             .await
             .expect("redeem after-expiry invite")
             .is_none()
     );
 
     let ttl = Duration::hours(72);
-    let (issued, _) = workspace_invites::test_support::create_invite_at(
+    let (issued, _) = workspace_invites::create_invite_at(
         &txn,
         tenant.id,
         "ttl@example.com",
@@ -101,7 +98,6 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
         .expect("rollback invite boundary transaction");
 }
 
-#[cfg(feature = "test-support")]
 #[tokio::test]
 async fn invite_expiry_boundaries_match_postgres_gt() {
     if !super::super::require_postgres_backend() {

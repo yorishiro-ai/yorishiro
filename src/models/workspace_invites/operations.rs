@@ -18,6 +18,9 @@ const INVITE_TOKEN_BYTES: usize = 24;
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
 /// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
 /// Callers must surface it themselves (printed by the admin CLI today; a transactional-email integration is not provided).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_invite(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -28,7 +31,11 @@ pub async fn create_invite(
     create_invite_at(conn, tenant_id, email, role, ttl, Utc::now()).await
 }
 
-async fn create_invite_at(
+/// [`create_invite`] with the issue time supplied by the caller, so expiry boundaries can be tested without a clock.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub async fn create_invite_at(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     email: &str,
@@ -63,7 +70,11 @@ pub(crate) async fn redeem_invite(
     redeem_invite_at(conn, raw_token, Utc::now()).await
 }
 
-async fn redeem_invite_at(
+/// [`redeem_invite`] with the redemption time supplied by the caller, so expiry boundaries can be tested without a clock.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub async fn redeem_invite_at(
     conn: &impl ConnectionTrait,
     raw_token: &str,
     now: DateTime<Utc>,
@@ -109,29 +120,4 @@ async fn redeem_invite_at(
         email: invite.email,
         role,
     }))
-}
-
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub(crate) mod test_support {
-    use super::*;
-
-    pub async fn create_invite_at(
-        conn: &impl ConnectionTrait,
-        tenant_id: Uuid,
-        email: &str,
-        role: MembershipRole,
-        ttl: Duration,
-        now: DateTime<Utc>,
-    ) -> Result<(Model, String), YorishiroError> {
-        super::create_invite_at(conn, tenant_id, email, role, ttl, now).await
-    }
-
-    pub async fn redeem_invite_at(
-        conn: &impl ConnectionTrait,
-        raw_token: &str,
-        now: DateTime<Utc>,
-    ) -> Result<Option<RedeemedInvite>, YorishiroError> {
-        super::redeem_invite_at(conn, raw_token, now).await
-    }
 }

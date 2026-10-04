@@ -8,7 +8,7 @@
 //! `status` is the exception: past the gate it answers `200` whether or not OAuth is configured, and `500` on that same partial-configuration error, but never `404`.
 //! That is what makes it the route `licence_gate.rs` tests the gate with, since its `404` can only come from the gate, while `authorize` and `callback` produce one of their own whenever the issuer is unset.
 
-pub(crate) mod state_token;
+pub mod state_token;
 
 use crate::YorishiroError;
 use crate::controllers::ApiError;

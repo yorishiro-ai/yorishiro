@@ -1,3 +1,5 @@
+mod model_fetch;
+
 /// Tests for the embedding provider resolution: ONNX variable deprecation and local model configuration.
 mod openai;
 use serial_test::serial;

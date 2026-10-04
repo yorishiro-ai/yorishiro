@@ -42,15 +42,15 @@ pub(crate) struct EmbeddingChainRow {
 }
 
 #[derive(Clone, sea_orm::FromQueryResult)]
-pub(crate) struct StartupReindexRow {
-    pub(crate) id: Uuid,
-    pub(crate) embedding_model: Option<String>,
+pub struct StartupReindexRow {
+    pub id: Uuid,
+    pub embedding_model: Option<String>,
 }
 
 impl StartupReindexRow {
     /// Whether the workspace's stored vectors came from a model other than `provider_model`.
     /// A workspace with no stamp has no vectors to replace: its first write stamps it.
-    pub(crate) fn is_stamped_with_other_model(&self, provider_model: &str) -> bool {
+    pub fn is_stamped_with_other_model(&self, provider_model: &str) -> bool {
         self.embedding_model
             .as_deref()
             .is_some_and(|stamped| stamped != provider_model)
@@ -235,21 +235,4 @@ pub(crate) async fn mark_active(
     .await
     .internal()?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::StartupReindexRow;
-
-    #[test]
-    fn only_a_differently_stamped_workspace_needs_a_reindex() {
-        let row = |model: Option<&str>| StartupReindexRow {
-            id: uuid::Uuid::nil(),
-            embedding_model: model.map(str::to_owned),
-        };
-        assert!(row(Some("old-model")).is_stamped_with_other_model("new-model"));
-        assert!(!row(Some("new-model")).is_stamped_with_other_model("new-model"));
-        // An unstamped workspace has no vectors to replace.
-        assert!(!row(None).is_stamped_with_other_model("new-model"));
-    }
 }

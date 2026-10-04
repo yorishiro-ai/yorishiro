@@ -91,6 +91,9 @@ fn shallow_copy(schema: &SchemaRecord, mut entity: EntityRecord) -> EntityRecord
 ///
 /// `query.depth` controls how many hops are traversed outward from `entity_id`, breadth-first.
 /// An entity reachable by more than one path is only reported once, tagged with the shortest `hop_distance`, and never re-expanded once visited (so cycles terminate).
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn recall_context(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

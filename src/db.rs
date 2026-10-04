@@ -81,25 +81,11 @@ pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::Yori
 /// A vector in the BLOB layout `sqlite-vec` reads: consecutive little-endian `f32` values.
 ///
 /// Written out value by value, so the bytes are little-endian on every host rather than whatever order the host happens to use.
-pub(crate) fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
+pub fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
     vector
         .iter()
         .flat_map(|value| value.to_le_bytes())
         .collect()
-}
-
-#[cfg(test)]
-mod vector_blob_tests {
-    use super::sqlite_vec_blob;
-
-    #[test]
-    fn blob_is_little_endian_f32_in_order() {
-        assert_eq!(
-            sqlite_vec_blob(&[1.0, -2.0]),
-            [0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0xc0]
-        );
-        assert!(sqlite_vec_blob(&[]).is_empty());
-    }
 }
 
 /// Public entry point for `main.rs` and `App::boot` to call.
@@ -140,6 +126,9 @@ impl TenantDb {
     /// `after_release` resets the GUCs before a connection returns to the pool, covering `acquire_for_workspace`'s use outside any transaction.
     ///
     /// `connect_lazy`, not `connect`: `Hooks::after_context` (this function's only caller) runs before migrations create the `yorishiro_app` role, so connecting eagerly would fail every connection on a fresh database until `acquire_timeout` gives up.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self, sqlx::Error> {
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
@@ -175,6 +164,9 @@ impl TenantDb {
     /// `app.current_tenant`/`app.current_workspace` are set transaction-locally (`set_config(..., true)`), so Postgres RLS policies see them for every statement run on the returned transaction, entity API and raw SQL alike, and they disappear automatically at commit or rollback.
     ///
     /// The caller owns the transaction's lifetime: a write handler must call `txn.commit().await` explicitly, or every write in it is silently discarded when the transaction drops.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn begin_for_workspace(
         &self,
         tenant_id: Uuid,
@@ -203,6 +195,9 @@ impl TenantDb {
     /// The same scoping as `begin_for_workspace`, on a bare connection rather than a transaction.
     ///
     /// `is_local=false` (session-level) is required here: this runs outside an explicit transaction, so `true` would discard the setting when the implicit single-statement transaction ends, leaving later queries on the connection unscoped.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn acquire_for_workspace(
         &self,
         tenant_id: Uuid,
@@ -278,6 +273,9 @@ pub fn stamped_updated_at(
 /// swallowed), but any handler needing a real second connection fails with `500` after
 /// `connect_timeout`: an intermittent failure under load with nothing pointing at the cause.
 /// Rejecting boot is what turns that into a legible startup error.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn require_min_sqlite_connections(max_connections: u32) -> Result<(), String> {
     if max_connections < 2 {
         return Err(format!(
@@ -300,6 +298,9 @@ pub fn require_min_sqlite_connections(max_connections: u32) -> Result<(), String
 /// That is sound rather than merely convenient, because every caller here locks, reads a count or existence check, then writes within the same transaction gated on that read.
 /// SQLite allows one write transaction at a time, so a transaction committing after another has written gets `SQLITE_BUSY` and fails whole; the TOCTOU this lock closes on Postgres surfaces as a retryable error rather than a silently-accepted inconsistent write.
 /// A caller holding the lock for some other reason would need its own justification, and none does.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(), DbErr> {
     if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
         return Ok(());
@@ -332,6 +333,9 @@ impl WorkspaceReindexLockGuard {
     /// Returns `Ok(())` on success. If the connection was already released
     /// (double-`release` is a no-op), returns `Ok(())` without error.
     /// Also logs any close failure for diagnostics.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
     pub async fn release(mut self) -> Result<(), sqlx::Error> {
         if let Some(conn) = self.conn.take() {
             let result = conn.close().await;
@@ -373,6 +377,9 @@ impl Drop for WorkspaceReindexLockGuard {
 /// Does not time out: a legitimate reindex over a large workspace can block for a long time,
 /// and imposing a bound would risk killing a run that is just busy. The `tracing::info!`
 /// before and after acquisition makes a wait visible rather than a silent hang.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn acquire_workspace_reindex_lock(
     pool: PgPool,
     workspace_id: Uuid,
@@ -403,6 +410,9 @@ pub async fn acquire_workspace_reindex_lock(
 /// This is the single-entry-point the concurrency test exercises: it races two such calls
 /// against the same workspace with different providers so the lock's serialization — and the
 /// restamp-on-full-success invariant that depends on it — can be verified.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn reindex_workspace_with_lock(
     pool: PgPool,
     workspace_id: Uuid,

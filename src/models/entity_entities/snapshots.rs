@@ -10,6 +10,9 @@ use crate::error::{ResultExt, YorishiroError};
 /// One statement (`INSERT ... SELECT`), not a read followed by a write: under READ COMMITTED, two statements can see different committed data, so a separate read could snapshot an image the row no longer holds by the time the insert runs.
 ///
 /// `entity_snapshots`'s RLS policy matches nothing rather than raising when no workspace is named, so a wrong `workspace_id` or missing entity silently inserts zero rows: `rows_affected == 0` is the only signal that catches it.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn snapshot(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -31,6 +34,9 @@ pub async fn snapshot(
 /// Removes one entity's snapshot from `job_id`'s group.
 ///
 /// For a caller that takes a snapshot before a write it isn't certain will land (`ee/`'s `infer_fill`, writing a model's guess straight to the entity): if that write then fails for a reason specific to it, the snapshot no longer describes a real change, and leaving it would let a later, unrelated edit to the same entity be misattributed to this job on undo.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn delete_snapshot(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -54,6 +60,9 @@ pub async fn delete_snapshot(
 ///
 /// Restores `schema_id` and `schema_version` alongside `data`, not just `data`: otherwise the entity would claim a version its restored data no longer matches.
 /// Builds the `ActiveModel` directly rather than calling `update()`, which cannot set those two columns and would also re-validate and re-stamp `updated_by` for a restore that isn't a user edit.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn undo_job(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

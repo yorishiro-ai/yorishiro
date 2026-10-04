@@ -30,7 +30,7 @@ pub struct InferenceJobRecord {
     pub proposed: i64,
     pub skipped: i64,
     pub error: Option<String>,
-    pub(crate) attempt: i32,
+    pub attempt: i32,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
     pub updated_at: chrono::DateTime<chrono::FixedOffset>,
 }
@@ -61,6 +61,9 @@ impl TryFrom<Model> for InferenceJobRecord {
     }
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -82,6 +85,9 @@ pub async fn create(
     Ok(())
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn get(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -96,6 +102,9 @@ pub async fn get(
 
 /// Claims a queued job exactly once.
 /// A running job is never reclaimed because its worker may still be executing an inference.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn claim(conn: &impl ConnectionTrait, id: Uuid) -> Result<bool, YorishiroError> {
     claim_attempt(conn, id, None).await
 }
@@ -132,7 +141,10 @@ pub(crate) async fn claim_attempt(
 
 /// Repairs the inference row after lifecycle admission committed before the worker claimed it.
 /// The target attempt is the lifecycle attempt, so repeated deliveries and recovery are idempotent.
-pub(crate) async fn reconcile_attempt(
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub async fn reconcile_attempt(
     conn: &sea_orm::DatabaseConnection,
     id: Uuid,
     target_attempt: i32,
@@ -195,6 +207,9 @@ pub(crate) async fn reconcile_attempt(
     Ok(result.rows_affected == 1)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn complete(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -221,7 +236,10 @@ pub async fn complete(
 }
 
 /// Completes a proposal-producing job without claiming that entity data was applied.
-pub(crate) async fn complete_proposals_attempt(
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub async fn complete_proposals_attempt(
     conn: &impl ConnectionTrait,
     id: Uuid,
     attempt: i32,
@@ -249,6 +267,9 @@ pub(crate) async fn complete_proposals_attempt(
     Ok(result.rows_affected == 1)
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn fail(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -278,7 +299,10 @@ pub async fn fail(
     Ok(())
 }
 
-pub(crate) async fn fail_attempt(
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub async fn fail_attempt(
     conn: &impl ConnectionTrait,
     id: Uuid,
     attempt: i32,
@@ -337,58 +361,4 @@ async fn validate_existing_status(
         InferenceJobRecord::try_from(row)?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use migration::{Migrator, MigratorTrait};
-    use sea_orm::{ActiveModelTrait, Database, Set};
-
-    #[tokio::test]
-    async fn reconcile_recovers_after_failure_before_retry() {
-        let db = Database::connect("sqlite::memory:").await.unwrap();
-        Migrator::up(&db, None).await.unwrap();
-        let tenant = crate::models::_entities::tenant_tenants::ActiveModel {
-            name: Set("reconcile-tenant".into()),
-            ..Default::default()
-        }
-        .insert(&db)
-        .await
-        .unwrap();
-        let workspace = crate::models::_entities::workspace_workspaces::ActiveModel {
-            tenant_id: Set(tenant.id),
-            name: Set("reconcile-workspace".into()),
-            status: Set("active".into()),
-            ..Default::default()
-        }
-        .insert(&db)
-        .await
-        .unwrap();
-        let id = Uuid::now_v7();
-        create(&db, id, workspace.id, "notes").await.unwrap();
-        assert!(claim(&db, id).await.unwrap());
-        let attempt = get(&db, id).await.unwrap().unwrap().attempt;
-        assert!(
-            fail_attempt(&db, id, attempt, "provider failed")
-                .await
-                .unwrap()
-        );
-        assert!(reconcile_attempt(&db, id, attempt).await.unwrap());
-        assert!(!fail_attempt(&db, id, attempt - 1, "stale").await.unwrap());
-        assert!(
-            complete_proposals_attempt(&db, id, attempt, 2, 0)
-                .await
-                .unwrap()
-        );
-        assert!(
-            !complete_proposals_attempt(&db, id, attempt, 9, 0)
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            get(&db, id).await.unwrap().unwrap().status,
-            InferenceJobStatus::Completed
-        );
-    }
 }

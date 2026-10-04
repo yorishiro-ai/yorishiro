@@ -34,6 +34,9 @@ pub(crate) struct WorkerClassAssignment {
 }
 
 /// Stores or replaces a workspace's own worker-class assignment.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

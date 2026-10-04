@@ -100,7 +100,7 @@ pub(crate) struct SetRelationStatusInput {
 }
 
 #[derive(Default)]
-pub(crate) struct ListRelationsQuery {
+pub struct ListRelationsQuery {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
@@ -149,6 +149,9 @@ async fn validate_relation_type(
 /// Creates a new relation: verifies both the source and target entities exist and that `relation_type` matches the metaschema's source/target constraint, then persists it.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -249,6 +252,9 @@ pub(crate) async fn set_status(
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn delete(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -305,6 +311,9 @@ pub(crate) async fn list(
 }
 
 /// Counts how many relations a workspace holds, for workspace-detail summaries.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
     use crate::models::_entities::entity_relations::Column;
 

@@ -69,6 +69,9 @@ async fn reindex_embedding_for_record(
 }
 
 /// Re-embeds every candidate entity and restamps the workspace after full success.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn reindex_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

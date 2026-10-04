@@ -1,9 +1,5 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
-src/models/workspace_invites.rs	mod	test_support	integration-test: timestamp seam moved with invite persistence to the table-owning model.
-src/models/workspace_invites.rs	use	test_support::super::operations::test_support::{create_invite_at,redeem_invite_at}	integration-test: timestamp seam moved with invite persistence to the table-owning model.
-src/models/workspace_invites/operations.rs	fn	test_support::create_invite_at	integration-test: timestamp seam moved with invite persistence to the table-owning model.
-src/models/workspace_invites/operations.rs	fn	test_support::redeem_invite_at	integration-test: timestamp seam moved with invite persistence to the table-owning model.
 src/models/workspace_invites.rs	struct	RedeemedInvite	seaorm-facade: invite result moved from the cross-table facade to the table-owning model.
 src/models/workspace_invites.rs	field	RedeemedInvite::tenant_id	seaorm-facade: invite result field moved with its existing public type.
 src/models/workspace_invites.rs	field	RedeemedInvite::email	seaorm-facade: invite result field moved with its existing public type.
@@ -26,14 +22,13 @@ src/models/tenant_tenants.rs	use	operations::create_tenant	integration-test: ten
 src/models/tenant_tenants/operations.rs	fn	create_tenant	integration-test: tenant cap and locking behavior are exercised by the external test crate.
 src/models/user_users.rs	use	operations::create_user	integration-test: user creation moved from the cross-table facade to the table-owning model.
 src/models/user_users/operations.rs	fn	create_user	integration-test: request fixtures create users through the owning model.
-src/models/workspace_invites.rs	use	operations::create_invite	integration-test: invite creation moved from the cross-table facade to the table-owning model.
+src/models/workspace_invites.rs	use	operations::{create_invite,create_invite_at,redeem_invite_at}	integration-test: invite creation and redemption, including the variants that take the current time, are exercised on both database backends.
 src/models/workspace_invites/operations.rs	fn	create_invite	integration-test: invite persistence is exercised on both database backends.
-src/workers/mod.rs	mod	dispatch	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-src/workers/dispatch.rs	trait	TestReindexDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-src/workers/dispatch.rs	trait	ReindexDispatcher	Test-support dispatcher seam is public so integration tests can install a typed dispatcher.
-src/workers/dispatch.rs	fn	install_test_reindex_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-ee/workers/infer_fill.rs	trait	TestInferFillDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
-ee/workers/infer_fill.rs	fn	install_test_infer_fill_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
+src/models/workspace_invites/operations.rs	fn	create_invite_at	integration-test: the injected-time variant lets backend tests pin the `expires_at == now` boundary without a clock.
+src/models/workspace_invites/operations.rs	fn	redeem_invite_at	integration-test: the injected-time variant lets backend tests pin the expiry boundary without a clock.
+src/workers/mod.rs	mod	dispatch	integration-test: the module that names the dispatcher seam traits integration tests substitute through `AppContext::shared_store`.
+src/workers/dispatch.rs	trait	ReindexDispatcher	integration-test: reindex dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
+ee/workers/infer_fill.rs	trait	InferFillDispatcher	integration-test: infer-fill dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
 ee/controllers/inference.rs	field	InferJobStatus::proposed	Public JSON response field for the durable proposal count.
 ee/models/inference_jobs.rs	field	InferenceJobRecord::proposed	Public durable job record field for the proposal count.
 ee/models/inference_jobs.rs	fn	complete_proposals	Enterprise worker lifecycle operation for proposal-producing jobs.
@@ -658,3 +653,239 @@ src/error.rs	enum	YorishiroErrorCode	API contract: error code sent in every erro
 src/error.rs	fn	YorishiroErrorCode::as_str	API contract: string representation of the error code sent in API responses.
 src/error.rs	fn	YorishiroErrorCode::http_status	API contract: fixed HTTP status code per error code; part of the API contract.
 src/error.rs	fn	YorishiroErrorCode::description	API contract: human-readable description of the error code for API responses and logs.
+ee/controllers/hmac_sign.rs	fn	sign	integration-test: tests/ee/controllers/hmac_sign.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/hmac_sign.rs	fn	verify	integration-test: tests/ee/controllers/hmac_sign.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/mcp/mod.rs	fn	tool_router	integration-test: tests/ee/controllers/mcp/mod.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/middleware/edition.rs	fn	LicenceState::active_plan_at	integration-test: tests/ee/controllers/middleware/edition.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/mod.rs	mod	hmac_sign	integration-test: tests/ee/controllers/mod.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/mod.rs	mod	mcp	integration-test: tests/ee/controllers/mod.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth.rs	mod	state_token	integration-test: tests/ee/controllers/oauth/mod.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	const	STATE_TTL_SECS	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	field	IssuedState::csrf_cookie_value	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	field	IssuedState::state	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	field	VerifiedState::csrf_hash	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	fn	hash_csrf_cookie	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	fn	issue	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	fn	issue_at	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	fn	verify	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	fn	verify_at	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	struct	IssuedState	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/oauth/state_token.rs	struct	VerifiedState	integration-test: tests/ee/controllers/oauth/state_token.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/stripe.rs	const	SIGNATURE_TOLERANCE_SECS	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/stripe.rs	enum	inbound::Error	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/stripe.rs	fn	inbound::verify_at	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/stripe.rs	mod	inbound	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/stripe.rs	struct	inbound::VerifiedStripeEvent	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
+ee/data/mod.rs	fn	non_empty_env	integration-test: tests/ee/data/mod.rs exercises it now that the unit tests moved out of src/.
+ee/data/mod.rs	mod	oauth	integration-test: tests/ee/data/mod.rs exercises it now that the unit tests moved out of src/.
+ee/data/mod.rs	mod	plan	integration-test: tests/ee/data/mod.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	field	OAuthConfig::client_id	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	field	OAuthConfig::client_secret	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	field	OAuthConfig::issuer_url	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	field	OAuthConfig::redirect_uri	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	field	OAuthConfig::state_signing_key	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	fn	require_non_empty	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	fn	rewrite_unspecified_host	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/oauth.rs	struct	OAuthConfig	integration-test: tests/ee/data/oauth.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	enum	Plan	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	enum	PriorityTier	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	field	ComputePolicy::base_official_concurrency	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	field	ComputePolicy::burst_ceiling	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	field	ComputePolicy::priority	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	field	ComputePolicy::queue_start_objective_seconds	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	fn	Plan::compute_policy	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/data/plan.rs	struct	ComputePolicy	integration-test: tests/ee/data/plan.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	enum	SchedulerOwnership	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	SchedulerOwnership::release	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	acquire_postgres_scheduler_lock	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	acquire_scheduler_ownership	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	acquire_sqlite_scheduler_lock	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	lock_sqlite_scheduler_file	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	sqlite_options_are_in_memory	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	sqlite_scheduler_lock_path	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/db.rs	fn	unlock_sqlite_scheduler_file	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
+ee/mod.rs	mod	data	integration-test: tests/ee/mod.rs exercises it now that the unit tests moved out of src/.
+ee/models/entity_entities.rs	mod	infer_fill	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+ee/models/inference_jobs.rs	field	InferenceJobRecord::attempt	integration-test: tests/ee/models/inference_jobs.rs exercises it now that the unit tests moved out of src/.
+ee/models/inference_jobs.rs	fn	complete_proposals_attempt	integration-test: tests/ee/models/inference_jobs.rs exercises it now that the unit tests moved out of src/.
+ee/models/inference_jobs.rs	fn	fail_attempt	integration-test: tests/ee/models/inference_jobs.rs exercises it now that the unit tests moved out of src/.
+ee/models/inference_jobs.rs	fn	reconcile_attempt	integration-test: tests/ee/models/inference_jobs.rs exercises it now that the unit tests moved out of src/.
+ee/models/mod.rs	mod	workspace_llm_keys	integration-test: tests/ee/models/mod.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas.rs	mod	merge	integration-test: tests/ee/models/schema_schemas/mod.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	enum	MergeVerdict	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	field	FieldMerge::detail	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	field	FieldMerge::entity_type	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	field	FieldMerge::field	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	field	FieldMerge::verdict	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	field	MergePlan::fields	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	fn	MergePlan::conflicts	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	fn	MergePlan::has_conflicts	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	fn	apply_plan	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	fn	three_way	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	struct	FieldMerge	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/models/schema_schemas/merge.rs	struct	MergePlan	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	enum	InferenceHttpError	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	field	InferenceHttpResponse::body	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	field	InferenceHttpResponse::headers	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	field	InferenceHttpResponse::status	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	fn	InferenceClient::with_http	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	struct	InferenceHttpResponse	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	trait	InferenceHttp	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	field	DiscoveryDocument::authorization_endpoint	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	field	DiscoveryDocument::jwks_uri	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	field	DiscoveryDocument::token_endpoint	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	field	TokenResponse::id_token	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	fn	ReqwestOAuthHttp::with_client	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	fn	redirect_policy	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	struct	DiscoveryDocument	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	struct	ReqwestOAuthHttp	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	struct	TokenResponse	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	trait	OAuthHttp	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/mod.rs	fn	build_authorize_redirect_with_http	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/mod.rs	fn	handle_callback_with_http	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/mod.rs	mod	discovery	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/mod.rs	struct	AuthorizeRedirect	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/mod.rs	struct	CallbackIdentity	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
+ee/tasks/reindex_scheduler.rs	fn	TenantReindexScheduler::run_at	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
+ee/tasks/reindex_scheduler.rs	fn	dispatch_reindex_batch	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
+ee/tasks/reindex_scheduler.rs	fn	is_due	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
+ee/tasks/reindex_scheduler.rs	fn	scheduler_failure_message	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
+ee/workers/infer_fill.rs	field	InferFillArgs::lifecycle_id	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
+ee/workers/infer_fill.rs	fn	enqueue_infer_fill_with_dispatcher	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
+src/controllers/extractors.rs	fn	authenticator	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/controllers/extractors.rs	fn	db_handle	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/entities.rs	struct	CreateEntityArgs	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/entities.rs	struct	ListEntitiesArgs	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/mod.rs	fn	community_tool_router	integration-test: tests/controllers/mcp/mod.rs exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/mod.rs	fn	compose_tool_routers	integration-test: tests/controllers/mcp/mod.rs exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/mod.rs	mod	entities	integration-test: tests/controllers/mcp/mod.rs exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/mod.rs	mod	relations	integration-test: tests/controllers/mcp/mod.rs exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/mod.rs	trait	McpToolPolicy	integration-test: tests/controllers/mcp/mod.rs exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/relations.rs	struct	CreateRelationArgs	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/controllers/mcp/relations.rs	struct	ListRelationsArgs	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/controllers/mod.rs	mod	swagger	integration-test: tests/controllers/mod.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	enum	RouteClass	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	InfrastructureExclusion::path	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	InfrastructureExclusion::reason	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	RouteEntry::class	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	RouteEntry::method	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	RouteEntry::operation_id	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	RouteEntry::path	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	RouteInventory::entries	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	field	RouteInventory::exclusions	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	fn	RouteInventory::add_allowlisted_exclusions	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	fn	RouteInventory::public	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	fn	operation_id	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	struct	InfrastructureExclusion	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	struct	RouteDoc	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	struct	RouteEntry	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/route_inventory.rs	struct	RouteInventory	integration-test: tests/controllers/route_inventory.rs exercises it now that the unit tests moved out of src/.
+src/controllers/swagger.rs	fn	implementation::add_schema	integration-test: tests/controllers/swagger.rs exercises it now that the unit tests moved out of src/.
+src/controllers/swagger.rs	fn	implementation::openapi_for	integration-test: tests/controllers/swagger.rs exercises it now that the unit tests moved out of src/.
+src/controllers/swagger.rs	fn	implementation::openapi_method	integration-test: tests/controllers/swagger.rs exercises it now that the unit tests moved out of src/.
+src/controllers/swagger.rs	fn	implementation::validate_schema_refs	integration-test: tests/controllers/swagger.rs exercises it now that the unit tests moved out of src/.
+src/controllers/swagger.rs	mod	implementation	integration-test: tests/controllers/swagger.rs exercises it now that the unit tests moved out of src/.
+src/data/config.rs	fn	serve_worker_queues	integration-test: tests/data/config.rs exercises it now that the unit tests moved out of src/.
+src/data/config.rs	fn	validate_queue_policy	integration-test: tests/data/config.rs exercises it now that the unit tests moved out of src/.
+src/data/mod.rs	mod	settings	integration-test: tests/data/mod.rs exercises it now that the unit tests moved out of src/.
+src/data/settings.rs	enum	EmbeddingProvider	integration-test: tests/data/settings.rs exercises it now that the unit tests moved out of src/.
+src/data/settings.rs	field	Embedding::provider	integration-test: tests/data/settings.rs exercises it now that the unit tests moved out of src/.
+src/data/settings.rs	field	Settings::embedding	integration-test: tests/data/settings.rs exercises it now that the unit tests moved out of src/.
+src/data/settings.rs	struct	Embedding	integration-test: tests/data/settings.rs exercises it now that the unit tests moved out of src/.
+src/data/settings.rs	struct	Settings	integration-test: tests/data/settings.rs exercises it now that the unit tests moved out of src/.
+src/data/templates.rs	const	TEMPLATES	integration-test: tests/data/templates.rs exercises it now that the unit tests moved out of src/.
+src/data/templates.rs	field	BuiltinTemplate::id	integration-test: tests/data/templates.rs exercises it now that the unit tests moved out of src/.
+src/data/templates.rs	fn	parse	integration-test: tests/data/templates.rs exercises it now that the unit tests moved out of src/.
+src/data/templates.rs	struct	BuiltinTemplate	integration-test: tests/data/templates.rs exercises it now that the unit tests moved out of src/.
+src/db.rs	fn	sqlite_vec_blob	integration-test: tests/db.rs exercises it now that the unit tests moved out of src/.
+src/initializers/db_load_guard.rs	enum	StepOutcome	integration-test: tests/initializers/db_load_guard.rs exercises it now that the unit tests moved out of src/.
+src/initializers/db_load_guard.rs	fn	LoadHistory::observe	integration-test: tests/initializers/db_load_guard.rs exercises it now that the unit tests moved out of src/.
+src/initializers/db_load_guard.rs	fn	decide	integration-test: tests/initializers/db_load_guard.rs exercises it now that the unit tests moved out of src/.
+src/initializers/db_load_guard.rs	fn	run_step	integration-test: tests/initializers/db_load_guard.rs exercises it now that the unit tests moved out of src/.
+src/initializers/db_load_guard.rs	struct	LoadHistory	integration-test: tests/initializers/db_load_guard.rs exercises it now that the unit tests moved out of src/.
+src/initializers/mod.rs	mod	db_load_guard	integration-test: tests/initializers/mod.rs exercises it now that the unit tests moved out of src/.
+src/lib.rs	mod	db_enum	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/lib.rs	mod	initializers	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/models/entity_relations.rs	struct	ListRelationsQuery	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
+src/models/mod.rs	mod	queue_job_lifecycles	integration-test: tests/models/mod.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	enum	Admission	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	enum	LifecycleStatus	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	field	Enqueue::concurrency_key	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	field	Enqueue::concurrency_limit	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	field	Enqueue::id	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	field	Enqueue::job_name	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	field	Enqueue::plan	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	field	Enqueue::worker_class	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	field	Enqueue::workspace_id	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	Entity::defer	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	Entity::defer_at	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	Entity::finish	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	Entity::record_enqueue	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	Entity::renew_at	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	Entity::start_at	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	LifecycleStatus::from_row	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	lease_duration	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	fn	running_lease_is_live	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	struct	Enqueue	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/queue_job_lifecycles.rs	use	crate::models::_entities::queue_job_lifecycles::{ActiveModel,Column,Entity,Model}	integration-test: tests/models/queue_job_lifecycles.rs exercises it now that the unit tests moved out of src/.
+src/models/workspace_workspaces.rs	field	StartupReindexRow::embedding_model	integration-test: tests/models/workspace_workspaces.rs exercises it now that the unit tests moved out of src/.
+src/models/workspace_workspaces.rs	field	StartupReindexRow::id	integration-test: tests/models/workspace_workspaces.rs exercises it now that the unit tests moved out of src/.
+src/models/workspace_workspaces.rs	fn	StartupReindexRow::is_stamped_with_other_model	integration-test: tests/models/workspace_workspaces.rs exercises it now that the unit tests moved out of src/.
+src/models/workspace_workspaces.rs	struct	StartupReindexRow	integration-test: tests/models/workspace_workspaces.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/mod.rs	mod	model_fetch	integration-test: tests/services/embedding/mod.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	const	CONNECT_TIMEOUT	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	const	DEFAULT_MODEL	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	const	READ_TIMEOUT	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	const	STALE_PARTIAL_AGE	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	enum	ArtifactHttpError	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	Artifact::description	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	Artifact::local_name	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	Artifact::remote_path	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	Artifact::sha256	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	Artifact::size	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	ArtifactHttpResponse::body	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	ArtifactHttpResponse::status	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	LocalModelDef::model	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	LocalModelDef::revision	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	LocalModelDef::short_id	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	field	LocalModelDef::tokenizer	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	fn	download_verified	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	fn	ensure_file_with_http	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	fn	sweep_stale_partials	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	struct	Artifact	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	struct	ArtifactHttpResponse	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	struct	LocalModelDef	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	struct	ReqwestArtifactHttp	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	trait	ArtifactBody	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	trait	ArtifactHttp	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	enum	OpenAiHttpError	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	field	OpenAiHttpResponse::body	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	field	OpenAiHttpResponse::headers	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	field	OpenAiHttpResponse::status	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	fn	OpenAiCompatibleProvider::with_http	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	struct	OpenAiHttpResponse	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	trait	OpenAiCompatibleHttp	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/workers/dispatch.rs	trait	EmbeddingSyncDispatcher	integration-test: tests/workers/dispatch.rs exercises it now that the unit tests moved out of src/.
+src/workers/embedding_sync.rs	fn	WorkerClass::tag	integration-test: tests/workers/embedding_sync.rs exercises it now that the unit tests moved out of src/.
+src/workers/embedding_sync.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/embedding_sync.rs exercises it now that the unit tests moved out of src/.
+src/workers/lifecycle.rs	fn	perform_with_lifecycle	integration-test: tests/workers/lifecycle.rs exercises it now that the unit tests moved out of src/.
+src/workers/mod.rs	mod	lifecycle	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
+src/workers/mod.rs	mod	queue	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	const	STARVATION_PRIORITY	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	const	STARVATION_WAIT_SECONDS	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	field	ConcurrencyPolicy::limit	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	field	ConcurrencyPolicy::plan	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	field	Decision::class	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	field	Decision::fallback	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	field	Decision::priority	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	fn	class_queues	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	fn	concurrency_for	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	fn	decide	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	fn	decide_for_dispatch_at	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	fn	default_queue_policy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	fn	priority	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	struct	ConcurrencyPolicy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	struct	Decision	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	trait	QueuePolicy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
+src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.

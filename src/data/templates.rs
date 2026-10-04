@@ -3,12 +3,12 @@ use serde::Serialize;
 use crate::error::YorishiroError;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
-struct BuiltinTemplate {
-    id: &'static str,
+pub struct BuiltinTemplate {
+    pub id: &'static str,
     source: &'static str,
 }
 
-const TEMPLATES: &[BuiltinTemplate] = &[
+pub const TEMPLATES: &[BuiltinTemplate] = &[
     BuiltinTemplate {
         id: "general-notes",
         source: include_str!("../../data/templates/general-notes.json"),
@@ -36,7 +36,10 @@ pub struct TemplateSummary {
     pub description: Option<String>,
 }
 
-fn parse(template: &BuiltinTemplate) -> MetaSchemaDefinition {
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
+pub fn parse(template: &BuiltinTemplate) -> MetaSchemaDefinition {
     serde_json::from_str(template.source)
         .unwrap_or_else(|err| panic!("built-in template '{}' failed to parse: {err}", template.id))
 }
@@ -55,23 +58,13 @@ pub fn list_templates() -> Vec<TemplateSummary> {
         .collect()
 }
 
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn get_template(id: &str) -> Result<MetaSchemaDefinition, YorishiroError> {
     TEMPLATES
         .iter()
         .find(|template| template.id == id)
         .map(parse)
         .ok_or_else(|| YorishiroError::not_found(format!("no template named '{id}'")))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{TEMPLATES, parse};
-
-    #[test]
-    fn every_builtin_asset_is_a_schema_definition() {
-        for template in TEMPLATES {
-            let definition = parse(template);
-            assert!(!definition.entity_types.is_empty(), "{}", template.id);
-        }
-    }
 }

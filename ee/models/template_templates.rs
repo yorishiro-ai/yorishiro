@@ -36,6 +36,9 @@ pub struct SeedOutcome {
 /// Publishes every built-in template as an official, community-visible marketplace listing.
 /// Idempotent: a new version is published only when the built-in definition differs from the latest one already published.
 /// Calls `ensure_official_tenant` itself, so this still works standalone.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, YorishiroError> {
     ensure_official_tenant(&ctx.db).await?;
 

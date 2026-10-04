@@ -95,6 +95,9 @@ impl RateLimiter {
 ///
 /// Charged before embedding, since embedding is the work the budget protects, and counting is cheap (a query is short), which is why search is metered in tokens while writes stay on request counts.
 /// A free function taking both `ctx` values rather than a method on either, so a check written for only one caller can't leave the other able to spend the budget it's meant to protect: both the REST and MCP search handlers call this same function.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub fn charge_search_tokens(
     limiter: &RateLimiter,
     provider: &dyn crate::services::embedding::EmbeddingProvider,

@@ -11,6 +11,9 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::schema_schemas::metaschema;
 
 /// Reports how `entity_id` stands against the active version of its schema.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn drift(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -61,6 +64,9 @@ pub async fn drift(
 /// Reads only.
 ///
 /// The counting is done in one query per (entity_type, schema_id) group rather than one per entity: a workspace can hold far more entities than it holds distinct old versions, and the answer is the same either way.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn migration_dry_run(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

@@ -64,10 +64,16 @@ jobs:
         run: make check-ce
       - name: Clippy CE without enterprise code
         run: make clippy-ce
-      - name: Test CE library
-        # The whole CE lib suite, not a name filter: a filter that stops matching still passes
-        # with zero tests, which is how the old `services::mcp::tests` filter went unnoticed.
-        run: cargo test --locked --no-default-features --features community --lib
+      - name: Test CE
+        # The whole `tests/` crate built without the enterprise feature, not a name filter: a
+        # filter that stops matching still passes with zero tests, which is how the old
+        # `services::mcp::tests` filter went unnoticed. SQLite needs no service container, so the
+        # PostgreSQL-only tests skip themselves behind the backend gate.
+        env:
+          LOCO_ENV: test_sqlite
+          DATABASE_URL: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+          QUEUE_URL: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
+        run: cargo test --locked --no-default-features --features community --test mod
 
   check:
     name: Enterprise edition
@@ -107,6 +113,15 @@ jobs:
           # All other test files must use boot_request/boot_request_sqlite instead.
           if git grep -l 'request_with_create_db::<\|request_with_create_sqlite::<' tests/ | grep -v 'tests/requests/mod.rs'; then
             echo "ERROR: call boot_request/boot_request_sqlite instead of the raw loco helper directly"
+            exit 1
+          fi
+
+      - name: Check that tests live in tests/
+        run: |
+          # Tests and test-only seams belong to the integration-test crate: no #[test] or
+          # #[cfg(test)] in the shipped sources.
+          if git grep -nE '#\[(tokio::)?test\b|#\[cfg\(test\)\]' -- src ee; then
+            echo "ERROR: move the test above into tests/ (see docs/en/contributing.md)"
             exit 1
           fi
 
@@ -171,18 +186,13 @@ jobs:
             -D rustdoc::invalid_html_tags
             -D rustdoc::bare_urls
 
-      - name: Clippy (tests + complexity report)
-        # Merges the hard-fail lint gate (`-D warnings`) with the warn-only complexity
-        # report (`cognitive_complexity`, `too_many_lines`) into a single invocation.
-        # Both lints are nursery/pedantic, off by default, so --force-warn opts them in.
-        # Step 3 (doc coverage) stays separate because `--lib` is a different target set
-        # from `--tests` and does not fire missing_errors_doc/missing_panics_doc on lib code.
-        run: cargo clippy --locked --workspace --tests --features enterprise,test-support -- -D warnings --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
+      - name: Clippy
+        # Keep CI aligned with rust-analyzer: every target and public API documentation.
+        run: make clippy-ee
 
-      - name: Clippy doc coverage report
-        # Warn-only (see clippy.toml): ~200 existing violations of missing_errors_doc
-        # and missing_panics_doc; new/changed code is expected to add those comments.
-        run: cargo clippy --locked --workspace --lib --features enterprise -- --force-warn clippy::missing_errors_doc --force-warn clippy::missing_panics_doc
+      - name: Clippy complexity report
+        # Existing complexity debt remains report-only.
+        run: cargo clippy --locked --workspace --all-targets --features enterprise -- --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
 
   msrv:
     name: MSRV

@@ -9,7 +9,7 @@ use yorishiro::app::App;
 use yorishiro::db::DbHandle;
 use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
-use yorishiro::ee::workers::infer_fill::{InferFillArgs, TestInferFillDispatcher};
+use yorishiro::ee::workers::infer_fill::{InferFillArgs, InferFillDispatcher};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
@@ -937,7 +937,7 @@ struct FailingInferFillDispatcher {
 }
 
 #[async_trait]
-impl TestInferFillDispatcher for FailingInferFillDispatcher {
+impl InferFillDispatcher for FailingInferFillDispatcher {
     async fn dispatch(
         &self,
         _ctx: &loco_rs::app::AppContext,
@@ -973,10 +973,8 @@ async fn infer_fill_dispatch_failure_persists_failed_job() {
         let dispatcher = Arc::new(FailingInferFillDispatcher {
             args: Mutex::new(None),
         });
-        yorishiro::ee::workers::infer_fill::install_test_infer_fill_dispatcher(
-            &ctx,
-            dispatcher.clone(),
-        );
+        ctx.shared_store
+            .insert(dispatcher.clone() as Arc<dyn InferFillDispatcher>);
 
         let response = request
             .post("/api/schemas/active/article/infer-fill")

@@ -198,6 +198,9 @@ pub enum SetOutcome {
 /// outside the migration-role connection. The controller calls this through `ctx.db`, which
 /// is the identity pool (migration role), so the transaction has the required privileges.
 #[allow(clippy::too_many_arguments)]
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

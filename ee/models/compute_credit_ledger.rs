@@ -40,6 +40,9 @@ crate::db_enum::db_enum! {
 /// Records an earn event for the workspace.
 ///
 /// `amount` is stored as a positive value.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn earn(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -60,6 +63,9 @@ pub async fn earn(
 /// `amount` is the positive quantity to deduct; it is stored as a negative
 /// value in the ledger so that `SUM(amount)` across all rows yields the
 /// correct balance.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn spend(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -102,6 +108,9 @@ async fn insert_row(
 ///
 /// The transaction-scoped workspace lock serializes concurrent debits on PostgreSQL.
 /// SQLite serializes write transactions, and the same transaction boundary makes a stale balance fail as a whole.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn debit_actual(
     conn: &DatabaseTransaction,
     workspace_id: Uuid,
@@ -131,6 +140,9 @@ pub async fn debit_actual(
 ///
 /// Because earn rows are positive and spend rows are stored as negative,
 /// the raw sum is the running balance in credit units.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn balance(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -150,6 +162,12 @@ pub async fn balance(
 }
 
 /// Returns the last `limit` entries for a workspace, most recent first.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+///
+/// # Panics
+/// Panics if an internal invariant required by this operation is violated.
 pub async fn recent(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

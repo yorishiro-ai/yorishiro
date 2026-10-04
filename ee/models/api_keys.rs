@@ -21,6 +21,9 @@ pub struct CreatedTenantApiKey {
 /// The role cap is the same one that command applies: a key attributed to a user may not exceed what that user's tenant role permits, since the key can act as them.
 ///
 /// **`conn` must be the identity pool (`DbHandle::identity`, wrapped as a `sea_orm::DatabaseConnection`), not the tenant pool.** This reads `tenant_tenants` and `tenant_memberships`, and neither is granted to `yorishiro_app` (the tenant pool's role): calling this against the tenant pool fails with "permission denied for table tenant_tenants".
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn create_tenant_api_key(
     conn: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,

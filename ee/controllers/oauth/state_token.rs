@@ -15,35 +15,35 @@ use crate::ee::controllers::hmac_sign;
 
 /// How long a `state` value remains acceptable after being issued.
 /// Also used as the CSRF cookie's max-age, so the cookie never outlives the `state` that depends on it.
-pub(crate) const STATE_TTL_SECS: i64 = 600;
+pub const STATE_TTL_SECS: i64 = 600;
 
 /// Number of random bytes in the CSRF cookie value.
 /// Only its SHA-256 hash is ever embedded in `state`, so this need not resist offline brute-forcing on its own.
 const CSRF_COOKIE_BYTES: usize = 16;
 
-pub(crate) struct IssuedState {
+pub struct IssuedState {
     /// The opaque value to embed in the authorize URL's `state` query parameter.
     /// Carries the PKCE code verifier too, so the callback can recover it via [`verify`] without this process having kept anything in memory in between.
-    pub(crate) state: String,
+    pub state: String,
     /// The PKCE code challenge (`BASE64URL(SHA256(verifier))`) to send in the authorize request.
     pub(crate) pkce_challenge: String,
     /// The random value to set as the CSRF cookie.
     /// `state` carries only its SHA-256 hash, never the value itself.
-    pub(crate) csrf_cookie_value: String,
+    pub csrf_cookie_value: String,
 }
 
 /// The verified result of a `state`: the PKCE verifier it carries, and the CSRF hash it expects the callback's cookie to match.
-pub(crate) struct VerifiedState {
+pub struct VerifiedState {
     pub(crate) pkce_verifier: String,
-    pub(crate) csrf_hash: String,
+    pub csrf_hash: String,
 }
 
 /// Generates a fresh CSRF cookie value and PKCE verifier, and packs the PKCE verifier plus the CSRF value's hash into a signed `state` value.
-pub(crate) fn issue(signing_key: &[u8]) -> IssuedState {
+pub fn issue(signing_key: &[u8]) -> IssuedState {
     issue_at(signing_key, chrono::Utc::now().timestamp())
 }
 
-fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
+pub fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
     let mut csrf_bytes = [0u8; CSRF_COOKIE_BYTES];
     rand::rng().fill_bytes(&mut csrf_bytes);
     let csrf_cookie_value = URL_SAFE_NO_PAD.encode(csrf_bytes);
@@ -71,11 +71,11 @@ fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
 /// This alone does **not** prove the presenting browser is the one the flow was started for.
 /// See the module docs.
 /// Callers must separately check the returned `csrf_hash` against the SHA-256 hash of the browser's CSRF cookie.
-pub(crate) fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
+pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
     verify_at(signing_key, state, chrono::Utc::now().timestamp())
 }
 
-fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState> {
+pub fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState> {
     let mut parts = state.splitn(4, '.');
     let issued_at_str = parts.next()?;
     let csrf_hash = parts.next()?;
@@ -105,111 +105,6 @@ fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState>
 }
 
 /// Hashes a CSRF cookie value the same way [`issue`] does, for `callback` to compare against [`VerifiedState::csrf_hash`].
-pub(crate) fn hash_csrf_cookie(cookie_value: &str) -> String {
+pub fn hash_csrf_cookie(cookie_value: &str) -> String {
     hex::encode(Sha256::digest(cookie_value.as_bytes()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const KEY: &[u8] = b"a signing key";
-
-    #[test]
-    fn issued_state_verifies_and_the_csrf_hash_matches_the_cookie() {
-        let issued = issue_at(KEY, 1_700_000_000);
-        let verified = verify_at(KEY, &issued.state, 1_700_000_000)
-            .expect("a freshly issued state must verify");
-        assert_eq!(
-            verified.csrf_hash,
-            hash_csrf_cookie(&issued.csrf_cookie_value)
-        );
-    }
-
-    #[test]
-    fn verify_rejects_a_wrong_signing_key() {
-        let issued = issue_at(KEY, 1_700_000_000);
-        assert!(verify_at(b"a different key", &issued.state, 1_700_000_000).is_none());
-    }
-
-    #[test]
-    fn verify_rejects_a_tampered_payload() {
-        let issued = issue_at(KEY, 1_700_000_000);
-        // Flip the last character of the payload without re-signing.
-        let mut parts: Vec<&str> = issued.state.split('.').collect();
-        let last_payload_part = parts[2].to_string();
-        let mut tampered_part = last_payload_part.clone();
-        tampered_part.push('x');
-        parts[2] = &tampered_part;
-        let tampered = parts.join(".");
-
-        assert!(verify_at(KEY, &tampered, 1_700_000_000).is_none());
-    }
-
-    #[test]
-    fn verify_rejects_a_malformed_state() {
-        assert!(verify(KEY, "not.enough.parts").is_none());
-        assert!(verify(KEY, "").is_none());
-    }
-
-    #[test]
-    fn verify_rejects_an_expired_state() {
-        let now = 1_700_000_000;
-        let issued_at = now - STATE_TTL_SECS - 1;
-        let csrf_hash = "deadbeef";
-        let pkce_verifier = "verifier";
-        let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
-        let signature = hmac_sign::sign(KEY, payload.as_bytes());
-        let state = format!("{payload}.{signature}");
-
-        assert!(verify_at(KEY, &state, now).is_none());
-    }
-
-    #[test]
-    fn verify_accepts_the_expiry_and_future_skew_boundaries() {
-        let now = 1_700_000_000;
-        for issued_at in [now - STATE_TTL_SECS, now + 5] {
-            let csrf_hash = "deadbeef";
-            let pkce_verifier = "verifier";
-            let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
-            let signature = hmac_sign::sign(KEY, payload.as_bytes());
-            let state = format!("{payload}.{signature}");
-
-            assert!(verify_at(KEY, &state, now).is_some());
-        }
-    }
-
-    #[test]
-    fn verify_rejects_a_state_outside_the_future_skew_boundary() {
-        let now = 1_700_000_000;
-        let issued_at = now + 6;
-        let csrf_hash = "deadbeef";
-        let pkce_verifier = "verifier";
-        let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
-        let signature = hmac_sign::sign(KEY, payload.as_bytes());
-        let state = format!("{payload}.{signature}");
-
-        assert!(verify_at(KEY, &state, now).is_none());
-    }
-
-    #[test]
-    fn verify_handles_extreme_timestamps_without_overflow() {
-        for (issued_at, now) in [(i64::MIN, i64::MAX), (i64::MAX, i64::MIN)] {
-            let payload = format!("{issued_at}.deadbeef.verifier");
-            let signature = hmac_sign::sign(KEY, payload.as_bytes());
-            let state = format!("{payload}.{signature}");
-
-            assert!(verify_at(KEY, &state, now).is_none());
-        }
-    }
-
-    #[test]
-    fn production_wrappers_issue_and_verify_a_state() {
-        let issued = issue(KEY);
-        let verified = verify(KEY, &issued.state).expect("a production state must verify");
-        assert_eq!(
-            verified.csrf_hash,
-            hash_csrf_cookie(&issued.csrf_cookie_value)
-        );
-    }
 }

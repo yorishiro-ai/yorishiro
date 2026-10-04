@@ -31,6 +31,9 @@ pub struct ImportResult {
 /// `tenant_id` comes from the authenticated request, not the export: an exported schema's `tenant_id` is only meaningful in its source tenant, and reusing it here would violate `schema_schemas`' FK to `tenant_tenants` once source and destination tenants differ.
 ///
 /// Every imported entity is attributed to `imported_by`, not the exported `created_by`: the exported value names a user in the source tenant that `yorishiro_app` can't verify exists (`user_users` carries no grant to that role), risking an FK violation on restore.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn import_jsonl(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

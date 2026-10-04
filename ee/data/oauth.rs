@@ -9,18 +9,18 @@ use crate::YorishiroError;
 use crate::ee::data::non_empty_env;
 
 #[derive(Clone)]
-pub(crate) struct OAuthConfig {
+pub struct OAuthConfig {
     /// The identity provider's issuer URL, e.g. `https://accounts.google.com`.
     /// OIDC discovery is fetched from this at request time, not cached at startup.
-    pub(crate) issuer_url: String,
-    pub(crate) client_id: String,
-    pub(crate) client_secret: String,
+    pub issuer_url: String,
+    pub client_id: String,
+    pub client_secret: String,
     /// Where the provider redirects back to after the user authenticates.
     /// Defaults to a `localhost`-rewritten `YORISHIRO_BIND`, see [`default_redirect_uri`]: a bind address is usually `0.0.0.0:...`, not a host a browser can reach.
-    pub(crate) redirect_uri: String,
+    pub redirect_uri: String,
     /// HMAC key used to sign the `state` parameter that round-trips through the provider.
     /// Derived from `client_secret` so no separate secret needs provisioning.
-    pub(crate) state_signing_key: Vec<u8>,
+    pub state_signing_key: Vec<u8>,
 }
 
 impl OAuthConfig {
@@ -62,7 +62,10 @@ fn require_non_empty_env(key: &str) -> Result<String, YorishiroError> {
 }
 
 /// The pure fold `require_non_empty_env` wraps, split out so tests can exercise every case (unset, set-but-empty, set) without mutating the process environment.
-pub(crate) fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, YorishiroError> {
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, YorishiroError> {
     match raw.filter(|s| !s.is_empty()) {
         Some(value) => Ok(value.to_string()),
         None => Err(YorishiroError::Internal(anyhow::anyhow!(
@@ -84,58 +87,9 @@ fn default_redirect_uri() -> String {
 /// Rewrites `host:port` to `localhost:port` when the host is an all-interfaces bind address (`0.0.0.0` or `::`), leaving everything else as given.
 /// Parses the whole string as a [`std::net::SocketAddr`] rather than doing a substring replace, which would corrupt an address like `10.0.0.0:8081` into `1localhost:8081`.
 /// A `bind` that is not a valid `SocketAddr` at all passes through unchanged.
-pub(crate) fn rewrite_unspecified_host(bind: &str) -> String {
+pub fn rewrite_unspecified_host(bind: &str) -> String {
     match bind.parse::<std::net::SocketAddr>() {
         Ok(addr) if addr.ip().is_unspecified() => format!("localhost:{}", addr.port()),
         _ => bind.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn require_non_empty_accepts_a_present_value() {
-        assert_eq!(require_non_empty("KEY", Some("value")).unwrap(), "value");
-    }
-
-    #[test]
-    fn require_non_empty_rejects_an_unset_value() {
-        let err = require_non_empty("KEY", None).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("KEY must be set to a non-empty value")
-        );
-    }
-
-    #[test]
-    fn require_non_empty_rejects_a_set_but_empty_value() {
-        let err = require_non_empty("KEY", Some("")).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("KEY must be set to a non-empty value")
-        );
-    }
-
-    #[test]
-    fn rewrite_unspecified_host_rewrites_all_interfaces_addresses() {
-        assert_eq!(rewrite_unspecified_host("0.0.0.0:8080"), "localhost:8080");
-        assert_eq!(rewrite_unspecified_host("[::]:8080"), "localhost:8080");
-    }
-
-    #[test]
-    fn rewrite_unspecified_host_leaves_a_real_address_alone() {
-        // Must not be corrupted by a substring replace: this merely contains "0.0.0.0".
-        assert_eq!(rewrite_unspecified_host("10.0.0.0:8081"), "10.0.0.0:8081");
-        assert_eq!(rewrite_unspecified_host("127.0.0.1:8080"), "127.0.0.1:8080");
-    }
-
-    #[test]
-    fn rewrite_unspecified_host_leaves_a_non_socket_addr_alone() {
-        assert_eq!(
-            rewrite_unspecified_host("example.com:8080"),
-            "example.com:8080"
-        );
     }
 }

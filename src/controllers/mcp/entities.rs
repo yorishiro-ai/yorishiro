@@ -15,7 +15,7 @@ use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_entities;
 
 #[derive(Deserialize, JsonSchema)]
-pub(crate) struct CreateEntityArgs {
+pub struct CreateEntityArgs {
     /// Name of the schema this entity conforms to.
     /// The workspace's current active version is used.
     pub schema_name: String,
@@ -55,7 +55,7 @@ pub(crate) struct FillDefaultsArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub(crate) struct ListEntitiesArgs {
+pub struct ListEntitiesArgs {
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
     pub filter: Option<Value>,

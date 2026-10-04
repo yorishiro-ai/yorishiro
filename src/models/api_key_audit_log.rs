@@ -94,6 +94,9 @@ pub(crate) async fn record(
 
 /// The workspace's audit trail, most recent first, for an `audit`-permission key to review.
 /// Same 200-row page cap `entity_entities::list`/`entity_relations::list` use, for the same reason: an unbounded read against a table that only grows is a query nobody meant to run.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
 pub async fn list_for_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
