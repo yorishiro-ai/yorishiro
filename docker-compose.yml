@@ -74,6 +74,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    ports:
+      - "15432:5432"
 
   redis:
     image: valkey/valkey:9.1
@@ -83,10 +85,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    ports:
+      - "6379:6379"
 
   app:
     <<: *yorishiro
     container_name: app
+    # The default local provider may download about 522 MiB before the HTTP server binds.
+    healthcheck:
+      start_period: 15m
     # To use a model this machine already has, put `model.safetensors` and `tokenizer.json` in
     # `models/` and add:
     #
