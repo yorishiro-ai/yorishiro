@@ -8,7 +8,7 @@ use crate::ee::controllers::middleware::edition::LicenceState;
 use crate::ee::data::plan::Plan;
 use crate::ee::models::tenant_billing;
 use crate::error::YorishiroError;
-use crate::models::tenancy;
+use crate::models::workspace_workspaces;
 use crate::workers::embedding_sync::WorkerClass;
 use crate::workers::queue::{ConcurrencyPolicy, QueuePolicy};
 
@@ -39,7 +39,7 @@ impl QueuePolicy for PlanQueuePolicy {
 }
 
 async fn plan_for(ctx: &AppContext, workspace_id: Uuid) -> Result<Plan, String> {
-    let workspace = tenancy::get_workspace(&ctx.db, workspace_id)
+    let workspace = workspace_workspaces::get_workspace(&ctx.db, workspace_id)
         .await
         .map_err(|error| match error {
             YorishiroError::NotFound { .. } => {

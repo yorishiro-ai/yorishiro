@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Barrier;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
-use yorishiro::models::tenancy;
+use yorishiro::models::{tenancy, tenant_memberships, workspace_invites};
 
 #[cfg(feature = "test-support")]
 pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnection) {
@@ -24,11 +24,11 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
         .expect("parse fixed timestamp")
         .with_timezone(&Utc);
 
-    let (at_expiry, token) = tenancy::test_support::create_invite_at(
+    let (at_expiry, token) = workspace_invites::test_support::create_invite_at(
         &txn,
         tenant.id,
         "at-expiry@example.com",
-        tenancy::MembershipRole::Member,
+        tenant_memberships::MembershipRole::Member,
         Duration::seconds(1),
         now - Duration::seconds(1),
     )
@@ -36,17 +36,17 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
     .expect("create at-expiry invite");
     assert_eq!(DateTime::<Utc>::from(at_expiry.expires_at), now);
     assert!(
-        tenancy::test_support::redeem_invite_at(&txn, &token, now)
+        workspace_invites::test_support::redeem_invite_at(&txn, &token, now)
             .await
             .expect("redeem at-expiry invite")
             .is_none()
     );
 
-    let (before_expiry, token) = tenancy::test_support::create_invite_at(
+    let (before_expiry, token) = workspace_invites::test_support::create_invite_at(
         &txn,
         tenant.id,
         "before-expiry@example.com",
-        tenancy::MembershipRole::Member,
+        tenant_memberships::MembershipRole::Member,
         Duration::seconds(1),
         now,
     )
@@ -57,17 +57,17 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
         now + Duration::seconds(1)
     );
     assert!(
-        tenancy::test_support::redeem_invite_at(&txn, &token, now)
+        workspace_invites::test_support::redeem_invite_at(&txn, &token, now)
             .await
             .expect("redeem before-expiry invite")
             .is_some()
     );
 
-    let (after_expiry, token) = tenancy::test_support::create_invite_at(
+    let (after_expiry, token) = workspace_invites::test_support::create_invite_at(
         &txn,
         tenant.id,
         "after-expiry@example.com",
-        tenancy::MembershipRole::Member,
+        tenant_memberships::MembershipRole::Member,
         Duration::seconds(1),
         now,
     )
@@ -78,18 +78,18 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
         now + Duration::seconds(1)
     );
     assert!(
-        tenancy::test_support::redeem_invite_at(&txn, &token, now + Duration::seconds(2))
+        workspace_invites::test_support::redeem_invite_at(&txn, &token, now + Duration::seconds(2))
             .await
             .expect("redeem after-expiry invite")
             .is_none()
     );
 
     let ttl = Duration::hours(72);
-    let (issued, _) = tenancy::test_support::create_invite_at(
+    let (issued, _) = workspace_invites::test_support::create_invite_at(
         &txn,
         tenant.id,
         "ttl@example.com",
-        tenancy::MembershipRole::Member,
+        tenant_memberships::MembershipRole::Member,
         ttl,
         now,
     )
@@ -138,7 +138,7 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
             .expect("insert tenant");
 
         let txn = ctx.db.begin().await.expect("begin seed txn");
-        tenancy::create_workspace(&txn, tenant.id, "first", None, None, None)
+        tenancy::create_workspace(&txn, tenant.id, "first", None, None)
             .await
             .expect("seed the tenant's first workspace");
         txn.commit().await.expect("commit seed");
@@ -152,15 +152,9 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
             handles.push(tokio::spawn(async move {
                 barrier.wait().await;
                 let txn = db.begin().await.expect("begin racer txn");
-                let result = tenancy::create_workspace(
-                    &txn,
-                    tenant_id,
-                    &format!("racer-{i}"),
-                    None,
-                    None,
-                    None,
-                )
-                .await;
+                let result =
+                    tenancy::create_workspace(&txn, tenant_id, &format!("racer-{i}"), None, None)
+                        .await;
                 match result {
                     Ok(_) => txn.commit().await.is_ok(),
                     Err(_) => {

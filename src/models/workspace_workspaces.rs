@@ -6,6 +6,21 @@ use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
 
+mod tenancy;
+
+pub(crate) use tenancy::{
+    delete_workspace, get_workspace, get_workspace_tenant, list_workspaces,
+    workspace_count_lock_key,
+};
+
+/// A workspace summary returned by tenancy lookups and signup.
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkspaceSummary {
+    pub id: Uuid,
+    pub name: String,
+}
+
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.

@@ -10,7 +10,9 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::dtos::members::AddMemberRequest;
 use crate::error::YorishiroError;
-use crate::models::tenancy::{self, MembershipRecord};
+use crate::models::tenant_memberships;
+use crate::models::tenant_memberships::MembershipRecord;
+use crate::models::user_users;
 
 /// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope.
 pub(crate) async fn require_tenant_admin(
@@ -19,7 +21,7 @@ pub(crate) async fn require_tenant_admin(
     user_id: Option<uuid::Uuid>,
 ) -> Result<(), YorishiroError> {
     let user_id = user_id.ok_or(YorishiroError::Unauthenticated)?;
-    tenancy::get_membership_role(&ctx.db, tenant_id, user_id)
+    tenant_memberships::get_membership_role(&ctx.db, tenant_id, user_id)
         .await?
         .filter(|role| role.administers_tenant())
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
@@ -29,18 +31,18 @@ pub(crate) async fn require_tenant_admin(
     Ok(())
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::tenancy::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::tenant_memberships::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn list_members(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MembershipRecord>>, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-    let members = tenancy::list_members(&ctx.db, auth.tenant_id, page.into()).await?;
+    let members = tenant_memberships::list_members(&ctx.db, auth.tenant_id, page.into()).await?;
     Ok(Json(members))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::models::tenancy::MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::models::tenant_memberships::MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn add_member(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -48,7 +50,7 @@ pub async fn add_member(
 ) -> Result<impl IntoResponse, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
 
-    let user = tenancy::get_user_by_email(&ctx.db, &body.email)
+    let user = user_users::get_user_by_email(&ctx.db, &body.email)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found(format!(
@@ -57,7 +59,7 @@ pub async fn add_member(
             ))
         })?;
 
-    tenancy::add_member(&ctx.db, auth.tenant_id, user.id, body.role).await?;
+    tenant_memberships::add_member(&ctx.db, auth.tenant_id, user.id, body.role).await?;
 
     Ok((
         StatusCode::CREATED,

@@ -14,11 +14,12 @@ use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::embedding_provider;
 use crate::dtos::setup::{SetupRequest, SetupResponse, SetupStatusResponse};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenancy::{self, MembershipRole};
+use crate::models::tenant_memberships;
+use crate::models::tenant_memberships::MembershipRole;
+use crate::models::{tenancy, tenant_tenants, user_users};
 
 fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     let settings = ctx
@@ -31,7 +32,7 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = crate::dtos::setup::SetupStatusResponse)), security(()), tag = "community"))]
 pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
     let setup_required = if max_tenants(&ctx)?.is_some() {
-        tenancy::count_tenants(&ctx.db).await? == 0
+        tenant_tenants::count_tenants(&ctx.db).await? == 0
     } else {
         false
     };
@@ -53,48 +54,36 @@ pub async fn setup(
 
     // A fast-path check before doing any work, not the guarantee: two concurrent POST /setup calls could both pass this and both proceed.
     // The real check runs again after the advisory lock below, inside the transaction that also does the writes.
-    if tenancy::count_tenants(&ctx.db).await? > 0 {
+    if tenant_tenants::count_tenants(&ctx.db).await? > 0 {
         return Err(YorishiroError::Conflict {
             message: "this deployment has already been set up".into(),
         }
         .into());
     }
-
-    let provider = embedding_provider(&ctx)?;
-    let embedding_model = provider.model_name();
-    let dimensions = provider.dimensions() as i32;
 
     // tenant + workspace + user + membership run in one transaction: a request that dies part-way must not leave rows nothing can finish or undo.
     // `db::lock_for_update` closes the TOCTOU window the fast-path check above has: a fixed key, serializing every setup attempt on this deployment against every other, so the second caller's re-check (below) sees the first caller's commit before it decides whether to proceed.
     let txn = ctx.db.begin().await.internal()?;
     crate::db::lock_for_update(&txn, "setup").await.internal()?;
-    if tenancy::count_tenants(&txn).await? > 0 {
+    if tenant_tenants::count_tenants(&txn).await? > 0 {
         return Err(YorishiroError::Conflict {
             message: "this deployment has already been set up".into(),
         }
         .into());
     }
 
-    let tenant = tenancy::create_tenant_with_limit(&txn, "default", max_tenants).await?;
+    let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
 
-    let workspace = tenancy::create_workspace(
-        &txn,
-        tenant.id,
-        "default",
-        None,
-        None,
-        Some((&embedding_model, dimensions)),
-    )
-    .await?;
+    let workspace = tenancy::create_workspace(&txn, tenant.id, "default", None, None).await?;
 
-    let user = tenancy::create_user(
+    let user = user_users::create_user(
         &txn,
         &body.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenancy::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
+    tenant_memberships::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
 
     txn.commit().await.internal()?;
 

@@ -1,13 +1,34 @@
 mod origin;
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use rmcp::handler::server::router::tool::ToolRouter;
 
+use crate::controllers::mcp::McpToolPolicy;
 use crate::controllers::mcp::YorishiroMcpServer;
 use crate::controllers::mcp::compose_tool_routers;
+
+struct LicenceToolPolicy {
+    enterprise_tools: HashSet<String>,
+}
+
+impl McpToolPolicy for LicenceToolPolicy {
+    fn allows(&self, ctx: &loco_rs::app::AppContext, name: &str) -> bool {
+        !self.enterprise_tools.contains(name)
+            || crate::ee::controllers::middleware::edition::is_active(ctx)
+    }
+}
 
 /// The complete enterprise-only MCP tool set.
 pub(crate) fn tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([YorishiroMcpServer::tool_router_origin()])
+}
+
+pub(crate) fn tool_policy() -> Arc<dyn McpToolPolicy> {
+    Arc::new(LicenceToolPolicy {
+        enterprise_tools: tool_router().map.keys().map(ToString::to_string).collect(),
+    })
 }
 
 #[cfg(test)]
@@ -15,7 +36,22 @@ mod tests {
     use std::collections::HashSet;
 
     use super::tool_router;
-    use crate::controllers::mcp::{community_tool_router, render_inventory_fragment};
+    use crate::controllers::mcp::{community_tool_router, render_inventory_section};
+
+    fn render_inventory_fragment(
+        community: &[rmcp::model::Tool],
+        enterprise: &[rmcp::model::Tool],
+    ) -> String {
+        let mut community = community.to_vec();
+        let mut enterprise = enterprise.to_vec();
+        community.sort_by(|a, b| a.name.cmp(&b.name));
+        enterprise.sort_by(|a, b| a.name.cmp(&b.name));
+        format!(
+            "{}{}",
+            render_inventory_section("Community tools", &community),
+            render_inventory_section("Enterprise-only tools", &enterprise)
+        )
+    }
 
     #[test]
     fn enterprise_inventory_contract_is_disjoint_and_contains_community() {

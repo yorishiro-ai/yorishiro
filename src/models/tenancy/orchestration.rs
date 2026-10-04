@@ -9,7 +9,8 @@ use uuid::Uuid;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{tenant_memberships, workspace_workspaces};
 
-use super::{WorkspaceSummary, workspace::workspace_count_lock_key};
+use super::WorkspaceSummary;
+use crate::models::workspace_workspaces::workspace_count_lock_key;
 
 /// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold a membership in.
 /// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
@@ -48,12 +49,7 @@ pub(crate) async fn list_workspaces_for_user(
         .collect())
 }
 /// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
-/// `None` means unlimited, which is the default so enterprise-edition deployments are never capped unless an operator explicitly sets a limit.
-///
-/// `embedding` is the deployment's model and dimension count. The workspace starts with `NULL`
-/// for both `embedding_model` and `embedding_dimensions`; `sync_embedding` stamps the first
-/// successful embed (first-write stamping), which avoids the defect where a workspace created
-/// without an embedding provider would receive a sentinel stamp that blocks future model resolution.
+/// `None` means unlimited.
 ///
 /// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` because this takes `db::lock_for_update` before counting, and `pg_advisory_xact_lock` is transaction-scoped: handed a pool the lock would be released by the end of its own implicit transaction, before the count and insert it is meant to guard.
 /// Taking the transaction in the signature makes passing a pool a compile error instead of a lock that silently does nothing.
@@ -64,7 +60,6 @@ pub(crate) async fn create_workspace(
     name: &str,
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
-    _embedding: Option<(&str, i32)>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     use crate::models::_entities::tenant_tenants;
     use crate::models::workspace_workspaces::WorkspaceStatus;

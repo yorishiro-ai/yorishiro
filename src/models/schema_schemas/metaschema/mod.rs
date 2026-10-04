@@ -4,6 +4,7 @@ mod validate;
 mod versioning;
 
 pub use projection::entity_type_to_json_schema;
+pub use types::ArrayItemType;
 pub use types::{
     ArrayItems, EntityTypeDef, FieldDef, FieldTypeName, MetaSchemaDefinition, RelationTypeDef,
 };

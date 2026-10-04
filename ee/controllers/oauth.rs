@@ -112,16 +112,6 @@ async fn callback(
             .await?;
 
     // The deployment's actual embedding model and width, the same source `setup.rs` stamps a freshly bootstrapped workspace with, not a guessed default: `entity_entities.embedding`'s index is a fixed width, and a workspace stamped with the wrong one fails every entity write's dimension check.
-    let embedding_provider = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>()
-        .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "EmbeddingProvider missing"
-            )))
-        })?;
-    let embedding_model = embedding_provider.model_name();
-    let embedding_dimensions = embedding_provider.dimensions() as i32;
     let settings = ctx
         .shared_store
         .get::<crate::data::settings::Settings>()
@@ -139,7 +129,6 @@ async fn callback(
         &identity.subject_id,
         identity.email.as_deref(),
         identity.display_name.as_deref(),
-        (&embedding_model, embedding_dimensions),
         max_tenants,
     )
     .await?;

@@ -2,7 +2,10 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{entity_entities, tenant_memberships, workspace_workspaces};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
+    QueryFilter,
+};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -48,4 +51,20 @@ pub(crate) async fn compute_tenant_usage(
         member_count: member_count as i64,
         entity_count: entity_count as i64,
     })
+}
+
+pub(crate) async fn set_max_workspaces(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    max_workspaces: Option<i32>,
+) -> Result<(), YorishiroError> {
+    let tenant = crate::models::tenant_tenants::Entity::find_by_id(tenant_id)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
+    let mut active: crate::models::tenant_tenants::ActiveModel = tenant.into();
+    active.max_workspaces = ActiveValue::Set(max_workspaces);
+    active.update(conn).await.internal()?;
+    Ok(())
 }

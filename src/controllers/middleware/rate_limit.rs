@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const ONE_MINUTE: Duration = Duration::from_secs(60);
+const GC_BUCKET_THRESHOLD: usize = 128;
 
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
@@ -75,7 +76,7 @@ impl RateLimiter {
 
         // Lazy GC: evict expired entries every 128 calls to bound memory growth.
         // Without this, an attacker rotating source IPs would grow the map without limit (the rate limiter itself becoming a DoS vector).
-        if buckets.len() > 128 {
+        if buckets.len() > GC_BUCKET_THRESHOLD {
             let window = self.window;
             buckets.retain(|_, (start, _)| now.duration_since(*start) < window);
         }

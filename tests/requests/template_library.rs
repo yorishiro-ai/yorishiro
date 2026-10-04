@@ -2,7 +2,7 @@ use super::boot_request;
 use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 
 use super::fixtures::{self, TenantArgs, issue_api_key};
 
@@ -23,7 +23,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
     let (tenant_id, workspace_id, _owner_id, owner_key) =
         fixtures::create_tenant_workspace_owner(ctx, args).await;
 
-    let member = tenancy::create_user(
+    let member = yorishiro::models::user_users::create_user(
         &ctx.db,
         &format!("member-{name}@example.com"),
         "hunter2-hunter2",
@@ -31,9 +31,14 @@ async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
     )
     .await
     .expect("create member");
-    tenancy::add_member(&ctx.db, tenant_id, member.id, MembershipRole::Member)
-        .await
-        .expect("add member");
+    yorishiro::models::tenant_memberships::add_member(
+        &ctx.db,
+        tenant_id,
+        member.id,
+        MembershipRole::Member,
+    )
+    .await
+    .expect("add member");
     let member_key = issue_api_key(ctx, workspace_id, member.id, ApiKeyScope::Write, false).await;
 
     Setup {

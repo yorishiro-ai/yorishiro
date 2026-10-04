@@ -31,27 +31,11 @@ impl Task for CreateWorkspace {
                 })?;
         let name = vars.cli_arg("name")?;
 
-        let provider = app_context
-            .shared_store
-            .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>()
-            .ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
-            })?;
-        let embedding_model = provider.model_name();
-        let dimensions = provider.dimensions() as i32;
-
         // `create_workspace` holds a transaction-scoped advisory lock across its count and insert, so it takes a transaction rather than the pool.
         let txn = app_context.db.begin().await.internal()?;
-        let workspace = tenancy::create_workspace(
-            &txn,
-            tenant_id,
-            name,
-            None,
-            None,
-            Some((&embedding_model, dimensions)),
-        )
-        .await
-        .internal()?;
+        let workspace = tenancy::create_workspace(&txn, tenant_id, name, None, None)
+            .await
+            .internal()?;
         txn.commit().await.internal()?;
 
         println!("workspace id: {}", workspace.id);

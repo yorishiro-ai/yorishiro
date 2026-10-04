@@ -2,7 +2,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::ee::models::tenant_tenants::TenantUsage;
-use crate::models::tenancy::MembershipRecord;
+use crate::models::tenant_memberships::MembershipRecord;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct TenantOverview {

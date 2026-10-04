@@ -1,5 +1,6 @@
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::tenancy::{MembershipRole, WorkspaceSummary};
+use crate::models::tenant_memberships::MembershipRole;
+use crate::models::workspace_workspaces::WorkspaceSummary;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

@@ -99,14 +99,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
         let input = args.into();
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let record = match entity_relations::create(authorized.txn(), workspace_id, input).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -121,12 +122,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let record = match entity_relations::get(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -140,12 +142,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<DeleteRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         match entity_relations::delete(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -160,17 +163,18 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListRelationsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
         let query = match args.try_into() {
             Ok(query) => query,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let records = match entity_relations::list(authorized.txn(), workspace_id, query).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -189,12 +193,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SetRelationStatusArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let status = match entity_relations::parse_relation_status(&args.status) {
             Ok(status) => status,
             Err(err) => return Ok(err_to_tool_result(err)),

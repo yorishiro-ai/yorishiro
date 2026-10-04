@@ -99,7 +99,7 @@ async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, _, owner_key) =
             fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
-        let member = yorishiro::models::tenancy::create_user(
+        let member = yorishiro::models::user_users::create_user(
             &ctx.db,
             "member@example.com",
             "member-password",
@@ -107,11 +107,11 @@ async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
         )
         .await
         .expect("create member");
-        yorishiro::models::tenancy::add_member(
+        yorishiro::models::tenant_memberships::add_member(
             &ctx.db,
             tenant_id,
             member.id,
-            yorishiro::models::tenancy::MembershipRole::Member,
+            yorishiro::models::tenant_memberships::MembershipRole::Member,
         )
         .await
         .expect("add member");

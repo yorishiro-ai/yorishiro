@@ -5,7 +5,8 @@ use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{
-    DatabaseTransaction, ExprTrait, IntoActiveModel, PaginatorTrait, QuerySelect, TransactionTrait,
+    DatabaseBackend, DatabaseTransaction, ExprTrait, IntoActiveModel, PaginatorTrait, QuerySelect,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use tokio::task::JoinHandle;
 
@@ -242,7 +243,15 @@ impl Entity {
         id: Uuid,
         now: DateTimeWithTimeZone,
     ) -> Result<Admission, DbErr> {
-        let txn = db.begin().await?;
+        let txn = if db.get_database_backend() == DatabaseBackend::Sqlite {
+            db.begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await?
+        } else {
+            db.begin().await?
+        };
         let admission = admit(&txn, id, now).await?;
         // Only an admission wrote anything; every other outcome leaves the row as it found it.
         match admission {

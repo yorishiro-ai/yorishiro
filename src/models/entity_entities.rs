@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::QuerySelect;
 use sea_orm::entity::prelude::*;
+use sea_orm::{FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -32,6 +33,57 @@ pub(crate) async fn ids_for_workspace(
         .into_tuple()
         .all(db)
         .await
+}
+
+#[derive(FromQueryResult)]
+struct MissingEmbeddingRow {
+    id: Uuid,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+    schema_version: i32,
+    entity_type: String,
+    data: Value,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    created_by: Option<Uuid>,
+    updated_by: Option<Uuid>,
+}
+
+/// Finds every entity in a workspace that has no corresponding embedding row.
+///
+/// Raw SQL keeps the portable anti-join explicit: `entity_embeddings` is an application facade over backend-specific vector tables and has no generated SeaORM relation from this entity.
+pub(crate) async fn missing_embeddings(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<EntityRecord>, DbErr> {
+    MissingEmbeddingRow::find_by_statement(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
+         e.entity_type, e.data, e.created_at, e.updated_at, \
+         e.created_by, e.updated_by \
+         FROM entity_entities e \
+         LEFT JOIN entity_embeddings ee ON ee.entity_id = e.id \
+         WHERE e.workspace_id = $1 AND ee.entity_id IS NULL",
+        [workspace_id.into()],
+    ))
+    .all(db)
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|row| EntityRecord {
+                id: row.id,
+                workspace_id: row.workspace_id,
+                schema_id: row.schema_id,
+                schema_version: row.schema_version,
+                entity_type: row.entity_type,
+                data: row.data,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                created_by: row.created_by,
+                updated_by: row.updated_by,
+            })
+            .collect()
+    })
 }
 
 #[async_trait::async_trait]

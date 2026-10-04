@@ -2,11 +2,11 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
 use crate::error::ResultExt;
-use crate::models::tenancy;
+use crate::models::user_users;
 
 /// `cargo loco task create_user email:owner@example.com password:hunter2-hunter2 [display_name:Alice]`
 ///
-/// Wraps `tenancy::create_user`, which hashes the password (Argon2id) before writing it.
+/// Wraps `user_users::create_user`, which hashes the password (Argon2id) before writing it.
 /// A created user holds no tenant membership yet; follow with `add_member`.
 pub(crate) struct CreateUser;
 
@@ -24,7 +24,7 @@ impl Task for CreateUser {
         let password = vars.cli_arg("password")?;
         let display_name = vars.cli_arg("display_name").ok();
 
-        let user = tenancy::create_user(&app_context.db, email, password, display_name)
+        let user = user_users::create_user(&app_context.db, email, password, display_name)
             .await
             .internal()?;
 

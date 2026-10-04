@@ -4,7 +4,8 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::tenancy::{self, MembershipRole};
+use crate::models::tenant_memberships::MembershipRole;
+use crate::models::workspace_invites;
 
 const DEFAULT_INVITE_TTL_HOURS: i64 = 72;
 
@@ -52,7 +53,7 @@ impl Task for CreateInvite {
             Err(_) => DEFAULT_INVITE_TTL_HOURS,
         };
 
-        let (invite, token) = tenancy::create_invite(
+        let (invite, token) = workspace_invites::create_invite(
             &app_context.db,
             tenant_id,
             email,

@@ -10,14 +10,14 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
-use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
+use crate::controllers::extractors::{Authorized, ReadScope};
 use crate::controllers::members::require_tenant_admin;
 use crate::dtos::workspaces::{CreateWorkspaceRequest, WorkspaceDetail};
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::workspace_workspaces;
-use crate::models::tenancy;
+use crate::models::_entities::workspace_workspaces as workspace_entity;
+use crate::models::workspace_workspaces;
 use crate::models::workspace_workspaces::WorkspaceRecord;
-use crate::models::{entity_entities, entity_relations, schema_schemas};
+use crate::models::{entity_entities, entity_relations, schema_schemas, tenancy};
 
 /// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or act on another tenant's workspace by guessing its id.
 /// `workspace_workspaces` has no RLS of its own (it's read through `ctx.db`, the migration-role connection), so this check is the only thing enforcing that boundary for these handlers.
@@ -25,8 +25,8 @@ async fn get_workspace_in_tenant(
     ctx: &AppContext,
     tenant_id: Uuid,
     workspace_id: Uuid,
-) -> Result<workspace_workspaces::Model, ApiError> {
-    let workspace = tenancy::get_workspace(&ctx.db, workspace_id).await?;
+) -> Result<workspace_entity::Model, ApiError> {
+    let workspace = workspace_workspaces::get_workspace(&ctx.db, workspace_id).await?;
     if workspace.tenant_id != tenant_id {
         return Err(
             YorishiroError::not_found(format!("workspace '{workspace_id}' was not found")).into(),
@@ -53,10 +53,6 @@ pub async fn create_workspace(
 ) -> Result<impl IntoResponse, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
 
-    let provider = embedding_provider(&ctx)?;
-    let embedding_model = provider.model_name();
-    let dimensions = provider.dimensions() as i32;
-
     // `create_workspace` takes a transaction-scoped advisory lock to close the gap between counting a tenant's workspaces and inserting one, so it has to be handed a transaction rather than the pool.
     let txn = ctx.db.begin().await.internal()?;
     let workspace = tenancy::create_workspace(
@@ -65,7 +61,6 @@ pub async fn create_workspace(
         &body.name,
         body.max_entities,
         body.schema_id,
-        Some((&embedding_model, dimensions)),
     )
     .await?;
     txn.commit().await.internal()?;
@@ -107,7 +102,7 @@ pub(crate) async fn delete_workspace(
     get_workspace_in_tenant(&ctx, auth.tenant_id, id).await?;
     // A transaction, not `&ctx.db`: `delete_workspace`'s advisory lock only holds for a transaction's lifetime, so passing the pool would release it at the end of each statement's own implicit transaction, before the count and delete it guards.
     let txn = ctx.db.begin().await.internal()?;
-    tenancy::delete_workspace(&txn, id).await?;
+    workspace_workspaces::delete_workspace(&txn, id).await?;
     txn.commit().await.internal()?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -50,6 +50,9 @@ pub struct CreatedApiKey {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
+    pub(crate) key_prefix: String,
+    pub(crate) name: String,
+    pub(crate) created_at: chrono::DateTime<chrono::FixedOffset>,
     /// The raw API key string.
     /// Only its hash is stored in the DB, so this return value is the only place it can ever be obtained.
     pub plaintext: String,
@@ -258,6 +261,9 @@ impl Entity {
             id: inserted.id,
             workspace_id,
             scope,
+            key_prefix: inserted.key_prefix,
+            name: inserted.name,
+            created_at: inserted.created_at,
             plaintext,
         })
     }

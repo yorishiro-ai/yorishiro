@@ -40,7 +40,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SearchEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth_ctx = match super::verify(&self.ctx, &parts, ApiKeyScope::Read).await? {
+        let auth_ctx = match super::verify(self.app_context(), &parts, ApiKeyScope::Read).await? {
             VerifyOutcome::Verified(auth_ctx) => auth_ctx,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
@@ -52,14 +52,14 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        let provider = match resolve_embedding_provider(&self.ctx, auth_ctx.workspace_id)
+        let provider = match resolve_embedding_provider(self.app_context(), auth_ctx.workspace_id)
             .await
             .map_err(|err| err.0)
         {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        let limiter = match search_token_limiter(&self.ctx).map_err(|err| err.0) {
+        let limiter = match search_token_limiter(self.app_context()).map_err(|err| err.0) {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
@@ -89,7 +89,7 @@ impl YorishiroMcpServer {
                 Err(err) => return Ok(err_to_tool_result(YorishiroError::Internal(err.into()))),
             }
         } else {
-            let db = match db_handle(&self.ctx).map_err(|err| err.0) {
+            let db = match db_handle(self.app_context()).map_err(|err| err.0) {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(err)),
             };

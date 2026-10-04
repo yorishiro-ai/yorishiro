@@ -53,7 +53,16 @@ impl Task for CreateApiKey {
             ),
             Err(_) => None,
         };
-        let audit = vars.cli_arg("audit").map(|v| v == "true").unwrap_or(false);
+        let audit = match vars.cli_arg("audit") {
+            Ok(value) => value
+                .parse::<bool>()
+                .map_err(|_| YorishiroError::ValidationFailed {
+                    message: "audit is not a valid boolean".into(),
+                    details: vec![],
+                    hint: "audit must be true or false".into(),
+                })?,
+            Err(_) => false,
+        };
 
         let created = ApiKeys::create_api_key(&app_context.db, workspace_id, scope, user_id, audit)
             .await

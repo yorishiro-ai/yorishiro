@@ -1,6 +1,11 @@
 pub use crate::models::_entities::user_users::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
+mod operations;
+
+pub use operations::create_user;
+pub(crate) use operations::{get_user_by_email, verify_login};
+
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.

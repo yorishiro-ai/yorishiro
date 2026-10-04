@@ -34,12 +34,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<RecallContextArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let query = recall::RecallQuery {
             limit: args.limit.unwrap_or(DEFAULT_RECALL_LIMIT),
             full: args.full.unwrap_or(false),

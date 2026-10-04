@@ -2,7 +2,7 @@ use super::boot_request;
 use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
 #[serial(process_environment)]
@@ -28,7 +28,7 @@ async fn signup_then_login_round_trip() {
             .await
             .expect("insert workspace");
 
-        let (_invite, token) = tenancy::create_invite(
+        let (_invite, token) = yorishiro::models::workspace_invites::create_invite(
             &ctx.db,
             tenant.id,
             "round-trip@example.com",
@@ -243,8 +243,12 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
             let db = ctx.db.clone();
             let blocked = tokio::time::timeout(std::time::Duration::from_millis(500), async move {
                 let txn = sea_orm::TransactionTrait::begin(&db).await.unwrap();
-                let result =
-                    tenancy::create_tenant_with_limit(&txn, "blocked-racer", Some(100)).await;
+                let result = yorishiro::models::tenant_tenants::create_tenant(
+                    &txn,
+                    "blocked-racer",
+                    Some(100),
+                )
+                .await;
                 match &result {
                     Ok(_) => txn.commit().await.unwrap(),
                     Err(_) => txn.rollback().await.unwrap(),
@@ -260,8 +264,12 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
             // Releasing the lock lets the next caller through.
             holder.rollback().await.unwrap();
             let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
-            let result =
-                tenancy::create_tenant_with_limit(&txn, "unblocked-racer", Some(100)).await;
+            let result = yorishiro::models::tenant_tenants::create_tenant(
+                &txn,
+                "unblocked-racer",
+                Some(100),
+            )
+            .await;
             assert!(result.is_ok(), "result: {result:?}");
             txn.commit().await.unwrap();
         })

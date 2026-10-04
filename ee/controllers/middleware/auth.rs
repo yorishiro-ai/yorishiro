@@ -107,7 +107,6 @@ impl Authenticator for TenantScopedAuthenticator {
     }
 }
 
-use crate::models::tenancy;
 use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use loco_rs::app::AppContext;
@@ -188,7 +187,7 @@ pub(crate) async fn authenticate_tenant_admin(
 ) -> Result<Uuid, YorishiroError> {
     let auth_ctx = authenticate(ctx, headers).await?;
     let user_id = auth_ctx.user_id.ok_or(YorishiroError::Unauthenticated)?;
-    tenancy::get_membership_role(&ctx.db, auth_ctx.tenant_id, user_id)
+    crate::models::tenant_memberships::get_membership_role(&ctx.db, auth_ctx.tenant_id, user_id)
         .await?
         .filter(|role| role.administers_tenant())
         .ok_or_else(|| YorishiroError::ScopeInsufficient {

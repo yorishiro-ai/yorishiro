@@ -48,7 +48,7 @@ pub(crate) enum CreateOauthUserError {
 /// Creates a new OAuth-provisioned user row (`password_hash` left `NULL`, per `users_auth_method_check`).
 /// Does not touch tenancy: see `models::user_users::find_or_create` for the caller that wires a freshly created user into a tenant, workspace and membership.
 ///
-/// Takes `&impl ConnectionTrait` (rather than a pool handle) so `find_or_create` can run this on the same transaction as `tenancy::add_member`: both must succeed or fail together, or a crash between them would leave an orphaned user row with no tenant membership, and every later login for that identity would then resolve to a permanent `ScopeInsufficient`.
+/// Takes `&impl ConnectionTrait` rather than a pool handle so `find_or_create` can run this on the same transaction as membership creation: both must succeed or fail together, or a crash between them would leave an orphaned user row with no tenant membership, and every later login for that identity would then resolve to a permanent `ScopeInsufficient`.
 pub(crate) async fn create_oauth_user(
     conn: &impl ConnectionTrait,
     email: &str,

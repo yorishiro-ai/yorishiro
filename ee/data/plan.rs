@@ -41,7 +41,7 @@ impl ComputePolicy {
 }
 
 /// Caps applied when a tenant is on a given plan.
-/// `max_workspaces` is written straight onto `tenant_tenants` (see `crate::models::tenancy::set_tenant_max_workspaces`); `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
+/// `max_workspaces` is written onto `tenant_tenants`; `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
 /// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PlanCaps {

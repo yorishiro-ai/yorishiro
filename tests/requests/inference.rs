@@ -12,7 +12,7 @@ use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::ee::workers::infer_fill::{InferFillArgs, TestInferFillDispatcher};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the enterprise-edition state the test process booted with.
@@ -58,12 +58,17 @@ async fn setup_named(
     let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
         .await
         .expect("insert workspace");
-    let owner = tenancy::create_user(&ctx.db, email, "hunter2-hunter2", None)
+    let owner = yorishiro::models::user_users::create_user(&ctx.db, email, "hunter2-hunter2", None)
         .await
         .expect("create owner");
-    tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
-        .await
-        .expect("add owner");
+    yorishiro::models::tenant_memberships::add_member(
+        &ctx.db,
+        tenant.id,
+        owner.id,
+        MembershipRole::Owner,
+    )
+    .await
+    .expect("add owner");
     // Migration, not Schema: ApiKeyScope::Schema (infer_fill's own requirement) is a lower rung
     // than Migration (POST /api/migration-jobs/{job_id}/undo's requirement, see
     // controllers::entities::undo_migration_job), and Migration subsumes it, so one key issued at

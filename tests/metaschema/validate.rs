@@ -6,8 +6,8 @@ use serde_json::json;
 
 use yorishiro::error::YorishiroError;
 use yorishiro::models::schema_schemas::metaschema::{
-    ArrayItems, EntityTypeDef, FieldDef, FieldTypeName, MAX_OBJECT_DEPTH, MetaSchemaDefinition,
-    RelationTypeDef, validate_definition,
+    ArrayItemType, ArrayItems, EntityTypeDef, FieldDef, FieldTypeName, MAX_OBJECT_DEPTH,
+    MetaSchemaDefinition, RelationTypeDef, validate_definition,
 };
 
 fn parse(value: serde_json::Value) -> MetaSchemaDefinition {
@@ -50,8 +50,8 @@ fn rejects_unknown_relation_target() {
 }
 
 #[test]
-fn rejects_array_field_without_string_items() {
-    let def = parse(json!({
+fn rejects_unknown_array_item_type_during_deserialization() {
+    let result = serde_json::from_value::<MetaSchemaDefinition>(json!({
         "name": "task-management",
         "entity_types": {
             "task": {
@@ -61,7 +61,7 @@ fn rejects_array_field_without_string_items() {
             }
         }
     }));
-    assert!(validate_definition(&def).is_err());
+    assert!(result.is_err());
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn any_field() -> impl Strategy<Value = FieldDef> {
             (
                 prop::option::of(
                     (
-                        short_string(),
+                        prop_oneof![Just(ArrayItemType::String), Just(ArrayItemType::Object),],
                         prop::option::of(proptest::collection::btree_map(
                             short_string(),
                             child.clone(),

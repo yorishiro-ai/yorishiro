@@ -64,6 +64,20 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
     Ok(())
 }
 
+/// Reads PostgreSQL's process-level activity view for the load guard.
+/// This is backend-specific operational state that SeaORM does not model.
+pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::YorishiroError> {
+    use crate::error::ResultExt;
+
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_stat_activity \
+         WHERE datname = current_database() AND state = 'active'",
+    )
+    .fetch_one(pool)
+    .await
+    .internal()
+}
+
 /// A vector in the BLOB layout `sqlite-vec` reads: consecutive little-endian `f32` values.
 ///
 /// Written out value by value, so the bytes are little-endian on every host rather than whatever order the host happens to use.

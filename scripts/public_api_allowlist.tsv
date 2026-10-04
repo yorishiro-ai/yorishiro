@@ -1,8 +1,33 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
-src/models/tenancy.rs	mod	test_support	Test-only timestamp seam enabled only with the disabled-by-default test-support feature.
-src/models/tenancy.rs	fn	test_support::create_invite_at	Test-only timestamp seam enabled only with the disabled-by-default test-support feature.
-src/models/tenancy.rs	fn	test_support::redeem_invite_at	Test-only timestamp seam enabled only with the disabled-by-default test-support feature.
+src/models/workspace_invites.rs	mod	test_support	integration-test: timestamp seam moved with invite persistence to the table-owning model.
+src/models/workspace_invites.rs	use	test_support::super::operations::test_support::{create_invite_at,redeem_invite_at}	integration-test: timestamp seam moved with invite persistence to the table-owning model.
+src/models/workspace_invites/operations.rs	fn	test_support::create_invite_at	integration-test: timestamp seam moved with invite persistence to the table-owning model.
+src/models/workspace_invites/operations.rs	fn	test_support::redeem_invite_at	integration-test: timestamp seam moved with invite persistence to the table-owning model.
+src/models/workspace_invites.rs	struct	RedeemedInvite	seaorm-facade: invite result moved from the cross-table facade to the table-owning model.
+src/models/workspace_invites.rs	field	RedeemedInvite::tenant_id	seaorm-facade: invite result field moved with its existing public type.
+src/models/workspace_invites.rs	field	RedeemedInvite::email	seaorm-facade: invite result field moved with its existing public type.
+src/models/workspace_invites.rs	field	RedeemedInvite::role	seaorm-facade: invite result field moved with its existing public type.
+src/models/tenant_memberships.rs	enum	MembershipRole	openapi-transport: membership role moved from the cross-table facade to the table-owning model.
+src/models/tenant_memberships.rs	fn	MembershipRole::max_scope	auth-provider-resolver: role-to-key-scope policy moved with its existing public enum.
+src/models/tenant_memberships.rs	struct	MembershipRecord	openapi-transport: serialized member record moved to the table-owning model.
+src/models/tenant_memberships.rs	field	MembershipRecord::user_id	openapi-transport: serialized member response field.
+src/models/tenant_memberships.rs	field	MembershipRecord::email	openapi-transport: serialized member response field.
+src/models/tenant_memberships.rs	field	MembershipRecord::display_name	openapi-transport: serialized member response field.
+src/models/tenant_memberships.rs	field	MembershipRecord::role	openapi-transport: serialized member response field.
+src/models/workspace_workspaces.rs	struct	WorkspaceSummary	openapi-transport: serialized workspace summary moved to the table-owning model.
+src/models/workspace_workspaces.rs	field	WorkspaceSummary::id	openapi-transport: serialized workspace response field.
+src/models/workspace_workspaces.rs	field	WorkspaceSummary::name	openapi-transport: serialized workspace response field.
+src/models/schema_schemas/metaschema/types.rs	enum	ArrayItemType	integration-test: public metaschema AST type closes array item kinds to the two wire values accepted by deserialization.
+src/models/schema_schemas/metaschema/mod.rs	use	types::ArrayItemType	integration-test: exports the public metaschema AST enum beside ArrayItems.
+src/models/tenant_memberships.rs	use	operations::add_member	integration-test: membership persistence moved from the cross-table facade to the table-owning model.
+src/models/tenant_memberships/operations.rs	fn	add_member	integration-test: membership persistence is exercised by the external request-test crate.
+src/models/tenant_tenants.rs	use	operations::create_tenant	integration-test: tenant creation moved from the cross-table facade to the table-owning model.
+src/models/tenant_tenants/operations.rs	fn	create_tenant	integration-test: tenant cap and locking behavior are exercised by the external test crate.
+src/models/user_users.rs	use	operations::create_user	integration-test: user creation moved from the cross-table facade to the table-owning model.
+src/models/user_users/operations.rs	fn	create_user	integration-test: request fixtures create users through the owning model.
+src/models/workspace_invites.rs	use	operations::create_invite	integration-test: invite creation moved from the cross-table facade to the table-owning model.
+src/models/workspace_invites/operations.rs	fn	create_invite	integration-test: invite persistence is exercised on both database backends.
 src/workers/mod.rs	mod	dispatch	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
 src/workers/dispatch.rs	trait	TestReindexDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
 src/workers/dispatch.rs	trait	ReindexDispatcher	Test-support dispatcher seam is public so integration tests can install a typed dispatcher.

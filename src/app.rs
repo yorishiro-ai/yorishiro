@@ -274,25 +274,18 @@ impl Hooks for App {
             #[cfg(feature = "enterprise")]
             let enterprise_tool_router = crate::ee::controllers::mcp::tool_router();
             #[cfg(feature = "enterprise")]
-            let enterprise_tool_names = enterprise_tool_router
-                .map
-                .keys()
-                .map(ToString::to_string)
-                .collect::<std::collections::HashSet<_>>();
-            #[cfg(feature = "enterprise")]
             let mut tool_routers = vec![crate::controllers::mcp::community_tool_router()];
             #[cfg(not(feature = "enterprise"))]
             let tool_routers = vec![crate::controllers::mcp::community_tool_router()];
             #[cfg(feature = "enterprise")]
             tool_routers.push(enterprise_tool_router);
             let tool_router = crate::controllers::mcp::compose_tool_routers(tool_routers);
-            let server = crate::controllers::mcp::YorishiroMcpServer::new(ctx, tool_router);
             #[cfg(feature = "enterprise")]
-            let server = server.with_tool_filter(move |ctx, name| {
-                !enterprise_tool_names.contains(name)
-                    || crate::ee::controllers::middleware::edition::is_active(ctx)
-            });
-            server
+            let tool_policy = crate::ee::controllers::mcp::tool_policy();
+            #[cfg(not(feature = "enterprise"))]
+            let tool_policy = Arc::new(crate::controllers::mcp::AllowAllTools)
+                as Arc<dyn crate::controllers::mcp::McpToolPolicy>;
+            crate::controllers::mcp::YorishiroMcpServer::new(ctx, tool_router, tool_policy)
         });
         let settings = ctx
             .shared_store

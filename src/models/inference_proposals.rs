@@ -1,5 +1,3 @@
-#[cfg(feature = "enterprise")]
-pub(crate) use super::_entities::inference_proposals::Column;
 pub(crate) use super::_entities::inference_proposals::{ActiveModel, Entity, Model};
 
 use sea_orm::entity::prelude::*;

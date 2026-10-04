@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 /// Creates a tenant and one active workspace, for tests that need somewhere to attach members.
@@ -51,18 +51,33 @@ async fn owner_can_list_and_add_members() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
-        let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create owner");
-        tenancy::add_member(&ctx.db, tenant_id, owner.id, MembershipRole::Owner)
-            .await
-            .expect("add owner");
+        let owner = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "owner@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create owner");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant_id,
+            owner.id,
+            MembershipRole::Owner,
+        )
+        .await
+        .expect("add owner");
         let owner_key = issue_key_for(&ctx, workspace_id, owner.id).await;
 
         // The invitee must already have an account before they can be added by email.
-        let invitee = tenancy::create_user(&ctx.db, "invitee@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create invitee");
+        let invitee = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "invitee@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create invitee");
 
         let response = request
             .post("/api/members")
@@ -100,12 +115,22 @@ async fn add_member_rejects_an_email_with_no_account() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
-        let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create owner");
-        tenancy::add_member(&ctx.db, tenant_id, owner.id, MembershipRole::Owner)
-            .await
-            .expect("add owner");
+        let owner = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "owner@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create owner");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant_id,
+            owner.id,
+            MembershipRole::Owner,
+        )
+        .await
+        .expect("add owner");
         let owner_key = issue_key_for(&ctx, workspace_id, owner.id).await;
 
         let response = request
@@ -126,12 +151,22 @@ async fn member_role_cannot_manage_members() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
-        let member = tenancy::create_user(&ctx.db, "member@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create member");
-        tenancy::add_member(&ctx.db, tenant_id, member.id, MembershipRole::Member)
-            .await
-            .expect("add member");
+        let member = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "member@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create member");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant_id,
+            member.id,
+            MembershipRole::Member,
+        )
+        .await
+        .expect("add member");
         let member_key = issue_key_for(&ctx, workspace_id, member.id).await;
 
         let response = request
