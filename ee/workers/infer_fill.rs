@@ -23,6 +23,9 @@ use crate::ee::services::inference::InferenceClient;
 use crate::error::ResultExt;
 use crate::models::schema_schemas;
 
+/// The tag infer-fill jobs carry, and the named queue they use on providers that honour one.
+pub(crate) const QUEUE: &str = "infer-fill";
+
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InferFillArgs {
@@ -184,7 +187,11 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     fn tags() -> Vec<String> {
-        vec!["infer-fill".to_string()]
+        vec![QUEUE.to_string()]
+    }
+
+    fn queue() -> Option<String> {
+        Some(QUEUE.to_string())
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {

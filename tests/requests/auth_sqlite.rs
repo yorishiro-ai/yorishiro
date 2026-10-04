@@ -5,7 +5,7 @@
 /// work end to end.
 use axum::http::StatusCode;
 use yorishiro::app::App;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 
 /// Signup via invite then login, then verify replay protection.
 ///
@@ -42,7 +42,7 @@ async fn signup_then_login_round_trip_sqlite() {
             .await
             .expect("insert workspace");
 
-        let (_invite, token) = tenancy::create_invite(
+        let (_invite, token) = yorishiro::models::workspace_invites::create_invite(
             &ctx.db,
             tenant.id,
             "round-trip@example.com",

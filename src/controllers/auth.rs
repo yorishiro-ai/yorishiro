@@ -14,7 +14,9 @@ use crate::controllers::ApiError;
 use crate::dtos::auth::{LoginRequest, LoginResponse, SignupRequest, SignupResponse};
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenancy::{self, MembershipRole};
+use crate::models::tenant_memberships;
+use crate::models::tenant_memberships::MembershipRole;
+use crate::models::{tenancy, tenant_tenants, user_users, workspace_invites, workspace_workspaces};
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -48,7 +50,7 @@ async fn signup_with_invite(
         .into());
     }
 
-    let invite = tenancy::redeem_invite(&ctx.db, token)
+    let invite = workspace_invites::redeem_invite(&ctx.db, token)
         .await?
         .ok_or_else(|| YorishiroError::ValidationFailed {
             message: "invite token is invalid, expired, or already used".into(),
@@ -56,19 +58,19 @@ async fn signup_with_invite(
             hint: "ask a tenant admin for a fresh invite".into(),
         })?;
 
-    // create_user + add_member run in one transaction: see tenancy::create_user's doc comment.
+    // create_user + add_member run in one transaction: see user_users::create_user's doc comment.
     let txn = ctx.db.begin().await.internal()?;
-    let user = tenancy::create_user(
+    let user = user_users::create_user(
         &txn,
         &invite.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenancy::add_member(&txn, invite.tenant_id, user.id, invite.role).await?;
+    tenant_memberships::add_member(&txn, invite.tenant_id, user.id, invite.role).await?;
     txn.commit().await.internal()?;
 
-    let workspaces = tenancy::list_workspaces(
+    let workspaces = workspace_workspaces::list_workspaces(
         &ctx.db,
         invite.tenant_id,
         crate::models::pagination::ListParams::default(),
@@ -111,10 +113,10 @@ async fn signup_without_invite(
         .get::<crate::data::settings::Settings>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
     let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
-    let tenant = tenancy::create_tenant_with_limit(&txn, tenant_name, max_tenants).await?;
+    let tenant = tenant_tenants::create_tenant(&txn, tenant_name, max_tenants).await?;
     let user =
-        tenancy::create_user(&txn, email, &body.password, body.display_name.as_deref()).await?;
-    tenancy::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
+        user_users::create_user(&txn, email, &body.password, body.display_name.as_deref()).await?;
+    tenant_memberships::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
     txn.commit().await.internal()?;
 
     Ok((
@@ -142,14 +144,14 @@ pub async fn login(
     Json(body): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     // Credentials are checked before the workspace is looked up, so a request with a bad password never reveals whether workspace_id exists.
-    let user = tenancy::verify_login(&ctx.db, &body.email, &body.password)
+    let user = user_users::verify_login(&ctx.db, &body.email, &body.password)
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
 
     let workspace_id = match body.workspace_id {
         Some(workspace_id) => {
             // Confirms the workspace exists before the membership check below, matching the NotFound this call would surface anyway.
-            tenancy::get_workspace_tenant(&ctx.db, workspace_id).await?;
+            workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id).await?;
             workspace_id
         }
         None => {
@@ -184,8 +186,8 @@ pub async fn login(
         }
     };
 
-    let tenant_id = tenancy::get_workspace_tenant(&ctx.db, workspace_id).await?;
-    let role = tenancy::get_membership_role(&ctx.db, tenant_id, user.id)
+    let tenant_id = workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id).await?;
+    let role = tenant_memberships::get_membership_role(&ctx.db, tenant_id, user.id)
         .await?
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
             message: "this account is not a member of the tenant that owns this workspace".into(),

@@ -6,7 +6,7 @@
 # Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
-YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379
+YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
 
 .PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check coverage test-postgres test-sqlite test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee
 
@@ -55,10 +55,11 @@ test-postgres: build
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_backend.py sqlite
 
+# Redis DB 15 is reserved for tests because Loco clears the selected DB.
 # The default endpoint is provisioned locally by Compose. An explicit endpoint
 # uses the caller's service instead and does not start a local container.
 test-redis:
-	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379" ]; then \
+	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379/15" ]; then \
 		docker compose up -d --wait redis; \
 	fi
 	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' uv run scripts/test_redis.py

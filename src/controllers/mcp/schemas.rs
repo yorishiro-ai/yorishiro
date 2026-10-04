@@ -66,12 +66,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListSchemasArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let summaries = match schema_schemas::list(authorized.txn(), workspace_id, page).await {
             Ok(value) => value,
@@ -88,12 +89,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetActiveSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let record =
             match schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name)
                 .await
@@ -112,12 +114,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let record =
             match schema_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await {
                 Ok(value) => value,
@@ -135,10 +138,11 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Schema).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Schema).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
         let mut origin_template_id = None;
         let mut origin_snapshot = None;
@@ -173,8 +177,8 @@ impl YorishiroMcpServer {
             (None, Some(template_id)) => {
                 let (definition, origin) =
                     match crate::models::template_templates::resolve_template_definition(
-                        &self.ctx.db,
-                        authorized.ctx.tenant_id,
+                        &self.app_context().db,
+                        authorized.auth_context().tenant_id,
                         &template_id,
                     )
                     .await
@@ -188,8 +192,8 @@ impl YorishiroMcpServer {
             }
         };
 
-        let tenant_id = authorized.ctx.tenant_id;
-        let workspace_id = authorized.ctx.workspace_id;
+        let tenant_id = authorized.auth_context().tenant_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let (record, diff) = match schema_schemas::create_schema(
             authorized.txn(),
             tenant_id,
@@ -219,10 +223,11 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(_authorized) => _authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let _authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(_authorized) => _authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
         ok_json(crate::data::templates::list_templates())
     }
@@ -237,12 +242,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityTypeJsonSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let record = match schema_schemas::get_active_schema(
             authorized.txn(),
             workspace_id,

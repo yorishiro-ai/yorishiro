@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,10 +21,25 @@ def main() -> int:
     if not url.startswith(("redis://", "rediss://")):
         print("YORISHIRO_REDIS_TEST_URL must use redis:// or rediss://", file=sys.stderr)
         return 2
+    if urlparse(url).path != "/15":
+        print("YORISHIRO_REDIS_TEST_URL must select the reserved test database 15", file=sys.stderr)
+        return 2
 
     env = os.environ.copy()
     env.setdefault("LOCO_ENV", "test_sqlite")
     commands = [
+        [
+            "cargo",
+            "test",
+            "--locked",
+            "--features",
+            "test-support",
+            "--lib",
+            "workers::dispatch::redis_routing::a_class_drains_its_own_jobs_behind_a_backlog_of_another_class",
+            "--",
+            "--exact",
+            "--nocapture",
+        ],
         [
             "cargo",
             "test",

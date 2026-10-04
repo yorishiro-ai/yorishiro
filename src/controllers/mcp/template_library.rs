@@ -39,15 +39,17 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let tenant_id = authorized.ctx.tenant_id;
+        let tenant_id = authorized.auth_context().tenant_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let templates =
-            match template_templates::list_templates(&self.ctx.db, tenant_id, page).await {
+            match template_templates::list_templates(&self.app_context().db, tenant_id, page).await
+            {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(err)),
             };
@@ -63,17 +65,23 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-
-        let tenant_id = authorized.ctx.tenant_id;
-        let template =
-            match template_templates::get_template(&self.ctx.db, tenant_id, args.id).await {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
             };
+
+        let tenant_id = authorized.auth_context().tenant_id;
+        let template = match template_templates::get_template(
+            &self.app_context().db,
+            tenant_id,
+            args.id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(template)
     }
 }

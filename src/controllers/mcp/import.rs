@@ -32,14 +32,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ImportJsonlArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Schema).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Schema).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let tenant_id = authorized.ctx.tenant_id;
-        let workspace_id = authorized.ctx.workspace_id;
-        let imported_by = authorized.ctx.user_id;
+        let tenant_id = authorized.auth_context().tenant_id;
+        let workspace_id = authorized.auth_context().workspace_id;
+        let imported_by = authorized.auth_context().user_id;
         let result = match import::import_jsonl(
             authorized.txn(),
             tenant_id,

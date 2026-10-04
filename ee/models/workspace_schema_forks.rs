@@ -338,7 +338,7 @@ pub async fn create<C: ConnectionTrait>(
             hint: "choose a schema from another workspace in the same tenant".into(),
         });
     }
-    let target = crate::models::tenancy::get_workspace(conn, workspace_id).await?;
+    let target = crate::models::workspace_workspaces::get_workspace(conn, workspace_id).await?;
     if target.tenant_id != tenant_id {
         return Err(YorishiroError::not_found("workspace was not found"));
     }

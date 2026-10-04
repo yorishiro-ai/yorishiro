@@ -39,9 +39,25 @@ pub enum FieldTypeName {
     Object,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArrayItemType {
+    String,
+    Object,
+}
+
+impl std::fmt::Display for ArrayItemType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::String => "string",
+            Self::Object => "object",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArrayItems {
-    pub r#type: String,
+    pub r#type: ArrayItemType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub properties: Option<BTreeMap<String, FieldDef>>,
 }

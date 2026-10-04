@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {
@@ -49,12 +49,22 @@ async fn issue_key_for(
 async fn owner_can_create_list_view_and_delete_workspaces() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
-        let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create owner");
-        tenancy::add_member(&ctx.db, tenant_id, owner.id, MembershipRole::Owner)
-            .await
-            .expect("add owner");
+        let owner = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "owner@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create owner");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant_id,
+            owner.id,
+            MembershipRole::Owner,
+        )
+        .await
+        .expect("add owner");
         let owner_key = issue_key_for(&ctx, main_id, owner.id).await;
 
         let response = request
@@ -112,12 +122,22 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 async fn cannot_delete_a_tenants_only_workspace() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
-        let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create owner");
-        tenancy::add_member(&ctx.db, tenant_id, owner.id, MembershipRole::Owner)
-            .await
-            .expect("add owner");
+        let owner = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "owner@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create owner");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant_id,
+            owner.id,
+            MembershipRole::Owner,
+        )
+        .await
+        .expect("add owner");
         let owner_key = issue_key_for(&ctx, main_id, owner.id).await;
 
         let response = request
@@ -133,12 +153,22 @@ async fn cannot_delete_a_tenants_only_workspace() {
 async fn member_role_cannot_create_or_delete_workspaces() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
-        let member = tenancy::create_user(&ctx.db, "member@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create member");
-        tenancy::add_member(&ctx.db, tenant_id, member.id, MembershipRole::Member)
-            .await
-            .expect("add member");
+        let member = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "member@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create member");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant_id,
+            member.id,
+            MembershipRole::Member,
+        )
+        .await
+        .expect("add member");
         let member_key = issue_key_for(&ctx, main_id, member.id).await;
 
         let response = request
@@ -177,12 +207,22 @@ async fn workspaces_endpoints_require_authentication() {
 async fn workspace_endpoints_enforce_tenant_isolation() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_a, workspace_a) = setup_tenant(&ctx, "acme").await;
-        let owner_a = tenancy::create_user(&ctx.db, "owner-a@example.com", "hunter2-hunter2", None)
-            .await
-            .expect("create owner a");
-        tenancy::add_member(&ctx.db, tenant_a, owner_a.id, MembershipRole::Owner)
-            .await
-            .expect("add owner a");
+        let owner_a = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            "owner-a@example.com",
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create owner a");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant_a,
+            owner_a.id,
+            MembershipRole::Owner,
+        )
+        .await
+        .expect("add owner a");
         let owner_a_key = issue_key_for(&ctx, workspace_a, owner_a.id).await;
 
         let (_tenant_b, workspace_b) = setup_tenant(&ctx, "beta").await;

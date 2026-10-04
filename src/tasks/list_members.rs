@@ -3,7 +3,7 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::tenancy;
+use crate::models::tenant_memberships;
 
 /// `cargo loco task list_members tenant_id:<uuid>`
 pub(crate) struct ListMembers;
@@ -31,7 +31,7 @@ impl Task for ListMembers {
 
         // A CLI listing, not a paged UI: shows up to MAX_LIST_LIMIT rather than truncating
         // silently at the smaller default an operator has no way to override here.
-        let members = tenancy::list_members(
+        let members = tenant_memberships::list_members(
             &app_context.db,
             tenant_id,
             crate::models::pagination::ListParams {

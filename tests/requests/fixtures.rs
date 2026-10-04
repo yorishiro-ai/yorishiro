@@ -14,7 +14,7 @@ use loco_rs::app::AppContext;
 use uuid::Uuid;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 /// Arguments for shared tenant/workspace/owner setup.
@@ -71,12 +71,22 @@ pub async fn create_tenant_workspace_owner(
         .await
         .expect("insert workspace");
 
-    let owner = tenancy::create_user(&ctx.db, &args.owner_email, &args.owner_password, None)
-        .await
-        .expect("create owner");
-    tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
-        .await
-        .expect("add owner");
+    let owner = yorishiro::models::user_users::create_user(
+        &ctx.db,
+        &args.owner_email,
+        &args.owner_password,
+        None,
+    )
+    .await
+    .expect("create owner");
+    yorishiro::models::tenant_memberships::add_member(
+        &ctx.db,
+        tenant.id,
+        owner.id,
+        MembershipRole::Owner,
+    )
+    .await
+    .expect("add owner");
 
     let plaintext = api_keys::Entity::create_api_key(
         &ctx.db,

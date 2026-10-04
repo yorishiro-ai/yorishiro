@@ -112,7 +112,7 @@ fn diff_fields(
                     "field '{path}.{field_name}' array items type changed from '{}' to '{}'",
                     old_items.r#type, new_items.r#type
                 ));
-            } else if old_items.r#type == "object" {
+            } else if old_items.r#type == super::types::ArrayItemType::Object {
                 diff_fields(
                     &format!("{path}.{field_name}[]"),
                     old_items.properties.as_ref().unwrap_or(&BTreeMap::new()),

@@ -88,13 +88,13 @@ fn field_to_json_schema(field: &FieldDef) -> Value {
     if matches!(field.r#type, FieldTypeName::Array)
         && let Some(items) = &field.items
     {
-        let items_schema = if items.r#type == "object" {
+        let items_schema = if items.r#type == super::types::ArrayItemType::Object {
             let mut items_schema =
                 properties_to_json_schema(items.properties.as_ref().unwrap_or(&BTreeMap::new()));
             items_schema["type"] = Value::String("object".into());
             items_schema
         } else {
-            json!({ "type": items.r#type })
+            json!({ "type": items.r#type.to_string() })
         };
         schema.insert("items".into(), items_schema);
     }

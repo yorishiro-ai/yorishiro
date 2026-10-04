@@ -25,7 +25,7 @@ impl Task for CreateTenant {
             .settings::<crate::data::settings::Settings>()?;
         let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
         let tenant =
-            crate::models::tenancy::create_tenant_with_limit(&app_context.db, name, max_tenants)
+            crate::models::tenant_tenants::create_tenant(&app_context.db, name, max_tenants)
                 .await
                 .map_err(|err| YorishiroError::Internal(err.into()))?;
 

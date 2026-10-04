@@ -5,7 +5,6 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::EntityTrait;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
@@ -55,20 +54,14 @@ pub(crate) async fn create(
         &name,
     )
     .await?;
-    let model = IdentityApiKeys::find_by_id(created.id)
-        .one(&ctx.db)
-        .await
-        .map_err(|err| YorishiroError::Internal(err.into()))?
-        .ok_or_else(|| YorishiroError::not_found("created API key was not found"))?;
-
     Ok((
         StatusCode::CREATED,
         Json(CreateApiKeyResponse {
             id: created.id,
-            prefix: model.key_prefix,
+            prefix: created.key_prefix,
             full_key: created.plaintext,
-            name: model.name,
-            created_at: model.created_at.into(),
+            name: created.name,
+            created_at: created.created_at.into(),
         }),
     ))
 }

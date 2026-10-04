@@ -2,7 +2,9 @@
 use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use yorishiro::error::YorishiroError;
-use yorishiro::models::tenancy::{MembershipRole, create_invite, create_tenant};
+use yorishiro::models::tenant_memberships::MembershipRole;
+use yorishiro::models::tenant_tenants::create_tenant;
+use yorishiro::models::workspace_invites::create_invite;
 
 /// A fresh in-memory SQLite database, migrated.
 /// Each test gets its own, so nothing but the process-wide `YORISHIRO_MAX_TENANTS` env var is shared between them.
@@ -20,7 +22,7 @@ async fn a_first_tenant_can_be_created_on_sqlite() {
         return;
     }
     let db = sqlite_db().await;
-    let tenant = create_tenant(&db, "first tenant")
+    let tenant = create_tenant(&db, "first tenant", None)
         .await
         .expect("first tenant should be created");
     assert_eq!(tenant.name, "first tenant");
@@ -37,11 +39,11 @@ async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
     let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
     guard.set("YORISHIRO_MAX_TENANTS", "1000");
     {
-        create_tenant(&db, "first tenant")
+        create_tenant(&db, "first tenant", None)
             .await
             .expect("first tenant should be created");
 
-        let err = create_tenant(&db, "second tenant")
+        let err = create_tenant(&db, "second tenant", None)
             .await
             .expect_err("a second tenant must be refused on sqlite");
         assert!(
@@ -61,7 +63,7 @@ async fn an_invite_gets_an_id_on_sqlite() {
         return;
     }
     let db = sqlite_db().await;
-    let tenant = create_tenant(&db, "invite tenant")
+    let tenant = create_tenant(&db, "invite tenant", None)
         .await
         .expect("create tenant");
 

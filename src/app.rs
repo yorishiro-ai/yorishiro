@@ -53,9 +53,10 @@ impl Hooks for App {
     async fn boot(
         mode: StartMode,
         environment: &Environment,
-        config: Config,
+        mut config: Config,
     ) -> Result<BootResult> {
         crate::data::config::validate_queue_policy(&config)?;
+        crate::data::config::serve_worker_queues(&mut config, &worker_queues());
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         crate::db::register_sqlite_extensions();
@@ -273,25 +274,18 @@ impl Hooks for App {
             #[cfg(feature = "enterprise")]
             let enterprise_tool_router = crate::ee::controllers::mcp::tool_router();
             #[cfg(feature = "enterprise")]
-            let enterprise_tool_names = enterprise_tool_router
-                .map
-                .keys()
-                .map(ToString::to_string)
-                .collect::<std::collections::HashSet<_>>();
-            #[cfg(feature = "enterprise")]
             let mut tool_routers = vec![crate::controllers::mcp::community_tool_router()];
             #[cfg(not(feature = "enterprise"))]
             let tool_routers = vec![crate::controllers::mcp::community_tool_router()];
             #[cfg(feature = "enterprise")]
             tool_routers.push(enterprise_tool_router);
             let tool_router = crate::controllers::mcp::compose_tool_routers(tool_routers);
-            let server = crate::controllers::mcp::YorishiroMcpServer::new(ctx, tool_router);
             #[cfg(feature = "enterprise")]
-            let server = server.with_tool_filter(move |ctx, name| {
-                !enterprise_tool_names.contains(name)
-                    || crate::ee::controllers::middleware::edition::is_active(ctx)
-            });
-            server
+            let tool_policy = crate::ee::controllers::mcp::tool_policy();
+            #[cfg(not(feature = "enterprise"))]
+            let tool_policy = Arc::new(crate::controllers::mcp::AllowAllTools)
+                as Arc<dyn crate::controllers::mcp::McpToolPolicy>;
+            crate::controllers::mcp::YorishiroMcpServer::new(ctx, tool_router, tool_policy)
         });
         let settings = ctx
             .shared_store
@@ -410,6 +404,14 @@ impl Hooks for App {
         }
         Ok(())
     }
+}
+
+/// Every named queue this build's workers enqueue to: the base's, then the edition's.
+fn worker_queues() -> Vec<String> {
+    let queues = crate::workers::queue::class_queues();
+    #[cfg(feature = "enterprise")]
+    let queues = [queues, crate::ee::app::worker_queues()].concat();
+    queues
 }
 
 /// Builds the pools and shared services every entry point, tasks included, depends on.

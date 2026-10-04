@@ -11,6 +11,8 @@ use super::EmbeddingProvider;
 use crate::error::{ResultExt, YorishiroError};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
+const MAX_RETRY_AFTER_SECONDS: u64 = 60;
 
 pub struct OpenAiCompatibleConfig {
     /// Example: `http://localhost:11434`
@@ -246,15 +248,17 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
 /// 429 and 503 are the two the providers use for "later"; everything else is a request that will fail again the same way.
 /// `Retry-After` is honoured when the provider sends it; a default stands in when it does not.
 fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    if status != 429 && status != 503 {
+    if status != StatusCode::TOO_MANY_REQUESTS.as_u16()
+        && status != StatusCode::SERVICE_UNAVAILABLE.as_u16()
+    {
         return None;
     }
     let from_header = headers
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|secs| Duration::from_secs(secs.min(60)));
-    Some(from_header.unwrap_or(Duration::from_secs(5)))
+        .map(|secs| Duration::from_secs(secs.min(MAX_RETRY_AFTER_SECONDS)));
+    Some(from_header.unwrap_or(DEFAULT_RETRY_AFTER))
 }
 
 #[cfg(test)]

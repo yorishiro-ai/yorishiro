@@ -98,15 +98,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
         let input = args.into();
 
-        let workspace_id = authorized.ctx.workspace_id;
-        let created_by = authorized.ctx.user_id;
+        let workspace_id = authorized.auth_context().workspace_id;
+        let created_by = authorized.auth_context().user_id;
         let record = match entity_entities::create(
             authorized.txn(),
             workspace_id,
@@ -120,8 +121,12 @@ impl YorishiroMcpServer {
         };
         authorized.commit().await?;
         // Same enqueue the REST handler does, and for the same reason: an entity written without it keeps `embedding` NULL forever and is reachable only through the `pg_trgm` fuzzy fallback, so the transport a write arrived on must not decide whether it becomes searchable.
-        crate::workers::embedding_sync::enqueue_after_write(&self.ctx, workspace_id, record.id)
-            .await;
+        crate::workers::embedding_sync::enqueue_after_write(
+            self.app_context(),
+            workspace_id,
+            record.id,
+        )
+        .await;
         ok_json(record)
     }
 
@@ -131,12 +136,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let record = match entity_entities::get(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -150,13 +156,14 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
-        let updated_by = authorized.ctx.user_id;
+        let workspace_id = authorized.auth_context().workspace_id;
+        let updated_by = authorized.auth_context().user_id;
         let record = match entity_entities::update(
             authorized.txn(),
             workspace_id,
@@ -173,8 +180,12 @@ impl YorishiroMcpServer {
         };
         authorized.commit().await?;
         // The data changed, so the stored vector no longer matches it; re-syncing is the same follow-up the REST update handler performs.
-        crate::workers::embedding_sync::enqueue_after_write(&self.ctx, workspace_id, record.id)
-            .await;
+        crate::workers::embedding_sync::enqueue_after_write(
+            self.app_context(),
+            workspace_id,
+            record.id,
+        )
+        .await;
         ok_json(record)
     }
 
@@ -184,12 +195,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         match entity_entities::delete(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -204,17 +216,18 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
         let query = match args.try_into() {
             Ok(query) => query,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let records = match entity_entities::list(authorized.txn(), workspace_id, query).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -234,12 +247,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let drift = match entity_entities::drift(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -259,12 +273,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MigrationDryRunArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let report =
             match entity_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name)
                 .await
@@ -283,12 +298,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<FillDefaultsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Migration).await? {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Migration).await? {
+                AuthzOutcome::Authorized(authorized) => authorized,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let schema_name = args.schema_name;
         let job_id = Uuid::now_v7();
         let report = match entity_entities::fill_defaults(
@@ -296,7 +312,7 @@ impl YorishiroMcpServer {
             workspace_id,
             &schema_name,
             job_id,
-            authorized.ctx.user_id,
+            authorized.auth_context().user_id,
         )
         .await
         {
@@ -308,9 +324,9 @@ impl YorishiroMcpServer {
             authorized.txn(),
             crate::models::api_key_audit_log::AuditActor {
                 workspace_id,
-                tenant_id: authorized.ctx.tenant_id,
-                api_key_id: authorized.ctx.api_key_id,
-                user_id: authorized.ctx.user_id,
+                tenant_id: authorized.auth_context().tenant_id,
+                api_key_id: authorized.auth_context().api_key_id,
+                user_id: authorized.auth_context().user_id,
             },
             crate::models::api_key_audit_log::AuditAction::FillDefaults,
             serde_json::json!({

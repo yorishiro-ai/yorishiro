@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::api_keys::ApiKeyScope;
 
 async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {
@@ -61,10 +61,10 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
-        let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
+        let owner = yorishiro::models::user_users::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
             .await
             .expect("create owner");
-        tenancy::add_member(&ctx.db, tenant_id, owner.id, MembershipRole::Owner)
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant_id, owner.id, MembershipRole::Owner)
             .await
             .expect("add owner");
         let owner_key = issue_key_for(&ctx, main_id, owner.id).await;

@@ -4,7 +4,7 @@ name: Release (SemVer)
 # publishes images, and publishes a GitHub Release.
 #
 # SemVer releases use `vX.Y.Z` tags and are what `Cargo.toml`'s version field represents. A
-# SemVer release bumps the manifest, tags the commit, then runs the full build pipeline.
+# SemVer release bumps the manifest, runs the full build pipeline, then tags the verified commit.
 #
 # Prereleases use a different workflow (`release_pre.yml`) with date-based tags (`YYYYMMDD-N`)
 # and do not modify `Cargo.toml`.
@@ -134,45 +134,48 @@ jobs:
             echo "No changes to commit (version may already be set)." >&2
             git checkout develop
             git branch -D "$BRANCH"
+            REF=$(git rev-parse HEAD)
           else
             git commit -m "Bump version to ${TAG}"
+            REF=$(git rev-parse HEAD)
           fi
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
           if [ "$DRY_RUN" = "true" ]; then
-            echo "dry run: would tag ${TAG}, building from $(git rev-parse HEAD)"
-            echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-            git checkout develop
-            git branch -D "$BRANCH"
+            echo "dry run: would tag ${TAG}, building from ${REF}"
+            echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+            if [ "$(git branch --show-current)" = "$BRANCH" ]; then
+              git checkout develop
+              git branch -D "$BRANCH"
+            fi
             exit 0
           fi
 
-          git push origin "$BRANCH"
-          git tag "$TAG"
-          git push origin "$TAG"
-          git push origin "$BRANCH:develop"
-          git branch -D "$BRANCH"
-          echo "ref=${TAG}" >> "$GITHUB_OUTPUT"
+          if [ "$(git branch --show-current)" = "$BRANCH" ]; then
+            git push origin "$BRANCH"
+            git push origin "$BRANCH:develop"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
   binary:
     needs: prepare
     strategy:
       matrix:
         include:
-          - os: ubuntu-26.04
+          - os: ubuntu-24.04
             arch: amd64
             target: x86_64-unknown-linux-gnu
             edition: ce
-          - os: ubuntu-26.04-arm
+          - os: ubuntu-24.04-arm
             arch: arm64
             target: aarch64-unknown-linux-gnu
             edition: ce
-          - os: ubuntu-26.04
+          - os: ubuntu-24.04
             arch: amd64
             target: x86_64-unknown-linux-gnu
             edition: ee
-          - os: ubuntu-26.04-arm
+          - os: ubuntu-24.04-arm
             arch: arm64
             target: aarch64-unknown-linux-gnu
             edition: ee
@@ -446,6 +449,11 @@ jobs:
       attestations: write
 
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
@@ -481,6 +489,23 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: 'dist/*.deb, dist/*.rpm'
+
+      - name: Tag the verified release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.prepare.outputs.ref }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          token_header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${token_header}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on remote." >&2
+            exit 1
+          fi
+          git tag "$TAG" "$REF"
+          git push origin "$TAG"
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:

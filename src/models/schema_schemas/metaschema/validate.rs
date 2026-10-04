@@ -1,6 +1,6 @@
 use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 
-use super::types::{FieldDef, FieldTypeName, MetaSchemaDefinition};
+use super::types::{ArrayItemType, FieldDef, FieldTypeName, MetaSchemaDefinition};
 
 /// Maximum nesting depth for object-type fields, to prevent unbounded recursion from malformed or adversarial schema definitions.
 #[doc(hidden)]
@@ -100,47 +100,39 @@ fn validate_field(
 ) {
     if field.r#type == FieldTypeName::Array {
         match &field.items {
-            Some(items) if items.r#type == "string" => {}
-            Some(items) if items.r#type == "object" => match &items.properties {
-                Some(properties) if !properties.is_empty() => {
-                    if depth >= MAX_OBJECT_DEPTH {
-                        details.push(ValidationDetail {
-                            field: format!("{field_path}/items/properties"),
-                            problem: format!(
-                                "object nesting exceeds max depth of {MAX_OBJECT_DEPTH}"
-                            ),
-                            code: ValidationErrorCode::DepthExceeded,
-                            expected: Some(MAX_OBJECT_DEPTH.to_string()),
-                            actual: Some(depth.to_string()),
-                        });
-                    } else {
-                        for (child_name, child_field) in properties {
-                            let child_path = format!(
-                                "{field_path}/items/properties/{}",
-                                escape_pointer_segment(child_name)
-                            );
-                            validate_field(child_field, &child_path, depth + 1, details);
+            Some(items) => match items.r#type {
+                ArrayItemType::String => {}
+                ArrayItemType::Object => match &items.properties {
+                    Some(properties) if !properties.is_empty() => {
+                        if depth >= MAX_OBJECT_DEPTH {
+                            details.push(ValidationDetail {
+                                field: format!("{field_path}/items/properties"),
+                                problem: format!(
+                                    "object nesting exceeds max depth of {MAX_OBJECT_DEPTH}"
+                                ),
+                                code: ValidationErrorCode::DepthExceeded,
+                                expected: Some(MAX_OBJECT_DEPTH.to_string()),
+                                actual: Some(depth.to_string()),
+                            });
+                        } else {
+                            for (child_name, child_field) in properties {
+                                let child_path = format!(
+                                    "{field_path}/items/properties/{}",
+                                    escape_pointer_segment(child_name)
+                                );
+                                validate_field(child_field, &child_path, depth + 1, details);
+                            }
                         }
                     }
-                }
-                _ => details.push(ValidationDetail {
-                    field: format!("{field_path}/items/properties"),
-                    problem: "array items.type = 'object' requires non-empty properties".into(),
-                    code: ValidationErrorCode::EmptyObjectProperties,
-                    expected: Some("non-empty properties".into()),
-                    actual: None,
-                }),
+                    _ => details.push(ValidationDetail {
+                        field: format!("{field_path}/items/properties"),
+                        problem: "array items.type = 'object' requires non-empty properties".into(),
+                        code: ValidationErrorCode::EmptyObjectProperties,
+                        expected: Some("non-empty properties".into()),
+                        actual: None,
+                    }),
+                },
             },
-            Some(items) => details.push(ValidationDetail {
-                field: format!("{field_path}/items/type"),
-                problem: format!(
-                    "array items.type must be 'string' or 'object', got '{}'",
-                    items.r#type
-                ),
-                code: ValidationErrorCode::InvalidArrayItemType,
-                expected: Some("'string' or 'object'".into()),
-                actual: Some(items.r#type.clone()),
-            }),
             None => details.push(ValidationDetail {
                 field: format!("{field_path}/items"),
                 problem: "array field requires items.type = 'string' or 'object'".into(),

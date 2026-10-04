@@ -111,6 +111,10 @@ macro_rules! reindex_worker_for_class {
                 vec![$class.tag().to_string()]
             }
 
+            fn queue() -> Option<String> {
+                Some($class.queue().to_string())
+            }
+
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
                 crate::workers::lifecycle::perform_with_lifecycle::<Self, _, _, _>(
                     &self.ctx,

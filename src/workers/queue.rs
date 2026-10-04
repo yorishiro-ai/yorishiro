@@ -65,6 +65,16 @@ pub(crate) async fn concurrency_for(
     policy.concurrency(ctx, workspace_id, class).await
 }
 
+/// The named queue of every worker class, in the order a worker serving all of them should poll.
+///
+/// Redis honours a job's queue name and the SQL providers ignore it, so this is how a class gets a queue of its own on Redis only.
+pub(crate) fn class_queues() -> Vec<String> {
+    WorkerClass::ALL
+        .iter()
+        .map(|class| class.queue().to_owned())
+        .collect()
+}
+
 const TENANT_PRIVATE_PRIORITY: i32 = 300;
 const OFFICIAL_PRIORITY: i32 = 200;
 const SHARED_PRIORITY: i32 = 100;

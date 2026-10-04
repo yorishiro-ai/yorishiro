@@ -2,7 +2,7 @@ use super::boot_request;
 use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 async fn issue_key_for(
@@ -41,12 +41,22 @@ async fn owner_key(ctx: &loco_rs::app::AppContext, name: &str) -> String {
     let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
         .await
         .expect("insert workspace");
-    let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
-        .await
-        .expect("create owner");
-    tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
-        .await
-        .expect("add owner");
+    let owner = yorishiro::models::user_users::create_user(
+        &ctx.db,
+        "owner@example.com",
+        "hunter2-hunter2",
+        None,
+    )
+    .await
+    .expect("create owner");
+    yorishiro::models::tenant_memberships::add_member(
+        &ctx.db,
+        tenant.id,
+        owner.id,
+        MembershipRole::Owner,
+    )
+    .await
+    .expect("add owner");
     issue_key_for(ctx, workspace.id, owner.id, MembershipRole::Owner).await
 }
 
@@ -68,12 +78,22 @@ async fn member_key(ctx: &loco_rs::app::AppContext, name: &str) -> String {
     let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
         .await
         .expect("insert workspace");
-    let member = tenancy::create_user(&ctx.db, "member@example.com", "hunter2-hunter2", None)
-        .await
-        .expect("create member");
-    tenancy::add_member(&ctx.db, tenant.id, member.id, MembershipRole::Member)
-        .await
-        .expect("add member");
+    let member = yorishiro::models::user_users::create_user(
+        &ctx.db,
+        "member@example.com",
+        "hunter2-hunter2",
+        None,
+    )
+    .await
+    .expect("create member");
+    yorishiro::models::tenant_memberships::add_member(
+        &ctx.db,
+        tenant.id,
+        member.id,
+        MembershipRole::Member,
+    )
+    .await
+    .expect("add member");
     issue_key_for(ctx, workspace.id, member.id, MembershipRole::Member).await
 }
 

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::models::schema_schemas::SchemaRecord;
 use crate::models::template_templates::TemplateVisibility;
-use crate::models::tenancy::MembershipRecord;
+use crate::models::tenant_memberships::MembershipRecord;
 
 #[derive(ToSchema)]
 pub struct OAuthStatus {

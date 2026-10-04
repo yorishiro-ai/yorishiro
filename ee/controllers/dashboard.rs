@@ -2,7 +2,7 @@
 
 use crate::error::ResultExt;
 use crate::models::_entities::tenant_tenants as tenant_tenants_entity;
-use crate::models::tenancy;
+use crate::models::tenant_memberships;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -38,7 +38,7 @@ async fn tenant_overview(
     let usage = tenant_tenants::compute_tenant_usage(&ctx.db, tenant_id).await?;
     // The dashboard overview shows every member, not a page: it's a fixed-shape summary, not a browsable list with its own query params.
     // A tenant with more than MAX_LIST_LIMIT members sees a truncated list; flagged rather than silently accepted, since nothing here has measured how common that is.
-    let members = tenancy::list_members(
+    let members = tenant_memberships::list_members(
         &ctx.db,
         tenant_id,
         crate::models::pagination::ListParams {

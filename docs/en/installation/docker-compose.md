@@ -23,6 +23,9 @@ volumes:
 
 Start with `docker compose up -d`. Stop with `docker compose down`.
 
+The local embedding provider downloads about 522 MiB before the HTTP server first binds, so allow a health-check start period of at least 15 minutes when it is enabled.
+Set `YORISHIRO_EMBEDDING_PROVIDER=none` to skip that download when embedding is not required.
+
 ## PostgreSQL
 
 Replace the `DATABASE_URL` line:
@@ -48,7 +51,7 @@ services:
       - QUEUE_URL=redis://valkey:6379
 
   valkey:
-    image: valkey/valkey:8
+    image: valkey/valkey:9.1
     restart: unless-stopped
     volumes:
       - valkey-data:/data
@@ -85,7 +88,7 @@ services:
       - pg-data:/var/lib/postgresql/data
 
   valkey:
-    image: valkey/valkey:8
+    image: valkey/valkey:9.1
     restart: unless-stopped
     volumes:
       - valkey-data:/data

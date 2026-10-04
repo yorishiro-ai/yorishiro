@@ -6,9 +6,10 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use super::WorkspaceSummary;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::workspace_workspaces;
+use crate::models::_entities::workspace_workspaces::Column;
+
+use super::{Entity, Model, WorkspaceSummary};
 
 /// Every workspace under `tenant_id`, for the signup response (which workspaces the new member can now log into).
 pub(crate) async fn list_workspaces(
@@ -16,11 +17,9 @@ pub(crate) async fn list_workspaces(
     tenant_id: Uuid,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    let workspaces = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
-        .order_by_asc(workspace_workspaces::Column::CreatedAt)
+    let workspaces = Entity::find()
+        .filter(Column::TenantId.eq(tenant_id))
+        .order_by_asc(Column::CreatedAt)
         .limit(page.limit() as u64)
         .offset(page.offset() as u64)
         .all(conn)
@@ -40,9 +39,7 @@ pub(crate) async fn get_workspace_tenant(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    workspace_workspaces::Entity::find_by_id(workspace_id)
+    Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -52,17 +49,15 @@ pub(crate) async fn get_workspace_tenant(
 
 /// The advisory-lock key serializing every operation that counts a tenant's workspaces before writing.
 /// `create_workspace` and `delete_workspace` share it deliberately: both decide from a count that the other invalidates, so they have to serialize against each other and not merely against themselves.
-pub(super) fn workspace_count_lock_key(tenant_id: Uuid) -> String {
+pub(crate) fn workspace_count_lock_key(tenant_id: Uuid) -> String {
     format!("workspace-count:{tenant_id}")
 }
 /// Fetches a workspace by id.
 pub(crate) async fn get_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-) -> Result<workspace_workspaces::Model, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    workspace_workspaces::Entity::find_by_id(workspace_id)
+) -> Result<Model, YorishiroError> {
+    Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -80,9 +75,7 @@ pub(crate) async fn delete_workspace(
     conn: &DatabaseTransaction,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+    let workspace = Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -94,8 +87,8 @@ pub(crate) async fn delete_workspace(
         .await
         .internal()?;
 
-    let remaining = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(workspace.tenant_id))
+    let remaining = Entity::find()
+        .filter(Column::TenantId.eq(workspace.tenant_id))
         .count(conn)
         .await
         .internal()?;
@@ -105,7 +98,7 @@ pub(crate) async fn delete_workspace(
         });
     }
 
-    workspace_workspaces::Entity::delete_by_id(workspace_id)
+    Entity::delete_by_id(workspace_id)
         .exec(conn)
         .await
         .internal()?;

@@ -5,7 +5,7 @@
 use crate::db;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{template_versions, tenant_tenants};
-use crate::models::tenancy::INFRASTRUCTURE_TENANT_ID;
+use crate::models::tenant_tenants::INFRASTRUCTURE_TENANT_ID;
 use loco_rs::app::AppContext;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
@@ -106,7 +106,7 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
 pub(crate) async fn ensure_official_tenant(
     conn: &impl ConnectionTrait,
 ) -> Result<(), YorishiroError> {
-    // Bypasses tenancy::create_tenant: the publisher is infrastructure, not subject to YORISHIRO_MAX_TENANTS.
+    // Bypasses tenant_tenants::create_tenant: the publisher is infrastructure, not subject to YORISHIRO_MAX_TENANTS.
     let active = tenant_tenants::ActiveModel {
         id: ActiveValue::Set(OFFICIAL_TENANT_ID),
         name: ActiveValue::Set(OFFICIAL_TENANT_NAME.to_string()),

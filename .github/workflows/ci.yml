@@ -270,13 +270,13 @@ jobs:
             queue: Redis-compatible
             loco_env: test_redis
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-            queue_url: redis://localhost:6379
+            queue_url: redis://localhost:6379/15
           - db: SQLite
             backend: sqlite
             queue: Redis-compatible
             loco_env: test_redis
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-            queue_url: redis://localhost:6379
+            queue_url: redis://localhost:6379/15
     services:
       db:
         image: pgvector/pgvector:pg18

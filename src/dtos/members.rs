@@ -1,4 +1,4 @@
-use crate::models::tenancy::MembershipRole;
+use crate::models::tenant_memberships::MembershipRole;
 use serde::Deserialize;
 
 #[derive(Deserialize)]

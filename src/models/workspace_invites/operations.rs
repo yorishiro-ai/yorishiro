@@ -7,23 +7,24 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::workspace_invites;
+use crate::models::_entities::workspace_invites::Column;
 use crate::models::api_keys::{hash_key, random_hex};
+use crate::models::tenant_memberships::MembershipRole;
 
-use super::{MembershipRole, RedeemedInvite};
+use super::{ActiveModel, Entity, Model, RedeemedInvite};
 
 const INVITE_TOKEN_BYTES: usize = 24;
 
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
 /// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
 /// Callers must surface it themselves (printed by the admin CLI today; a transactional-email integration is not provided).
-pub(crate) async fn create_invite(
+pub async fn create_invite(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     email: &str,
     role: MembershipRole,
     ttl: Duration,
-) -> Result<(workspace_invites::Model, String), YorishiroError> {
+) -> Result<(Model, String), YorishiroError> {
     create_invite_at(conn, tenant_id, email, role, ttl, Utc::now()).await
 }
 
@@ -34,12 +35,12 @@ async fn create_invite_at(
     role: MembershipRole,
     ttl: Duration,
     now: DateTime<Utc>,
-) -> Result<(workspace_invites::Model, String), YorishiroError> {
+) -> Result<(Model, String), YorishiroError> {
     let token = random_hex(INVITE_TOKEN_BYTES);
     let token_hash = hash_key(&token);
     let expires_at = now + ttl;
 
-    let active = workspace_invites::ActiveModel {
+    let active = ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         email: ActiveValue::Set(email.to_string()),
         role: ActiveValue::Set(role.as_db_str().to_string()),
@@ -70,10 +71,10 @@ async fn redeem_invite_at(
     let token_hash = hash_key(raw_token);
 
     // Read first to build the response: the update itself does not return rows affected as model data, and a second SELECT after the UPDATE could observe a different row (e.g. one this same call just marked used) if invites were ever deletable, which they are not, so this is safe, not merely convenient.
-    let invite = workspace_invites::Entity::find()
-        .filter(workspace_invites::Column::TokenHash.eq(token_hash.clone()))
-        .filter(workspace_invites::Column::UsedAt.is_null())
-        .filter(workspace_invites::Column::ExpiresAt.gt(now))
+    let invite = Entity::find()
+        .filter(Column::TokenHash.eq(token_hash.clone()))
+        .filter(Column::UsedAt.is_null())
+        .filter(Column::ExpiresAt.gt(now))
         .one(conn)
         .await
         .internal()?;
@@ -82,14 +83,11 @@ async fn redeem_invite_at(
         return Ok(None);
     };
 
-    let update_result = workspace_invites::Entity::update_many()
-        .col_expr(
-            workspace_invites::Column::UsedAt,
-            sea_orm::sea_query::Expr::value(now),
-        )
-        .filter(workspace_invites::Column::Id.eq(invite.id))
-        .filter(workspace_invites::Column::UsedAt.is_null())
-        .filter(workspace_invites::Column::ExpiresAt.gt(now))
+    let update_result = Entity::update_many()
+        .col_expr(Column::UsedAt, sea_orm::sea_query::Expr::value(now))
+        .filter(Column::Id.eq(invite.id))
+        .filter(Column::UsedAt.is_null())
+        .filter(Column::ExpiresAt.gt(now))
         .exec(conn)
         .await
         .internal()?;
@@ -118,18 +116,18 @@ async fn redeem_invite_at(
 pub(crate) mod test_support {
     use super::*;
 
-    pub(crate) async fn create_invite_at(
+    pub async fn create_invite_at(
         conn: &impl ConnectionTrait,
         tenant_id: Uuid,
         email: &str,
         role: MembershipRole,
         ttl: Duration,
         now: DateTime<Utc>,
-    ) -> Result<(workspace_invites::Model, String), YorishiroError> {
+    ) -> Result<(Model, String), YorishiroError> {
         super::create_invite_at(conn, tenant_id, email, role, ttl, now).await
     }
 
-    pub(crate) async fn redeem_invite_at(
+    pub async fn redeem_invite_at(
         conn: &impl ConnectionTrait,
         raw_token: &str,
         now: DateTime<Utc>,

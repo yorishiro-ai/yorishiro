@@ -223,7 +223,7 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   for unit in $units; do
     [ -f "$unit" ] || { echo "NO_UNIT:$unit"; exit 1; }
   done
-  grep -oE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" $units \
+  grep -hoE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" $units \
     | sed -e "s/^[[:space:]=\"]//" -e "s/[.,]$//" \
     | grep -vE "^/(proc|sys)(/|$)" \
     | sort -u | while read -r p; do

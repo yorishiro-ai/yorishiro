@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::api_keys::ApiKeyScope;
 
 struct Setup {
@@ -30,10 +30,10 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
         .await
         .expect("insert workspace");
-    let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
+    let owner = yorishiro::models::user_users::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
         .await
         .expect("create owner");
-    tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
+    yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
         .await
         .expect("add owner");
     let key = api_keys::Entity::create_api_key(

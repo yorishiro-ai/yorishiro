@@ -5,23 +5,24 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
 };
 
+use super::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::user_users;
+use crate::models::_entities::user_users::Column;
 
 /// Creates a human user account.
 /// The password is hashed with `loco_rs::hash` (Argon2id) before ever reaching the database.
 ///
 /// Takes `&impl ConnectionTrait` rather than a pool handle so a caller can compose this with `add_member` in one transaction: the two must succeed or fail together, or a failure between them leaves an orphaned user row that can never join a tenant (see `signup`, which wraps both in one transaction).
-pub(crate) async fn create_user(
+pub async fn create_user(
     conn: &impl ConnectionTrait,
     email: &str,
     password: &str,
     display_name: Option<&str>,
-) -> Result<user_users::Model, YorishiroError> {
+) -> Result<Model, YorishiroError> {
     let password_hash =
         hash::hash_password(password).map_err(|err| YorishiroError::Internal(err.into()))?;
 
-    let active = user_users::ActiveModel {
+    let active = ActiveModel {
         email: ActiveValue::Set(email.to_string()),
         password_hash: ActiveValue::Set(Some(password_hash)),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
@@ -45,9 +46,9 @@ pub(crate) async fn verify_login(
     conn: &impl ConnectionTrait,
     email: &str,
     password: &str,
-) -> Result<Option<user_users::Model>, YorishiroError> {
-    let user = user_users::Entity::find()
-        .filter(user_users::Column::Email.eq(email))
+) -> Result<Option<Model>, YorishiroError> {
+    let user = Entity::find()
+        .filter(Column::Email.eq(email))
         .one(conn)
         .await
         .internal()?;
@@ -67,9 +68,9 @@ pub(crate) async fn verify_login(
 pub(crate) async fn get_user_by_email(
     conn: &impl ConnectionTrait,
     email: &str,
-) -> Result<Option<user_users::Model>, YorishiroError> {
-    user_users::Entity::find()
-        .filter(user_users::Column::Email.eq(email))
+) -> Result<Option<Model>, YorishiroError> {
+    Entity::find()
+        .filter(Column::Email.eq(email))
         .one(conn)
         .await
         .internal()

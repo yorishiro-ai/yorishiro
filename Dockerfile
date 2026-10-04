@@ -4,6 +4,13 @@
 #   docker build -t yorishiro .
 #   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
 #
+# The default command serves HTTP only. Queued jobs run in a second container from this same
+# image, started with the tags the jobs carry (see `docker-compose.yml`'s `worker`), and with the
+# HEALTHCHECK below disabled because a worker answers on no port:
+#
+#   docker run --rm ... --no-healthcheck yorishiro start \
+#     --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
+#
 # The embedding provider (`candle-core`/`candle-nn`/`candle-transformers`) needs no prebuilt
 # runtime binary and pulls no dynamic TLS library into the link, unlike the ONNX-based provider
 # this Dockerfile used to build.

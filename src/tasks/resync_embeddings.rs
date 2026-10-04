@@ -1,10 +1,8 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
-use sea_orm::{FromQueryResult, Statement};
-use serde_json::Value;
 use uuid::Uuid;
 
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::YorishiroError;
 use crate::models::entity_embeddings;
 use crate::models::entity_entities;
 use crate::services::embedding;
@@ -21,37 +19,6 @@ use crate::services::embedding;
 /// That is correct, not a bug to route around: filling NULLs with vectors from a model the workspace is not stamped for would create the same silent model mix that check exists to prevent, just via this recovery path instead of an ordinary write.
 /// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
 pub(crate) struct ResyncEmbeddings;
-
-#[derive(FromQueryResult, Clone)]
-struct CandidateRow {
-    id: Uuid,
-    workspace_id: Uuid,
-    schema_id: Uuid,
-    schema_version: i32,
-    entity_type: String,
-    data: Value,
-    created_at: chrono::DateTime<chrono::Utc>,
-    updated_at: chrono::DateTime<chrono::Utc>,
-    created_by: Option<Uuid>,
-    updated_by: Option<Uuid>,
-}
-
-impl From<CandidateRow> for entity_entities::EntityRecord {
-    fn from(row: CandidateRow) -> Self {
-        entity_entities::EntityRecord {
-            id: row.id,
-            workspace_id: row.workspace_id,
-            schema_id: row.schema_id,
-            schema_version: row.schema_version,
-            entity_type: row.entity_type,
-            data: row.data,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            created_by: row.created_by,
-            updated_by: row.updated_by,
-        }
-    }
-}
 
 #[async_trait]
 impl Task for ResyncEmbeddings {
@@ -89,40 +56,15 @@ impl Task for ResyncEmbeddings {
                 hint: "check YORISHIRO_EMBEDDING_PROVIDER and YORISHIRO_LOCAL_MODEL config".into(),
             })?;
 
-        // Single anti-join fetch: gets entity rows that have no embedding row, in one round trip instead of two.
-        let candidates = CandidateRow::find_by_statement(Statement::from_sql_and_values(
-            app_context.db.get_database_backend(),
-            "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
-             e.entity_type, e.data, e.created_at, e.updated_at, \
-             e.created_by, e.updated_by \
-             FROM entity_entities e \
-             LEFT JOIN entity_embeddings ee ON ee.entity_id = e.id \
-             WHERE e.workspace_id = $1 AND ee.entity_id IS NULL",
-            [workspace_id.into()],
-        ))
-        .all(&app_context.db)
-        .await
-        .internal()?;
+        let candidates = entity_entities::missing_embeddings(&app_context.db, workspace_id).await?;
 
         let mut synced = 0;
         let mut failed = 0;
         for candidate in &candidates {
-            let record = entity_entities::EntityRecord {
-                id: candidate.id,
-                workspace_id: candidate.workspace_id,
-                schema_id: candidate.schema_id,
-                schema_version: candidate.schema_version,
-                entity_type: candidate.entity_type.clone(),
-                data: candidate.data.clone(),
-                created_at: candidate.created_at,
-                updated_at: candidate.updated_at,
-                created_by: candidate.created_by,
-                updated_by: candidate.updated_by,
-            };
             let result = entity_embeddings::sync_embedding_for_record(
                 &app_context.db,
                 workspace_id,
-                &record,
+                candidate,
                 provider.as_ref(),
             )
             .await;

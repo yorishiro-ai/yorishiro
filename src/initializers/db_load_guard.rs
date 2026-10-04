@@ -12,11 +12,10 @@ use loco_rs::{
     app::{AppContext, Initializer},
     environment::Environment,
 };
-use sqlx::PgPool;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-use crate::db::DbHandle;
+use crate::db::{self, DbHandle};
 use crate::error::YorishiroError;
 use crate::models::system_maintenance::{self, AUTO_REASON, MaintenanceMode, MaintenanceState};
 
@@ -172,16 +171,6 @@ fn run_step(
     StepOutcome::Transition { current, mode }
 }
 
-async fn active_connections(pool: &PgPool) -> Result<i64, YorishiroError> {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM pg_stat_activity \
-         WHERE datname = current_database() AND state = 'active'",
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|error| YorishiroError::Internal(anyhow::anyhow!(error)))
-}
-
 async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
     if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
         return Ok(0);
@@ -192,7 +181,7 @@ async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
             "db_load_guard: DbHandle not found in shared_store"
         ))
     })?;
-    let active = active_connections(&handle.identity).await?;
+    let active = db::active_connections(&handle.identity).await?;
     Ok(active)
 }
 
@@ -211,7 +200,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
             tracing::warn!("db_load_guard: DbHandle not found in shared_store");
             return;
         };
-        let active = match active_connections(&handle.identity).await {
+        let active = match db::active_connections(&handle.identity).await {
             Ok(active) => Ok(active),
             Err(error) => {
                 tracing::warn!(error = %error, "db_load_guard: could not read pg_stat_activity");

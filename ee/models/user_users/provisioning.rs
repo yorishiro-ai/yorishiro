@@ -7,8 +7,9 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_tenants;
 use crate::models::_entities::workspace_workspaces as workspace_workspaces_entity;
 use crate::models::schema_schemas;
-use crate::models::tenancy::{self, MembershipRole};
+use crate::models::tenant_memberships::{self, MembershipRole};
 use crate::models::workspace_workspaces::WorkspaceStatus;
+use crate::models::{tenancy, workspace_workspaces};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait,
@@ -31,8 +32,6 @@ pub struct ProvisionedLogin {
 /// An admin can rename either afterward through the existing dashboard/API.
 /// The new member's role is always `member`; an existing identity keeps whatever role it already holds.
 /// The new workspace gets a schema from the built-in `general-notes` template rather than being left `schema_pending`, since an auto-provisioned SSO login has no admin present afterward to choose one.
-/// `embedding` must be the deployment's actual model and width: the `entity_entities.embedding` index is a fixed width, so a workspace stamped with the wrong one would fail every entity write's dimension check.
-///
 /// The whole first-login path (user row, tenant, workspace, membership) runs in one transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`: a crash partway through rolls everything back rather than leaving an orphaned user row with no tenant membership, and the lock also serializes concurrent first logins for the same identity.
 /// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` so that requirement is enforced by the signature: every advisory lock taken here and in the `create_workspace` it calls is transaction-scoped, and handed a pool each one would be released before the work it guards.
 ///
@@ -44,7 +43,6 @@ pub async fn find_or_create(
     subject_id: &str,
     email: Option<&str>,
     display_name: Option<&str>,
-    embedding: (&str, i32),
     max_tenants: Option<i32>,
 ) -> Result<ProvisionedLogin, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
@@ -109,7 +107,6 @@ pub async fn find_or_create(
             .caps()
             .default_max_entities,
         None,
-        Some(embedding),
     )
     .await?;
 
@@ -127,7 +124,7 @@ pub async fn find_or_create(
     };
     let workspace = workspace_active.update(conn).await.internal()?;
 
-    tenancy::add_member(conn, tenant.id, user.id, MembershipRole::Member).await?;
+    tenant_memberships::add_member(conn, tenant.id, user.id, MembershipRole::Member).await?;
 
     Ok(ProvisionedLogin {
         user_id: user.id,
@@ -167,8 +164,8 @@ async fn resolve_existing_login(
         }
     };
 
-    let tenant_id = tenancy::get_workspace_tenant(conn, workspace.id).await?;
-    let role = tenancy::get_membership_role(conn, tenant_id, user.id)
+    let tenant_id = workspace_workspaces::get_workspace_tenant(conn, workspace.id).await?;
+    let role = tenant_memberships::get_membership_role(conn, tenant_id, user.id)
         .await?
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
             message: "this account is not a member of the tenant that owns its workspace".into(),

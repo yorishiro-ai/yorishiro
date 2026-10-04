@@ -34,35 +34,41 @@ use crate::models::api_keys::{ApiKeyScope, AuthContext};
 #[cfg(test)]
 use rmcp::model::Tool;
 
-type ToolFilter = Arc<dyn Fn(&AppContext, &str) -> bool + Send + Sync>;
+pub(crate) trait McpToolPolicy: Send + Sync {
+    fn allows(&self, ctx: &AppContext, name: &str) -> bool;
+}
+
+#[cfg(not(feature = "enterprise"))]
+pub(crate) struct AllowAllTools;
+
+#[cfg(not(feature = "enterprise"))]
+impl McpToolPolicy for AllowAllTools {
+    fn allows(&self, _ctx: &AppContext, _name: &str) -> bool {
+        true
+    }
+}
 
 /// Yorishiro MCP server assembled from registered `#[tool_router]` implementations.
 #[derive(Clone)]
 pub struct YorishiroMcpServer {
     ctx: AppContext,
     tool_router: ToolRouter<Self>,
-    tool_filter: ToolFilter,
+    tool_policy: Arc<dyn McpToolPolicy>,
 }
 
 impl YorishiroMcpServer {
-    pub(crate) fn new(ctx: AppContext, tool_router: ToolRouter<Self>) -> Self {
+    pub(crate) fn new(
+        ctx: AppContext,
+        tool_router: ToolRouter<Self>,
+        tool_policy: Arc<dyn McpToolPolicy>,
+    ) -> Self {
         Self {
             ctx,
             tool_router,
-            tool_filter: Arc::new(|_, _| true),
+            tool_policy,
         }
     }
 
-    #[cfg(feature = "enterprise")]
-    pub(crate) fn with_tool_filter(
-        mut self,
-        filter: impl Fn(&AppContext, &str) -> bool + Send + Sync + 'static,
-    ) -> Self {
-        self.tool_filter = Arc::new(filter);
-        self
-    }
-
-    #[cfg(feature = "enterprise")]
     pub(crate) fn app_context(&self) -> &AppContext {
         &self.ctx
     }
@@ -237,7 +243,7 @@ impl ServerHandler for YorishiroMcpServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        if !(self.tool_filter)(&self.ctx, request.name.as_ref()) {
+        if !self.tool_policy.allows(&self.ctx, request.name.as_ref()) {
             return Err(ErrorData::invalid_params("tool not found", None));
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
@@ -253,7 +259,7 @@ impl ServerHandler for YorishiroMcpServer {
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
         let mut tools = self.tool_router.list_all();
-        tools.retain(|tool| (self.tool_filter)(&self.ctx, tool.name.as_ref()));
+        tools.retain(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()));
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools,
@@ -265,7 +271,7 @@ impl ServerHandler for YorishiroMcpServer {
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
-        if !(self.tool_filter)(&self.ctx, name) {
+        if !self.tool_policy.allows(&self.ctx, name) {
             return None;
         }
         self.tool_router.get(name).cloned()
@@ -301,7 +307,6 @@ impl Authorized {
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))
     }
 
-    #[cfg(feature = "enterprise")]
     pub(crate) fn auth_context(&self) -> &AuthContext {
         &self.ctx
     }
@@ -455,7 +460,7 @@ pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
 }
 
 #[cfg(test)]
-fn render_inventory_section(title: &str, tools: &[Tool]) -> String {
+pub(crate) fn render_inventory_section(title: &str, tools: &[Tool]) -> String {
     let mut output = String::new();
     output.push_str("## ");
     output.push_str(title);
@@ -473,21 +478,6 @@ fn render_inventory_section(title: &str, tools: &[Tool]) -> String {
         output.push_str("\n```\n\n");
     }
     output
-}
-
-#[cfg(test)]
-#[cfg(feature = "enterprise")]
-pub(crate) fn render_inventory_fragment(community: &[Tool], enterprise: &[Tool]) -> String {
-    let mut community = community.to_vec();
-    let mut enterprise = enterprise.to_vec();
-    community.sort_by(|a, b| a.name.cmp(&b.name));
-    enterprise.sort_by(|a, b| a.name.cmp(&b.name));
-
-    format!(
-        "{}{}",
-        render_inventory_section("Community tools", &community),
-        render_inventory_section("Enterprise-only tools", &enterprise)
-    )
 }
 
 #[cfg(test)]

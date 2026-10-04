@@ -49,6 +49,11 @@ pub(crate) fn compose_context(ctx: &AppContext) {
             as Arc<dyn crate::ee::workers::infer_fill::InferFillDispatcher>);
 }
 
+/// The named queues the enterprise workers enqueue to, which the base serves on Redis after its own.
+pub(crate) fn worker_queues() -> Vec<String> {
+    vec![crate::ee::workers::infer_fill::QUEUE.to_owned()]
+}
+
 /// Registers enterprise workers after the base workers, preserving queue order.
 pub(crate) async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
     queue

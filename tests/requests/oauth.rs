@@ -310,7 +310,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             "a-brand-new-subject",
             Some("newcomer@example.com"),
             None,
-            ("test-model", 768),
             Some(1),
         )
         .await;
@@ -351,7 +350,6 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             "a-first-login-subject",
             Some("firstlogin@example.com"),
             None,
-            ("test-model", 768),
             None,
         )
         .await

@@ -46,7 +46,7 @@ pub async fn create_tenant_api_key(
     }
 
     if let Some(user_id) = user_id {
-        let role = crate::models::tenancy::get_membership_role(conn, tenant_id, user_id)
+        let role = crate::models::tenant_memberships::get_membership_role(conn, tenant_id, user_id)
             .await?
             .ok_or_else(|| {
                 YorishiroError::not_found(format!(

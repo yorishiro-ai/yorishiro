@@ -13,10 +13,10 @@ use sea_orm::{ConnectionTrait, TransactionTrait};
 use crate::db;
 use crate::ee::data::non_empty_env;
 use crate::ee::data::plan::{Plan, StripePriceMapping};
+use crate::ee::models::tenant_tenants;
 use crate::ee::models::{stripe_events, tenant_billing};
 use crate::error::ResultExt;
 use crate::error::YorishiroError;
-use crate::models::tenancy;
 
 mod inbound {
     use super::SIGNATURE_TOLERANCE_SECS;
@@ -497,7 +497,7 @@ async fn apply_stripe_event(
             };
             let caps = plan.caps();
             tenant_billing::set_plan(&txn, tenant_id, plan.as_str()).await?;
-            tenancy::set_tenant_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
+            tenant_tenants::set_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
         }
         "customer.subscription.deleted" => {
             let object = &event.data.object;
@@ -506,7 +506,7 @@ async fn apply_stripe_event(
             };
             let caps = Plan::Free.caps();
             tenant_billing::set_plan(&txn, tenant_id, Plan::Free.as_str()).await?;
-            tenancy::set_tenant_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
+            tenant_tenants::set_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
         }
         _ => {}
     }
