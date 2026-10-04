@@ -79,10 +79,6 @@ pub enum YorishiroError {
     Internal(#[from] anyhow::Error),
 }
 
-/// Sentinel code for internal errors (not a real Yorishiro error code).
-/// Only used in `into_http_parts()` for the `Internal` variant.
-const INTERNAL_CODE: &str = "internal";
-
 /// Machine-readable error code for every `YorishiroError` variant.
 ///
 /// This is the **single source of truth**: the code, HTTP status, and
@@ -246,13 +242,13 @@ impl YorishiroError {
     ///
     /// Internal errors are logged here; the caller should not log them again.
     pub fn into_http_parts(self) -> (axum::http::StatusCode, serde_json::Value) {
-        let (ecode, body) = match self {
+        match self {
             Self::ValidationFailed {
                 message,
                 details,
                 hint,
             } => (
-                YorishiroErrorCode::ValidationFailed,
+                YorishiroErrorCode::ValidationFailed.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::ValidationFailed.as_str(),
@@ -263,7 +259,7 @@ impl YorishiroError {
                 }),
             ),
             Self::NotFound { message } => (
-                YorishiroErrorCode::NotFound,
+                YorishiroErrorCode::NotFound.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::NotFound.as_str(),
@@ -272,7 +268,7 @@ impl YorishiroError {
                 }),
             ),
             Self::ScopeInsufficient { message, hint } => (
-                YorishiroErrorCode::ScopeInsufficient,
+                YorishiroErrorCode::ScopeInsufficient.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::ScopeInsufficient.as_str(),
@@ -282,7 +278,7 @@ impl YorishiroError {
                 }),
             ),
             Self::Conflict { message } => (
-                YorishiroErrorCode::Conflict,
+                YorishiroErrorCode::Conflict.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::Conflict.as_str(),
@@ -291,7 +287,7 @@ impl YorishiroError {
                 }),
             ),
             Self::RelationTypeMismatch { message } => (
-                YorishiroErrorCode::RelationTypeMismatch,
+                YorishiroErrorCode::RelationTypeMismatch.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::RelationTypeMismatch.as_str(),
@@ -300,7 +296,7 @@ impl YorishiroError {
                 }),
             ),
             Self::Unauthenticated => (
-                YorishiroErrorCode::Unauthenticated,
+                YorishiroErrorCode::Unauthenticated.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::Unauthenticated.as_str(),
@@ -319,7 +315,7 @@ impl YorishiroError {
                     YorishiroErrorCode::MaintenanceFullLock
                 };
                 (
-                    code,
+                    code.http_status(),
                     serde_json::json!({
                         "error": {
                             "code": code.as_str(),
@@ -333,7 +329,7 @@ impl YorishiroError {
                 message,
                 retry_after,
             } => (
-                YorishiroErrorCode::ProviderBusy,
+                YorishiroErrorCode::ProviderBusy.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::ProviderBusy.as_str(),
@@ -343,7 +339,7 @@ impl YorishiroError {
                 }),
             ),
             Self::ProviderUnreachable { url, message } => (
-                YorishiroErrorCode::ProviderUnreachable,
+                YorishiroErrorCode::ProviderUnreachable.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::ProviderUnreachable.as_str(),
@@ -353,7 +349,7 @@ impl YorishiroError {
                 }),
             ),
             Self::BackendUnsupported { message } => (
-                YorishiroErrorCode::BackendUnsupported,
+                YorishiroErrorCode::BackendUnsupported.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::BackendUnsupported.as_str(),
@@ -362,7 +358,7 @@ impl YorishiroError {
                 }),
             ),
             Self::BackendUnavailable { message } => (
-                YorishiroErrorCode::BackendUnavailable,
+                YorishiroErrorCode::BackendUnavailable.http_status(),
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::BackendUnavailable.as_str(),
@@ -373,28 +369,17 @@ impl YorishiroError {
             Self::Internal(ref err) => {
                 tracing::error!(error = %err, "internal error");
                 (
-                    YorishiroErrorCode::BackendUnavailable,
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     serde_json::json!({
                         "error": {
-                            "code": INTERNAL_CODE,
+                            "code": "internal",
                             "message": "internal server error",
                             "hint": "this is an unexpected error; check server logs",
                         }
                     }),
                 )
             }
-        };
-
-        // `INTERNAL_CODE` is not in `YorishiroErrorCode` — callers handle
-        // `YorishiroError::Internal` separately, so this sentinel is never
-        // returned to an API consumer.
-        let status = if ecode.as_str() == INTERNAL_CODE {
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        } else {
-            ecode.http_status()
-        };
-
-        (status, body)
+        }
     }
 }
 
