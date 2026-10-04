@@ -23,7 +23,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.ref }}
         persist-credentials: false
@@ -78,7 +78,7 @@ runs:
         done
         ls -1 dist/
 
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@v7
       if: ${{ !cancelled() }}
       with:
         name: binary-linux-${{ inputs.edition }}-${{ steps.arch.outputs.arch }}

@@ -53,7 +53,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -284,12 +284,12 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: binary-*
@@ -321,7 +321,7 @@ jobs:
           ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
           cat dist/checksums.txt
 
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: 'dist/*.deb, dist/*.rpm'
 
