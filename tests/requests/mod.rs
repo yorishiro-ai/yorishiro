@@ -3,30 +3,45 @@ mod audit_log;
 mod auth;
 mod dashboard;
 mod ee_setup;
+#[cfg(feature = "enterprise")]
 mod embedding;
 mod entities;
+#[cfg(feature = "enterprise")]
 mod entity_columns;
 mod fixtures;
 mod import;
+#[cfg(feature = "enterprise")]
 mod inference;
+#[cfg(feature = "enterprise")]
 mod licence_gate;
+#[cfg(feature = "enterprise")]
 mod marketplace;
+#[cfg(feature = "enterprise")]
 mod mcp;
 mod members;
+#[cfg(feature = "enterprise")]
 mod oauth;
+#[cfg(feature = "enterprise")]
 mod official_templates;
+#[cfg(feature = "enterprise")]
 mod openapi;
+#[cfg(feature = "enterprise")]
 mod origin;
+#[cfg(feature = "enterprise")]
 mod queue;
 mod relations;
+#[cfg(feature = "enterprise")]
 mod schema_forks;
 mod schemas;
 mod search;
 mod setup;
+#[cfg(feature = "enterprise")]
 mod stripe;
 mod system;
 mod template_library;
+#[cfg(feature = "enterprise")]
 mod tenant_auth;
+#[cfg(feature = "enterprise")]
 mod worker_class;
 mod workspaces;
 
