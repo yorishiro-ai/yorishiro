@@ -136,14 +136,27 @@ docker exec "$APP" systemctl set-environment \
 # SQLite, and `start` on an active unit does nothing, so the new environment would never be read
 # while the old server kept answering /_ping.
 docker exec "$APP" bash -c '
-  systemctl reset-failed yorishiro
+  systemctl reset-failed yorishiro yorishiro-worker
   systemctl daemon-reload
   systemctl enable yorishiro yorishiro-worker
-  systemctl restart yorishiro yorishiro-worker' >/dev/null 2>&1
+  systemctl restart yorishiro' >/dev/null 2>&1
 
 for _ in $(seq 1 120); do
   docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
   sleep 3
+done
+
+# The worker starts only once the server answers. Both run migrations at start (`auto_migrate`),
+# and on a fresh database two first starts at once collide creating `seaql_migrations`
+# (duplicate key): the loser exits and the unit sits in `activating (auto-restart)` for
+# RestartSec, which is what a single read of its state below would catch. The server answers
+# only after its migrations have been applied, so waiting for it gives the worker a migrated
+# database, as `production.yaml` advises for more than one instance.
+docker exec "$APP" systemctl restart yorishiro-worker >/dev/null 2>&1
+for _ in $(seq 1 30); do
+  docker exec "$APP" journalctl -u yorishiro-worker --no-pager -o cat 2>/dev/null \
+    | grep -q 'worker is online' && break
+  sleep 1
 done
 
 state=$(docker exec "$APP" bash -c '
@@ -158,7 +171,7 @@ grep -q 'active=active' <<<"$state" \
   || bad "expected active, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
 grep -q 'worker-active=active' <<<"$state" \
   && ok "the worker is active" \
-  || bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
+  || { bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"; dump_logs; }
 grep -q 'enabled=enabled' <<<"$state" \
   && ok "the service is enabled" \
   || bad "expected enabled, got: $(grep -o 'enabled=[a-z-]*' <<<"$state")"
