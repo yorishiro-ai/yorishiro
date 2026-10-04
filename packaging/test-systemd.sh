@@ -106,6 +106,7 @@ if grep -q 'ping=200' <<<"$state"; then
   ok "the unconfigured service answers /_ping"
 else
   bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
+  docker logs "$APP" 2>&1 | tail -20 >&2
 fi
 
 # --------------------------------------------------------------------------------------------

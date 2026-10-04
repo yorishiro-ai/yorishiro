@@ -312,6 +312,10 @@ EOF
   up=
   for _ in $(seq 1 120); do
     docker exec "app-$$" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && { up=1; break; }
+    # Periodically dump logs so we can see where migration/app startup is stuck.
+    if (( _ % 20 == 0 )); then
+      docker logs "app-$$" 2>&1 | tail -10 >&2
+    fi
     sleep 1
   done
 
