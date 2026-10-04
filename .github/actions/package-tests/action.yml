@@ -1,0 +1,73 @@
+name: Test installed packages
+description: Installs packages and verifies they run correctly
+
+inputs:
+  tag:
+    description: Release tag for artifact names
+    required: true
+    default: ''
+  ce_package:
+    description: Path to the CE package file
+    required: true
+    default: ''
+  ee_package:
+    description: Path to the EE package file
+    required: true
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v5
+      with:
+        path: dist
+        pattern: binary-*
+        merge-multiple: true
+    - name: Install package tooling
+      run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev rpm
+    - name: Assert exact artifacts and metadata
+      env:
+        VERSION: ${{ inputs.tag }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        for edition in ce ee; do
+          for arch in amd64 arm64; do
+            for ext in deb rpm; do
+              test -f "dist/yorishiro-${edition}-${VERSION}-${arch}.${ext}"
+            done
+          done
+        done
+        test "$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
+        for f in dist/*.deb; do
+          dpkg-deb -I "$f" | grep -E 'Conflicts:.*yorishiro|Replaces:.*yorishiro'
+        done
+        for f in dist/*.rpm; do
+          rpm -qp --conflicts "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
+          rpm -qp --obsoletes "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
+        done
+    - uses: ./.github/actions/install-nfpm
+    - name: Build retired unified packages for migration tests
+      env:
+        VERSION: ${{ inputs.tag }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p target/release /tmp/unified
+        dpkg-deb -x "dist/yorishiro-ce-${VERSION}-amd64.deb" /tmp/ce
+        cp /tmp/ce/usr/bin/yorishiro target/release/yorishiro
+        nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager deb --target /tmp/unified
+        nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager rpm --target /tmp/unified
+        mv "/tmp/unified/yorishiro_${VERSION}_amd64.deb" "/tmp/unified/yorishiro-${VERSION}-amd64.deb"
+        mv "/tmp/unified/yorishiro-${VERSION}-1.x86_64.rpm" "/tmp/unified/yorishiro-${VERSION}-amd64.rpm"
+    - name: Test package transitions and co-install refusal
+      env:
+        VERSION: ${{ inputs.tag }}
+      shell: bash
+      run: ./packaging/test-transitions.sh dist /tmp/unified "$VERSION"
+    - name: Test representative installed packages
+      shell: bash
+      run: |
+        ./packaging/test-install.sh "${{ inputs.ce_package }}"
+        ./packaging/test-systemd.sh "${{ inputs.ee_package }}"

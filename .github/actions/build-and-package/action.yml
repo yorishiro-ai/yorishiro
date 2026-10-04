@@ -1,0 +1,85 @@
+name: Build binary and package
+description: Builds yorishiro and packages it as deb/rpm
+
+inputs:
+  edition:
+    description: Edition (ce or ee)
+    required: true
+    default: ce
+  target:
+    description: Rust target (e.g. x86_64-unknown-linux-gnu)
+    required: true
+    default: x86_64-unknown-linux-gnu
+  tag:
+    description: Release tag for nfpm metadata
+    required: true
+    default: ''
+
+outputs:
+  binary-artifact:
+    description: Name of the uploaded artifact
+    value: binary-linux-${{ inputs.edition }}-${{ inputs.arch }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.ref }}
+        persist-credentials: false
+
+    - name: Set OS and arch from target
+      id: arch
+      shell: bash
+      run: |
+        case "${{ inputs.target }}" in
+          x86_64-unknown-linux-gnu) echo "os=ubuntu-24.04"; echo "arch=amd64" >> "$GITHUB_OUTPUT" ;;
+          aarch64-unknown-linux-gnu) echo "os=ubuntu-24.04-arm"; echo "arch=arm64" >> "$GITHUB_OUTPUT" ;;
+        esac
+
+    - uses: ./.github/actions/rust-setup
+      with:
+        targets: ${{ inputs.target }}
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        cache-directories: ~/.cache/ort.pyke.io
+
+    - name: Build
+      env:
+        BUILD_SHA: ${{ inputs.tag }}
+      shell: bash
+      run: |
+        if [ "${{ inputs.edition }}" = ce ]; then
+          cargo build --locked --no-default-features --features community --release --bin yorishiro
+        else
+          cargo build --locked --features enterprise --release --bin yorishiro
+        fi
+
+    - uses: ./.github/actions/install-nfpm
+
+    - name: Package (deb and rpm)
+      env:
+        VERSION: ${{ inputs.tag }}
+        ARCH: ${{ steps.arch.outputs.arch }}
+        EDITION: ${{ inputs.edition }}
+      shell: bash
+      run: |
+        mkdir -p dist
+        case "$ARCH" in amd64) rpm_arch=x86_64 ;; arm64) rpm_arch=aarch64 ;; esac
+        for pkg in deb rpm; do
+           nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
+           if [ "$pkg" = deb ]; then
+             source="dist/yorishiro-${EDITION}_${VERSION}_${ARCH}.deb"
+           else
+             source="dist/yorishiro-${EDITION}-${VERSION}-1.${rpm_arch}.rpm"
+           fi
+           mv "$source" "dist/yorishiro-${EDITION}-${VERSION}-${ARCH}.${pkg}"
+        done
+        ls -1 dist/
+
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: binary-linux-${{ inputs.edition }}-${{ steps.arch.outputs.arch }}
+        path: dist/*

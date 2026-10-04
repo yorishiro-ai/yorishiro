@@ -182,110 +182,21 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-and-package
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
-          persist-credentials: false
-
-      - uses: ./.github/actions/rust-setup
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-directories: ~/.cache/ort.pyke.io
-
-      - name: Build
-        env:
-          BUILD_SHA: ${{ needs.prepare.outputs.tag }}
-        run: |
-          if [ "${{ matrix.edition }}" = ce ]; then
-            cargo build --locked --no-default-features --features community --release --bin yorishiro
-          else
-            cargo build --locked --features enterprise --release --bin yorishiro
-          fi
-
-      - uses: ./.github/actions/install-nfpm
-
-      - name: Package (deb and rpm)
-        env:
-          VERSION: ${{ inputs.version }}
-          ARCH: ${{ matrix.arch }}
-          EDITION: ${{ matrix.edition }}
-        run: |
-          mkdir -p dist
-          case "$ARCH" in amd64) rpm_arch=x86_64 ;; arm64) rpm_arch=aarch64 ;; esac
-          for pkg in deb rpm; do
-             nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
-             if [ "$pkg" = deb ]; then
-               source="dist/yorishiro-${EDITION}_${VERSION}_${ARCH}.deb"
-             else
-               source="dist/yorishiro-${EDITION}-${VERSION}-1.${rpm_arch}.rpm"
-             fi
-             mv "$source" "dist/yorishiro-${EDITION}-${VERSION}-${ARCH}.${pkg}"
-          done
-          ls -1 dist/
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: binary-linux-${{ matrix.edition }}-${{ matrix.arch }}
-          path: dist/*
+          edition: ${{ matrix.edition }}
+          target: ${{ matrix.target }}
+          tag: ${{ needs.prepare.outputs.tag }}
 
   package-tests:
     needs: [binary, prepare]
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v5
+      - uses: ./.github/actions/package-tests
         with:
-          path: dist
-          pattern: binary-*
-          merge-multiple: true
-      - name: Install package tooling
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev rpm
-      - name: Assert exact artifacts and metadata
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          for edition in ce ee; do
-            for arch in amd64 arm64; do
-              for ext in deb rpm; do
-                test -f "dist/yorishiro-${edition}-${VERSION}-${arch}.${ext}"
-              done
-            done
-          done
-          test "$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
-          for f in dist/*.deb; do
-            dpkg-deb -I "$f" | grep -E 'Conflicts:.*yorishiro|Replaces:.*yorishiro'
-          done
-          for f in dist/*.rpm; do
-            rpm -qp --conflicts "$f" | grep -qx 'yorishiro\|yorishiro-ce\|yorishiro-ee'
-            rpm -qp --obsoletes "$f" | grep -qx 'yorishiro\|yorishiro-ce\|yorishiro-ee'
-          done
-      - uses: ./.github/actions/install-nfpm
-      - name: Build retired unified packages for migration tests
-        env:
-          VERSION: ${{ inputs.version }}
-          ARCH: amd64
-        run: |
-          set -euo pipefail
-          mkdir -p target/release /tmp/unified
-          dpkg-deb -x "dist/yorishiro-ce-${VERSION}-amd64.deb" /tmp/ce
-          cp /tmp/ce/usr/bin/yorishiro target/release/yorishiro
-          nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager deb --target /tmp/unified
-          nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager rpm --target /tmp/unified
-          mv "/tmp/unified/yorishiro_${VERSION}_amd64.deb" "/tmp/unified/yorishiro-${VERSION}-amd64.deb"
-          mv "/tmp/unified/yorishiro-${VERSION}-1.x86_64.rpm" "/tmp/unified/yorishiro-${VERSION}-amd64.rpm"
-      - name: Test package transitions and co-install refusal
-        env:
-          VERSION: ${{ inputs.version }}
-        run: ./packaging/test-transitions.sh dist /tmp/unified "$VERSION"
-      - name: Test representative installed packages
-        run: |
-          ./packaging/test-install.sh "dist/yorishiro-ce-${{ inputs.version }}-amd64.deb"
-          ./packaging/test-systemd.sh "dist/yorishiro-ee-${{ inputs.version }}-amd64.deb"
+          tag: ${{ inputs.version }}
+          ce_package: "dist/yorishiro-ce-${{ inputs.version }}-amd64.deb"
+          ee_package: "dist/yorishiro-ee-${{ inputs.version }}-amd64.deb"
 
   docker:
     needs: [prepare, package-tests]
@@ -309,47 +220,12 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-docker
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
-          persist-credentials: false
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
-        if: ${{ !inputs.dry_run }}
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify architecture image tags
-        env:
-          IMAGE: ${{ env.IMAGE_NAME }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-          EXPECTED_TAG: v${{ inputs.version }}
-        run: |
-          test "$TAG" = "$EXPECTED_TAG"
-          test "${IMAGE}:${TAG}-ce-amd64" = "${IMAGE}:v${{ inputs.version }}-ce-amd64"
-          test "${IMAGE}:${TAG}-ce-arm64" = "${IMAGE}:v${{ inputs.version }}-ce-arm64"
-          test "${IMAGE}:${TAG}-ee-amd64" = "${IMAGE}:v${{ inputs.version }}-ee-amd64"
-          test "${IMAGE}:${TAG}-ee-arm64" = "${IMAGE}:v${{ inputs.version }}-ee-arm64"
-
-      - name: Read the pinned Rust version
-        id: rust
-        run: echo "version=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: .
-          build-args: |
-            EDITION=${{ matrix.edition }}
-            RUST_VERSION=${{ steps.rust.outputs.version }}
+          edition: ${{ matrix.edition }}
+          tag: ${{ needs.prepare.outputs.tag }}
+          arch: ${{ matrix.arch }}
           push: ${{ !inputs.dry_run }}
-          provenance: false
-          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.edition }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
   docker-manifest:
     needs: [docker, prepare]
@@ -362,24 +238,10 @@ jobs:
         edition: [ce, ee]
 
     steps:
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+      - uses: ./.github/actions/docker-manifest
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create multi-arch manifest
-        env:
-          IMAGE: ${{ env.IMAGE_NAME }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-          EDITION: ${{ matrix.edition }}
-        run: |
-          docker buildx imagetools create \
-             -t "${IMAGE}:${TAG}-${EDITION}" \
-             "${IMAGE}:${TAG}-${EDITION}-amd64" \
-             "${IMAGE}:${TAG}-${EDITION}-arm64"
+          tag: ${{ needs.prepare.outputs.tag }}
+          edition: ${{ matrix.edition }}
 
   smoke:
     needs: [docker-manifest, prepare]
@@ -407,37 +269,10 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+      - uses: ./.github/actions/smoke
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Boot the published image
-        env:
-          IMAGE: ${{ env.IMAGE_NAME }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          psql "postgres://yorishiro:secret@127.0.0.1:5432/yorishiro" \
-            -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-
-          docker run -d --name smoke --network host \
-            -e DATABASE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
-            -e QUEUE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
-            -e HOST=http://127.0.0.1:5150 \
-            -e YORISHIRO_EMBEDDING_PROVIDER=none \
-            "${IMAGE}:${TAG}-${{ matrix.edition }}"
-
-          for _ in $(seq 1 60); do
-            curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
-            sleep 3
-          done
-          curl -fsS http://127.0.0.1:5150/_ping || {
-            echo "::error::the published image never answered /_ping" >&2
-            docker logs smoke
-            exit 1
-          }
-          docker rm -f smoke
+          tag: ${{ needs.prepare.outputs.tag }}
+          edition: ${{ matrix.edition }}
 
   github-release:
     needs: [binary, smoke, prepare]

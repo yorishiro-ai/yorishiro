@@ -1,0 +1,49 @@
+name: Smoke test
+description: Boots a published Docker image and verifies it responds
+
+inputs:
+  tag:
+    description: Release tag
+    required: true
+    default: ''
+  edition:
+    description: Edition (ce or ee)
+    required: true
+    default: ce
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Boot the published image
+      env:
+        TAG: ${{ inputs.tag }}
+        EDITION: ${{ inputs.edition }}
+      shell: bash
+      run: |
+        IMAGE=ghcr.io/yorishiro-ai/yorishiro
+        psql "postgres://yorishiro:secret@127.0.0.1:5432/yorishiro" \
+          -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
+        docker run -d --name smoke --network host \
+          -e DATABASE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
+          -e QUEUE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
+          -e HOST=http://127.0.0.1:5150 \
+          -e YORISHIRO_EMBEDDING_PROVIDER=none \
+          "${IMAGE}:${TAG}-${EDITION}"
+
+        for _ in $(seq 1 60); do
+          curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
+          sleep 3
+        done
+        curl -fsS http://127.0.0.1:5150/_ping || {
+          echo "::error::the published image never answered /_ping" >&2
+          docker logs smoke
+          exit 1
+        }
+        docker rm -f smoke
