@@ -8,7 +8,7 @@
 #
 #   ./packaging/test-systemd.sh <exact deb package file>
 #
-# Needs docker with --privileged. ubuntu:24.04 and the deb only: the rpm under systemd is
+# Needs docker with --privileged. ubuntu:26.04 and the deb only: the rpm under systemd is
 # checked by hand, because putting an EOL Fedora's package repositories on the critical path of
 # every pull request trades a real dependency for a marginal case.
 #
@@ -56,7 +56,7 @@ docker run -d --name "$PG" --network "$NET" \
 # systemd has to be PID 1, which is what `exec` at the end of the command is for, and needs both
 # tmpfs mounts plus a cgroup namespace it can write.
 docker run -d --name "$APP" --network "$NET" --privileged --cgroupns=host \
-  --tmpfs /run --tmpfs /run/lock -v "$PKG_DIR":/pkg:ro ubuntu:24.04 \
+  --tmpfs /run --tmpfs /run/lock -v "$PKG_DIR":/pkg:ro ubuntu:26.04 \
   bash -c 'apt-get update -qq >/dev/null 2>&1
            apt-get install -y -qq systemd systemd-sysv curl >/dev/null 2>&1
            exec /lib/systemd/systemd' >/dev/null
