@@ -237,30 +237,46 @@ docker exec "$APP" systemctl set-environment \
 
 # `restart`, not `enable --now`: the unconfigured section above left the server running on
 # SQLite, and `start` on an active unit does nothing, so the new environment would never be read
-# while the old server kept answering /_ping.
+# while the old server kept answering /_ping. Restart the server before the worker and wait for
+# its ping: both processes run automigrate, and starting them together races on PostgreSQL role
+# creation even though the worker unit has `After=yorishiro.service` (that only orders start jobs).
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
   systemctl enable yorishiro yorishiro-worker
-  systemctl restart yorishiro yorishiro-worker' >/dev/null 2>&1
+  systemctl restart yorishiro' >/dev/null 2>&1
 
 server_ready=
-worker_ready=
 # The worker may take a long time to boot (database migration, embedding provider init).
 # Use a generous timeout to avoid false failures on resource-constrained CI.
 for _ in $(seq 1 240); do
   docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 \
     && server_ready=1
-  docker exec "$APP" systemctl is-active --quiet yorishiro-worker 2>/dev/null \
-    && worker_ready=1
-  if [ -n "$server_ready" ] && [ -n "$worker_ready" ]; then
+  if [ -n "$server_ready" ]; then
     break
   fi
   sleep 3
 done
 
-if [ -z "$server_ready" ] || [ -z "$worker_ready" ]; then
-  echo "server and worker did not become ready (server=$server_ready, worker=$worker_ready)" >&2
+if [ -z "$server_ready" ]; then
+  echo "server did not become ready before starting worker" >&2
+  dump_logs
+fi
+
+docker exec "$APP" bash -c '
+  systemctl reset-failed yorishiro-worker
+  systemctl restart yorishiro-worker' >/dev/null 2>&1
+
+worker_ready=
+for _ in $(seq 1 240); do
+  docker exec "$APP" systemctl is-active --quiet yorishiro-worker 2>/dev/null \
+    && worker_ready=1
+  [ -n "$worker_ready" ] && break
+  sleep 3
+done
+
+if [ -z "$worker_ready" ]; then
+  echo "worker did not become ready" >&2
   dump_logs
 fi
 
