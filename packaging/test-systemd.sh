@@ -14,13 +14,14 @@
 #
 # The caller supplies one exact edition-first package filename.
 #
-# The unconfigured-start section exercises the zero-config default: production.yaml boots
-# against a local SQLite file with no external dependencies (DATABASE_URL defaults to
-# sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc, HOST defaults to http://localhost,
-# and the queue uses its separate packaged SQLite file), so an unconfigured install starts successfully
-# and serves a single-tenant trial instance. Embeddings are disabled to avoid fetching the
-# ~1 GiB model in CI. The later phase writes PostgreSQL settings to the installed YAML template
-# to verify that path as well.
+# The first phase exercises the default SQLite deployment without external dependencies.
+# DATABASE_URL defaults to sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc.
+# HOST defaults to http://localhost.
+# The queue uses its separate packaged SQLite file.
+# The smoke test sets an OpenAI-compatible embedding configuration before this phase starts.
+# The provider is constructed synchronously without calling the configured endpoint.
+# This avoids downloading the approximately 1 GiB local model.
+# The later phase switches the database to PostgreSQL.
 
 set -uo pipefail
 
@@ -76,7 +77,7 @@ if [ -z "$booted" ]; then
 fi
 
 # --------------------------------------------------------------------------------------------
-note "an unconfigured start succeeds (SQLite trial default)"
+note "a packaged SQLite start succeeds (default database)"
 # --------------------------------------------------------------------------------------------
 docker exec "$APP" bash -c "apt-get install -y -qq /pkg/$DEB >/dev/null 2>&1" || {
   echo "installing the package failed" >&2; exit 1
@@ -177,10 +178,14 @@ for marker in INTEG_META_INTACT INTEG_RESTORED; do
   case "$restore" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($restore)" ;; esac
 done
 
-# Disable embeddings to avoid the ~1 GiB model fetch in CI.
-# This setting has no Loco YAML field, so the test injects it into systemd's process environment
-# without creating a package-owned environment file.
-docker exec "$APP" systemctl set-environment YORISHIRO_EMBEDDING_PROVIDER=none
+# Use an OpenAI-compatible provider configuration so both the server and the worker construct the provider at startup without downloading the ~1 GiB local model.
+# `base_url` + `model` take priority over the enum in `build_embedding_provider`, so no `provider` variable is needed.
+# `none` is rejected (#524) because the server needs query embeddings in this smoke test.
+# The endpoint is not reachable.
+# The provider constructor is synchronous and never calls it.
+docker exec "$APP" systemctl set-environment \
+  YORISHIRO_EMBEDDING_BASE_URL=http://127.0.0.1:5151/v1 \
+  YORISHIRO_EMBEDDING_MODEL=package-smoke-test
 
 docker exec "$APP" systemctl reset-failed yorishiro >/dev/null 2>&1
 docker exec "$APP" systemctl start yorishiro >/dev/null 2>&1
@@ -195,14 +200,14 @@ state=$(docker exec "$APP" bash -c '
   echo "ping=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:5150/_ping)"' 2>&1)
 
 if grep -q 'active=active' <<<"$state"; then
-  ok "the unconfigured service is active"
+  ok "the packaged SQLite service is active"
 else
-  bad "expected active for unconfigured boot, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
+  bad "expected active for packaged SQLite start, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
 fi
 if grep -q 'ping=200' <<<"$state"; then
-  ok "the unconfigured service answers /_ping"
+  ok "the packaged SQLite service answers /_ping"
 else
-  bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
+  bad "expected 200 from packaged SQLite start, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
   dump_logs
 fi
 
@@ -227,19 +232,56 @@ docker exec "$APP" systemctl set-environment \
   HOST=http://127.0.0.1:5150 \
   DB_CONNECT_TIMEOUT=5000
 
-# `restart`, not `enable --now`: the unconfigured section above left the server running on
-# SQLite, and `start` on an active unit does nothing, so the new environment would never be read
-# while the old server kept answering /_ping.
+# Use `restart` instead of `enable --now` because the packaged SQLite phase left the server running.
+# Starting an active unit would not reload the new environment while the old server kept answering /_ping.
+# Restart the server before the worker and wait for its ping.
+# Both processes run automigrate, and starting them together races on PostgreSQL role creation.
+# `After=yorishiro.service` only orders the systemd start jobs and does not wait for server readiness.
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
   systemctl enable yorishiro yorishiro-worker
-  systemctl restart yorishiro yorishiro-worker' >/dev/null 2>&1
+  systemctl restart yorishiro' >/dev/null 2>&1
 
+server_ready=
+# Wait for the server before starting the worker.
 for _ in $(seq 1 120); do
-  docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
+  docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 \
+    && server_ready=1
+  if [ -n "$server_ready" ]; then
+    break
+  fi
   sleep 3
 done
+
+if [ -z "$server_ready" ]; then
+  bad "server did not become ready before starting worker"
+  dump_logs
+  worker_skipped=1
+  worker_assertion_recorded=1
+fi
+
+if [ -z "${worker_skipped:-}" ]; then
+  docker exec "$APP" bash -c '
+    systemctl reset-failed yorishiro-worker
+    systemctl restart yorishiro-worker' >/dev/null 2>&1
+fi
+
+worker_ready=
+if [ -z "${worker_skipped:-}" ]; then
+  for _ in $(seq 1 120); do
+    docker exec "$APP" systemctl is-active --quiet yorishiro-worker 2>/dev/null \
+      && worker_ready=1
+    [ -n "$worker_ready" ] && break
+    sleep 3
+  done
+fi
+
+if [ -z "${worker_skipped:-}" ] && [ -z "$worker_ready" ]; then
+  bad "worker did not become ready"
+  dump_logs
+  worker_assertion_recorded=1
+fi
 
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
@@ -251,9 +293,16 @@ state=$(docker exec "$APP" bash -c '
 grep -q 'active=active' <<<"$state" \
   && ok "the service is active" \
   || bad "expected active, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
-grep -q 'worker-active=active' <<<"$state" \
-  && ok "the worker is active" \
-  || bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
+if [ -n "${worker_skipped:-}" ]; then
+  :
+elif [ -n "${worker_assertion_recorded:-}" ]; then
+  :
+elif grep -q 'worker-active=active' <<<"$state"; then
+  ok "the worker is active"
+else
+  bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
+  dump_logs
+fi
 grep -q 'enabled=enabled' <<<"$state" \
   && ok "the service is enabled" \
   || bad "expected enabled, got: $(grep -o 'enabled=[a-z-]*' <<<"$state")"
