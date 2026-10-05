@@ -77,7 +77,7 @@ if [ -z "$booted" ]; then
 fi
 
 # --------------------------------------------------------------------------------------------
-note "an unconfigured start succeeds (SQLite trial default)"
+note "a packaged SQLite start succeeds (default database)"
 # --------------------------------------------------------------------------------------------
 docker exec "$APP" bash -c "apt-get install -y -qq /pkg/$DEB >/dev/null 2>&1" || {
   echo "installing the package failed" >&2; exit 1
@@ -183,7 +183,7 @@ done
 # model. `base_url` + `model` take priority over the enum in
 # `build_embedding_provider`, so no `provider` variable is needed.
 # `none` is rejected (#524): the server needs query embeddings even in
-# unconfigured mode. The endpoint is not reachable, but the provider
+# The server needs query embeddings in this smoke test. The endpoint is not reachable, but the provider
 # constructor is synchronous and never calls it.
 docker exec "$APP" systemctl set-environment \
   YORISHIRO_EMBEDDING_BASE_URL=http://127.0.0.1:5151/v1 \
@@ -202,14 +202,14 @@ state=$(docker exec "$APP" bash -c '
   echo "ping=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:5150/_ping)"' 2>&1)
 
 if grep -q 'active=active' <<<"$state"; then
-  ok "the unconfigured service is active"
+  ok "the packaged SQLite service is active"
 else
-  bad "expected active for unconfigured boot, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
+  bad "expected active for packaged SQLite start, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
 fi
 if grep -q 'ping=200' <<<"$state"; then
-  ok "the unconfigured service answers /_ping"
+  ok "the packaged SQLite service answers /_ping"
 else
-  bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
+  bad "expected 200 from packaged SQLite start, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
   dump_logs
 fi
 
@@ -234,7 +234,7 @@ docker exec "$APP" systemctl set-environment \
   HOST=http://127.0.0.1:5150 \
   DB_CONNECT_TIMEOUT=5000
 
-# Use `restart` instead of `enable --now` because the unconfigured section left the server running on SQLite.
+# Use `restart` instead of `enable --now` because the packaged SQLite phase left the server running.
 # Starting an active unit would not reload the new environment while the old server kept answering /_ping.
 # Restart the server before the worker and wait for its ping.
 # Both processes run automigrate, and starting them together races on PostgreSQL role creation.
@@ -260,6 +260,7 @@ if [ -z "$server_ready" ]; then
   bad "server did not become ready before starting worker"
   dump_logs
   worker_skipped=1
+  worker_assertion_recorded=1
 fi
 
 if [ -z "${worker_skipped:-}" ]; then
@@ -279,8 +280,9 @@ if [ -z "${worker_skipped:-}" ]; then
 fi
 
 if [ -z "${worker_skipped:-}" ] && [ -z "$worker_ready" ]; then
-  echo "worker did not become ready" >&2
+  bad "worker did not become ready"
   dump_logs
+  worker_assertion_recorded=1
 fi
 
 state=$(docker exec "$APP" bash -c '
@@ -294,7 +296,9 @@ grep -q 'active=active' <<<"$state" \
   && ok "the service is active" \
   || bad "expected active, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
 if [ -n "${worker_skipped:-}" ]; then
-  bad "worker check skipped because the server did not become ready"
+  :
+elif [ -n "${worker_assertion_recorded:-}" ]; then
+  :
 elif grep -q 'worker-active=active' <<<"$state"; then
   ok "the worker is active"
 else
