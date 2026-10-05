@@ -17,10 +17,12 @@
 # The unconfigured-start section exercises the zero-config default: production.yaml boots
 # against a local SQLite file with no external dependencies (DATABASE_URL defaults to
 # sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc, HOST defaults to http://localhost,
-# and the queue uses its separate packaged SQLite file), so an unconfigured install starts successfully
-# and serves a single-tenant trial instance. Embeddings are disabled to avoid fetching the
+# and the queue uses its separate packaged SQLite file). Embeddings are disabled to avoid the
 # ~1 GiB model in CI. The later phase writes PostgreSQL settings to the installed YAML template
-# to verify that path as well.
+# to verify that path, and configures an OpenAI-compatible embedding provider so both the server
+# and worker exercise provider initialization (base_url + model take priority over the provider
+# enum; the provider is constructed synchronously at boot without calling the endpoint, and the
+# worker remains active only when that boot path succeeds).
 
 set -uo pipefail
 
@@ -177,10 +179,16 @@ for marker in INTEG_META_INTACT INTEG_RESTORED; do
   case "$restore" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($restore)" ;; esac
 done
 
-# Disable embeddings to avoid the ~1 GiB model fetch in CI.
-# This setting has no Loco YAML field, so the test injects it into systemd's process environment
-# without creating a package-owned environment file.
-docker exec "$APP" systemctl set-environment YORISHIRO_EMBEDDING_PROVIDER=none
+# Use an OpenAI-compatible provider configuration so both the server and the
+# worker construct the provider at startup without downloading the ~1 GiB local
+# model. `base_url` + `model` take priority over the enum in
+# `build_embedding_provider`, so no `provider` variable is needed.
+# `none` is rejected (#524): the server needs query embeddings even in
+# unconfigured mode. The endpoint is not reachable, but the provider
+# constructor is synchronous and never calls it.
+docker exec "$APP" systemctl set-environment \
+  YORISHIRO_EMBEDDING_BASE_URL=http://127.0.0.1:5151/v1 \
+  YORISHIRO_EMBEDDING_MODEL=package-smoke-test
 
 docker exec "$APP" systemctl reset-failed yorishiro >/dev/null 2>&1
 docker exec "$APP" systemctl start yorishiro >/dev/null 2>&1
@@ -236,10 +244,25 @@ docker exec "$APP" bash -c '
   systemctl enable yorishiro yorishiro-worker
   systemctl restart yorishiro yorishiro-worker' >/dev/null 2>&1
 
-for _ in $(seq 1 120); do
-  docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
+server_ready=
+worker_ready=
+# The worker may take a long time to boot (database migration, embedding provider init).
+# Use a generous timeout to avoid false failures on resource-constrained CI.
+for _ in $(seq 1 240); do
+  docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 \
+    && server_ready=1
+  docker exec "$APP" systemctl is-active --quiet yorishiro-worker 2>/dev/null \
+    && worker_ready=1
+  if [ -n "$server_ready" ] && [ -n "$worker_ready" ]; then
+    break
+  fi
   sleep 3
 done
+
+if [ -z "$server_ready" ] || [ -z "$worker_ready" ]; then
+  echo "server and worker did not become ready (server=$server_ready, worker=$worker_ready)" >&2
+  dump_logs
+fi
 
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
@@ -253,7 +276,7 @@ grep -q 'active=active' <<<"$state" \
   || bad "expected active, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
 grep -q 'worker-active=active' <<<"$state" \
   && ok "the worker is active" \
-  || bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
+  || { bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"; dump_logs; }
 grep -q 'enabled=enabled' <<<"$state" \
   && ok "the service is enabled" \
   || bad "expected enabled, got: $(grep -o 'enabled=[a-z-]*' <<<"$state")"
