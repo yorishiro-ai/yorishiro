@@ -109,11 +109,11 @@ fn snapshot_select() -> Select<Entity> {
 /// The token is not part of `EntityRecord`, so it never reaches an API response.
 #[derive(sea_orm::FromQueryResult)]
 pub(crate) struct EmbeddingSnapshot {
-    pub id: Uuid,
-    pub schema_id: Uuid,
-    pub entity_type: String,
-    pub data: Value,
-    pub embedding_sync_token: String,
+    pub(crate) id: Uuid,
+    pub(crate) schema_id: Uuid,
+    pub(crate) entity_type: String,
+    pub(crate) data: Value,
+    pub(crate) embedding_sync_token: String,
 }
 
 /// Finds every entity in a workspace that has no corresponding embedding row.

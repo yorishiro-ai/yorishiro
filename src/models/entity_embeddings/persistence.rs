@@ -5,14 +5,14 @@ use crate::error::{ResultExt, YorishiroError};
 
 /// Input for writing an embedding vector with concurrency guarding.
 pub(super) struct VectorWriteInput {
-    pub workspace_id: Uuid,
-    pub entity_id: Uuid,
+    pub(super) workspace_id: Uuid,
+    pub(super) entity_id: Uuid,
     /// Monotonic token captured at the time the embedding vector was produced.
     /// `embed_and_write` only writes if the entity's current token equals this value,
     /// rejecting any write against an entity that was modified between capture and persist.
-    pub embedding_sync_token: String,
-    pub vector: Vec<f32>,
-    pub dimension: usize,
+    pub(super) embedding_sync_token: String,
+    pub(super) vector: Vec<f32>,
+    pub(super) dimension: usize,
 }
 
 /// Writes a vector to the width-specific table and guards it with the entity snapshot.
