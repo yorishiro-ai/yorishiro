@@ -8,10 +8,10 @@
 //! all.  Both backends therefore use character-n-gram fuzzy matching for the fallback path.
 //! The two halves are merged in Rust.
 //!
-//! Embedding generation follows two paths: document embedding is asynchronous — the embedding
-//! sync worker (`workers::embedding_sync`) generates and stores vectors after entity writes —
-//! while query embedding is synchronous (`embed_query` is called in the request handler, before
-//! any DB connection is acquired, to avoid holding connections during the external API call).
+//! Embedding generation follows two paths.
+//! Document embedding is asynchronous: the embedding sync worker (`workers::embedding_sync`) generates and stores vectors after entity writes.
+//! Query embedding is synchronous: `embed_query` runs in the request handler, before any DB connection is acquired, so no connection is held during the external API call.
+//! Both use the same provider, so documents and queries share one vector space.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::Serialize;
@@ -220,13 +220,31 @@ pub async fn resolve_search_table(
         crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS,
     )
     .await
+    .map(|(dimension, table)| (dimension, table.to_string()))
+}
+
+/// Resolves the embedding table a query vector of `vector_len` components is searched in.
+///
+/// Reads `tenant_tenants` for the tenant default, which the tenant-scoped role may not touch.
+/// Call it on the identity connection (`ctx.db`) before opening the request's tenant transaction, then pass the result to [`search_in_table`].
+///
+/// # Errors
+/// Returns an error if the workspace is missing or no table exists for the resolved width.
+pub(crate) async fn resolve_query_table(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    vector_len: usize,
+) -> Result<&'static str, YorishiroError> {
+    resolve_search_table_with_dimensions(conn, workspace_id, vector_len)
+        .await
+        .map(|(_, table)| table)
 }
 
 async fn resolve_search_table_with_dimensions(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     deployment_dimensions: usize,
-) -> Result<(usize, String), YorishiroError> {
+) -> Result<(usize, &'static str), YorishiroError> {
     use crate::models::entity_embeddings::resolve_embedding_chain;
 
     let chain = resolve_embedding_chain(conn, workspace_id, deployment_dimensions).await?;
@@ -238,7 +256,10 @@ async fn resolve_search_table_with_dimensions(
         )))
         .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32)
         as usize;
-    Ok((dimension, format!("entity_embeddings_{dimension}")))
+    Ok((
+        dimension,
+        crate::models::entity_embeddings::embedding_table(dimension)?,
+    ))
 }
 
 ///
@@ -251,6 +272,30 @@ pub async fn search_by_vector(
     query_text: &str,
     query: SearchQuery,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
+    let embed_table = resolve_query_table(conn, workspace_id, vector.len()).await?;
+    search_in_table(conn, workspace_id, vector, query_text, query, embed_table).await
+}
+
+/// [`search_by_vector`] against an `embed_table` already resolved by [`resolve_query_table`].
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub(crate) async fn search_in_table(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    vector: Vec<f32>,
+    query_text: &str,
+    query: SearchQuery,
+    embed_table: &str,
+) -> Result<Vec<SearchHit>, YorishiroError> {
+    // The table name is interpolated into SQL, so only a known embedding table is accepted.
+    if !crate::models::entity_embeddings::embedding_tables().any(|table| table == embed_table) {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!("{embed_table:?} is not an embedding table"),
+            details: vec![],
+            hint: "use the table returned by resolve_query_table".into(),
+        });
+    }
     let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
 
     // SQLite has no JSONB containment operator to replace `data @> filter`.
@@ -261,15 +306,12 @@ pub async fn search_by_vector(
         });
     }
 
-    let (_dimension, embed_table) =
-        resolve_search_table_with_dimensions(conn, workspace_id, vector.len()).await?;
-
     let knn = match conn.get_database_backend() {
         sea_orm::DatabaseBackend::Postgres => {
-            VectorKnn::postgres(vector, workspace_id, &query, limit, &embed_table)
+            VectorKnn::postgres(vector, workspace_id, &query, limit, embed_table)
         }
         sea_orm::DatabaseBackend::Sqlite => {
-            VectorKnn::sqlite(vector, workspace_id, &query, limit, &embed_table)
+            VectorKnn::sqlite(vector, workspace_id, &query, limit, embed_table)
         }
         // _ includes MySQL and any future backends: vector search is Postgres/SQLite only.
         _ => {

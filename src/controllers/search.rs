@@ -42,6 +42,9 @@ pub(crate) async fn search_entities(
 
     let workspace_id = verified.ctx.workspace_id;
 
+    // The tenant-scoped role cannot read `tenant_tenants`, which the embedding chain joins, so the table is resolved on the identity pool before the transaction opens.
+    let embed_table = search::resolve_query_table(&ctx.db, workspace_id, vector.len()).await?;
+
     // A read-only transaction: dropped without committing when this returns, a no-op since nothing was written.
     let txn = if ctx.is_sqlite() {
         ctx.db.begin().await.internal()?
@@ -53,8 +56,15 @@ pub(crate) async fn search_entities(
             .internal()?
     };
 
-    let hits =
-        search::search_by_vector(&txn, workspace_id, vector, &params.query_text, query).await?;
+    let hits = search::search_in_table(
+        &txn,
+        workspace_id,
+        vector,
+        &params.query_text,
+        query,
+        embed_table,
+    )
+    .await?;
     Ok(Json(hits))
 }
 

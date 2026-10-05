@@ -11,7 +11,7 @@ use super::persistence::{VectorWriteInput, embed_and_write};
 enum ReindexStep {
     Reindexed,
     NothingToEmbed,
-    ConcurrentlyModified,
+    Deleted,
 }
 
 /// One entity that failed during a [`reindex_workspace`] run.
@@ -63,7 +63,7 @@ async fn reindex_embedding_for_record(
     .await?
     {
         true => Ok(ReindexStep::Reindexed),
-        false => Ok(ReindexStep::ConcurrentlyModified),
+        false => Ok(ReindexStep::Deleted),
     }
 }
 
@@ -77,9 +77,10 @@ pub async fn reindex_workspace(
     candidate_ids: &[Uuid],
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
-    let records = crate::models::entity_entities::missing_embeddings(conn, workspace_id)
-        .await
-        .internal()?;
+    let records =
+        crate::models::entity_entities::get_batch_with_tokens(conn, workspace_id, candidate_ids)
+            .await
+            .internal()?;
 
     let records: std::collections::HashMap<_, _> = records.into_iter().map(|r| (r.id, r)).collect();
 
@@ -95,11 +96,10 @@ pub async fn reindex_workspace(
         };
         match reindex_embedding_for_record(conn, workspace_id, record, provider).await {
             Ok(ReindexStep::Reindexed | ReindexStep::NothingToEmbed) => reindexed += 1,
-            Ok(ReindexStep::ConcurrentlyModified) => failures.push(ReindexFailure {
+            Ok(ReindexStep::Deleted) => failures.push(ReindexFailure {
                 entity_id,
-                error: YorishiroError::Internal(anyhow::anyhow!(
-                    "entity was modified concurrently with the reindex; re-run reindex_embeddings \
-                     to pick it up against its current data"
+                error: YorishiroError::not_found(format!(
+                    "entity {entity_id} was deleted during the reindex"
                 )),
             }),
             Err(error) => failures.push(ReindexFailure { entity_id, error }),

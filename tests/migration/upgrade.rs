@@ -802,7 +802,7 @@ async fn embedding_sync_token_initializes_on_insert_and_rotates_on_update() {
             backend => panic!("unsupported backend: {backend:?}"),
         }
 
-        // Insert a new entity — triggers must generate a non-empty token.
+        // Insert a new entity: the triggers must generate a non-empty token.
         execute(
             db,
             format!(
@@ -828,7 +828,7 @@ async fn embedding_sync_token_initializes_on_insert_and_rotates_on_update() {
             );
         }
 
-        // Update the entity — the UPDATE trigger must rotate the token.
+        // Update the entity: the UPDATE trigger must rotate the token.
         // On SQLite the AFTER UPDATE trigger with INSERT OR REPLACE handles
         // raw SQL UPDATEs; on PostgreSQL the BEFORE UPDATE trigger does.
         let token_before: String = value(
@@ -898,10 +898,26 @@ async fn embedding_sync_token_migration_down_removes_column_and_triggers() {
             backend => panic!("unsupported backend: {backend:?}"),
         }
 
-        // Re-apply — must succeed cleanly (triggers are created fresh).
+        if db.get_database_backend() == DbBackend::Sqlite {
+            let matching: i64 = value(
+                db,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'entity_fts_au' AND sql LIKE '%AFTER UPDATE ON entity_entities%'",
+            )
+            .await;
+            assert_eq!(matching, 1, "rollback must restore the original entity_fts_au trigger");
+        }
+        // Re-apply: must succeed cleanly because the triggers are created fresh.
         Migrator::up(db, Some(through_token))
             .await
             .expect("reapply token migration");
+        if db.get_database_backend() == DbBackend::Sqlite {
+            let matching: i64 = value(
+                db,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'entity_fts_au' AND sql LIKE '%AFTER UPDATE OF data ON entity_entities%'",
+            )
+            .await;
+            assert_eq!(matching, 1, "reapply must narrow entity_fts_au to data updates");
+        }
 
         // Column must exist again.
         match db.get_database_backend() {
@@ -923,6 +939,42 @@ async fn embedding_sync_token_migration_down_removes_column_and_triggers() {
             }
             backend => panic!("unsupported backend: {backend:?}"),
         }
+    }))
+    .await;
+}
+
+/// The tenant-scoped role reads the embedding tables only after the grant migration, and loses the grant on rollback.
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn embedding_tables_tenant_read_grant_is_applied_and_rolled_back() {
+    with_database("embedding_tables_tenant_read", |db| Box::pin(async move {
+        if db.get_database_backend() != DbBackend::Postgres {
+            return;
+        }
+        let through_grant = migrations_through("m20261005_000017_embedding_tables_tenant_read");
+        let can_select = "SELECT COUNT(*) FROM (SELECT 1 WHERE has_table_privilege('yorishiro_app', 'entity_embeddings_768', 'SELECT')) t";
+
+        Migrator::up(db, Some(through_grant - 1))
+            .await
+            .expect("migrations before the grant");
+        assert_eq!(value::<i64>(db, can_select).await, 0, "no grant before the migration");
+
+        Migrator::up(db, Some(through_grant))
+            .await
+            .expect("apply the grant migration");
+        assert_eq!(value::<i64>(db, can_select).await, 1, "SELECT granted");
+        let policies: i64 = value(
+            db,
+            "SELECT COUNT(*) FROM pg_policies WHERE tablename LIKE 'entity_embeddings_%' AND cmd = 'SELECT'",
+        )
+        .await;
+        assert_eq!(policies, 3, "one SELECT policy per width table");
+
+        Migrator::down(db, Some(1))
+            .await
+            .expect("roll back the grant migration");
+        assert_eq!(value::<i64>(db, can_select).await, 0, "grant revoked on rollback");
     }))
     .await;
 }

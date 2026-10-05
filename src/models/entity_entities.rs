@@ -12,6 +12,7 @@ mod migration;
 mod snapshots;
 mod validation;
 
+use crate::models::_entities::entity_entities::Column;
 pub use crate::models::_entities::entity_entities::{ActiveModel, Entity, Model};
 use crate::models::schema_schemas::metaschema;
 
@@ -37,31 +38,55 @@ pub(crate) async fn ids_for_workspace(
 
 /// Reads a single entity with its embedding-sync token.
 ///
-/// Used by the embedding sync worker and tests: it needs the full entity body
-/// plus the token to guard `embed_and_write`'s concurrency check.
+/// Used by the embedding sync worker and the public `sync_embedding_for_record`:
+/// they need the entity body plus the token that guards `embed_and_write`.
 pub(crate) async fn get_with_token(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
     entity_id: Uuid,
 ) -> Result<EmbeddingSnapshot, DbErr> {
-    let row = EmbeddingSnapshot::find_by_statement(Statement::from_sql_and_values(
-        db.get_database_backend(),
-        "SELECT id, schema_id, entity_type, data, embedding_sync_token \
-         FROM entity_entities WHERE id = $1 AND workspace_id = $2",
-        [entity_id.into(), workspace_id.into()],
-    ))
-    .one(db)
-    .await?;
-    row.ok_or(DbErr::RecordNotFound("entity_entities".to_string()))
+    snapshot_select()
+        .filter(Column::Id.eq(entity_id))
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .into_model::<EmbeddingSnapshot>()
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::RecordNotFound(Entity.table_name().to_string()))
 }
 
-/// A token captured alongside an entity snapshot for use in embedding persistence.
+/// Reads the given entities with their embedding-sync tokens, whether or not they already have a vector.
 ///
-/// Carries the `embedding_sync_token` column from `entity_entities` so that
-/// `embed_and_write` can verify the entity was not modified between read and
-/// write. Used internally by the embedding sync worker and `resync_embeddings`
-/// task to read entities with their concurrency token. Not exposed in
-/// `EntityRecord` — embedding code reads it separately.
+/// Used by a full reindex, which re-embeds every entity regardless of existing vectors.
+pub(crate) async fn get_batch_with_tokens(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    ids: &[Uuid],
+) -> Result<Vec<EmbeddingSnapshot>, DbErr> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    snapshot_select()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Id.is_in(ids.iter().copied()))
+        .into_model::<EmbeddingSnapshot>()
+        .all(db)
+        .await
+}
+
+fn snapshot_select() -> Select<Entity> {
+    Entity::find().select_only().columns([
+        Column::Id,
+        Column::SchemaId,
+        Column::EntityType,
+        Column::Data,
+        Column::EmbeddingSyncToken,
+    ])
+}
+
+/// An entity as the embedding code reads it: the fields it embeds plus the concurrency token.
+///
+/// `embed_and_write` stores a vector only while the entity still carries this token.
+/// The token is not part of `EntityRecord`, so it never reaches an API response.
 #[derive(sea_orm::FromQueryResult)]
 pub(crate) struct EmbeddingSnapshot {
     pub id: Uuid,
@@ -78,18 +103,18 @@ pub(crate) async fn missing_embeddings(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<EmbeddingSnapshot>, DbErr> {
+    let embedded = crate::models::entity_embeddings::embedding_tables()
+        .map(|table| format!("SELECT entity_id FROM {table}"))
+        .collect::<Vec<_>>()
+        .join(" UNION ");
     EmbeddingSnapshot::find_by_statement(Statement::from_sql_and_values(
         db.get_database_backend(),
-        "SELECT e.id, e.schema_id, e.entity_type, e.data, e.embedding_sync_token \
-         FROM entity_entities e \
-         LEFT JOIN ( \
-             SELECT entity_id FROM entity_embeddings_768 \
-             UNION \
-             SELECT entity_id FROM entity_embeddings_1024 \
-             UNION \
-             SELECT entity_id FROM entity_embeddings_1536 \
-         ) ee ON ee.entity_id = e.id \
-         WHERE e.workspace_id = $1 AND ee.entity_id IS NULL",
+        format!(
+            "SELECT e.id, e.schema_id, e.entity_type, e.data, e.embedding_sync_token \
+             FROM entity_entities e \
+             LEFT JOIN ({embedded}) ee ON ee.entity_id = e.id \
+             WHERE e.workspace_id = $1 AND ee.entity_id IS NULL"
+        ),
         [workspace_id.into()],
     ))
     .all(db)

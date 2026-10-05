@@ -1,4 +1,4 @@
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, DbErr};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -135,7 +135,12 @@ pub async fn sync_embedding_for_record(
     // without token info, so we need the latest token from the DB to guard embed_and_write.
     let snapshot = entity_entities::get_with_token(conn, workspace_id, record.id)
         .await
-        .map_err(|_| YorishiroError::not_found(format!("entity '{}' was not found", record.id)))?;
+        .map_err(|error| match error {
+            DbErr::RecordNotFound(_) => {
+                YorishiroError::not_found(format!("entity '{}' was not found", record.id))
+            }
+            other => YorishiroError::Internal(other.into()),
+        })?;
 
     sync_embedding_for_snapshot(conn, workspace_id, &snapshot, provider).await
 }

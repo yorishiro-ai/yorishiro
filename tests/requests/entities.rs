@@ -188,7 +188,7 @@ async fn list_entities_with_filter_returns_501_on_sqlite() {
         .await
         .expect("create entity");
 
-        // Query with a filter — should return 501 on SQLite.
+        // Query with a filter: should return 501 on SQLite.
         // The filter parameter is raw JSON; axum deserializes the raw query value
         // directly, so we pass it URL-encoded to avoid query-string parsing issues.
         let response = request

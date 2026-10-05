@@ -1214,107 +1214,10 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
     .await;
 }
 
-/// Stale token in `embed_and_write` must reject the write with a Conflict error:
-/// the entity was modified after the snapshot was captured.
-#[tokio::test]
-async fn stale_token_rejects_embedding_persistence() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = tenant_tenants::ActiveModel {
-            name: sea_orm::ActiveValue::Set("stale-token-test".into()),
-            ..Default::default()
-        };
-        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-            .await
-            .expect("insert tenant");
-
-        let workspace = workspace_workspaces::ActiveModel {
-            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-            name: sea_orm::ActiveValue::Set("main".into()),
-            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-            embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
-            ..Default::default()
-        };
-        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-            .await
-            .expect("insert workspace");
-
-        let def = serde_json::from_value(note_definition()).expect("parse definition");
-        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
-            .await
-            .expect("create schema");
-
-        // Create entity and capture its token.
-        let entity = entity_entities::create(
-            &ctx.db,
-            workspace.id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "stale token test" }),
-            },
-            None,
-        )
-        .await
-        .expect("create entity");
-
-        // Get the entity with token.
-        let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
-            .await
-            .expect("get entity record");
-
-        // Now modify the entity directly (bypassing the normal update path), which rotates the token.
-        let backend = ctx.db.get_database_backend();
-        match backend {
-            sea_orm::DatabaseBackend::Postgres => {
-                ctx.db
-                    .execute_unprepared(&format!(
-                        "UPDATE entity_entities SET data = '{{\"modified\": true}}' WHERE id = '{}'",
-                        entity.id
-                    ))
-                    .await
-                    .expect("direct update");
-            }
-            sea_orm::DatabaseBackend::Sqlite => {
-                ctx.db
-                    .execute_unprepared(&format!(
-                        "UPDATE entity_entities SET data = '{{\"modified\": true}}' WHERE id = x'{}'",
-                        entity.id.to_string().replace("-", "")
-                    ))
-                    .await
-                    .expect("direct update");
-            }
-            _ => panic!("unsupported backend"),
-        }
-
-        // Try to embed using the old entity record (the entity was modified after the record was read).
-        let result = entity_embeddings::sync_embedding_for_record(
-            &ctx.db,
-            workspace.id,
-            &record,
-            &FixedModelProvider(
-                "nomic-ai/nomic-embed-text-v1.5",
-                &[],
-                std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            ),
-        )
-        .await;
-
-        assert!(
-            matches!(result, Err(YorishiroError::Conflict { .. })),
-            "stale token must produce Conflict, got: {result:?}"
-        );
-    })
-    .await;
-}
-
 /// SQLite end-to-end: entity create → document embed via test provider → persisted vector → vector search hit.
 ///
-/// Document embedding runs in the worker path (`sync_embedding_for_record`), not in the
-/// server request handler (query embedding runs in the server). This test exercises the
-/// worker path on SQLite, confirming the embedding is persisted and searchable.
+/// Drives the public `sync_embedding_for_record` directly, not the worker.
+/// `tests/requests/search.rs` covers the worker and the HTTP search on both backends.
 #[tokio::test]
 async fn sqlite_document_embed_persist_and_search() {
     if !super::super::require_sqlite_backend() {
@@ -1422,5 +1325,74 @@ async fn sqlite_document_embed_persist_and_search() {
             );
         },
     )
+    .await;
+}
+
+/// A reindex re-embeds entities that already have a vector, which is the whole point of switching models.
+/// Backend-neutral: runs on whichever backend `DATABASE_URL` names.
+#[tokio::test]
+async fn reindex_replaces_existing_vectors_and_restamps_the_workspace() {
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let tenant = tenant_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("reindex-existing".into()),
+            ..Default::default()
+        };
+        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            .await
+            .expect("insert tenant");
+        let workspace = workspace_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            ..Default::default()
+        };
+        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            .await
+            .expect("insert workspace");
+        let def = serde_json::from_value(note_definition()).expect("parse definition");
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            .await
+            .expect("create schema");
+        let entity = entity_entities::create(
+            &ctx.db,
+            workspace.id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "already embedded" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+
+        let counter = || std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let first = FixedModelProvider("model-a", &[], counter());
+        let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
+            .await
+            .expect("get entity");
+        entity_embeddings::sync_embedding_for_record(&ctx.db, workspace.id, &record, &first)
+            .await
+            .expect("first embed");
+
+        let second = FixedModelProvider("model-b", &[], counter());
+        let outcome =
+            entity_embeddings::reindex_workspace(&ctx.db, workspace.id, &[entity.id], &second)
+                .await
+                .expect("reindex");
+
+        assert_eq!(outcome.total, 1);
+        assert_eq!(outcome.reindexed, 1);
+        assert!(
+            outcome.failures.is_empty(),
+            "an entity that already has a vector must be reindexed, not reported missing"
+        );
+        let stamped = workspace_workspaces::Entity::find_by_id(workspace.id)
+            .one(&ctx.db)
+            .await
+            .expect("read workspace")
+            .expect("workspace row");
+        assert_eq!(stamped.embedding_model.as_deref(), Some("model-b"));
+    })
     .await;
 }

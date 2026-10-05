@@ -34,7 +34,7 @@ pub(super) async fn embed_and_write(
         Vec::new()
     };
 
-    let table_name = format!("entity_embeddings_{}", input.dimension);
+    let table_name = super::embedding_table(input.dimension)?;
     let rows_affected = conn
         .execute_raw(Statement::from_sql_and_values(
             backend,
@@ -102,9 +102,9 @@ pub(super) async fn embed_and_write(
             });
         }
 
-        tracing::debug!(
+        tracing::info!(
             entity_id = %input.entity_id,
-            "embed_and_write: entity was deleted, write skipped"
+            "embed_and_write: entity was deleted, vector not stored"
         );
         return Ok(false);
     }
