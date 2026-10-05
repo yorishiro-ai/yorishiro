@@ -8,6 +8,7 @@ src/models/tenant_memberships.rs	enum	MembershipRole	openapi-transport: membersh
 src/models/tenant_memberships.rs	fn	MembershipRole::max_scope	auth-provider-resolver: role-to-key-scope policy moved with its existing public enum.
 src/models/tenant_memberships.rs	struct	MembershipRecord	openapi-transport: serialized member record moved to the table-owning model.
 src/models/tenant_memberships.rs	field	MembershipRecord::user_id	openapi-transport: serialized member response field.
+src/workers/queue.rs	fn	all_tags	operator-tag-discovery: all_tags() is the authoritative, programmatically derived list of every registered worker tag for systemd units and operator tooling; enterprise tags are derived from ee::app::worker_queues() so tags and queue lists share one source of truth.
 src/models/tenant_memberships.rs	field	MembershipRecord::email	openapi-transport: serialized member response field.
 src/models/tenant_memberships.rs	field	MembershipRecord::display_name	openapi-transport: serialized member response field.
 src/models/tenant_memberships.rs	field	MembershipRecord::role	openapi-transport: serialized member response field.

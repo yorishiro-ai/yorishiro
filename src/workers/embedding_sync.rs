@@ -9,8 +9,8 @@
 //! jobs. Every job this module enqueues carries exactly one tag, so such a process takes none of
 //! them, rather than taking "the leftover ones nothing else claimed".
 //!
-//! Covering every class in one process means naming every tag:
-//! `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill`.
+//! Covering every class in one process can use `yorishiro worker-tags` output piped into
+//! `--worker=...`, or the `worker-wrapper.sh` script that does it automatically at boot.
 //! This all-job command names every currently registered tag, including infer-fill.
 //! There is no wildcard flag, so a new [`WorkerClass`] or job type needs its tag added to those commands by
 //! hand. The matching worker type is caught at compile time by `enqueue_for_class`'s exhaustive

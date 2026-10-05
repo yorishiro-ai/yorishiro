@@ -5,6 +5,7 @@ mod db_enum;
 #[cfg(feature = "enterprise")]
 mod ee;
 mod initializers;
+mod integration;
 
 mod config;
 mod licence;

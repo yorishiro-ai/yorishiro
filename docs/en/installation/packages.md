@@ -21,6 +21,7 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | File | Description |
 |---|---|
 | `/usr/bin/yorishiro` | The binary |
+| `/var/lib/yorishiro/worker-wrapper.sh` | Wrapper that discovers tags at boot |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
 | `/lib/systemd/system/yorishiro-worker.service` | Tagged background worker unit |
 | `/etc/yorishiro/production.yaml` | Editable Loco production configuration |
@@ -58,4 +59,17 @@ $ sudo systemctl status yorishiro-worker
 ```
 
 The worker is a separate unit because Loco 1.2.0 cannot combine `--server-and-worker` with tagged workers.
-It runs the three worker-class tags and `infer-fill`.
+The wrapper script calls `yorishiro worker-tags` at boot to discover every registered worker tag and passes them as a comma-separated list to `start --worker=`, so the list stays correct when new worker classes or job types are added.
+
+## Server-only mode
+
+In server-only mode (`yorishiro start` with no `--worker` flag) the local embedding model is not loaded, which saves memory and startup time.
+Search and recall fail loudly with a helpful error if no external embedding provider (such as `YORISHIRO_EMBEDDING_BASE_URL`) is configured.
+Any mode that dequeues or executes embedding jobs loads the model as before.
+
+## Directory integrity
+
+The state directory `/var/lib/yorishiro` is owned by `root:yorishiro` with mode `1770` (sticky bit + group-writable).
+The `yorishiro` user can create and update state files inside the directory, but cannot replace or rename root-owned files such as `worker-wrapper.sh`.
+This prevents an account compromise from replacing the tag-discovery wrapper with a script that exfiltrates state.
+The sticky bit ensures each user can only remove its own files, even though the directory is group-writable.

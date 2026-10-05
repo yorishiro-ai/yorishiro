@@ -7,6 +7,7 @@ mod embedding_sync;
 mod infer_fill;
 mod queue_routing;
 mod reindex;
+mod tag_discovery;
 
 use loco_rs::app::{AppContext, Hooks};
 use loco_rs::environment::Environment;

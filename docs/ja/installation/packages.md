@@ -21,6 +21,7 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | ファイル | 説明 |
 |---|---|
 | `/usr/bin/yorishiro` | バイナリ |
+| `/var/lib/yorishiro/worker-wrapper.sh` | 起動時にタグを自動検出するラッパースクリプト |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
 | `/lib/systemd/system/yorishiro-worker.service` | タグ付きバックグラウンドワーカーユニット |
 | `/etc/yorishiro/production.yaml` | 編集可能な Loco production 設定 |
@@ -58,4 +59,17 @@ $ sudo systemctl status yorishiro-worker
 ```
 
 Loco 1.2.0では、`--server-and-worker`とタグ付きワーカーを組み合わせられないため、ワーカーは別ユニットで起動します。
-3つのworker-classタグと`infer-fill`を処理します。
+ラッパースクリプトは起動時に `yorishiro worker-tags` を実行して登録済みのすべてのタグを自動検出するため、新しいワーカークラスやジョブタイプが追加されてもリストは常に正しく保たれます。
+
+## サーバーのみのモード
+
+サーバーのみのモード（`--worker` フラグなしで `yorishiro start`）では、ローカル埋め込みモデルがロードされないため、メモリと起動時間を節約できます。
+`YORISHIRO_EMBEDDING_BASE_URL` などの外部埋め込みプロバイダが設定されていない場合、検索とリコールはヘルプ付きのエラーで明示的に失敗します。
+エンベッディングジョブをデキューまたは実行するすべてのモードでは、従来どおりモデルがロードされます。
+
+## ディレクトリの整合性
+
+状態ディレクトリ `/var/lib/yorishiro` の所有者は `root:yorishiro`、モード `1770`（sticky bit + グループ書込可能）です。
+`yorishiro` ユーザはディレクトリ内で状態ファイルの作成・更新ができますが、`worker-wrapper.sh` などの root 所有ファイルの置き換えや名前変更はできません。
+これにより、アカウント侵害時に状態の漏洩を目的としたラッパースクリプトへの置き換えが防止されます。
+sticky bit により、ディレクトリが書込可能でも各ユーザは自分のファイルしか削除できません。

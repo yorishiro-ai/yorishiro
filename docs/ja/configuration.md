@@ -164,11 +164,14 @@ Yorishiro は既定ではメールを送信しません。
 `ForegroundBlocking` と `BackgroundAsync` は設定読み込み時とアプリケーション起動時に拒否されます。
 
 HTTP サーバとワーカーは別プロセスで起動します。
-すべてのジョブを処理するワーカーは次のコマンドです。
+すべてのジョブを処理するワーカーのコマンドは、デプロイ方法によって異なります：
 
-```
-cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
-```
+- **パッケージベースのデプロイ（推奨）：** `/var/lib/yorishiro/worker-wrapper.sh` にインストールされたラッパースクリプトを使用します。
+  起動時にすべての登録済みタグを自動検出します。systemd ユニット `yorishiro-worker.service` がこのパスを使用します。
+
+- **ソースまたは Docker デプロイ：** `cargo loco start --worker="$(cargo loco worker-tags)"`
+  （ソース）または Docker イメージ内の `/var/lib/yorishiro/worker-wrapper.sh`（ラッパースクリプトをコピー済み）を使用します。
+  どちらもタグをプログラマティックに検出し、新しいワーカークラスやジョブタイプが追加された場合にも自動的に追従します。
 
 特定の埋め込み・再インデックス対象グループだけを処理する場合は、プールごとに起動します。
 
