@@ -1,6 +1,7 @@
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
+use sea_orm::{ConnectionTrait, DatabaseBackend};
 use uuid::Uuid;
 
 use super::validation::{resolve_entity_type, validate_data};
@@ -214,6 +215,8 @@ pub async fn delete(
 
 /// `query.filter` (JSONB containment, `data @> filter`) is the one condition here `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated to Postgres's `@>` operator), so it's built with `sea_query::extension::postgres::PgExpr::contains`, the builder for `PgBinOper::Contains`, instead of a raw SQL string.
 ///
+/// SQLite does not support this filter (`BackendUnsupported` is returned) because `data` is stored as `TEXT` and the JSONB containment operator is a PostgreSQL-specific feature.
+///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn list(
@@ -230,6 +233,11 @@ pub async fn list(
         select = select.filter(Column::EntityType.eq(entity_type));
     }
     if let Some(filter) = query.filter {
+        if conn.get_database_backend() == DatabaseBackend::Sqlite {
+            return Err(YorishiroError::BackendUnsupported {
+                message: "entity filter (JSONB containment) is not supported on SQLite".to_string(),
+            });
+        }
         select = select.filter(Expr::col(Column::Data).contains(Expr::val(filter)));
     }
     if let Some(schema_version) = query.schema_version {

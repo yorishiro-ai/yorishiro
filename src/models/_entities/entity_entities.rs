@@ -3,7 +3,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "entity_entities")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -19,6 +19,9 @@ pub struct Model {
     pub updated_by: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(column_type = "Text")]
+    #[serde(skip_serializing)]
+    pub embedding_sync_token: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

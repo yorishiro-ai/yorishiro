@@ -745,3 +745,236 @@ async fn queue_starvation_index_matches_admission_predicate() {
     }))
     .await;
 }
+
+/// The embedding-sync token column is present, non-empty, and rotates on every write.
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn embedding_sync_token_initializes_on_insert_and_rotates_on_update() {
+    with_database("embedding_sync_token", |db| Box::pin(async move {
+        let through_token =
+            migrations_through("m20261005_000016_add_entity_embedding_sync_token");
+        // Apply through the migration before the token column.
+        Migrator::up(db, Some(through_token - 1))
+            .await
+            .expect("migrations before token");
+
+        let tenant = id(db, TENANT);
+        let user = id(db, USER);
+        let workspace = id(db, WORKSPACE);
+        let schema = id(db, SCHEMA);
+        let entity = id(db, ENTITY);
+
+        // Create base tables needed for the entity (same order as seed_initial_rows).
+        for sql in [
+            format!("INSERT INTO tenant_tenants (id, name) VALUES ({tenant}, 'token-test')"),
+            format!("INSERT INTO user_users (id, email, password_hash) VALUES ({user}, 'token@example.test', 'hash')"),
+            format!("INSERT INTO workspace_workspaces (id, tenant_id, name, status) VALUES ({workspace}, {tenant}, 'token-workspace', 'active')"),
+            format!("INSERT INTO schema_schemas (id, tenant_id, workspace_id, name, version, definition) VALUES ({schema}, {tenant}, {workspace}, 'token-schema', 1, '{{}}')"),
+            format!("UPDATE workspace_workspaces SET schema_id = {schema} WHERE id = {workspace}"),
+        ] {
+            execute(db, sql).await;
+        }
+
+        // Apply the token migration.
+        Migrator::up(db, Some(through_token))
+            .await
+            .expect("apply token migration");
+
+        // After the migration, the column exists and is non-null.
+        match db.get_database_backend() {
+            DbBackend::Sqlite => {
+                let col_exists: i64 = value(
+                    db,
+                    "SELECT COUNT(*) FROM pragma_table_info('entity_entities') WHERE name = 'embedding_sync_token'",
+                )
+                .await;
+                assert_eq!(col_exists, 1, "token column must exist on SQLite");
+            }
+            DbBackend::Postgres => {
+                let col_exists: i64 = value(
+                    db,
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'entity_entities' AND column_name = 'embedding_sync_token'",
+                )
+                .await;
+                assert_eq!(col_exists, 1, "token column must exist on Postgres");
+            }
+            backend => panic!("unsupported backend: {backend:?}"),
+        }
+
+        // Insert a new entity: the triggers must generate a non-empty token.
+        execute(
+            db,
+            format!(
+                "INSERT INTO entity_entities (id, workspace_id, schema_id, schema_version, entity_type, data, created_by) VALUES ({entity}, {workspace}, {schema}, 1, 'doc', '{{}}', {user})"
+            ),
+        )
+        .await;
+
+        // Verify the token is non-empty and non-default.
+        let token: String = value(
+            db,
+            format!("SELECT embedding_sync_token FROM entity_entities WHERE id = {entity}"),
+        )
+        .await;
+        assert!(
+            !token.is_empty(),
+            "new entity must have a non-empty token"
+        );
+        if db.get_database_backend() == DbBackend::Postgres {
+            assert_ne!(
+                token, "00000000-0000-0000-0000-000000000000",
+                "token must not be the default zero UUID"
+            );
+        }
+
+        // Update the entity: the UPDATE trigger must rotate the token.
+        // On SQLite the AFTER UPDATE trigger with INSERT OR REPLACE handles
+        // raw SQL UPDATEs; on PostgreSQL the BEFORE UPDATE trigger does.
+        let token_before: String = value(
+            db,
+            format!("SELECT embedding_sync_token FROM entity_entities WHERE id = {entity}"),
+        )
+        .await;
+
+        execute(
+            db,
+            format!(
+                "UPDATE entity_entities SET data = '{{\"updated\": true}}' WHERE id = {entity}"
+            ),
+        )
+        .await;
+
+        let token_after: String = value(
+            db,
+            format!("SELECT embedding_sync_token FROM entity_entities WHERE id = {entity}"),
+        )
+        .await;
+        assert_ne!(
+            token_after, token_before,
+            "UPDATE must rotate the token"
+        );
+    }))
+    .await;
+}
+
+/// Roll back the token migration and verify triggers/columns are cleaned up.
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn embedding_sync_token_migration_down_removes_column_and_triggers() {
+    with_database("embedding_sync_token_down", |db| Box::pin(async move {
+        let through_token =
+            migrations_through("m20261005_000016_add_entity_embedding_sync_token");
+
+        // Apply through token migration.
+        Migrator::up(db, Some(through_token))
+            .await
+            .expect("apply token migration");
+
+        // Roll back exactly through this migration.
+        Migrator::down(db, Some(1))
+            .await
+            .expect("roll back token migration");
+
+        // Column must be gone.
+        match db.get_database_backend() {
+            DbBackend::Sqlite => {
+                let col_exists: i64 = value(
+                    db,
+                    "SELECT COUNT(*) FROM pragma_table_info('entity_entities') WHERE name = 'embedding_sync_token'",
+                )
+                .await;
+                assert_eq!(col_exists, 0, "token column must be dropped on SQLite");
+            }
+            DbBackend::Postgres => {
+                let col_exists: i64 = value(
+                    db,
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'entity_entities' AND column_name = 'embedding_sync_token'",
+                )
+                .await;
+                assert_eq!(col_exists, 0, "token column must be dropped on Postgres");
+            }
+            backend => panic!("unsupported backend: {backend:?}"),
+        }
+
+        if db.get_database_backend() == DbBackend::Sqlite {
+            let matching: i64 = value(
+                db,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'entity_fts_au' AND sql LIKE '%AFTER UPDATE ON entity_entities%'",
+            )
+            .await;
+            assert_eq!(matching, 1, "rollback must restore the original entity_fts_au trigger");
+        }
+        // Re-apply: must succeed cleanly because the triggers are created fresh.
+        Migrator::up(db, Some(through_token))
+            .await
+            .expect("reapply token migration");
+        if db.get_database_backend() == DbBackend::Sqlite {
+            let matching: i64 = value(
+                db,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'entity_fts_au' AND sql LIKE '%AFTER UPDATE OF data ON entity_entities%'",
+            )
+            .await;
+            assert_eq!(matching, 1, "reapply must narrow entity_fts_au to data updates");
+        }
+
+        // Column must exist again.
+        match db.get_database_backend() {
+            DbBackend::Sqlite => {
+                let col_exists: i64 = value(
+                    db,
+                    "SELECT COUNT(*) FROM pragma_table_info('entity_entities') WHERE name = 'embedding_sync_token'",
+                )
+                .await;
+                assert_eq!(col_exists, 1, "token column must exist after reapply");
+            }
+            DbBackend::Postgres => {
+                let col_exists: i64 = value(
+                    db,
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'entity_entities' AND column_name = 'embedding_sync_token'",
+                )
+                .await;
+                assert_eq!(col_exists, 1, "token column must exist after reapply");
+            }
+            backend => panic!("unsupported backend: {backend:?}"),
+        }
+    }))
+    .await;
+}
+
+/// The tenant-scoped role reads the embedding tables only after the grant migration, and loses the grant on rollback.
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn embedding_tables_tenant_read_grant_is_applied_and_rolled_back() {
+    with_database("embedding_tables_tenant_read", |db| Box::pin(async move {
+        if db.get_database_backend() != DbBackend::Postgres {
+            return;
+        }
+        let through_grant = migrations_through("m20261005_000017_embedding_tables_tenant_read");
+        let can_select = "SELECT COUNT(*) FROM (SELECT 1 WHERE has_table_privilege('yorishiro_app', 'entity_embeddings_768', 'SELECT')) t";
+
+        Migrator::up(db, Some(through_grant - 1))
+            .await
+            .expect("migrations before the grant");
+        assert_eq!(value::<i64>(db, can_select).await, 0, "no grant before the migration");
+
+        Migrator::up(db, Some(through_grant))
+            .await
+            .expect("apply the grant migration");
+        assert_eq!(value::<i64>(db, can_select).await, 1, "SELECT granted");
+        let policies: i64 = value(
+            db,
+            "SELECT COUNT(*) FROM pg_policies WHERE tablename LIKE 'entity_embeddings_%' AND cmd = 'SELECT'",
+        )
+        .await;
+        assert_eq!(policies, 3, "one SELECT policy per width table");
+
+        Migrator::down(db, Some(1))
+            .await
+            .expect("roll back the grant migration");
+        assert_eq!(value::<i64>(db, can_select).await, 0, "grant revoked on rollback");
+    }))
+    .await;
+}

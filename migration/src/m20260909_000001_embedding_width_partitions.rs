@@ -24,10 +24,10 @@ use sea_orm_migration::sea_orm::DbBackend;
 /// A table for a width that no workspace uses is harmless: it is simply
 /// never queried, and only occupies negligible catalog metadata.
 /// When a deployment needs a new width, the helper below creates the table.
-const WIDTHS: &[i32] = &[768, 1024, 1536];
+pub(crate) const WIDTHS: &[i32] = &[768, 1024, 1536];
 
 /// The table name for a given width.
-fn table_name(width: i32) -> String {
+pub(crate) fn table_name(width: i32) -> String {
     format!("entity_embeddings_{width}")
 }
 

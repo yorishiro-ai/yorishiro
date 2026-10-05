@@ -122,13 +122,6 @@ pub struct UnconfiguredEmbeddingProvider {
     remedy: &'static str,
 }
 
-impl UnconfiguredEmbeddingProvider {
-    /// Returns a new no-op provider that always errors with `remedy` as guidance.
-    pub(crate) fn new(dimensions: usize, remedy: &'static str) -> Self {
-        Self { dimensions, remedy }
-    }
-}
-
 #[async_trait]
 impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
     fn dimensions(&self) -> usize {

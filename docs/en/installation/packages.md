@@ -61,12 +61,6 @@ $ sudo systemctl status yorishiro-worker
 The worker is a separate unit because Loco 1.2.0 cannot combine `--server-and-worker` with tagged workers.
 The wrapper script calls `yorishiro worker-tags` at boot to discover every registered worker tag and passes them as a comma-separated list to `start --worker=`, so the list stays correct when new worker classes or job types are added.
 
-## Server-only mode
-
-In server-only mode (`yorishiro start` with no `--worker` flag) the local embedding model is not loaded, which saves memory and startup time.
-Search and recall fail loudly with a helpful error if no external embedding provider (such as `YORISHIRO_EMBEDDING_BASE_URL`) is configured.
-Any mode that dequeues or executes embedding jobs loads the model as before.
-
 ## Directory integrity
 
 The state directory `/var/lib/yorishiro` is owned by `root:yorishiro` with mode `1770` (sticky bit + group-writable).

@@ -61,7 +61,7 @@ impl Task for ResyncEmbeddings {
         let mut synced = 0;
         let mut failed = 0;
         for candidate in &candidates {
-            let result = entity_embeddings::sync_embedding_for_record(
+            let result = entity_embeddings::sync_embedding_for_snapshot(
                 &app_context.db,
                 workspace_id,
                 candidate,

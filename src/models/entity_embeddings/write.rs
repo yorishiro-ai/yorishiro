@@ -1,8 +1,10 @@
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, DbErr};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
+use crate::models::entity_entities;
+use crate::models::entity_entities::EmbeddingSnapshot;
 use crate::models::entity_entities::EntityRecord;
 use crate::models::schema_schemas::metaschema::EntityTypeDef;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
@@ -32,7 +34,7 @@ pub(super) fn compose_embedding_text(
 async fn sync_embedding(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    record: &EntityRecord,
+    record: &EmbeddingSnapshot,
     entity_type_def: &EntityTypeDef,
     provider: &dyn EmbeddingProvider,
 ) -> Result<(), YorishiroError> {
@@ -88,7 +90,7 @@ async fn sync_embedding(
         VectorWriteInput {
             workspace_id,
             entity_id: record.id,
-            snapshot_updated_at: record.updated_at,
+            embedding_sync_token: record.embedding_sync_token.clone(),
             vector,
             dimension: expected_dimensions as usize,
         },
@@ -116,12 +118,45 @@ async fn sync_embedding(
 
 /// Resolves the schema definition for an entity record and synchronizes its embedding.
 ///
+/// Accepts an `EntityRecord` (the original public type) so the public API shape is preserved
+/// and the concurrency token never leaks into `EntityRecord`.  Behind the scenes this re-reads
+/// the current `EmbeddingSnapshot` to pick up the latest concurrency token, then delegates to
+/// the private `sync_embedding_for_snapshot`.
+///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn sync_embedding_for_record(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     record: &EntityRecord,
+    provider: &dyn EmbeddingProvider,
+) -> Result<(), YorishiroError> {
+    // Re-read the full snapshot with the current token: the caller has an EntityRecord
+    // without token info, so we need the latest token from the DB to guard embed_and_write.
+    let snapshot = entity_entities::get_with_token(conn, workspace_id, record.id)
+        .await
+        .map_err(|error| match error {
+            DbErr::RecordNotFound(_) => {
+                YorishiroError::not_found(format!("entity '{}' was not found", record.id))
+            }
+            other => YorishiroError::Internal(other.into()),
+        })?;
+
+    sync_embedding_for_snapshot(conn, workspace_id, &snapshot, provider).await
+}
+
+/// Resolves the schema definition for an entity snapshot and synchronizes its embedding.
+///
+/// This is the private entry point used by the embedding sync worker and `resync_embeddings`
+/// task after their own atomic snapshot read (which already includes the concurrency token).
+/// The public `sync_embedding_for_record` wraps this after re-reading the snapshot.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub(crate) async fn sync_embedding_for_snapshot(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    record: &EmbeddingSnapshot,
     provider: &dyn EmbeddingProvider,
 ) -> Result<(), YorishiroError> {
     let schema =

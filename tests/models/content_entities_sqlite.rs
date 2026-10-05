@@ -173,3 +173,107 @@ async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
         .expect("get after undo");
     assert_eq!(restored.data["title"], "restored");
 }
+
+/// A JSONB containment filter on `list()` must return `BackendUnsupported` on SQLite,
+/// because the column is `TEXT` there and the JSONB `@>` operator is PostgreSQL-only.
+#[tokio::test]
+async fn entity_list_filter_returns_backend_unsupported_on_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let (db, workspace_id) = seeded_sqlite_db().await;
+
+    entity_entities::create(
+        &db,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "notes".into(),
+            entity_type: "note".into(),
+            data: serde_json::json!({"status": "active"}),
+        },
+        None,
+    )
+    .await
+    .expect("create entity");
+
+    let result = entity_entities::list(
+        &db,
+        workspace_id,
+        ListEntitiesQuery {
+            filter: Some(serde_json::json!({"status": "active"})),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert!(
+        matches!(
+            result,
+            Err(yorishiro::error::YorishiroError::BackendUnsupported { .. })
+        ),
+        "JSONB filter on SQLite must return BackendUnsupported, got: {result:?}"
+    );
+}
+
+/// The database holds one entity, so every FTS row belongs to it.
+async fn fts_rows(db: &sea_orm::DatabaseConnection) -> i64 {
+    use sea_orm::{FromQueryResult, Statement};
+    #[derive(FromQueryResult)]
+    struct Count {
+        n: i64,
+    }
+    Count::find_by_statement(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Sqlite,
+        "SELECT COUNT(*) AS n FROM entity_fts",
+        [],
+    ))
+    .one(db)
+    .await
+    .expect("count FTS rows")
+    .expect("count row")
+    .n
+}
+
+/// The token triggers update the row they just wrote.
+/// That nested update must not reach `entity_fts_au`, or every entity would be indexed twice.
+#[tokio::test]
+async fn token_rotation_does_not_duplicate_fts_rows_on_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let (db, workspace_id) = seeded_sqlite_db().await;
+    let created = entity_entities::create(
+        &db,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "notes".into(),
+            entity_type: "note".into(),
+            data: serde_json::json!({"title": "first"}),
+        },
+        None,
+    )
+    .await
+    .expect("create");
+    assert_eq!(fts_rows(&db).await, 1, "one row after insert");
+
+    entity_entities::update(
+        &db,
+        workspace_id,
+        entity_entities::UpdateEntityInput {
+            id: created.id,
+            data: serde_json::json!({"title": "second"}),
+            updated_by: None,
+        },
+    )
+    .await
+    .expect("update");
+    assert_eq!(fts_rows(&db).await, 1, "one row after a data update");
+
+    db.execute_unprepared(&format!(
+        "UPDATE entity_entities SET updated_by = NULL WHERE id = X'{}'",
+        created.id.simple()
+    ))
+    .await
+    .expect("update a column other than data");
+    assert_eq!(fts_rows(&db).await, 1, "one row after a non-data update");
+}

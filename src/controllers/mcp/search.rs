@@ -82,6 +82,15 @@ impl YorishiroMcpServer {
 
         let workspace_id = auth_ctx.workspace_id;
 
+        // Resolved on the identity pool: the tenant-scoped role cannot read `tenant_tenants`, which the embedding chain joins.
+        let embed_table =
+            match search::resolve_query_table(&self.app_context().db, workspace_id, vector.len())
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
+
         // A read-only transaction, same as `Authorized`'s: dropped without committing when this returns, which is a no-op since nothing was written.
         let txn = if self.app_context().db.get_database_backend()
             == sea_orm::DatabaseBackend::Sqlite
@@ -106,13 +115,19 @@ impl YorishiroMcpServer {
             }
         };
 
-        let hits =
-            match search::search_by_vector(&txn, workspace_id, vector, &args.query_text, query)
-                .await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let hits = match search::search_in_table(
+            &txn,
+            workspace_id,
+            vector,
+            &args.query_text,
+            query,
+            embed_table,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(hits)
     }
 }
