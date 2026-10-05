@@ -2,7 +2,7 @@ use sea_orm::ConnectionTrait;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::entity_entities::EntityRecord;
+use crate::models::entity_entities::EmbeddingSnapshot;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
@@ -30,7 +30,7 @@ pub struct ReindexOutcome {
 async fn reindex_embedding_for_record(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    record: &EntityRecord,
+    record: &EmbeddingSnapshot,
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexStep, YorishiroError> {
     let schema =
@@ -50,22 +50,21 @@ async fn reindex_embedding_for_record(
         return Ok(ReindexStep::NothingToEmbed);
     };
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
-    let written = embed_and_write(
+    match embed_and_write(
         conn,
         VectorWriteInput {
             workspace_id,
             entity_id: record.id,
-            snapshot_updated_at: record.updated_at,
+            embedding_sync_token: record.embedding_sync_token.clone(),
             vector,
             dimension: provider.dimensions(),
         },
     )
-    .await?;
-    Ok(if written {
-        ReindexStep::Reindexed
-    } else {
-        ReindexStep::ConcurrentlyModified
-    })
+    .await?
+    {
+        true => Ok(ReindexStep::Reindexed),
+        false => Ok(ReindexStep::ConcurrentlyModified),
+    }
 }
 
 /// Re-embeds every candidate entity and restamps the workspace after full success.
@@ -78,9 +77,11 @@ pub async fn reindex_workspace(
     candidate_ids: &[Uuid],
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
-    let records = crate::models::entity_entities::get_batch(conn, workspace_id, candidate_ids)
+    let records = crate::models::entity_entities::missing_embeddings(conn, workspace_id)
         .await
         .internal()?;
+
+    let records: std::collections::HashMap<_, _> = records.into_iter().map(|r| (r.id, r)).collect();
 
     let mut reindexed = 0;
     let mut failures = Vec::new();

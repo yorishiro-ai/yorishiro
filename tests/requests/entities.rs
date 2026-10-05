@@ -142,3 +142,70 @@ async fn undo_an_unknown_job_is_refused() {
     })
     .await;
 }
+
+/// JSONB containment filter on `GET /api/entities?filter=...` must return HTTP 501
+/// (`BackendUnsupported`) on SQLite, because the column is `TEXT` there and the
+/// JSONB `@>` operator is PostgreSQL-only.
+///
+/// The model layer returns `YorishiroError::BackendUnsupported`, which the controller
+/// renders as HTTP 501 with code `backend_unsupported`.
+#[tokio::test]
+async fn list_entities_with_filter_returns_501_on_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = setup(&ctx).await;
+
+        let definition = serde_json::from_value(serde_json::json!({
+            "name": "note",
+            "entity_types": {
+                "note": { "fields": { "title": { "type": "string", "required": true } } }
+            }
+        }))
+        .expect("parse definition");
+        schema_schemas::create_schema(
+            &ctx.db,
+            setup.tenant_id,
+            setup.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .expect("create schema");
+
+        entity_entities::create(
+            &ctx.db,
+            setup.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "test", "status": "active" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+
+        // Query with a filter — should return 501 on SQLite.
+        // The filter parameter is raw JSON; axum deserializes the raw query value
+        // directly, so we pass it URL-encoded to avoid query-string parsing issues.
+        let response = request
+            .get("/api/entities?filter=%7B%22status%22:%22active%22%7D")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            501,
+            "filter query on SQLite must return 501, response: {:?}",
+            response.text()
+        );
+        let body: serde_json::Value = response.json();
+        assert_eq!(
+            body["error"]["code"], "backend_unsupported",
+            "response must have backend_unsupported code, body: {body}"
+        );
+    })
+    .await;
+}

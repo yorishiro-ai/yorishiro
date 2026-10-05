@@ -217,13 +217,16 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
         )
         .await
         .expect("create entity");
+        let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
+            .await
+            .expect("get entity record");
 
         let mismatched_provider = FixedWidthProvider(1024);
         let result =
             entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
-                &entity,
+                &record,
                 &mismatched_provider,
             )
             .await;
@@ -348,6 +351,9 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
         )
         .await
         .expect("create entity");
+        let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
+            .await
+            .expect("get entity record");
 
         let mismatched_provider = FixedModelProvider(
             "intfloat/multilingual-e5-base",
@@ -358,7 +364,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
-                &entity,
+                &record,
                 &mismatched_provider,
             )
             .await;
@@ -437,6 +443,9 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         )
         .await
         .expect("create entity");
+        let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
+            .await
+            .expect("get entity record");
 
         // The tenant is stamped with nomic-embed-text-v1.5, so the effective model must be that.
         // Using the same model provider should succeed.
@@ -449,7 +458,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
-                &entity,
+                &record,
                 &matching_provider,
             )
             .await;
@@ -486,6 +495,9 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         )
         .await
         .expect("create second entity");
+        let record2 = entity_entities::get(&ctx.db, workspace.id, entity2.id)
+            .await
+            .expect("get entity record");
 
         let mismatched_provider = FixedModelProvider(
             "intfloat/multilingual-e5-base",
@@ -496,7 +508,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
-                &entity2,
+                &record2,
                 &mismatched_provider,
             )
             .await;
@@ -556,12 +568,14 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         )
         .await
         .expect("create entity");
-
+        let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
+            .await
+            .expect("get entity record");
         // Provider is 768-dimensional, not the workspace's 1024: the dimension check fires
         // first and rejects the write before the model check is reached.
         let provider = FixedWidthProvider(768);
         let result =
-            entity_embeddings::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &provider)
+            entity_embeddings::sync_embedding_for_record(&ctx.db, workspace.id, &record, &provider)
                 .await;
 
         assert!(
@@ -856,15 +870,13 @@ async fn reindex_overwrites_existing_entity_embeddings() {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         for entity in [&e1, &e2] {
-            let entity_record = entity_entities::Entity::find_by_id(entity.id)
-                .one(&ctx.db)
+            let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
                 .await
-                .expect("find entity")
-                .expect("entity exists");
+                .expect("get entity record");
             entity_embeddings::sync_embedding_for_record(
                 &ctx.db,
                 workspace.id,
-                &entity_record.into(),
+                &record,
                 &old_provider,
             )
             .await
@@ -1197,6 +1209,217 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 
             let after_delete = entity_entities::get(&ctx.db, workspace_id, matching.id).await;
             assert!(after_delete.is_err(), "deleted entity must not be found");
+        },
+    )
+    .await;
+}
+
+/// Stale token in `embed_and_write` must reject the write with a Conflict error:
+/// the entity was modified after the snapshot was captured.
+#[tokio::test]
+async fn stale_token_rejects_embedding_persistence() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let tenant = tenant_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("stale-token-test".into()),
+            ..Default::default()
+        };
+        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            .await
+            .expect("insert tenant");
+
+        let workspace = workspace_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
+            ..Default::default()
+        };
+        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            .await
+            .expect("insert workspace");
+
+        let def = serde_json::from_value(note_definition()).expect("parse definition");
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            .await
+            .expect("create schema");
+
+        // Create entity and capture its token.
+        let entity = entity_entities::create(
+            &ctx.db,
+            workspace.id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "stale token test" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+
+        // Get the entity with token.
+        let record = entity_entities::get(&ctx.db, workspace.id, entity.id)
+            .await
+            .expect("get entity record");
+
+        // Now modify the entity directly (bypassing the normal update path), which rotates the token.
+        let backend = ctx.db.get_database_backend();
+        match backend {
+            sea_orm::DatabaseBackend::Postgres => {
+                ctx.db
+                    .execute_unprepared(&format!(
+                        "UPDATE entity_entities SET data = '{{\"modified\": true}}' WHERE id = '{}'",
+                        entity.id
+                    ))
+                    .await
+                    .expect("direct update");
+            }
+            sea_orm::DatabaseBackend::Sqlite => {
+                ctx.db
+                    .execute_unprepared(&format!(
+                        "UPDATE entity_entities SET data = '{{\"modified\": true}}' WHERE id = x'{}'",
+                        entity.id.to_string().replace("-", "")
+                    ))
+                    .await
+                    .expect("direct update");
+            }
+            _ => panic!("unsupported backend"),
+        }
+
+        // Try to embed using the old entity record (the entity was modified after the record was read).
+        let result = entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            workspace.id,
+            &record,
+            &FixedModelProvider(
+                "nomic-ai/nomic-embed-text-v1.5",
+                &[],
+                std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            ),
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(YorishiroError::Conflict { .. })),
+            "stale token must produce Conflict, got: {result:?}"
+        );
+    })
+    .await;
+}
+
+/// SQLite end-to-end: entity create → document embed via test provider → persisted vector → vector search hit.
+///
+/// Document embedding runs in the worker path (`sync_embedding_for_record`), not in the
+/// server request handler (query embedding runs in the server). This test exercises the
+/// worker path on SQLite, confirming the embedding is persisted and searchable.
+#[tokio::test]
+async fn sqlite_document_embed_persist_and_search() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir
+        .path()
+        .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
+    let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
+    crate::requests::boot_request_sqlite::<App, _, _>(
+        db_path.clone(),
+        |_request, ctx| async move {
+            let tenant = tenant_tenants::ActiveModel {
+                name: sea_orm::ActiveValue::Set("embed-e2e-test".into()),
+                ..Default::default()
+            };
+            let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+                .await
+                .expect("insert tenant");
+            let tenant_id = tenant.id;
+
+            let workspace = workspace_workspaces::ActiveModel {
+                tenant_id: sea_orm::ActiveValue::Set(tenant_id),
+                name: sea_orm::ActiveValue::Set("main".into()),
+                status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+                ..Default::default()
+            };
+            let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+                .await
+                .expect("insert workspace");
+            let workspace_id = workspace.id;
+
+            let def = serde_json::from_value(note_definition()).expect("parse definition");
+            schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
+                .await
+                .expect("create schema");
+
+            // Create entity to embed.
+            let entity = entity_entities::create(
+                &ctx.db,
+                workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({ "title": "quarterly roadmap review" }),
+                },
+                None,
+            )
+            .await
+            .expect("create entity");
+
+            // Embed via the worker path using a test provider.
+            let record = entity_entities::get(&ctx.db, workspace_id, entity.id)
+                .await
+                .expect("get entity record");
+            let provider = FixedModelProvider(
+                "test-model",
+                &[],
+                std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            );
+            entity_embeddings::sync_embedding_for_record(
+                &ctx.db,
+                workspace_id,
+                &record,
+                &provider,
+            )
+            .await
+            .expect("embed entity");
+
+            // Verify the embedding was written to the width-specific table.
+            let has_embedding: Option<bool> = {
+                #[derive(sea_orm::FromQueryResult)]
+                struct Row {
+                    has_embedding: bool,
+                }
+                Row::find_by_statement(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = ?",
+                    [entity.id.into()],
+                ))
+                .one(&ctx.db)
+                .await
+                .expect("query embedding")
+                .map(|r| r.has_embedding)
+            };
+            assert_eq!(has_embedding, Some(true), "embedding must have been written");
+
+            // Search by vector should find the entity.
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace_id,
+                provider.vector(),
+                "quarterly roadmap",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector");
+            assert_eq!(hits.len(), 1, "vector search must find the embedded entity, hits: {hits:?}");
+            assert_eq!(hits[0].entity.id, entity.id);
+            assert!(
+                hits[0].distance.is_some(),
+                "vector hit must have a distance"
+            );
         },
     )
     .await;

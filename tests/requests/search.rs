@@ -1,11 +1,15 @@
 use super::boot_request;
+use async_trait::async_trait;
 use axum::http::StatusCode;
 use serial_test::serial;
+use std::sync::{Arc, Mutex};
 use yorishiro::app::App;
+use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
 
 struct Setup {
     read_key: String,
@@ -55,6 +59,58 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     .expect("issue read key")
     .plaintext;
     Setup { read_key }
+}
+
+struct RecordingProvider {
+    kinds: Arc<Mutex<Vec<EmbedKind>>>,
+}
+
+#[async_trait]
+impl EmbeddingProvider for RecordingProvider {
+    fn dimensions(&self) -> usize {
+        768
+    }
+
+    fn model_name(&self) -> String {
+        "recording-provider".into()
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+        Ok(texts.iter().map(|_| vec![0.0; 768]).collect())
+    }
+
+    async fn embed_as(&self, kind: EmbedKind, _text: &str) -> Result<Vec<f32>, YorishiroError> {
+        self.kinds.lock().unwrap().push(kind);
+        Ok(vec![0.0; 768])
+    }
+}
+
+#[tokio::test]
+async fn search_embeds_the_query_synchronously_as_query_kind() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let Setup { read_key } = setup(&ctx).await;
+        let kinds = Arc::new(Mutex::new(Vec::new()));
+        ctx.shared_store.insert(Arc::new(RecordingProvider {
+            kinds: kinds.clone(),
+        }) as Arc<dyn EmbeddingProvider>);
+
+        let response = request
+            .get("/api/search?query_text=hello")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+
+        assert_eq!(
+            response.status_code(),
+            StatusCode::OK,
+            "{}",
+            response.text()
+        );
+        assert!(
+            kinds.lock().unwrap().as_slice() == [EmbedKind::Query],
+            "search must make exactly one query embedding call"
+        );
+    })
+    .await;
 }
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=none` forces `build_embedding_provider` to return `UnconfiguredEmbeddingProvider` regardless of cached model files, so any actual search attempt surfaces as 502, not a panic or a silent empty result.

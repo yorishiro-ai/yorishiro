@@ -173,3 +173,44 @@ async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
         .expect("get after undo");
     assert_eq!(restored.data["title"], "restored");
 }
+
+/// A JSONB containment filter on `list()` must return `BackendUnsupported` on SQLite,
+/// because the column is `TEXT` there and the JSONB `@>` operator is PostgreSQL-only.
+#[tokio::test]
+async fn entity_list_filter_returns_backend_unsupported_on_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let (db, workspace_id) = seeded_sqlite_db().await;
+
+    entity_entities::create(
+        &db,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "notes".into(),
+            entity_type: "note".into(),
+            data: serde_json::json!({"status": "active"}),
+        },
+        None,
+    )
+    .await
+    .expect("create entity");
+
+    let result = entity_entities::list(
+        &db,
+        workspace_id,
+        ListEntitiesQuery {
+            filter: Some(serde_json::json!({"status": "active"})),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert!(
+        matches!(
+            result,
+            Err(yorishiro::error::YorishiroError::BackendUnsupported { .. })
+        ),
+        "JSONB filter on SQLite must return BackendUnsupported, got: {result:?}"
+    );
+}

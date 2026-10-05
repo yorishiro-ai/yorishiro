@@ -7,6 +7,11 @@
 //! or trigram (SQLite FTS5 `tokenize='trigram'`) fallback for entities with no embedding at
 //! all.  Both backends therefore use character-n-gram fuzzy matching for the fallback path.
 //! The two halves are merged in Rust.
+//!
+//! Embedding generation follows two paths: document embedding is asynchronous — the embedding
+//! sync worker (`workers::embedding_sync`) generates and stores vectors after entity writes —
+//! while query embedding is synchronous (`embed_query` is called in the request handler, before
+//! any DB connection is acquired, to avoid holding connections during the external API call).
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::Serialize;

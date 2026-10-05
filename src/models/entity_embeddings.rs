@@ -14,6 +14,7 @@ mod write;
 pub use reindex::{ReindexFailure, ReindexOutcome, reindex_workspace};
 pub(crate) use resolution::resolve_embedding_chain;
 pub use write::sync_embedding_for_record;
+pub(crate) use write::sync_embedding_for_snapshot;
 
 pub use crate::models::_entities::entity_embeddings_768::{
     ActiveModel as ActiveModel768, Entity as Entity768, Model as Model768,

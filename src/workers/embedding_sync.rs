@@ -21,6 +21,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
+use sea_orm::DbErr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -154,9 +155,11 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
     // which enforces the boundary regardless of the connection pool used. Switching to
     // `TenantDb` here would require resolving `tenant_id` from `workspace_id` first and
     // adds transaction-scoping overhead for zero additional isolation.
-    let record = match entity_entities::get(&ctx.db, args.workspace_id, args.entity_id).await {
+    let record = match entity_entities::get_with_token(&ctx.db, args.workspace_id, args.entity_id)
+        .await
+    {
         Ok(record) => record,
-        Err(crate::error::YorishiroError::NotFound { .. }) => {
+        Err(DbErr::RecordNotFound(_)) => {
             tracing::debug!(entity_id = %args.entity_id, "embedding sync worker: entity no longer exists, skipping");
             return Ok(());
         }
@@ -166,7 +169,7 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
         }
     };
 
-    if let Err(err) = entity_embeddings::sync_embedding_for_record(
+    if let Err(err) = entity_embeddings::sync_embedding_for_snapshot(
         &ctx.db,
         args.workspace_id,
         &record,
@@ -176,7 +179,8 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
     {
         use crate::error::YorishiroError;
         match err {
-            YorishiroError::ProviderBusy { .. }
+            YorishiroError::Conflict { .. }
+            | YorishiroError::ProviderBusy { .. }
             | YorishiroError::ProviderUnreachable { .. }
             | YorishiroError::Internal(_) => {
                 tracing::warn!(entity_id = %args.entity_id, error = %err, "embedding sync failed transiently, job will be marked failed for retry_failed");

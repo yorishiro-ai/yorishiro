@@ -70,6 +70,9 @@ use std::net::SocketAddr;
 /// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
+    if let Some(queue) = &ctx.queue_provider {
+        queue.shutdown().expect("shut down queue provider");
+    }
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
         db.tenant.pool().close().await;

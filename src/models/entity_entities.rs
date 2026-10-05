@@ -35,18 +35,40 @@ pub(crate) async fn ids_for_workspace(
         .await
 }
 
-#[derive(FromQueryResult)]
-struct MissingEmbeddingRow {
-    id: Uuid,
+/// Reads a single entity with its embedding-sync token.
+///
+/// Used by the embedding sync worker and tests: it needs the full entity body
+/// plus the token to guard `embed_and_write`'s concurrency check.
+pub(crate) async fn get_with_token(
+    db: &impl ConnectionTrait,
     workspace_id: Uuid,
-    schema_id: Uuid,
-    schema_version: i32,
-    entity_type: String,
-    data: Value,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-    created_by: Option<Uuid>,
-    updated_by: Option<Uuid>,
+    entity_id: Uuid,
+) -> Result<EmbeddingSnapshot, DbErr> {
+    let row = EmbeddingSnapshot::find_by_statement(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "SELECT id, schema_id, entity_type, data, embedding_sync_token \
+         FROM entity_entities WHERE id = $1 AND workspace_id = $2",
+        [entity_id.into(), workspace_id.into()],
+    ))
+    .one(db)
+    .await?;
+    row.ok_or(DbErr::RecordNotFound("entity_entities".to_string()))
+}
+
+/// A token captured alongside an entity snapshot for use in embedding persistence.
+///
+/// Carries the `embedding_sync_token` column from `entity_entities` so that
+/// `embed_and_write` can verify the entity was not modified between read and
+/// write. Used internally by the embedding sync worker and `resync_embeddings`
+/// task to read entities with their concurrency token. Not exposed in
+/// `EntityRecord` — embedding code reads it separately.
+#[derive(sea_orm::FromQueryResult)]
+pub(crate) struct EmbeddingSnapshot {
+    pub id: Uuid,
+    pub schema_id: Uuid,
+    pub entity_type: String,
+    pub data: Value,
+    pub embedding_sync_token: String,
 }
 
 /// Finds every entity in a workspace that has no corresponding embedding row.
@@ -55,12 +77,10 @@ struct MissingEmbeddingRow {
 pub(crate) async fn missing_embeddings(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
-) -> Result<Vec<EntityRecord>, DbErr> {
-    MissingEmbeddingRow::find_by_statement(Statement::from_sql_and_values(
+) -> Result<Vec<EmbeddingSnapshot>, DbErr> {
+    EmbeddingSnapshot::find_by_statement(Statement::from_sql_and_values(
         db.get_database_backend(),
-        "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
-         e.entity_type, e.data, e.created_at, e.updated_at, \
-         e.created_by, e.updated_by \
+        "SELECT e.id, e.schema_id, e.entity_type, e.data, e.embedding_sync_token \
          FROM entity_entities e \
          LEFT JOIN ( \
              SELECT entity_id FROM entity_embeddings_768 \
@@ -74,22 +94,7 @@ pub(crate) async fn missing_embeddings(
     ))
     .all(db)
     .await
-    .map(|rows| {
-        rows.into_iter()
-            .map(|row| EntityRecord {
-                id: row.id,
-                workspace_id: row.workspace_id,
-                schema_id: row.schema_id,
-                schema_version: row.schema_version,
-                entity_type: row.entity_type,
-                data: row.data,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-                created_by: row.created_by,
-                updated_by: row.updated_by,
-            })
-            .collect()
-    })
+    .map(|rows| rows.into_iter().collect())
 }
 
 #[async_trait::async_trait]
