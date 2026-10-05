@@ -5,11 +5,11 @@
 #   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
 #
 # The default command serves HTTP only. Queued jobs run in a second container from this same
-# image, started with the tags the jobs carry (see `docker-compose.yml`'s `worker`), and with the
+# image, started with the wrapper that discovers tags programmatically at boot
+# (see `docker-compose.yml`'s `worker`), and with the
 # HEALTHCHECK below disabled because a worker answers on no port:
 #
-#   docker run --rm ... --no-healthcheck yorishiro start \
-#     --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
+#   docker run --rm --entrypoint /var/lib/yorishiro/worker-wrapper.sh yorishiro
 #
 # The embedding provider (`candle-core`/`candle-nn`/`candle-transformers`) needs no prebuilt
 # runtime binary and pulls no dynamic TLS library into the link, unlike the ONNX-based provider
@@ -63,6 +63,18 @@ RUN apt-get update && apt-get install -y \
     && useradd --system --create-home --home-dir /home/yorishiro yorishiro
 
 COPY --from=builder /usr/local/bin/yorishiro /usr/local/bin/yorishiro
+# Copy the worker wrapper that discovers tags programmatically at boot.
+# Without this, container or source worker starts would need a hard-coded tag list that drifts
+# when new worker classes or job types are added.  Docker Compose uses exec-form commands
+# (no shell variable expansion), so the wrapper must be present in the image for exec-form to
+# reference it directly.
+#
+# The wrapper and its parent directory are root-owned so the yorishiro user can run the
+# wrapper but cannot replace or rename it.
+COPY packaging/yorishiro-worker-wrapper.sh /var/lib/yorishiro/worker-wrapper.sh
+RUN chmod +x /var/lib/yorishiro/worker-wrapper.sh \
+    && chown root:yorishiro /var/lib/yorishiro \
+    && chmod 1770 /var/lib/yorishiro
 # Keep Loco's environment-based configuration layout in the runtime image.
 COPY config/production.yaml /app/config/production.yaml
 
@@ -72,10 +84,8 @@ COPY config/production.yaml /app/config/production.yaml
 # fetches the model on first use instead, into $HOME/.cache/yorishiro/models.
 WORKDIR /app
 # The production configuration defaults SQLite state to /var/lib/yorishiro.
-# Create it in the image so an unconfigured non-root container can boot and persist data.
-RUN chown -R yorishiro:yorishiro /app \
-    && install -d -o yorishiro -g yorishiro /var/lib/yorishiro \
-    && test -w /var/lib/yorishiro
+# The directory is already created with root:yorishiro 1770 by the wrapper install step.
+RUN chown -R yorishiro:yorishiro /app
 
 # The account has a real home, and `HOME` is set for it, because the model fetch needs somewhere
 # to write. `services::embedding::model_fetch::cache_dir` reads `HOME` and gives up when it is

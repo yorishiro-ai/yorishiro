@@ -87,6 +87,10 @@ replaces:
 contents:
   - src: ./target/release/yorishiro
     dst: /usr/bin/yorishiro
+  - src: ./packaging/yorishiro-worker-wrapper.sh
+    dst: /var/lib/yorishiro/worker-wrapper.sh
+    file_info:
+      mode: 0755
   - src: ./packaging/yorishiro.service
     dst: /lib/systemd/system/yorishiro.service
   - src: ./packaging/yorishiro-worker.service

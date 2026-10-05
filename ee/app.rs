@@ -50,6 +50,8 @@ pub(crate) fn compose_context(ctx: &AppContext) {
 }
 
 /// The named queues the enterprise workers enqueue to, which the base serves on Redis after its own.
+/// The values here are also used by `all_tags()` to derive the enterprise tags, so tags and
+/// queue lists share a single source of truth and cannot drift.
 pub(crate) fn worker_queues() -> Vec<String> {
     vec![crate::ee::workers::infer_fill::QUEUE.to_owned()]
 }

@@ -91,7 +91,10 @@ services:
   app:
     <<: *yorishiro
     container_name: app
-    # The default local provider may download about 522 MiB before the HTTP server binds.
+    # The healthcheck start period accommodates the local embedding model download
+    # (about 522 MiB on first use).  Set `YORISHIRO_EMBEDDING_PROVIDER=none` to skip
+    # the download when embedding is not needed — the server then starts instantly
+    # because the local model is not loaded in that case.
     healthcheck:
       start_period: 15m
     # To use a model this machine already has, put `model.safetensors` and `tokenizer.json` in
@@ -116,12 +119,12 @@ services:
   worker:
     <<: *yorishiro
     container_name: worker
-    # The same tags `packaging/yorishiro-worker.service` starts with. Bare `--worker`,
-    # `--server-and-worker` and `--all` pass an empty tag list, which dequeues none of these jobs.
-    # `infer-fill` is an enterprise queue; a community build has no such jobs and ignores it.
-    command:
-      - start
-      - --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
+    # Override the image default ENTRYPOINT ["yorishiro"] because we need to run the
+    # wrapper script directly (it performs shell substitution via `$(...)` to discover
+    # tags programmatically).  Compose exec-form does not support shell substitution,
+    # so we must replace the entrypoint, not just the command.
+    entrypoint: ["/var/lib/yorishiro/worker-wrapper.sh"]
+    command: []
     # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
     # reported unhealthy forever.
     healthcheck:

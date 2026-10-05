@@ -151,13 +151,16 @@ Yorishiro requires `workers.mode: BackgroundQueue` in every environment configur
 `ForegroundBlocking` and `BackgroundAsync` are rejected at configuration load and application boot.
 
 Run the HTTP server and workers as separate processes.
-The supported all-job worker command is:
+The supported all-job worker command depends on how you deploy:
 
-```
-cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
-```
+- **Package-based deployment (recommended):** use the wrapper installed at `/var/lib/yorishiro/worker-wrapper.sh`
+  which discovers every registered tag at boot.  The systemd unit `yorishiro-worker.service` uses this path.
 
-Run a pool-specific worker when that process should consume only one embedding and reindex target group:
+- **Source or Docker deployment:** use `cargo loco start --worker="$(cargo loco worker-tags)"`
+  (source) or `/var/lib/yorishiro/worker-wrapper.sh` (Docker image copies the wrapper there).
+  Both discover tags programmatically and stay in sync when new worker classes or job types are added.
+
+Pool-specific workers use an explicit tag:
 
 ```
 cargo loco start --worker=worker-class:shared

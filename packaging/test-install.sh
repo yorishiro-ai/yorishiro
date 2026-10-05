@@ -62,23 +62,84 @@ edition() { basename "$PKG_FILE" | grep -q '^yorishiro-ee-' && echo ee || echo c
 # --------------------------------------------------------------------------------------------
 note "deb on ubuntu:24.04 — the supported case"
 # --------------------------------------------------------------------------------------------
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+# Single container: install, root backup/metadata, unprivileged probes as yorishiro,
+# root verify/atomic restore, then emit all markers to the host for assertion.
+probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+  set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
+  # Root-owned property checks.
   /usr/bin/yorishiro --help >/dev/null 2>&1 && echo "RUNS"
   getent passwd yorishiro >/dev/null && echo "USER"
   [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "EE_LICENCE"
   [ -f /etc/yorishiro/production.yaml ] && echo "CONFIG"
   [ "$(stat -c "%a %U:%G" /etc/yorishiro/production.yaml)" = "640 root:yorishiro" ] && echo "CONFIGPERM"
-  [ "$(stat -c "%U" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEOWNER"
+  [ "$(stat -c "%U" /var/lib/yorishiro)" = "root" ] && echo "STATEOWNER"
+  [ "$(stat -c "%a" /var/lib/yorishiro)" = "1770" ] && echo "STATEPERMS"
+  [ "$(stat -c "%G" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEGRP"
+  [ "$(stat -c "%U" /var/lib/yorishiro/worker-wrapper.sh)" = "root" ] && echo "WRAPPEROWNER"
+  [ "$(stat -c "%a" /var/lib/yorishiro/worker-wrapper.sh)" = "755" ] && echo "WRAPPERPERMS"
+  # Root records wrapper metadata and creates a protected backup.
+  stat -c "%U:%G %a" /var/lib/yorishiro/worker-wrapper.sh > /tmp/wrapper-meta.bak
+  md5sum /var/lib/yorishiro/worker-wrapper.sh > /tmp/wrapper-md5.bak
+  cp /var/lib/yorishiro/worker-wrapper.sh /root/worker-wrapper.backup
+  # Unprivileged probes as the yorishiro user.
+  su -s /bin/sh yorishiro -c '"'"'
+    # State-file creation must succeed (directory is group-writable).
+    touch /var/lib/yorishiro/writable-as-yorishiro && echo "STATEWRITE" || echo "STATEWRITEFAIL"
+    # rm test: wrapper is root-owned; yorishiro cannot delete it.
+    rm -f /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null || true
+    if [ -f /var/lib/yorishiro/worker-wrapper.sh ]; then
+      echo "WRAPPER_UNRMED_BY_YORISHIRO"
+    else
+      echo "WRAPPER_UNEXPECTEDLY_GONE"
+    fi
+    # Sticky-rename test: mv -f (force) as yorishiro over root-owned wrapper.
+    # The sticky bit on the directory blocks the rename because yorishiro does
+    # not own the target file.
+    touch /var/lib/yorishiro/unpriv-tempfile
+    mv -f /var/lib/yorishiro/unpriv-tempfile /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null || true
+    if [ -f /var/lib/yorishiro/worker-wrapper.sh ] && [ "$(stat -c %U /var/lib/yorishiro/worker-wrapper.sh)" = "root" ]; then
+      echo "WRAPPER_INTACT_AFTER_MV"
+    else
+      echo "WRAPPER_CORRUPTED_AFTER_MV"
+    fi
+    # Shell redirection overwrite attempt as yorishiro.
+    echo "tampered" > /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null && {
+      echo "REDIRECTOVERWRITE_SUCCEEDED"
+    } || echo "REDIRECTOVERWRITE_FAILED"
+  '"'"'
+  # Root verifies wrapper integrity and atomically restores.
+  meta=$(stat -c "%U:%G %a" /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null)
+  orig=$(cat /tmp/wrapper-meta.bak)
+  if [ "$meta" = "$orig" ]; then
+    echo "POST_META_INTACT"
+  else
+    echo "POST_META_CHANGED"
+  fi
+  # Atomic restore: copy to temp, set temp ownership to root:root, then mv -f over wrapper.
+  cp /root/worker-wrapper.backup /var/lib/yorishiro/worker-wrapper.sh.tmp
+  chown root:root /var/lib/yorishiro/worker-wrapper.sh.tmp
+  chmod 0755 /var/lib/yorishiro/worker-wrapper.sh.tmp
+  mv -f /var/lib/yorishiro/worker-wrapper.sh.tmp /var/lib/yorishiro/worker-wrapper.sh
+  chown root:yorishiro /var/lib/yorishiro/worker-wrapper.sh
+  # Verify restored file matches original checksum and exact metadata.
+  restored_md5=$(md5sum /var/lib/yorishiro/worker-wrapper.sh | cut -d" " -f1)
+  orig_md5=$(cat /tmp/wrapper-md5.bak | cut -d" " -f1)
+  restored_meta=$(stat -c "%U:%G %a" /var/lib/yorishiro/worker-wrapper.sh)
+  if [ "$restored_md5" = "$orig_md5" ] && [ "$restored_meta" = "root:yorishiro 755" ]; then
+    echo "POST_RESTORED"
+  else
+    echo "POST_RESTORE_FAILED"
+  fi
 ' 2>&1)
-WANTS="RUNS USER COPYRIGHT CONFIG CONFIGPERM STATEOWNER"
-if [ "$(edition)" = ee ]; then WANTS="$WANTS EE_LICENCE"; fi
-for want in $WANTS; do
-  case "$out" in
+ALL_WANTS="RUNS USER COPYRIGHT CONFIG CONFIGPERM STATEOWNER STATEPERMS STATEGRP WRAPPEROWNER WRAPPERPERMS STATEWRITE WRAPPER_UNRMED_BY_YORISHIRO WRAPPER_INTACT_AFTER_MV REDIRECTOVERWRITE_FAILED POST_META_INTACT POST_RESTORED"
+if [ "$(edition)" = ee ]; then ALL_WANTS="$ALL_WANTS EE_LICENCE"; fi
+for want in $ALL_WANTS; do
+  case "$probe" in
     *"$want"*) ok "$want" ;;
-    *) bad "$want (install output: $(echo "$out" | tr '\n' ' '))" ;;
+    *) bad "$want (probe output: $(echo "$probe" | tr '\n' ' '))" ;;
   esac
 done
 
@@ -196,13 +257,12 @@ fi
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-  grep -Fx "ExecStart=/usr/bin/yorishiro start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill" \
-    /lib/systemd/system/yorishiro-worker.service
+  grep -m1 "^ExecStart=" /lib/systemd/system/yorishiro-worker.service
 ' 2>&1)
-if grep -Fxq 'ExecStart=/usr/bin/yorishiro start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill' <<<"$out"; then
-  ok "worker unit uses all tagged worker classes"
+if grep -q "^ExecStart=/var/lib/yorishiro/worker-wrapper.sh" <<<"$out"; then
+  ok "worker unit uses programmatic wrapper for tag discovery"
 else
-  bad "worker unit command or tags are wrong: $(echo "$out" | tr '\n' ' ')"
+  bad "worker unit ExecStart does not reference the wrapper: $out"
 fi
 
 # Every absolute path, not a list of prefixes: a unit naming `/opt/...` or `/run/...` would

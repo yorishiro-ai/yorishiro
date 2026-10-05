@@ -23,8 +23,9 @@ volumes:
 
 `docker compose up -d` で開始、`docker compose down` で停止します。
 
-ローカル埋め込みプロバイダを有効にすると、HTTP サーバーが初回起動する前に約 522 MiB をダウンロードするため、healthcheck の開始猶予を 15 分以上にしてください。
+ローカル埋め込みプロバイダは初回使用時に約 522 MiB をダウンロードします。
 埋め込みが不要な場合は `YORISHIRO_EMBEDDING_PROVIDER=none` を設定するとダウンロードを省略できます。
+サーバー専用モード（`--worker` フラグなし）ではローカル初期化がスキップされるため、プロバイダ設定に関わらずダウンロードなしで起動します。
 
 ## PostgreSQL
 

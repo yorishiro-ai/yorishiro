@@ -23,8 +23,10 @@ volumes:
 
 Start with `docker compose up -d`. Stop with `docker compose down`.
 
-The local embedding provider downloads about 522 MiB before the HTTP server first binds, so allow a health-check start period of at least 15 minutes when it is enabled.
-Set `YORISHIRO_EMBEDDING_PROVIDER=none` to skip that download when embedding is not required.
+The local embedding provider downloads about 522 MiB on first use.  Set
+`YORISHIRO_EMBEDDING_PROVIDER=none` to skip that download when embedding is not
+required — server-only mode (no `--worker` flag) skips local initialization,
+so it starts without the download regardless of the provider setting.
 
 ## PostgreSQL
 

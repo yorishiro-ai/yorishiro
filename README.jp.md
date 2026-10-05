@@ -101,7 +101,7 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 2. APIキーを生成し、エンティティの作成を開始。
 
 バックグラウンドキューを使うソースチェックアウトでは、サーバーとタグ付きワーカーを別々に起動します。
-`cargo loco start` と `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill` を実行してください。
+`cargo loco start` と `cargo loco start --worker="$(cargo loco worker-tags)"` を実行してください。
 
 インストール手順は [docs/ja/installation.md](docs/ja/installation.md) を参照してください。
 

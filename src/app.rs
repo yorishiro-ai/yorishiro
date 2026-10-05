@@ -13,6 +13,48 @@ use migration::Migrator;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Task-local key that carries the server-only flag into `after_context` so
+/// `install_services` can skip the local embedding model when the process
+/// never dequeues or executes embedding jobs.
+///
+/// Loco does not expose `StartMode` to `after_context`.  We set the flag
+/// synchronously in `boot` before calling `create_app`, then wrap the
+/// future in a task-local span so it is visible to every async call
+/// (including `after_context`) spawned on the same Tokio task.
+///
+/// The task-local scope is scoped to the `create_app` future itself, so
+/// it is safe for concurrent and repeated `App::boot` calls: each task
+/// gets its own value and there is no process-global state.
+mod server_only_scope {
+    use std::future::Future;
+
+    /// Tokio task-local storage for the server-only flag.
+    pub(super) use tokio::task_local;
+    task_local! {
+        pub(super) static IS_SERVER_ONLY: bool;
+    }
+
+    /// Returns the current flag or `false` when no boot is in progress
+    /// (tests that do not call `App::boot`).
+    pub(super) fn is_server_only() -> bool {
+        IS_SERVER_ONLY.try_with(|v| *v).unwrap_or(false)
+    }
+
+    /// Runs `f` with the server-only flag set, returning the result.
+    ///
+    /// `create_app` spawns `after_context` on the same Tokio task, so this
+    /// wrapper must wrap the *entire* `create_app` call to ensure the
+    /// task-local is visible to `after_context`.
+    pub(super) async fn with_server_only<F, R>(server_only: bool, f: F) -> R
+    where
+        F: Future<Output = R>,
+    {
+        IS_SERVER_ONLY.scope(server_only, f).await
+    }
+}
+
+use server_only_scope::{is_server_only, with_server_only};
+
 use crate::controllers;
 use crate::controllers::route_inventory::{RouteClass, RouteInventory};
 use crate::db::AppContextBackend;
@@ -60,7 +102,14 @@ impl Hooks for App {
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         crate::db::register_sqlite_extensions();
-        create_app::<Self, Migrator>(mode, environment, config).await
+        // Set the server-only flag in a task-local scope that wraps the
+        // entire `create_app` future so `after_context` can read it.
+        let server_only = matches!(mode, StartMode::ServerOnly);
+        with_server_only(
+            server_only,
+            create_app::<Self, Migrator>(mode, environment, config),
+        )
+        .await
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
@@ -420,6 +469,7 @@ async fn install_services(ctx: AppContext) -> Result<AppContext> {
         crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
             .map_err(loco_rs::Error::Message)?;
     }
+
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
 
     if ctx.is_postgres() {
@@ -430,11 +480,36 @@ async fn install_services(ctx: AppContext) -> Result<AppContext> {
             .insert(crate::controllers::middleware::auth::default_authenticator());
     }
 
-    // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the
-    // error to the first search.
-    let embedding_provider = crate::services::embedding::build_embedding_provider(&settings)
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("failed to build embedding provider: {e}")))?;
+    // Skip the local embedding model only when BOTH conditions hold: the
+    // process is a server-only HTTP listener AND the configured provider is
+    // Local.  OpenAI-compatible providers are cheap to instantiate and must
+    // still be installed on server-only; the `None` provider is a trivial
+    // no-op that works everywhere.
+    let skip_local_embedding = is_server_only()
+        && settings.embedding.provider == crate::data::settings::EmbeddingProvider::Local;
+
+    let embedding_provider = if skip_local_embedding {
+        tracing::info!(
+            "embedding provider skipped (server-only mode with local provider; no embedding work will be executed)"
+        );
+        let dimensions = settings.embedding.dimensions;
+        std::sync::Arc::new(
+            crate::services::embedding::UnconfiguredEmbeddingProvider::new(
+                dimensions,
+                "server-only mode does not load the local embedding model; \
+             set YORISHIRO_EMBEDDING_BASE_URL and YORISHIRO_EMBEDDING_MODEL to use \
+             an OpenAI-compatible endpoint, or start with --worker to enable embeddings",
+            ),
+        )
+    } else {
+        // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the
+        // error to the first search.
+        crate::services::embedding::build_embedding_provider(&settings)
+            .await
+            .map_err(|e| {
+                loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
+            })?
+    };
     ctx.shared_store.insert(embedding_provider);
     ctx.shared_store
         .insert(crate::workers::queue::default_queue_policy());

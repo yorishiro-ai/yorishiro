@@ -82,6 +82,101 @@ docker exec "$APP" bash -c "apt-get install -y -qq /pkg/$DEB >/dev/null 2>&1" ||
   echo "installing the package failed" >&2; exit 1
 }
 
+# Packaging assertions: wrapper exists, is executable, service points to it.
+docker exec "$APP" test -f /var/lib/yorishiro/worker-wrapper.sh \
+  && ok "wrapper script is installed at /var/lib/yorishiro/worker-wrapper.sh" \
+  || bad "wrapper script not found at /var/lib/yorishiro/worker-wrapper.sh"
+docker exec "$APP" test -x /var/lib/yorishiro/worker-wrapper.sh \
+  && ok "wrapper script is executable" \
+  || bad "wrapper script is not executable"
+execstart=$(docker exec "$APP" bash -c '
+  grep -m1 "^ExecStart=" /lib/systemd/system/yorishiro-worker.service' 2>/dev/null)
+echo "$execstart" | grep -q "worker-wrapper" \
+  && ok "yorishiro-worker.service ExecStart points to the wrapper" \
+  || bad "yorishiro-worker.service ExecStart does not reference the wrapper: $execstart"
+
+# Integrity probes: /var/lib/yorishiro is root:yorishiro mode 1770.
+# Root records wrapper checksum and creates a protected backup before
+# unprivileged probes.  After yorishiro's attempts, root verifies the
+# wrapper is intact and atomically restores from backup.  All assertions
+# happen on the host via markers returned from docker exec.
+integrity=$(docker exec "$APP" bash -c '
+  stat -c "%U:%G" /var/lib/yorishiro | grep -q "^root:yorishiro$" && echo "INTEG_OWNER" || echo "INTEG_OWNERFAIL"
+  stat -c "%a" /var/lib/yorishiro | grep -q "^1770$" && echo "INTEG_PERMS" || echo "INTEG_PERMSFAIL"
+  # Record wrapper metadata for post-probe verification.
+  stat -c "%U:%G %a" /var/lib/yorishiro/worker-wrapper.sh > /tmp/wrapper-meta.bak
+  md5sum /var/lib/yorishiro/worker-wrapper.sh > /tmp/wrapper-md5.bak
+  # Create a root-owned backup outside the state directory.
+  cp /var/lib/yorishiro/worker-wrapper.sh /root/worker-wrapper.backup
+  echo "INTEG_BACKED"
+')
+# Unprivileged probes as the yorishiro user via docker exec --user.
+unpriv=$(docker exec --user yorishiro "$APP" bash -c '
+  # State-file creation must succeed (directory is group-writable).
+  touch /var/lib/yorishiro/writable-as-yorishiro && echo "UNPRIV_WRITE" || echo "UNPRIV_WRITEFAIL"
+  # rm test: wrapper is root-owned; yorishiro cannot delete it.
+  rm -f /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null || true
+  if [ -f /var/lib/yorishiro/worker-wrapper.sh ]; then
+    echo "UNPRIV_UNRMED"
+  else
+    echo "UNPRIV_GONE"
+  fi
+  # Sticky-rename test: mv -f (force) as yorishiro over root-owned wrapper.
+  # The sticky bit on the directory blocks the rename because yorishiro does
+  # not own the target file.
+  touch /var/lib/yorishiro/unpriv-tempfile
+  mv -f /var/lib/yorishiro/unpriv-tempfile /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null || true
+  if [ -f /var/lib/yorishiro/worker-wrapper.sh ] \
+     && [ "$(stat -c %U /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null)" = "root" ]; then
+    echo "UNPRIV_MV_INTEGRITY"
+  else
+    echo "UNPRIV_MV_CORRUPT"
+  fi
+  # Shell redirection overwrite attempt as yorishiro.
+  echo "tampered" > /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null && {
+    echo "UNPRIV_REDIRECT_OK"
+  } || echo "UNPRIV_REDIRECT_FAIL"
+')
+# Root verifies wrapper is still intact after unprivileged probes, then
+# atomically restores from backup using cp-to-temp + mv.  set -e ensures
+# any restore step failure aborts the block rather than silently proceeding.
+restore=$(docker exec "$APP" bash -c '
+  set -e
+  # Check wrapper metadata has not changed.
+  meta=$(stat -c "%U:%G %a" /var/lib/yorishiro/worker-wrapper.sh 2>/dev/null)
+  orig=$(cat /tmp/wrapper-meta.bak)
+  if [ "$meta" = "$orig" ]; then
+    echo "INTEG_META_INTACT"
+  else
+    echo "INTEG_META_CHANGED"
+  fi
+  # Atomic restore: copy backup to a temp file in the same directory,
+  # set temp ownership to root:root, then mv -f over the wrapper.
+  cp /root/worker-wrapper.backup /var/lib/yorishiro/worker-wrapper.sh.tmp
+  chown root:root /var/lib/yorishiro/worker-wrapper.sh.tmp
+  chmod 0755 /var/lib/yorishiro/worker-wrapper.sh.tmp
+  mv -f /var/lib/yorishiro/worker-wrapper.sh.tmp /var/lib/yorishiro/worker-wrapper.sh
+  chown root:yorishiro /var/lib/yorishiro/worker-wrapper.sh
+  # Verify restored file matches original checksum and exact metadata.
+  restored_md5=$(md5sum /var/lib/yorishiro/worker-wrapper.sh | cut -d" " -f1)
+  orig_md5=$(cat /tmp/wrapper-md5.bak | cut -d" " -f1)
+  restored_meta=$(stat -c "%U:%G %a" /var/lib/yorishiro/worker-wrapper.sh)
+  if [ "$restored_md5" = "$orig_md5" ] && [ "$restored_meta" = "root:yorishiro 755" ]; then
+    echo "INTEG_RESTORED"
+  else
+    echo "INTEG_RESTORE_FAILED"
+  fi
+')
+for marker in INTEG_OWNER INTEG_PERMS; do
+  case "$integrity" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($integrity)" ;; esac
+done
+for marker in UNPRIV_WRITE UNPRIV_UNRMED UNPRIV_MV_INTEGRITY UNPRIV_REDIRECT_FAIL; do
+  case "$unpriv" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($unpriv)" ;; esac
+done
+for marker in INTEG_META_INTACT INTEG_RESTORED; do
+  case "$restore" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($restore)" ;; esac
+done
+
 # Disable embeddings to avoid the ~1 GiB model fetch in CI.
 # This setting has no Loco YAML field, so the test injects it into systemd's process environment
 # without creating a package-owned environment file.
