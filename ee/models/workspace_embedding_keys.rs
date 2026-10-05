@@ -13,7 +13,7 @@ use crate::services::embedding::{
 };
 use async_trait::async_trait;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Statement};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -79,93 +79,6 @@ pub(crate) struct EmbeddingKeyConfig {
     pub(crate) send_dimensions_param: bool,
 }
 
-/// Creates or replaces the width-specific embedding table for a workspace that is about to
-/// use a new model width.
-///
-/// `conn` must be a `DatabaseTransaction` obtained from
-/// `TenantDb::begin_for_workspace` or `ctx.db.begin()`.
-///
-/// This is a DDL call inside the same transaction that stores the key row.
-/// `yorishiro_app` has no CREATE privilege, so DDL via the request path is impossible
-/// outside a transaction that was opened by the migration role (identity pool) or
-/// a local transaction (SQLite). The migration role path is what the `workspace_embedding_keys::set`
-/// call site uses, so this function must live inside that transaction to succeed.
-async fn create_width_table(
-    conn: &impl ConnectionTrait,
-    dimension: i32,
-) -> Result<(), YorishiroError> {
-    let table_name = format!("content_entity_embeddings_{dimension}");
-
-    // Check if the table already exists.
-    let backend = conn.get_database_backend();
-    let exists = if backend == sea_orm::DatabaseBackend::Sqlite {
-        let rows = conn
-            .execute_raw(Statement::from_sql_and_values(
-                backend,
-                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=$1",
-                [table_name.clone().into()],
-            ))
-            .await
-            .internal()?;
-        rows.rows_affected() > 0
-    } else {
-        let rows = conn
-            .execute_raw(Statement::from_sql_and_values(
-                backend,
-                "SELECT count(*) FROM information_schema.tables WHERE table_name=$1",
-                [table_name.clone().into()],
-            ))
-            .await
-            .internal()?;
-        rows.rows_affected() > 0
-    };
-
-    if exists {
-        return Ok(());
-    }
-
-    // Create the table.
-    if backend == sea_orm::DatabaseBackend::Sqlite {
-        conn.execute_raw(Statement::from_sql_and_values(
-            backend,
-            format!(
-                "CREATE TABLE {table_name} (\
-                 entity_id BLOB PRIMARY KEY, \
-                 embedding BLOB, \
-                 FOREIGN KEY (entity_id) REFERENCES entity_entities(id) ON DELETE CASCADE)"
-            ),
-            [],
-        ))
-        .await
-        .internal()?;
-    } else {
-        conn.execute_raw(Statement::from_sql_and_values(
-            backend,
-            format!(
-                "CREATE TABLE {table_name} (\
-                 entity_id UUID PRIMARY KEY, \
-                 embedding vector({dimension}))"
-            ),
-            [],
-        ))
-        .await
-        .internal()?;
-
-        let idx_name = format!("idx_{table_name}_hnsw");
-        conn.execute_raw(Statement::from_sql_and_values(
-            backend,
-            format!(
-                "CREATE INDEX {idx_name} ON {table_name} USING hnsw (embedding vector_cosine_ops)"
-            ),
-            [],
-        ))
-        .await
-        .internal()?;
-    }
-
-    Ok(())
-}
-
 /// Outcome of storing an embedding key assignment.
 ///
 /// `WidthChanged` is returned when the new provider's width differs from the
@@ -192,11 +105,8 @@ pub enum SetOutcome {
 /// `#307` uses). This is preferable to rejecting outright: the operator's intent is to switch
 /// widths, and reindexing is the mechanism that makes the switch consistent.
 ///
-/// **Table creation**: if the width-specific table (e.g. `entity_embeddings_1024`) does not
-/// yet exist, this function creates it within the same transaction.
-/// `yorishiro_app` has no CREATE privilege, so DDL via the request path is impossible
-/// outside the migration-role connection. The controller calls this through `ctx.db`, which
-/// is the identity pool (migration role), so the transaction has the required privileges.
+/// **Supported widths**: the width must have an embedding table, which the community edition's migrations create.
+/// `dimensions` is checked against the community edition's own list, so a width no table exists for is refused here instead of failing on the first entity write.
 #[allow(clippy::too_many_arguments)]
 ///
 /// # Errors
@@ -236,12 +146,7 @@ pub async fn set(
         SetOutcome::Stored
     };
 
-    // Create the width-specific table if it does not yet exist.
-    // This must run inside the same transaction as the key insert so that the
-    // table is available before any entity write can use it, and because
-    // yorishiro_app has no CREATE privilege (DDL must go through the
-    // migration-role identity pool).
-    create_width_table(conn, dimensions).await?;
+    crate::models::entity_embeddings::embedding_table(dimensions as usize)?;
 
     let base_url = base_url.trim().trim_end_matches('/');
     check_scheme(base_url)?;

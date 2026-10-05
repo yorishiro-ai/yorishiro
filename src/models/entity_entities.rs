@@ -16,6 +16,26 @@ use crate::models::_entities::entity_entities::Column;
 pub use crate::models::_entities::entity_entities::{ActiveModel, Entity, Model};
 use crate::models::schema_schemas::metaschema;
 
+/// Written by hand because the generated `Model` carries `embedding_sync_token`, which the entity hardening script treats as secret-bearing and therefore strips `Debug` from.
+/// The token is a concurrency guard, never needed in a log line, so it is the one field left out.
+impl std::fmt::Debug for Model {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EntityEntity")
+            .field("id", &self.id)
+            .field("workspace_id", &self.workspace_id)
+            .field("schema_id", &self.schema_id)
+            .field("schema_version", &self.schema_version)
+            .field("entity_type", &self.entity_type)
+            .field("data", &self.data)
+            .field("created_by", &self.created_by)
+            .field("updated_by", &self.updated_by)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
+}
+
 pub use crud::{count, create, delete, export_all, get, get_batch, list, update};
 pub(crate) use migration::fill_defaults;
 pub use migration::{drift, migration_dry_run};

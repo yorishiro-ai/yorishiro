@@ -207,10 +207,10 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({
                 "base_url": "https://embed.example.com/v1",
-                "model": "text-embedding-3-large",
+                "model": "embed-1024",
                 "api_key": "sk-secret-value",
-                // Deliberately not 768, the workspace's own stamp.
-                "dimensions": 3072
+                // Deliberately not 768, the workspace's own stamp, but a width with an embedding table.
+                "dimensions": 1024
             }))
             .await;
         assert_eq!(
@@ -314,4 +314,72 @@ async fn setup_second_workspace(ctx: &loco_rs::app::AppContext, first: &Setup) -
         .await
         .expect("insert second workspace");
     workspace.id
+}
+
+/// `set` takes the width list from the community edition's embedding tables instead of keeping its own.
+/// A width with no table is refused up front and stores nothing, and a supported width stores the key without the old request-path DDL creating a stray `content_entity_embeddings_*` table.
+#[tokio::test]
+async fn set_checks_the_width_against_the_community_embedding_tables() {
+    use sea_orm::{ConnectionTrait, Statement};
+    use yorishiro::ee::models::workspace_embedding_keys::{SetOutcome, set};
+    use yorishiro::error::YorishiroError;
+
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let setup = setup(&ctx).await;
+
+        let refused = set(
+            &ctx.db,
+            setup.workspace_id,
+            "https://embed.example.com/v1",
+            "text-embedding-3-large",
+            "sk-secret-value",
+            3072,
+            false,
+            None,
+        )
+        .await;
+        assert!(
+            matches!(refused, Err(YorishiroError::ValidationFailed { .. })),
+            "a width with no embedding table must be refused, got: {refused:?}"
+        );
+        assert!(
+            EmbeddingKeyResolver
+                .resolve(&ctx.db, setup.workspace_id)
+                .await
+                .expect("resolve after a refused assignment")
+                .is_none(),
+            "a refused assignment must store nothing"
+        );
+
+        let stored = set(
+            &ctx.db,
+            setup.workspace_id,
+            "https://embed.example.com/v1",
+            "embed-1024",
+            "sk-secret-value",
+            1024,
+            false,
+            None,
+        )
+        .await
+        .expect("a width with an embedding table is accepted");
+        assert!(matches!(stored, SetOutcome::Stored));
+
+        let backend = ctx.db.get_database_backend();
+        let stray_tables = if backend == sea_orm::DatabaseBackend::Sqlite {
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'content_entity_embeddings%'"
+        } else {
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'content_entity_embeddings%'"
+        };
+        let stray: i64 = ctx
+            .db
+            .query_one_raw(Statement::from_string(backend, stray_tables))
+            .await
+            .expect("query tables")
+            .expect("count row")
+            .try_get_by_index(0)
+            .expect("count value");
+        assert_eq!(stray, 0, "no table outside the community naming may exist");
+    })
+    .await;
 }
