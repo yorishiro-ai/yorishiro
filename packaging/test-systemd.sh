@@ -14,15 +14,14 @@
 #
 # The caller supplies one exact edition-first package filename.
 #
-# The unconfigured-start section exercises the zero-config default: production.yaml boots
-# against a local SQLite file with no external dependencies (DATABASE_URL defaults to
-# sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc, HOST defaults to http://localhost,
-# and the queue uses its separate packaged SQLite file). Embeddings are disabled to avoid the
-# ~1 GiB model in CI. The later phase writes PostgreSQL settings to the installed YAML template
-# to verify that path, and configures an OpenAI-compatible embedding provider so both the server
-# and worker exercise provider initialization (base_url + model take priority over the provider
-# enum; the provider is constructed synchronously at boot without calling the endpoint, and the
-# worker remains active only when that boot path succeeds).
+# The first phase exercises the default SQLite deployment without external dependencies.
+# DATABASE_URL defaults to sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc.
+# HOST defaults to http://localhost.
+# The queue uses its separate packaged SQLite file.
+# The smoke test sets an OpenAI-compatible embedding configuration before this phase starts.
+# The provider is constructed synchronously without calling the configured endpoint.
+# This avoids downloading the approximately 1 GiB local model.
+# The later phase switches the database to PostgreSQL.
 
 set -uo pipefail
 
@@ -235,11 +234,11 @@ docker exec "$APP" systemctl set-environment \
   HOST=http://127.0.0.1:5150 \
   DB_CONNECT_TIMEOUT=5000
 
-# `restart`, not `enable --now`: the unconfigured section above left the server running on
-# SQLite, and `start` on an active unit does nothing, so the new environment would never be read
-# while the old server kept answering /_ping. Restart the server before the worker and wait for
-# its ping: both processes run automigrate, and starting them together races on PostgreSQL role
-# creation even though the worker unit has `After=yorishiro.service` (that only orders start jobs).
+# Use `restart` instead of `enable --now` because the unconfigured section left the server running on SQLite.
+# Starting an active unit would not reload the new environment while the old server kept answering /_ping.
+# Restart the server before the worker and wait for its ping.
+# Both processes run automigrate, and starting them together races on PostgreSQL role creation.
+# `After=yorishiro.service` only orders the systemd start jobs and does not wait for server readiness.
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
@@ -247,9 +246,8 @@ docker exec "$APP" bash -c '
   systemctl restart yorishiro' >/dev/null 2>&1
 
 server_ready=
-# The worker may take a long time to boot (database migration, embedding provider init).
-# Use a generous timeout to avoid false failures on resource-constrained CI.
-for _ in $(seq 1 240); do
+# Wait for the server before starting the worker.
+for _ in $(seq 1 120); do
   docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 \
     && server_ready=1
   if [ -n "$server_ready" ]; then
@@ -259,23 +257,28 @@ for _ in $(seq 1 240); do
 done
 
 if [ -z "$server_ready" ]; then
-  echo "server did not become ready before starting worker" >&2
+  bad "server did not become ready before starting worker"
   dump_logs
+  worker_skipped=1
 fi
 
-docker exec "$APP" bash -c '
-  systemctl reset-failed yorishiro-worker
-  systemctl restart yorishiro-worker' >/dev/null 2>&1
+if [ -z "${worker_skipped:-}" ]; then
+  docker exec "$APP" bash -c '
+    systemctl reset-failed yorishiro-worker
+    systemctl restart yorishiro-worker' >/dev/null 2>&1
+fi
 
 worker_ready=
-for _ in $(seq 1 240); do
-  docker exec "$APP" systemctl is-active --quiet yorishiro-worker 2>/dev/null \
-    && worker_ready=1
-  [ -n "$worker_ready" ] && break
-  sleep 3
-done
+if [ -z "${worker_skipped:-}" ]; then
+  for _ in $(seq 1 120); do
+    docker exec "$APP" systemctl is-active --quiet yorishiro-worker 2>/dev/null \
+      && worker_ready=1
+    [ -n "$worker_ready" ] && break
+    sleep 3
+  done
+fi
 
-if [ -z "$worker_ready" ]; then
+if [ -z "${worker_skipped:-}" ] && [ -z "$worker_ready" ]; then
   echo "worker did not become ready" >&2
   dump_logs
 fi
@@ -290,9 +293,14 @@ state=$(docker exec "$APP" bash -c '
 grep -q 'active=active' <<<"$state" \
   && ok "the service is active" \
   || bad "expected active, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
-grep -q 'worker-active=active' <<<"$state" \
-  && ok "the worker is active" \
-  || { bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"; dump_logs; }
+if [ -n "${worker_skipped:-}" ]; then
+  bad "worker check skipped because the server did not become ready"
+elif grep -q 'worker-active=active' <<<"$state"; then
+  ok "the worker is active"
+else
+  bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
+  dump_logs
+fi
 grep -q 'enabled=enabled' <<<"$state" \
   && ok "the service is enabled" \
   || bad "expected enabled, got: $(grep -o 'enabled=[a-z-]*' <<<"$state")"
