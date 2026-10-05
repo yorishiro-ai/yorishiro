@@ -178,13 +178,11 @@ for marker in INTEG_META_INTACT INTEG_RESTORED; do
   case "$restore" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($restore)" ;; esac
 done
 
-# Use an OpenAI-compatible provider configuration so both the server and the
-# worker construct the provider at startup without downloading the ~1 GiB local
-# model. `base_url` + `model` take priority over the enum in
-# `build_embedding_provider`, so no `provider` variable is needed.
-# `none` is rejected (#524): the server needs query embeddings even in
-# The server needs query embeddings in this smoke test. The endpoint is not reachable, but the provider
-# constructor is synchronous and never calls it.
+# Use an OpenAI-compatible provider configuration so both the server and the worker construct the provider at startup without downloading the ~1 GiB local model.
+# `base_url` + `model` take priority over the enum in `build_embedding_provider`, so no `provider` variable is needed.
+# `none` is rejected (#524) because the server needs query embeddings in this smoke test.
+# The endpoint is not reachable.
+# The provider constructor is synchronous and never calls it.
 docker exec "$APP" systemctl set-environment \
   YORISHIRO_EMBEDDING_BASE_URL=http://127.0.0.1:5151/v1 \
   YORISHIRO_EMBEDDING_MODEL=package-smoke-test
