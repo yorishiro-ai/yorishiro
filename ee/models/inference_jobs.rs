@@ -293,8 +293,12 @@ pub async fn fail(
     if result.rows_affected == 0 {
         validate_existing_status(conn, id).await?;
     } else if let Some(row) = Entity::find_by_id(id).one(conn).await.internal()? {
-        crate::ee::models::inference_proposals::discard_pending_for_job(conn, row.workspace_id, id)
-            .await?;
+        crate::edition::ee::models::inference_proposals::discard_pending_for_job(
+            conn,
+            row.workspace_id,
+            id,
+        )
+        .await?;
     }
     Ok(())
 }

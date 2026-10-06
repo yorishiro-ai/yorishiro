@@ -1,7 +1,7 @@
 use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
-use yorishiro::ee::models::marketplace::{
+use yorishiro::edition::ee::models::marketplace::{
     PublishVersionRequest, TemplateVersionRecord, TemplateVersionStatus,
 };
 use yorishiro::models::_entities::template_versions;

@@ -11,7 +11,7 @@
 //!
 //! Covering every class in one process can use `yorishiro worker-tags` output piped into
 //! `--worker=...`, or the `worker-wrapper.sh` script that does it automatically at boot.
-//! This all-job command names every currently registered tag, including infer-fill.
+//! This all-job command names every currently registered tag, whichever edition registered it.
 //! There is no wildcard flag, so a new [`WorkerClass`] or job type needs its tag added to those commands by
 //! hand. The matching worker type is caught at compile time by `enqueue_for_class`'s exhaustive
 //! match; the command is not, and is an operational concern.

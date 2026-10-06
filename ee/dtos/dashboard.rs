@@ -1,7 +1,7 @@
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::ee::models::tenant_tenants::TenantUsage;
+use crate::edition::ee::models::tenant_tenants::TenantUsage;
 use crate::models::tenant_memberships::MembershipRecord;
 
 #[derive(Debug, Serialize)]

@@ -1,6 +1,7 @@
 mod api_keys;
 mod audit_log;
 mod auth;
+#[cfg(feature = "enterprise")]
 mod dashboard;
 mod ee_setup;
 #[cfg(feature = "enterprise")]

@@ -22,9 +22,9 @@ use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
 
-use crate::ee::data::oauth::OAuthConfig;
-use crate::ee::dtos::oauth::{CallbackParams, OAuthStatus};
-use crate::ee::services::oauth;
+use crate::edition::ee::data::oauth::OAuthConfig;
+use crate::edition::ee::dtos::oauth::{CallbackParams, OAuthStatus};
+use crate::edition::ee::services::oauth;
 
 /// Name of the CSRF cookie `authorize` sets and `callback` reads back.
 const CSRF_COOKIE_NAME: &str = "ysr_oauth_csrf";
@@ -59,7 +59,7 @@ fn csrf_clear_cookie() -> String {
 
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
 /// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = crate::ee::controllers::openapi::OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = crate::edition::ee::controllers::openapi::OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
 async fn status() -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_env()?.is_some(),
@@ -123,7 +123,7 @@ async fn callback(
     let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
 
     let txn = ctx.db.begin().await.internal()?;
-    let provisioned = crate::ee::models::user_users::find_or_create(
+    let provisioned = crate::edition::ee::models::user_users::find_or_create(
         &txn,
         "oidc",
         &identity.subject_id,

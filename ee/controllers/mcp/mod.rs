@@ -16,7 +16,7 @@ struct LicenceToolPolicy {
 impl McpToolPolicy for LicenceToolPolicy {
     fn allows(&self, ctx: &loco_rs::app::AppContext, name: &str) -> bool {
         !self.enterprise_tools.contains(name)
-            || crate::ee::controllers::middleware::edition::is_active(ctx)
+            || crate::edition::ee::controllers::middleware::edition::is_active(ctx)
     }
 }
 

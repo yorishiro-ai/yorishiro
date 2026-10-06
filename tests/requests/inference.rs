@@ -5,11 +5,11 @@ use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::db::DbHandle;
-use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
-use yorishiro::ee::workers::infer_fill::{InferFillArgs, InferFillDispatcher};
+use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::edition::ee::models::inference_jobs::{self, InferenceJobStatus};
+use yorishiro::edition::ee::workers::infer_fill::{InferFillArgs, InferFillDispatcher};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
@@ -347,7 +347,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             )
             .await
             .expect("active schema");
-            yorishiro::ee::models::inference_proposals::record_batch(
+            yorishiro::edition::ee::models::inference_proposals::record_batch(
                 &txn,
                 setup.workspace_id,
                 job_id,
@@ -449,7 +449,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
             yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
                 .await
                 .expect("active schema");
-        yorishiro::ee::models::inference_proposals::record_batch(
+        yorishiro::edition::ee::models::inference_proposals::record_batch(
             &txn,
             setup.workspace_id,
             job_id,
@@ -462,7 +462,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         inference_jobs::complete(&txn, job_id, 0, 0)
             .await
             .expect("complete proposal job");
-        let report = yorishiro::ee::models::inference_proposals::confirm(
+        let report = yorishiro::edition::ee::models::inference_proposals::confirm(
             &txn,
             setup.workspace_id,
             job_id,
@@ -512,7 +512,7 @@ async fn create_completed_proposal(
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
             .expect("active schema");
-    yorishiro::ee::models::inference_proposals::record_batch(
+    yorishiro::edition::ee::models::inference_proposals::record_batch(
         &txn,
         setup.workspace_id,
         job_id,
@@ -658,7 +658,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
                     .await
                     .expect("begin confirmation transaction");
                 confirm_barrier.wait().await;
-                let result = yorishiro::ee::models::inference_proposals::confirm(
+                let result = yorishiro::edition::ee::models::inference_proposals::confirm(
                     &txn,
                     terminal_setup,
                     job_id,
@@ -674,14 +674,14 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
             });
             barrier.wait().await;
             let terminal_result = if terminal_action == "reject" {
-                yorishiro::ee::models::inference_proposals::reject(
+                yorishiro::edition::ee::models::inference_proposals::reject(
                     &terminal_txn,
                     terminal_setup,
                     job_id,
                 )
                 .await
             } else {
-                yorishiro::ee::models::inference_proposals::discard(
+                yorishiro::edition::ee::models::inference_proposals::discard(
                     &terminal_txn,
                     terminal_setup,
                     job_id,
@@ -703,7 +703,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
                     .await
                     .expect("read entity after race");
             assert_eq!(entity_after.data["summary"], serde_json::Value::Null);
-            let proposals = yorishiro::ee::models::inference_proposals::for_job(
+            let proposals = yorishiro::edition::ee::models::inference_proposals::for_job(
                 &ctx.db,
                 setup.workspace_id,
                 job_id,
@@ -793,7 +793,7 @@ async fn create_pending_proposal(
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
             .expect("active schema");
-    yorishiro::ee::models::inference_proposals::record_batch(
+    yorishiro::edition::ee::models::inference_proposals::record_batch(
         &txn,
         setup.workspace_id,
         job_id,

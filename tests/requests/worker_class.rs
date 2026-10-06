@@ -2,8 +2,8 @@ use super::boot_request;
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use uuid::Uuid;
-use yorishiro::app::App;
-use yorishiro::ee::models::workspace_worker_classes::WorkerClassAssignmentResolver;
+use yorishiro::App;
+use yorishiro::edition::ee::models::workspace_worker_classes::WorkerClassAssignmentResolver;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
@@ -194,7 +194,7 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "an unassigned workspace must resolve to None so the caller falls back to WorkerClass::Shared"
         );
 
-        yorishiro::ee::models::workspace_worker_classes::set(
+        yorishiro::edition::ee::models::workspace_worker_classes::set(
             &ctx.db,
             setup.workspace_id,
             yorishiro::workers::embedding_sync::WorkerClass::Official,

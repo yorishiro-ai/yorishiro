@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ee::models::inference_jobs::InferenceJobStatus;
+use crate::edition::ee::models::inference_jobs::InferenceJobStatus;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct InferFillResponse {

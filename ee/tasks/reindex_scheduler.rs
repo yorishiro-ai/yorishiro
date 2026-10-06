@@ -207,7 +207,7 @@ impl TenantReindexScheduler {
         // Ownership is held on a detached PostgreSQL session or an OS file handle through every
         // queue dispatch. The schedule transaction is separate so dispatch cannot hold a DB
         // transaction open, and the guard is released explicitly after the final dispatch.
-        let mut ownership = match crate::ee::db::acquire_scheduler_ownership(
+        let mut ownership = match crate::edition::ee::db::acquire_scheduler_ownership(
             app_context,
             "yorishiro:tenant-reindex-scheduler",
         )
@@ -236,7 +236,7 @@ impl TenantReindexScheduler {
             },
             ownership_lock_path = ownership
                 .as_ref()
-                .and_then(crate::ee::db::SchedulerOwnership::sqlite_path)
+                .and_then(crate::edition::ee::db::SchedulerOwnership::sqlite_path)
                 .map(|path| path.display().to_string()),
             "reindex scheduler tick ownership acquired"
         );
@@ -390,7 +390,7 @@ pub async fn dispatch_reindex_batch(
 }
 
 async fn release_scheduler_ownership(
-    ownership: crate::ee::db::SchedulerOwnership,
+    ownership: crate::edition::ee::db::SchedulerOwnership,
 ) -> Result<(), String> {
     match ownership.release().await {
         Ok(()) => {

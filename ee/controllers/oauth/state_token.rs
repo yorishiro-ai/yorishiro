@@ -1,6 +1,6 @@
 //! The `state` parameter carried through the OAuth2 authorization-code round trip.
 //!
-//! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::ee::controllers::hmac_sign`], rather than stored server-side and looked up by an opaque id.
+//! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::edition::ee::controllers::hmac_sign`], rather than stored server-side and looked up by an opaque id.
 //!
 //! The signature alone only proves this process issued *some* `state`, not that the browser presenting it is the one the flow was started for.
 //! That is what the CSRF cookie is for: `authorize` sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it does not match [`verify`]'s `csrf_hash` output.
@@ -11,7 +11,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
-use crate::ee::controllers::hmac_sign;
+use crate::edition::ee::controllers::hmac_sign;
 
 /// How long a `state` value remains acceptable after being issued.
 /// Also used as the CSRF cookie's max-age, so the cookie never outlives the `state` that depends on it.

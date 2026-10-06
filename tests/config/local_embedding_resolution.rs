@@ -19,7 +19,7 @@ async fn unknown_local_model_name_fails_at_boot() {
         ))
         .unwrap();
 
-    let result = yorishiro::app::App::boot(StartMode::ServerOnly, &Environment::Test, config).await;
+    let result = yorishiro::App::boot(StartMode::ServerOnly, &Environment::Test, config).await;
 
     match result {
         Ok(_) => panic!("unknown model name must fail at boot"),
@@ -44,7 +44,7 @@ async fn none_provider_installs_noop_with_clear_message() {
     )
     .unwrap();
 
-    let result = yorishiro::app::App::boot(StartMode::ServerOnly, &Environment::Test, config).await;
+    let result = yorishiro::App::boot(StartMode::ServerOnly, &Environment::Test, config).await;
 
     match result {
         Ok(boot) => {

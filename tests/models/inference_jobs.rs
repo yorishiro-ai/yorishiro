@@ -2,7 +2,7 @@ use migration::{Migrator, MigratorTrait};
 use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, Database, EntityTrait, Set};
 use serde_json::json;
 use uuid::Uuid;
-use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
+use yorishiro::edition::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::models::_entities::{
     inference_jobs as generated, tenant_tenants, workspace_workspaces,
 };

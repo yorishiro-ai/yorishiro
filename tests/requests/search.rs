@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use axum::http::StatusCode;
 use serial_test::serial;
 use std::sync::{Arc, Mutex};
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;

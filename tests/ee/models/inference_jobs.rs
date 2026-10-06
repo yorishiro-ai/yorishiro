@@ -2,7 +2,7 @@ use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use sea_orm::{ActiveModelTrait, Set};
 use uuid::Uuid;
-use yorishiro::ee::models::inference_jobs::*;
+use yorishiro::edition::ee::models::inference_jobs::*;
 
 #[tokio::test]
 async fn reconcile_recovers_after_failure_before_retry() {

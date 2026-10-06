@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use serde_json::Value;
 use uuid::Uuid;
-use yorishiro::app::App;
+use yorishiro::App;
 
 use super::boot_request;
 use super::fixtures::{self, TenantArgs};

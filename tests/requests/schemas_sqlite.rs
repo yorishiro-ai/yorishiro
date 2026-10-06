@@ -3,7 +3,7 @@
 /// Exercises the same schema creation flow as `schemas.rs` but boot against a
 /// SQLite backend.
 use axum::http::StatusCode;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenant_memberships::MembershipRole;

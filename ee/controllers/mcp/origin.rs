@@ -59,7 +59,7 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.auth_context().workspace_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let changes = match crate::ee::models::schema_schemas::list_with_upstream_changes(
+        let changes = match crate::edition::ee::models::schema_schemas::list_with_upstream_changes(
             &self.app_context().db,
             workspace_id,
             page,
@@ -96,7 +96,7 @@ impl YorishiroMcpServer {
             .await
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
 
-        let plan = match crate::ee::models::schema_schemas::merge_preview(
+        let plan = match crate::edition::ee::models::schema_schemas::merge_preview(
             &schema_txn,
             self.app_context(),
             auth_ctx.tenant_id,
@@ -137,7 +137,7 @@ impl YorishiroMcpServer {
             .await
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
 
-        let (schema, diff, summary) = match crate::ee::models::schema_schemas::merge_apply(
+        let (schema, diff, summary) = match crate::edition::ee::models::schema_schemas::merge_apply(
             &schema_txn,
             self.app_context(),
             auth_ctx.tenant_id,

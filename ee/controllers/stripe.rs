@@ -11,10 +11,10 @@ use loco_rs::controller::Routes;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
 use crate::db;
-use crate::ee::data::non_empty_env;
-use crate::ee::data::plan::{Plan, StripePriceMapping};
-use crate::ee::models::tenant_tenants;
-use crate::ee::models::{stripe_events, tenant_billing};
+use crate::edition::ee::data::non_empty_env;
+use crate::edition::ee::data::plan::{Plan, StripePriceMapping};
+use crate::edition::ee::models::tenant_tenants;
+use crate::edition::ee::models::{stripe_events, tenant_billing};
 use crate::error::ResultExt;
 use crate::error::YorishiroError;
 
@@ -24,7 +24,7 @@ pub mod inbound {
     use chrono::Utc;
     use serde::Deserialize;
 
-    use crate::ee::controllers::hmac_sign;
+    use crate::edition::ee::controllers::hmac_sign;
 
     #[derive(Debug)]
     pub enum Error {

@@ -232,8 +232,7 @@ pub(crate) async fn get_by_id(
 /// The signal only (what changed and where), with no diff and no application.
 /// Whether to follow the upstream edit is the workspace's call, since applying it could invalidate entities already stored against the current definition.
 ///
-/// Lives here rather than in `ee/` because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
-/// The endpoint that produces one (`ee/`'s `GET /api/schemas/upstream-changes`) is what makes following it enterprise, not the shape of the value itself.
+/// Lives here because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
 #[derive(Clone, Serialize)]
 pub struct UpstreamChange {
     pub schema_id: Uuid,

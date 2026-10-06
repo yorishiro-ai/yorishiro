@@ -2,7 +2,7 @@ use migration::{Migrator, MigratorTrait};
 use sea_orm::{ActiveModelTrait, ActiveValue, Database};
 use serde_json::json;
 use uuid::Uuid;
-use yorishiro::ee::models::{inference_jobs, inference_proposals};
+use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
 use yorishiro::models::{entity_entities, schema_schemas};
 
 async fn database() -> (

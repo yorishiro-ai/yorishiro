@@ -106,7 +106,7 @@ pub async fn find_or_create(
         conn,
         tenant.id,
         "default",
-        crate::ee::data::plan::Plan::Free
+        crate::edition::ee::data::plan::Plan::Free
             .caps()
             .default_max_entities,
         None,

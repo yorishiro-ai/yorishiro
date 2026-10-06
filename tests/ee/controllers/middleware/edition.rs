@@ -1,5 +1,5 @@
-use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-use yorishiro::ee::data::plan::Plan;
+use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::edition::ee::data::plan::Plan;
 
 #[test]
 fn active_licence_plan_is_safe_and_expires_into_fallback() {

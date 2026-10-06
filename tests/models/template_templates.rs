@@ -2,7 +2,7 @@ use crate::requests::boot_request;
 use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{template_templates, tenant_tenants};
 use yorishiro::models::template_templates::{self as templates, TemplateVisibility};
 

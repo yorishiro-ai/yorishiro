@@ -43,7 +43,7 @@ pub async fn create_user(
 }
 
 /// Verifies an email/password pair against the stored Argon2id hash, returning the matching user on success.
-/// An OAuth-only account (`password_hash = NULL`) never matches, same as a wrong password: `loco_rs::hash::verify_password` needs a hash to compare against.
+/// A passwordless account (`password_hash = NULL`) never matches, same as a wrong password: `loco_rs::hash::verify_password` needs a hash to compare against.
 pub(crate) async fn verify_login(
     conn: &impl ConnectionTrait,
     email: &str,

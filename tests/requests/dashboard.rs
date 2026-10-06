@@ -1,7 +1,7 @@
 use super::{boot_request, with_max_tenants};
 use axum::http::StatusCode;
 use serial_test::serial;
-use yorishiro::app::App;
+use yorishiro::App;
 
 /// The freshly bootstrapped owner can read their own tenant's overview: zero usage, no plan (never subscribed), and themselves as the sole member.
 #[tokio::test]

@@ -12,11 +12,11 @@ async fn boot_rejects_a_shared_sqlite_database_and_queue_file() {
     )
     .unwrap();
 
-    let error =
-        match yorishiro::app::App::boot(StartMode::ServerOnly, &Environment::Test, config).await {
-            Ok(_) => panic!("shared SQLite file should be rejected at App::boot"),
-            Err(error) => error.to_string(),
-        };
+    let error = match yorishiro::App::boot(StartMode::ServerOnly, &Environment::Test, config).await
+    {
+        Ok(_) => panic!("shared SQLite file should be rejected at App::boot"),
+        Err(error) => error.to_string(),
+    };
 
     assert!(error.contains("same file"), "{error}");
 }

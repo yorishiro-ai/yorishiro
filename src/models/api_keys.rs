@@ -131,7 +131,7 @@ impl Entity {
     /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the SeaORM entity API.
     /// Matches the SQL function's single-argument overload exactly: only a workspace-scoped key (`workspace_id` set) resolves; a tenant-scoped key matches nothing here either, same as on Postgres.
     ///
-    /// Deliberately not routed through the `Authenticator` trait: that trait exists so `ee/` can swap the authentication rule, and `ee/` does not run against SQLite, so there is no second implementation for the trait to replace on this backend.
+    /// Deliberately not routed through the `Authenticator` trait: that trait is the seam for replacing the PostgreSQL authentication rule, and SQLite has no second rule to substitute, so there is nothing for the trait to select between on this backend.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -216,7 +216,7 @@ impl Entity {
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part (192 bits) is the actual credential.
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
-    /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or OAuth provisioning a key for an ordinary user.
+    /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or any other flow provisioning a key for an ordinary user.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.

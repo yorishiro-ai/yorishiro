@@ -3,27 +3,28 @@ mod discovery;
 use std::sync::Arc;
 use std::sync::Mutex;
 use yorishiro::YorishiroError;
-use yorishiro::ee::controllers::oauth::state_token;
-use yorishiro::ee::data::oauth::OAuthConfig;
+use yorishiro::edition::ee::controllers::oauth::state_token;
+use yorishiro::edition::ee::data::oauth::OAuthConfig;
 
 use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
 
-use yorishiro::ee::services::oauth::*;
+use yorishiro::edition::ee::services::oauth::*;
 
 struct FakeOAuthHttp {
     calls: Mutex<Vec<&'static str>>,
 }
 
 #[async_trait]
-impl yorishiro::ee::services::oauth::discovery::OAuthHttp for FakeOAuthHttp {
+impl yorishiro::edition::ee::services::oauth::discovery::OAuthHttp for FakeOAuthHttp {
     async fn fetch_discovery_document(
         &self,
         _issuer_url: &str,
-    ) -> Result<yorishiro::ee::services::oauth::discovery::DiscoveryDocument, YorishiroError> {
+    ) -> Result<yorishiro::edition::ee::services::oauth::discovery::DiscoveryDocument, YorishiroError>
+    {
         self.calls.lock().unwrap().push("discovery");
         Ok(
-            yorishiro::ee::services::oauth::discovery::DiscoveryDocument {
+            yorishiro::edition::ee::services::oauth::discovery::DiscoveryDocument {
                 authorization_endpoint: "https://idp.example/authorize".into(),
                 token_endpoint: "https://idp.example/token".into(),
                 jwks_uri: "https://idp.example/jwks".into(),
@@ -39,11 +40,14 @@ impl yorishiro::ee::services::oauth::discovery::OAuthHttp for FakeOAuthHttp {
         _code: &str,
         _redirect_uri: &str,
         _pkce_verifier: &str,
-    ) -> Result<yorishiro::ee::services::oauth::discovery::TokenResponse, YorishiroError> {
+    ) -> Result<yorishiro::edition::ee::services::oauth::discovery::TokenResponse, YorishiroError>
+    {
         self.calls.lock().unwrap().push("token");
-        Ok(yorishiro::ee::services::oauth::discovery::TokenResponse {
-            id_token: "not-a-jwt".into(),
-        })
+        Ok(
+            yorishiro::edition::ee::services::oauth::discovery::TokenResponse {
+                id_token: "not-a-jwt".into(),
+            },
+        )
     }
 
     async fn fetch_jwks(&self, _jwks_uri: &str) -> Result<JwkSet, YorishiroError> {

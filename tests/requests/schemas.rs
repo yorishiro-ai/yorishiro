@@ -1,6 +1,6 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{self, TenantArgs};

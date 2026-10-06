@@ -1,9 +1,9 @@
 use axum::http::HeaderMap;
-use yorishiro::ee::controllers::hmac_sign;
-use yorishiro::ee::controllers::stripe::SIGNATURE_TOLERANCE_SECS;
+use yorishiro::edition::ee::controllers::hmac_sign;
+use yorishiro::edition::ee::controllers::stripe::SIGNATURE_TOLERANCE_SECS;
 
 use axum::http::HeaderValue;
-use yorishiro::ee::controllers::stripe::inbound::*;
+use yorishiro::edition::ee::controllers::stripe::inbound::*;
 
 const SECRET: &str = "whsec_test";
 const NOW: i64 = 1_700_000_000;

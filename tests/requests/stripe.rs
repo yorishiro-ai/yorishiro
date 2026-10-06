@@ -7,9 +7,9 @@ use serde_json::json;
 use serial_test::serial;
 use sha2::Sha256;
 use uuid::Uuid;
-use yorishiro::app::App;
-use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-use yorishiro::ee::models::tenant_billing;
+use yorishiro::App;
+use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::edition::ee::models::tenant_billing;
 use yorishiro::models::_entities::tenant_tenants;
 
 type HmacSha256 = Hmac<Sha256>;

@@ -12,7 +12,7 @@ mod tag_discovery;
 use loco_rs::app::{AppContext, Hooks};
 use loco_rs::environment::Environment;
 use sea_orm::Database;
-use yorishiro::app::App;
+use yorishiro::App;
 
 /// An application context over an in-memory SQLite database, for tests that need `AppContext` but no HTTP server or queue.
 pub(crate) async fn test_context() -> AppContext {

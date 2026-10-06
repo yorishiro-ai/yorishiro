@@ -4,7 +4,7 @@ use sea_orm::ActiveModelTrait;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
 use tokio::sync::Barrier;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::{tenancy, tenant_memberships, workspace_invites};
 

@@ -4,7 +4,7 @@ use super::{boot_request, with_max_tenants};
 use axum::http::StatusCode;
 use loco_rs::app::Hooks;
 use serial_test::serial;
-use yorishiro::app::App;
+use yorishiro::App;
 
 #[tokio::test]
 #[serial(process_environment)]

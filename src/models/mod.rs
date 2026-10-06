@@ -1,3 +1,8 @@
+//! One module per table, beside the generated entities in [`_entities`].
+//!
+//! Every generated entity needs an `ActiveModelBehavior` implementation in every build, and the ones that hold a secret need a redacting `Debug` (`scripts/harden_generated_entities.py` removes the derived one).
+//! So a table gets its module here even when only an overlay's code reads and writes it: the schema is one set of migrations, one set of entities, and the behaviour that overlay owns stays in that overlay's own module for the table.
+
 pub mod _entities;
 pub mod api_key_audit_log;
 pub mod api_keys;

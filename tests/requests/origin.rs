@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use sea_orm::TransactionTrait;
 use serde_json::json;
 use uuid::Uuid;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{
     api_keys, template_templates, tenant_tenants, workspace_workspaces,
 };
@@ -361,7 +361,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         }
 
         #[async_trait::async_trait]
-        impl yorishiro::ee::models::schema_schemas::MergeReadHook for ReadBarrier {
+        impl yorishiro::edition::ee::models::schema_schemas::MergeReadHook for ReadBarrier {
             async fn after_revision_read(&self) {
                 self.ready.notify_one();
                 self.release.notified().await;
@@ -422,15 +422,16 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         let merge_barrier = barrier.clone();
         let merge = tokio::spawn(async move {
             let txn = merge_db.begin().await.expect("begin merge transaction");
-            let result = yorishiro::ee::models::schema_schemas::merge_apply_with_read_hook(
-                &txn,
-                &merge_ctx,
-                tenant_id,
-                workspace_id,
-                schema_id,
-                merge_barrier.as_ref(),
-            )
-            .await;
+            let result =
+                yorishiro::edition::ee::models::schema_schemas::merge_apply_with_read_hook(
+                    &txn,
+                    &merge_ctx,
+                    tenant_id,
+                    workspace_id,
+                    schema_id,
+                    merge_barrier.as_ref(),
+                )
+                .await;
             if result.is_ok() {
                 txn.commit().await.expect("commit merge acknowledgement");
             } else {

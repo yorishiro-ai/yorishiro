@@ -2,7 +2,7 @@ use serde_json::json;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
-use yorishiro::ee::models::schema_schemas::merge::*;
+use yorishiro::edition::ee::models::schema_schemas::merge::*;
 
 /// Builds a definition with one entity type whose fields are given as JSON.
 fn def(fields: serde_json::Value) -> MetaSchemaDefinition {

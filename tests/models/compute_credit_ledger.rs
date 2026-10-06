@@ -1,7 +1,7 @@
 use crate::requests::boot_request;
 use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
-use yorishiro::app::App;
-use yorishiro::ee::models::compute_credit_ledger as ledger;
+use yorishiro::App;
+use yorishiro::edition::ee::models::compute_credit_ledger as ledger;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 

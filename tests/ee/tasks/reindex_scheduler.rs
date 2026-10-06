@@ -7,7 +7,7 @@ use uuid::Uuid;
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 
-use yorishiro::ee::tasks::reindex_scheduler::{
+use yorishiro::edition::ee::tasks::reindex_scheduler::{
     dispatch_reindex_batch, is_due, scheduler_failure_message,
 };
 
@@ -101,7 +101,7 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     yorishiro::db::register_sqlite_extensions();
     let db = Database::connect(&uri).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    let mut config = yorishiro::app::App::load_config(&loco_rs::environment::Environment::Any(
+    let mut config = yorishiro::App::load_config(&loco_rs::environment::Environment::Any(
         "test_sqlite".into(),
     ))
     .await
@@ -145,7 +145,7 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     });
     ctx.shared_store
         .insert(dispatcher.clone() as Arc<dyn yorishiro::workers::dispatch::ReindexDispatcher>);
-    let task = yorishiro::ee::tasks::reindex_scheduler::TenantReindexScheduler;
+    let task = yorishiro::edition::ee::tasks::reindex_scheduler::TenantReindexScheduler;
     let first = task
         .run_at(&ctx, &loco_rs::task::Vars::default(), at(0))
         .await;
@@ -166,10 +166,12 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
         .await;
     assert!(second.is_ok());
     assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 2);
-    let ownership =
-        yorishiro::ee::db::acquire_scheduler_ownership(&ctx, "yorishiro:tenant-reindex-scheduler")
-            .await
-            .unwrap()
-            .unwrap();
+    let ownership = yorishiro::edition::ee::db::acquire_scheduler_ownership(
+        &ctx,
+        "yorishiro:tenant-reindex-scheduler",
+    )
+    .await
+    .unwrap()
+    .unwrap();
     ownership.release().await.unwrap();
 }

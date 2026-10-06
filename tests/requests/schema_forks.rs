@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
 use uuid::Uuid;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{
     entity_entities, schema_schemas, tenant_tenants, workspace_schema_fork_heads,
     workspace_schema_forks, workspace_workspaces,
@@ -657,11 +657,11 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
         let barrier_b = barrier;
         let create_a = async {
             barrier_a.wait().await;
-            let result = yorishiro::ee::models::workspace_schema_forks::create(
+            let result = yorishiro::edition::ee::models::workspace_schema_forks::create(
                 &txn_a,
                 tenant_id,
                 workspace_a,
-                yorishiro::ee::models::workspace_schema_forks::CreateInput {
+                yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
                     source_workspace_id: workspace_b.id,
                     source_schema_id: schema_b_id,
                 },
@@ -676,11 +676,11 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
         };
         let create_b = async {
             barrier_b.wait().await;
-            let result = yorishiro::ee::models::workspace_schema_forks::create(
+            let result = yorishiro::edition::ee::models::workspace_schema_forks::create(
                 &txn_b,
                 tenant_id,
                 workspace_b.id,
-                yorishiro::ee::models::workspace_schema_forks::CreateInput {
+                yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
                     source_workspace_id: workspace_a,
                     source_schema_id: schema_a_id,
                 },
@@ -757,11 +757,11 @@ async fn fork_creation_shares_the_schema_version_lock() {
                 .await
                 .unwrap();
             second_barrier.wait().await;
-            let fork = yorishiro::ee::models::workspace_schema_forks::create(
+            let fork = yorishiro::edition::ee::models::workspace_schema_forks::create(
                 &txn,
                 tenant_id,
                 target.id,
-                yorishiro::ee::models::workspace_schema_forks::CreateInput {
+                yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
                     source_workspace_id,
                     source_schema_id,
                 },

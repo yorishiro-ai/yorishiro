@@ -152,7 +152,7 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
+        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.is_sqlite() {
             let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
@@ -338,7 +338,7 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
+        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.is_sqlite() {
             let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await

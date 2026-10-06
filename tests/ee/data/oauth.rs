@@ -1,4 +1,4 @@
-use yorishiro::ee::data::oauth::*;
+use yorishiro::edition::ee::data::oauth::*;
 
 #[test]
 fn require_non_empty_accepts_a_present_value() {

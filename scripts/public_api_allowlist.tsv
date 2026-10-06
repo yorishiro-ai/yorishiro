@@ -8,7 +8,6 @@ src/models/tenant_memberships.rs	enum	MembershipRole	openapi-transport: membersh
 src/models/tenant_memberships.rs	fn	MembershipRole::max_scope	auth-provider-resolver: role-to-key-scope policy moved with its existing public enum.
 src/models/tenant_memberships.rs	struct	MembershipRecord	openapi-transport: serialized member record moved to the table-owning model.
 src/models/tenant_memberships.rs	field	MembershipRecord::user_id	openapi-transport: serialized member response field.
-src/workers/queue.rs	fn	all_tags	operator-tag-discovery: all_tags() is the authoritative, programmatically derived list of every registered worker tag for systemd units and operator tooling; enterprise tags are derived from ee::app::worker_queues() so tags and queue lists share one source of truth.
 src/models/tenant_memberships.rs	field	MembershipRecord::email	openapi-transport: serialized member response field.
 src/models/tenant_memberships.rs	field	MembershipRecord::display_name	openapi-transport: serialized member response field.
 src/models/tenant_memberships.rs	field	MembershipRecord::role	openapi-transport: serialized member response field.
@@ -879,7 +878,6 @@ src/workers/queue.rs	field	ConcurrencyPolicy::plan	integration-test: tests/worke
 src/workers/queue.rs	field	Decision::class	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
 src/workers/queue.rs	field	Decision::fallback	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
 src/workers/queue.rs	field	Decision::priority	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	class_queues	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
 src/workers/queue.rs	fn	concurrency_for	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
 src/workers/queue.rs	fn	decide	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
 src/workers/queue.rs	fn	decide_for_dispatch_at	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
@@ -890,3 +888,19 @@ src/workers/queue.rs	struct	Decision	integration-test: tests/workers/queue.rs ex
 src/workers/queue.rs	trait	QueuePolicy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
 src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
+src/lib.rs	mod	edition	ce-ee-composition: the only Hooks implementation lives in this module, which sits outside src/ so that nothing under src/ names an edition overlay.
+src/lib.rs	use	edition::{App,worker_tags}	ce-ee-composition: the binary and the integration tests boot the application and read its worker tags through the single composition root, without src naming it elsewhere.
+edition/app.rs	struct	App	ce-ee-composition: the crate's only Hooks implementation, delegating to src/app.rs and the active edition.
+edition/app.rs	fn	workers	ce-ee-composition: the composed worker registry that Loco registration, the Redis queue configuration and worker-tags all derive from.
+edition/app.rs	fn	worker_tags	ce-ee-composition: the tag list printed by the worker-tags command, derived from the composed worker registry.
+edition/mod.rs	use	app::{App,worker_tags,workers}	ce-ee-composition: re-exports the Hooks implementation and the worker registry derivations from the module that defines them, for the binary and the integration tests.
+edition/mod.rs	mod	ee	ce-ee-composition: the enterprise overlay is compiled in here, behind the enterprise feature, rather than from src/.
+src/workers/mod.rs	mod	registry	worker-registry: the single registration list that tags, queues and Loco registration derive from.
+src/workers/registry.rs	struct	WorkerRegistry	worker-registry: typed value holding one registration per worker type; the composition root extends the community baseline with an edition's workers.
+src/workers/registry.rs	fn	WorkerRegistry::community	worker-registry: the base application's workers, which the composition root and the integration tests start from.
+src/workers/registry.rs	fn	WorkerRegistry::register	worker-registry: how an edition adds one worker type whose tags and queue come from the type itself.
+src/workers/registry.rs	fn	WorkerRegistry::tags	worker-registry: the tag list for --worker=..., read by the worker-tags command and the integration tests.
+src/workers/registry.rs	fn	WorkerRegistry::queues	worker-registry: the named queues a Redis provider must poll, read at boot and by the integration tests.
+src/controllers/mcp/mod.rs	struct	McpToolSet	ce-ee-composition: the MCP tools and access policy an edition extends from the community set.
+src/controllers/mcp/mod.rs	fn	McpToolSet::extend	ce-ee-composition: how an edition adds MCP tools and its access policy; unused by the community build, which is why it cannot be narrowed to pub(crate).
+src/workers/queue.rs	const	SINGLE_JOB_LIMIT	integration-test: the one-running-job default that the queue policy tests and the plan policy overlay both state.

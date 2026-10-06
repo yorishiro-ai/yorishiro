@@ -120,10 +120,15 @@ jobs:
         run: |
           # Tests and test-only seams belong to the integration-test crate: no #[test] or
           # #[cfg(test)] in the shipped sources.
-          if git grep -nE '#\[(tokio::)?test\b|#\[cfg\(test\)\]' -- src ee; then
+          if git grep -nE '#\[(tokio::)?test\b|#\[cfg\(test\)\]' -- src ee edition; then
             echo "ERROR: move the test above into tests/ (see docs/en/contributing.md)"
             exit 1
           fi
+
+      - name: Check the edition boundary
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_edition_boundary.py
+          PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_edition_boundary.py
 
       - name: Check public API additions
         run: |
@@ -170,7 +175,7 @@ jobs:
         run: |
           # SeaORM FromQueryResult requires exact field names for column mapping,
           # so columns read from SQL but unused on the Rust side need a _ prefix.
-          if git grep -n 'allow(dead_code)' -- src ee migration/src; then
+          if git grep -n 'allow(dead_code)' -- src ee edition migration/src; then
             echo "ERROR: allow(dead_code) found above (except known entity_relations exception). Delete the unused item, don't remove it."
             exit 1
           fi

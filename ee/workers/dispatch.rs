@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 
-use crate::ee::workers::infer_fill::{InferFillArgs, InferFillDispatcher, InferFillWorker};
+use crate::edition::ee::workers::infer_fill::{
+    InferFillArgs, InferFillDispatcher, InferFillWorker,
+};
 use crate::workers::dispatch::{JobSpec, LocoJobDispatcher, dispatch_job};
 use crate::workers::embedding_sync::WorkerClass;
 

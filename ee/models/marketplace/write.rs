@@ -4,7 +4,7 @@
 //! This module holds only the writes, calling into `models::marketplace` for the insert/update itself once a decision allows it.
 
 use crate::db;
-use crate::ee::models::marketplace;
+use crate::edition::ee::models::marketplace;
 use crate::error::{ResultExt, YorishiroError};
 use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;

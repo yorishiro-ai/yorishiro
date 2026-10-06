@@ -2,7 +2,7 @@ use crate::controllers::render_inventory_section;
 use std::collections::HashSet;
 
 use yorishiro::controllers::mcp::community_tool_router;
-use yorishiro::ee::controllers::mcp::tool_router;
+use yorishiro::edition::ee::controllers::mcp::tool_router;
 
 fn render_inventory_fragment(
     community: &[rmcp::model::Tool],

@@ -6,7 +6,7 @@
 
 use crate::YorishiroError;
 
-use crate::ee::data::non_empty_env;
+use crate::edition::ee::data::non_empty_env;
 
 #[derive(Clone)]
 pub struct OAuthConfig {

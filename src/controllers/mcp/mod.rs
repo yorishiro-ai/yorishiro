@@ -35,13 +35,51 @@ pub trait McpToolPolicy: Send + Sync {
     fn allows(&self, ctx: &AppContext, name: &str) -> bool;
 }
 
-#[cfg(not(feature = "enterprise"))]
+/// The policy a deployment gets when it does not choose one: every registered tool is listed and callable.
 pub(crate) struct AllowAllTools;
 
-#[cfg(not(feature = "enterprise"))]
 impl McpToolPolicy for AllowAllTools {
     fn allows(&self, _ctx: &AppContext, _name: &str) -> bool {
         true
+    }
+}
+
+/// The tools one MCP server exposes, and the policy that decides which of them a request may see.
+///
+/// Starts as the community tool set under [`AllowAllTools`].
+/// An edition adds its own tools with [`McpToolSet::extend`], which replaces the policy because only the edition knows which of the tools it added need gating.
+#[derive(Clone)]
+pub struct McpToolSet {
+    router: ToolRouter<YorishiroMcpServer>,
+    policy: Arc<dyn McpToolPolicy>,
+}
+
+impl McpToolSet {
+    pub(crate) fn community() -> Self {
+        Self {
+            router: community_tool_router(),
+            policy: Arc::new(AllowAllTools),
+        }
+    }
+
+    /// Adds `router`'s tools and decides access with `policy` from now on.
+    ///
+    /// # Panics
+    /// Panics if `router` names a tool this set already has.
+    #[must_use]
+    pub fn extend(
+        self,
+        router: ToolRouter<YorishiroMcpServer>,
+        policy: Arc<dyn McpToolPolicy>,
+    ) -> Self {
+        Self {
+            router: compose_tool_routers([self.router, router]),
+            policy,
+        }
+    }
+
+    pub(crate) fn server(&self, ctx: AppContext) -> YorishiroMcpServer {
+        YorishiroMcpServer::new(ctx, self.router.clone(), self.policy.clone())
     }
 }
 

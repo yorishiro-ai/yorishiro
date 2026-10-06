@@ -115,11 +115,11 @@ pub(crate) async fn record_batch_attempt(
     else {
         return Err(YorishiroError::not_found("infer-fill job not found"));
     };
-    let job = crate::ee::models::inference_jobs::InferenceJobRecord::try_from(row)?;
+    let job = crate::edition::ee::models::inference_jobs::InferenceJobRecord::try_from(row)?;
     if job.workspace_id != workspace_id {
         return Err(YorishiroError::not_found("infer-fill job not found"));
     }
-    if job.status != crate::ee::models::inference_jobs::InferenceJobStatus::Running {
+    if job.status != crate::edition::ee::models::inference_jobs::InferenceJobStatus::Running {
         return Err(YorishiroError::Conflict {
             message: format!("inference job '{job_id}' is not running"),
         });
@@ -182,13 +182,13 @@ async fn require_completed_job(
     workspace_id: Uuid,
     job_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    let Some(job) = crate::ee::models::inference_jobs::get(conn, job_id).await? else {
+    let Some(job) = crate::edition::ee::models::inference_jobs::get(conn, job_id).await? else {
         return Err(YorishiroError::not_found("infer-fill job not found"));
     };
     if job.workspace_id != workspace_id {
         return Err(YorishiroError::not_found("infer-fill job not found"));
     }
-    if job.status != crate::ee::models::inference_jobs::InferenceJobStatus::Completed {
+    if job.status != crate::edition::ee::models::inference_jobs::InferenceJobStatus::Completed {
         return Err(YorishiroError::Conflict {
             message: format!(
                 "inference job '{job_id}' is not completed and its proposals cannot be changed"
@@ -394,7 +394,7 @@ pub async fn confirm(
         }
 
         entity_entities::snapshot(conn, workspace_id, entity_id, job_id).await?;
-        if !crate::ee::models::entity_entities::update_if_unchanged(
+        if !crate::edition::ee::models::entity_entities::update_if_unchanged(
             conn,
             workspace_id,
             &existing,

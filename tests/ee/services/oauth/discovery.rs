@@ -5,7 +5,7 @@ use yorishiro::YorishiroError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use yorishiro::ee::services::oauth::discovery::*;
+use yorishiro::edition::ee::services::oauth::discovery::*;
 
 async fn start_server(response: &str) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))

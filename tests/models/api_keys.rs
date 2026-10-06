@@ -1,5 +1,5 @@
 use crate::requests::boot_request;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::api_keys::Entity as ApiKeys;

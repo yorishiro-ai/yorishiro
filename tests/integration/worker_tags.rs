@@ -3,8 +3,8 @@
 
 use std::process::Command;
 
+use yorishiro::edition::worker_tags;
 use yorishiro::workers::embedding_sync::WorkerClass;
-use yorishiro::workers::queue::all_tags;
 
 /// Invokes the compiled binary and asserts `worker-tags` output format.
 #[test]
@@ -27,10 +27,10 @@ fn worker_tags_command_output_is_single_comma_separated_line() {
     );
 
     let tags_csv = lines[0];
-    let expected = all_tags().join(",");
+    let expected = worker_tags().join(",");
     assert_eq!(
         tags_csv, expected,
-        "worker-tags output must match all_tags()"
+        "worker-tags output must match worker_tags()"
     );
 }
 
@@ -47,7 +47,7 @@ fn worker_tags_command_includes_all_expected_tags() {
 
     let tags_csv = stdout.trim_end();
     let received: Vec<&str> = tags_csv.split(',').collect();
-    let expected_tags = all_tags();
+    let expected_tags = worker_tags();
 
     // Must match count exactly.
     assert_eq!(
@@ -106,4 +106,22 @@ fn worker_tags_command_contains_infer_fill() {
         tags_csv.contains("infer-fill"),
         "worker-tags must include the enterprise infer-fill tag"
     );
+}
+
+/// The binary prints exactly the baseline in a community build and the baseline plus the edition's worker in an enterprise one, independent of the library function the other tests compare against.
+#[test]
+fn worker_tags_command_prints_the_edition_exact_list() {
+    let bin = env!("CARGO_BIN_EXE_yorishiro");
+    let output = Command::new(bin)
+        .args(["worker-tags"])
+        .output()
+        .expect("run yorishiro");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("valid UTF-8");
+    let baseline = "worker-class:tenant-private,worker-class:official,worker-class:shared";
+    #[cfg(feature = "enterprise")]
+    let expected = format!("{baseline},infer-fill");
+    #[cfg(not(feature = "enterprise"))]
+    let expected = baseline.to_owned();
+    assert_eq!(stdout.trim_end(), expected);
 }
