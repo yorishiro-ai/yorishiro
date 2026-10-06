@@ -648,7 +648,7 @@ mod conflict {
 
     /// A write that lands between the worker's snapshot read and the vector persist must not store a stale vector.
     /// The old delivery is terminally superseded; the REST update dispatches the fresh job.
-    /// Runs on whichever backend `DATABASE_URL` names, so SQLite and PostgreSQL share one assertion set.
+    /// SQLite-only: the live queue it drives is a test-local SQLite file, so the test returns early when `DATABASE_URL` names another backend.
     #[tokio::test]
     #[serial(process_environment)]
     async fn a_write_during_embedding_supersedes_the_old_delivery() {
@@ -818,6 +818,59 @@ mod conflict {
 
             let _ = queue.shutdown();
             queue_pool.close().await;
+        })
+        .await;
+    }
+
+    /// Capacity denial is terminal under the single-attempt policy: the row must not stay `queued` while Loco fails the job.
+    #[tokio::test]
+    async fn a_saturated_embedding_job_is_failed_not_orphaned() {
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let enqueue = |id| Enqueue {
+                id,
+                job_name: "embedding_sync",
+                worker_class: WorkerClass::Shared,
+                workspace_id: Some(workspace_id),
+                plan: None,
+                concurrency_key: Some("shared:test"),
+                concurrency_limit: Some(1),
+            };
+            let holder = Uuid::now_v7();
+            Entity::record_enqueue(&ctx.db, enqueue(holder))
+                .await
+                .expect("record holder");
+            Entity::start_at(&ctx.db, holder, chrono::Utc::now().fixed_offset())
+                .await
+                .expect("holder runs");
+
+            let waiting = Uuid::now_v7();
+            Entity::record_enqueue(&ctx.db, enqueue(waiting))
+                .await
+                .expect("record waiting");
+            let result = EmbeddingSyncWorkerShared::build(&ctx)
+                .perform(EmbeddingSyncArgs {
+                    lifecycle_id: Some(waiting),
+                    workspace_id,
+                    entity_id,
+                    worker_class: WorkerClass::Shared,
+                })
+                .await;
+            assert!(result.is_err(), "capacity denial must reach Loco");
+            let row = Entity::find_by_id(waiting)
+                .one(&ctx.db)
+                .await
+                .expect("read waiting")
+                .expect("waiting row");
+            assert_eq!(row.status, LifecycleStatus::Failed.as_db_str());
+            assert!(row.error.is_some_and(|e| e.contains("saturated")));
+            assert_eq!(vector_rows(&ctx, entity_id).await, 0);
+            let holder = Entity::find_by_id(holder)
+                .one(&ctx.db)
+                .await
+                .expect("read holder")
+                .expect("holder row");
+            assert_eq!(holder.status, LifecycleStatus::Running.as_db_str());
         })
         .await;
     }

@@ -162,6 +162,35 @@ impl Entity {
         Ok(())
     }
 
+    /// Closes a row that was never admitted as `failed`, fenced to the statuses a delivery may still claim.
+    ///
+    /// # Errors
+    /// Returns `RecordNotFound` when another delivery has already claimed the row.
+    pub(crate) async fn fail_unadmitted(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        error: &str,
+    ) -> Result<(), DbErr> {
+        let result = Entity::update_many()
+            .col_expr(
+                Column::Status,
+                Expr::value(LifecycleStatus::Failed.as_db_str()),
+            )
+            .col_expr(Column::FailedAt, Expr::value(Utc::now().fixed_offset()))
+            .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
+            .filter(Column::Id.eq(id))
+            .filter(Column::Status.is_in([
+                LifecycleStatus::Queued.as_db_str(),
+                LifecycleStatus::Retrying.as_db_str(),
+            ]))
+            .exec(db)
+            .await?;
+        if result.rows_affected == 0 {
+            return Err(DbErr::RecordNotFound("unclaimed queue lifecycle".into()));
+        }
+        Ok(())
+    }
+
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
