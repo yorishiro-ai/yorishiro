@@ -1,77 +1,63 @@
-//! Tests for `all_tags()` completeness and determinism.
+//! The worker registry is the single source of tags, queues and registration.
 
+use yorishiro::edition::{worker_tags, workers};
 use yorishiro::workers::embedding_sync::WorkerClass;
-use yorishiro::workers::queue::all_tags;
+use yorishiro::workers::registry::WorkerRegistry;
 
-/// `all_tags()` must return exactly the union of base worker-class tags and
-/// enterprise tags (when compiled in).
-///
-/// The base set is known at compile time; the enterprise set is one tag when
-/// `enterprise` is enabled, zero otherwise.
-#[test]
-fn all_tags_contains_base_worker_class_tags() {
-    let tags = all_tags();
-    for class in WorkerClass::ALL {
-        let tag = class.tag();
-        assert!(
-            tags.contains(&tag.to_owned()),
-            "all_tags() must include the base tag for {class:?} ({tag})"
-        );
-    }
+fn community_tags() -> Vec<String> {
+    WorkerClass::ALL
+        .iter()
+        .map(|class| class.tag().to_owned())
+        .collect()
 }
 
-/// `all_tags()` must contain the enterprise `infer-fill` tag when compiled in.
+/// The community registry names exactly the worker classes' tags and queues, whichever edition is compiled in.
+#[test]
+fn community_registry_is_the_worker_class_baseline() {
+    let registry = WorkerRegistry::community();
+    assert_eq!(registry.tags(), community_tags());
+    assert_eq!(registry.queues(), community_tags());
+}
+
+/// Without the enterprise feature the composed registry is the community one: nothing else contributes.
+#[cfg(not(feature = "enterprise"))]
+#[test]
+fn composed_registry_is_the_community_registry_without_an_edition() {
+    assert_eq!(worker_tags(), community_tags());
+    assert_eq!(workers().queues(), community_tags());
+}
+
+/// With the enterprise feature the composed registry is the community baseline followed by exactly the edition's own workers.
 #[cfg(feature = "enterprise")]
 #[test]
-fn all_tags_contains_enterprise_infer_fill() {
-    let tags = all_tags();
-    assert!(
-        tags.contains(&"infer-fill".to_owned()),
-        "all_tags() must include the enterprise infer-fill tag"
+fn composed_registry_extends_the_community_baseline_only() {
+    let mut expected = community_tags();
+    expected.push("infer-fill".to_owned());
+    assert_eq!(worker_tags(), expected);
+    assert_eq!(workers().queues(), expected);
+    assert_eq!(
+        &worker_tags()[..WorkerClass::ALL.len()],
+        WorkerRegistry::community().tags().as_slice(),
+        "the edition must not reorder or replace the baseline"
     );
 }
 
-/// `all_tags()` must not contain duplicate tags.
+/// Tags are listed once each and in a stable order, since the list is substituted verbatim into `--worker=`.
 #[test]
-fn all_tags_has_no_duplicates() {
-    let tags = all_tags();
+fn composed_tags_are_distinct_and_deterministic() {
+    let tags = worker_tags();
     let mut seen = std::collections::HashSet::new();
-    for tag in &tags {
-        assert!(
-            seen.insert(tag.clone()),
-            "duplicate tag in all_tags(): {tag}"
-        );
-    }
+    assert!(
+        tags.iter().all(|tag| seen.insert(tag)),
+        "duplicate tag in {tags:?}"
+    );
+    assert_eq!(tags, worker_tags());
 }
 
-/// `all_tags()` output is deterministic (same order across calls).
+/// Registering the same worker type twice is refused, because Loco keys handlers by class name and the second would replace the first.
 #[test]
-fn all_tags_is_deterministic() {
-    let a = all_tags();
-    let b = all_tags();
-    assert_eq!(
-        a, b,
-        "all_tags() must produce the same list on repeated calls"
-    );
-}
-
-/// The number of tags matches the expected count.
-#[test]
-fn all_tags_count_matches_expected() {
-    let tags = all_tags();
-    // Base: 3 worker-class tags
-    #[allow(unused_mut)]
-    let mut expected = WorkerClass::ALL.len();
-    #[cfg(feature = "enterprise")]
-    {
-        // EE adds 1: infer-fill
-        expected += 1;
-    }
-    assert_eq!(
-        tags.len(),
-        expected,
-        "all_tags() returned {} tags but expected {}",
-        tags.len(),
-        expected
-    );
+#[should_panic(expected = "duplicate background worker")]
+fn registering_a_worker_twice_is_refused() {
+    use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorkerShared};
+    let _ = WorkerRegistry::community().register::<EmbeddingSyncArgs, EmbeddingSyncWorkerShared>();
 }

@@ -3,8 +3,10 @@
 use super::boot_request;
 use loco_rs::app::Hooks;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use yorishiro::app::App;
-use yorishiro::ee::models::template_templates::{self as official_templates, OFFICIAL_TENANT_ID};
+use yorishiro::App;
+use yorishiro::edition::ee::models::template_templates::{
+    self as official_templates, OFFICIAL_TENANT_ID,
+};
 use yorishiro::models::_entities::{template_versions, tenant_tenants};
 
 /// A first run publishes every built-in template and creates the official tenant; a second run republishes nothing.

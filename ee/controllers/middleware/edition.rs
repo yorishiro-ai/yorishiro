@@ -10,7 +10,7 @@
 //! No key means the enterprise features are disabled, never that the process refuses to start: a deployment that only wants the free half must keep working with no licence configured at all.
 
 use crate::YorishiroError;
-use crate::ee::data::plan::Plan;
+use crate::edition::ee::data::plan::Plan;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

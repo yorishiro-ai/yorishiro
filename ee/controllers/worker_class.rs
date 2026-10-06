@@ -13,12 +13,12 @@ use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
-use crate::ee::controllers::middleware::auth as authz;
-use crate::ee::dtos::worker_class::SetWorkerClassRequest;
-use crate::ee::models::workspace_worker_classes::{self, WorkerClassAssignment};
+use crate::edition::ee::controllers::middleware::auth as authz;
+use crate::edition::ee::dtos::worker_class::SetWorkerClassRequest;
+use crate::edition::ee::models::workspace_worker_classes::{self, WorkerClassAssignment};
 
 /// `PUT /api/workspace/worker-class`
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/worker-class", request_body = crate::ee::controllers::openapi::WorkerClassRequest, responses((status = 204, description = "Worker class saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/worker-class", request_body = crate::edition::ee::controllers::openapi::WorkerClassRequest, responses((status = 204, description = "Worker class saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn set_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -31,7 +31,7 @@ async fn set_worker_class(
 }
 
 /// `GET /api/workspace/worker-class`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/worker-class", responses((status = 200, body = crate::ee::controllers::openapi::WorkerClassResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/worker-class", responses((status = 200, body = crate::edition::ee::controllers::openapi::WorkerClassResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn get_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,

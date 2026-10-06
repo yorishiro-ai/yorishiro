@@ -5,18 +5,12 @@ pub mod db;
 pub mod db_enum;
 pub mod dtos;
 
-/// The enterprise edition.
+/// The composition root: the only `Hooks` implementation, and the one place that knows which editions exist.
 ///
-/// `ee/` sits at the repository root rather than under `src/` because `ee/LICENSE` defines its own
-/// Licensed Work as "everything under the `ee/` directory of this repository": the directory name is
-/// what scopes that licence, so moving these files would silently change what the licence covers.
-/// Compiling them into this crate does not change that scoping, since the files stay where the
-/// licence points.
-///
-/// The enterprise edition is not a separate compilation unit.
-#[cfg(feature = "enterprise")]
-#[path = "../ee/mod.rs"]
-pub mod ee;
+/// It sits at the repository root rather than under `src/` so that everything under `src/` stays free of edition-specific wiring.
+/// It is a module of this crate, not a crate of its own, so one binary carries every edition this build compiled in.
+#[path = "../edition/mod.rs"]
+pub mod edition;
 pub mod error;
 pub mod initializers;
 pub mod models;
@@ -24,4 +18,5 @@ pub mod services;
 pub mod tasks;
 pub mod workers;
 
+pub use edition::App;
 pub use error::YorishiroError;

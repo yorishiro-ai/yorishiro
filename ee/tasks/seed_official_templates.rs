@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::ee::models::template_templates as official_templates;
+use crate::edition::ee::models::template_templates as official_templates;
 
 /// `cargo loco task seed_official_templates`
 ///

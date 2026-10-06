@@ -4,7 +4,7 @@
 /// SQLite backend, confirming the `AuthContext`/`Authorized<R>` SQLite branches
 /// work end to end.
 use axum::http::StatusCode;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 /// Signup via invite then login, then verify replay protection.

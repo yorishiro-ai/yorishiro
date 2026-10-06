@@ -3,8 +3,8 @@ use axum::http::StatusCode;
 use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
-use yorishiro::app::App;
-use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::App;
+use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{self, TenantArgs};

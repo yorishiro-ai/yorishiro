@@ -7,8 +7,8 @@ mod id_token;
 use std::sync::Arc;
 
 use crate::YorishiroError;
-use crate::ee::controllers::oauth::state_token;
-use crate::ee::data::oauth::OAuthConfig;
+use crate::edition::ee::controllers::oauth::state_token;
+use crate::edition::ee::data::oauth::OAuthConfig;
 
 /// Everything `GET /auth/oauth/authorize` needs to build its redirect and set the CSRF cookie that binds the flow to this browser (see `state_token` module docs).
 pub struct AuthorizeRedirect {

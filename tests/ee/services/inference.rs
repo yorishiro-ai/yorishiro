@@ -10,7 +10,7 @@ use yorishiro::error::YorishiroError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use yorishiro::ee::services::inference::*;
+use yorishiro::edition::ee::services::inference::*;
 
 async fn start_server(response: &str) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))

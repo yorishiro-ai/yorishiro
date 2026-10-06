@@ -1,7 +1,7 @@
 use crate::requests::boot_request;
 use async_trait::async_trait;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::entity_embeddings;

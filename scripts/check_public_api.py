@@ -444,6 +444,7 @@ def _changed_paths(root: pathlib.Path, base: str, head: str) -> dict[str, str | 
             "--",
             "src",
             "ee",
+            "edition",
         )
         parts = [part for part in output.split("\0") if part]
         index = 0
@@ -461,7 +462,7 @@ def _changed_paths(root: pathlib.Path, base: str, head: str) -> dict[str, str | 
                 if path.endswith(".rs"):
                     paths[path] = path
     if head == WORKTREE:
-        untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z", "--", "src", "ee")
+        untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z", "--", "src", "ee", "edition")
         for path in untracked.split("\0"):
             if path.endswith(".rs"):
                 paths[path] = None
@@ -489,7 +490,7 @@ def load_allowlist(path: pathlib.Path) -> dict[tuple[str, str, str], AllowlistIt
         if len(columns) != 4 or columns[1] not in KINDS:
             raise CheckError(f"{path}:{line_number}: expected path, kind, symbol, reason TSV columns")
         item = AllowlistItem(*columns)
-        if not item.reason.strip() or not (item.path.startswith("src/") or item.path.startswith("ee/")):
+        if not item.reason.strip() or not item.path.startswith(("src/", "ee/", "edition/")):
             raise CheckError(f"{path}:{line_number}: allowlist item needs a source path and reason")
         if is_generated(item.path):
             raise CheckError(f"{path}:{line_number}: generated paths cannot be allowlisted")

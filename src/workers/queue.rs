@@ -1,9 +1,6 @@
 //! Queue scheduling policy shared by every Loco queue provider.
 //!
-//! This module also owns the definitive list of every tag a worker process can request through
-//! `--worker=...`.  The `all_tags()` function returns them all, so operators (systemd units, docs)
-//! never have to maintain a hand-edited tag list that drifts when a new worker class or job type
-//! is added.
+//! The list of tags a worker process can request through `--worker=...` is not kept here: it is derived from [`crate::workers::registry::WorkerRegistry`].
 
 use std::sync::Arc;
 
@@ -71,33 +68,6 @@ pub async fn concurrency_for(
         .get::<Arc<dyn QueuePolicy>>()
         .ok_or_else(|| "queue policy unavailable: no policy is installed".to_owned())?;
     policy.concurrency(ctx, workspace_id, class).await
-}
-
-/// The named queue of every worker class, in the order a worker serving all of them should poll.
-///
-/// Redis honours a job's queue name and the SQL providers ignore it, so this is how a class gets a queue of its own on Redis only.
-pub fn class_queues() -> Vec<String> {
-    WorkerClass::ALL
-        .iter()
-        .map(|class| class.queue().to_owned())
-        .collect()
-}
-
-/// Every tag the registered workers respond to, for use by operator tooling (systemd units, docs).
-///
-/// Includes base worker-class tags and, when the enterprise edition is compiled in,
-/// enterprise tags such as `infer-fill`.  The enterprise tags are derived from
-/// `ee::app::worker_queues()` — the same function that populates Redis queue lists —
-/// so tags and queues never drift.
-#[allow(unused_mut)]
-pub fn all_tags() -> Vec<String> {
-    let mut tags: Vec<String> = WorkerClass::ALL
-        .iter()
-        .map(|class| class.tag().to_owned())
-        .collect();
-    #[cfg(feature = "enterprise")]
-    tags.extend(crate::ee::app::worker_queues());
-    tags
 }
 
 const TENANT_PRIVATE_PRIORITY: i32 = 300;

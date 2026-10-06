@@ -1,6 +1,6 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
@@ -171,7 +171,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
         );
 
         let over_limit: Vec<String> = (0
-            ..yorishiro::ee::models::entity_column_preferences::MAX_VISIBLE_COLUMNS + 1)
+            ..yorishiro::edition::ee::models::entity_column_preferences::MAX_VISIBLE_COLUMNS + 1)
             .map(|i| format!("f{i}"))
             .collect();
         let too_many = request

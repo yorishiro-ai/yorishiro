@@ -1,4 +1,4 @@
-use yorishiro::ee::data::plan::{ComputePolicy, Plan, PriorityTier};
+use yorishiro::edition::ee::data::plan::{ComputePolicy, Plan, PriorityTier};
 
 #[test]
 fn compute_policies_match_the_published_bounds() {

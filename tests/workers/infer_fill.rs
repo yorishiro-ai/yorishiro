@@ -1,5 +1,5 @@
 use loco_rs::bgworker::BackgroundWorker;
-use yorishiro::ee::workers::infer_fill::InferFillWorker;
+use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
 
 #[test]
 fn infer_fill_worker_keeps_its_routing_tag_and_class_name() {

@@ -12,7 +12,7 @@ use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilte
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::ee::services::inference::InferenceConfig;
+use crate::edition::ee::services::inference::InferenceConfig;
 
 /// What a workspace has configured, without the key itself.
 ///

@@ -3,7 +3,7 @@ use loco_rs::prelude::*;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use yorishiro::ee::workers::infer_fill::*;
+use yorishiro::edition::ee::workers::infer_fill::*;
 
 struct RecordingDispatcher {
     args: Mutex<Vec<InferFillArgs>>,

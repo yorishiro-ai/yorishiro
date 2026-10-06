@@ -12,12 +12,12 @@ use loco_rs::controller::Routes;
 use sea_orm::EntityTrait;
 
 use crate::controllers::ApiError;
-use crate::ee::controllers::middleware::auth::authenticate_tenant_admin;
-use crate::ee::dtos::dashboard::TenantOverview;
-use crate::ee::models::tenant_billing;
-use crate::ee::models::tenant_tenants;
+use crate::edition::ee::controllers::middleware::auth::authenticate_tenant_admin;
+use crate::edition::ee::dtos::dashboard::TenantOverview;
+use crate::edition::ee::models::tenant_billing;
+use crate::edition::ee::models::tenant_tenants;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = crate::ee::controllers::openapi::TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = crate::edition::ee::controllers::openapi::TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "enterprise"))]
 async fn tenant_overview(
     State(ctx): State<AppContext>,
     headers: HeaderMap,

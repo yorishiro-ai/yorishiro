@@ -53,7 +53,7 @@ mod redis_routing {
             bgworker::redis::create_provider(&RedisQueueConfig {
                 uri,
                 dangerously_flush: true,
-                queues: Some(yorishiro::workers::queue::class_queues()),
+                queues: Some(yorishiro::workers::registry::WorkerRegistry::community().queues()),
                 num_workers: 1,
                 reaper: None,
             })

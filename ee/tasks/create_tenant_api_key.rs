@@ -3,7 +3,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
-use crate::ee::models::api_keys::create_tenant_api_key;
+use crate::edition::ee::models::api_keys::create_tenant_api_key;
 
 /// `cargo loco task create_tenant_api_key tenant_id:<uuid> scope:read [user_id:<uuid>]`
 ///

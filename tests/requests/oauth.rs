@@ -8,8 +8,8 @@ use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
 use serial_test::serial;
 use sha2::Sha256;
-use yorishiro::app::App;
-use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::App;
+use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::tenant_tenants;
 
 /// The OAuth routes carry the licence gate, so an unlicensed process answers 404 to all three before
@@ -304,7 +304,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let result = yorishiro::ee::models::user_users::find_or_create(
+        let result = yorishiro::edition::ee::models::user_users::find_or_create(
             &txn,
             "oidc",
             "a-brand-new-subject",
@@ -344,7 +344,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let provisioned = yorishiro::ee::models::user_users::find_or_create(
+        let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
             &txn,
             "oidc",
             "a-first-login-subject",

@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use serde_json::Value;
-use yorishiro::app::App;
+use yorishiro::App;
 
 use super::boot_request;
 

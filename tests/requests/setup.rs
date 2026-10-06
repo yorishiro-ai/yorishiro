@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use serial_test::serial;
-use yorishiro::app::App;
+use yorishiro::App;
 
 use super::boot_request;
 use super::with_max_tenants;

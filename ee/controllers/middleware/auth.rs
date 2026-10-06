@@ -149,7 +149,7 @@ async fn authenticate(
 
 /// Authenticates the bearer API key and returns the full context, **workspace included**.
 ///
-/// Goes through [`crate::ee::controllers::middleware::auth::TenantScopedAuthenticator`], the same seam every authenticated path in this process resolves through, so both key kinds work on these routes: a workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with `X-Workspace-Id`.
+/// Goes through [`crate::edition::ee::controllers::middleware::auth::TenantScopedAuthenticator`], the same seam every authenticated path in this process resolves through, so both key kinds work on these routes: a workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with `X-Workspace-Id`.
 /// Resolving it any other way here would make a REST route and an MCP tool disagree about who the caller is.
 ///
 /// [`authenticate_tenant`] is the weaker form for routes that need only the tenant.

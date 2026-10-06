@@ -10,7 +10,7 @@ use tempfile::tempdir;
 
 use serial_test::serial;
 use sqlx::postgres::PgPoolOptions;
-use yorishiro::ee::db::{
+use yorishiro::edition::ee::db::{
     acquire_sqlite_scheduler_lock, lock_sqlite_scheduler_file, sqlite_scheduler_lock_path,
     unlock_sqlite_scheduler_file,
 };
@@ -53,9 +53,9 @@ fn sqlite_scheduler_lock_path_handles_uri_forms_and_queries() {
         let parsed = SqliteConnectOptions::from_str(&uri);
         assert_eq!(
             sqlite_scheduler_lock_path(&uri).is_ok(),
-            parsed
-                .as_ref()
-                .is_ok_and(|options| !yorishiro::ee::db::sqlite_options_are_in_memory(options))
+            parsed.as_ref().is_ok_and(|options| {
+                !yorishiro::edition::ee::db::sqlite_options_are_in_memory(options)
+            })
         );
     }
     for uri in [
@@ -70,7 +70,9 @@ fn sqlite_scheduler_lock_path_handles_uri_forms_and_queries() {
         sqlite_scheduler_lock_path(&encoded_uri).is_ok(),
         SqliteConnectOptions::from_str(&encoded_uri)
             .as_ref()
-            .is_ok_and(|options| !yorishiro::ee::db::sqlite_options_are_in_memory(options))
+            .is_ok_and(
+                |options| !yorishiro::edition::ee::db::sqlite_options_are_in_memory(options)
+            )
     );
     assert_eq!(
         sqlite_scheduler_lock_path(&format!(
@@ -111,7 +113,7 @@ fn sqlite_scheduler_lock_is_non_blocking_and_releases() {
         .unwrap();
     let second = acquire_sqlite_scheduler_lock(&uri, "unused").unwrap();
     assert!(second.is_none());
-    if let yorishiro::ee::db::SchedulerOwnership::Sqlite {
+    if let yorishiro::edition::ee::db::SchedulerOwnership::Sqlite {
         file: Some(file), ..
     } = &first
     {
@@ -226,8 +228,8 @@ fn sqlite_scheduler_lock_child() {
     release_sqlite_for_test(&ownership);
 }
 
-fn release_sqlite_for_test(ownership: &yorishiro::ee::db::SchedulerOwnership) {
-    if let yorishiro::ee::db::SchedulerOwnership::Sqlite {
+fn release_sqlite_for_test(ownership: &yorishiro::edition::ee::db::SchedulerOwnership) {
+    if let yorishiro::edition::ee::db::SchedulerOwnership::Sqlite {
         file: Some(file), ..
     } = ownership
     {
@@ -249,21 +251,22 @@ async fn postgres_scheduler_lock_contends_and_connection_close_releases() {
         .await
         .unwrap();
     let key = format!("test-scheduler-ownership-{}", uuid::Uuid::now_v7());
-    let holder = yorishiro::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
+    let holder = yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
         .await
         .unwrap()
         .unwrap();
     assert!(
-        yorishiro::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
+        yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
             .await
             .unwrap()
             .is_none()
     );
     holder.release().await.unwrap();
-    let final_ownership = yorishiro::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
-        .await
-        .unwrap()
-        .unwrap();
+    let final_ownership =
+        yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
+            .await
+            .unwrap()
+            .unwrap();
     final_ownership.release().await.unwrap();
     pool.close().await;
 }
@@ -281,15 +284,16 @@ async fn postgres_scheduler_detached_connection_close_releases_without_unlock() 
         .await
         .unwrap();
     let key = format!("test-scheduler-crash-release-{}", uuid::Uuid::now_v7());
-    let mut ownership = yorishiro::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
-        .await
-        .unwrap()
-        .unwrap();
+    let mut ownership =
+        yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
+            .await
+            .unwrap()
+            .unwrap();
     let (conn, held_key) = match &mut ownership {
-        yorishiro::ee::db::SchedulerOwnership::Postgres { conn, key } => {
+        yorishiro::edition::ee::db::SchedulerOwnership::Postgres { conn, key } => {
             (conn.take().unwrap(), key.clone())
         }
-        yorishiro::ee::db::SchedulerOwnership::Sqlite { .. } => {
+        yorishiro::edition::ee::db::SchedulerOwnership::Sqlite { .. } => {
             panic!("expected PostgreSQL ownership")
         }
     };
@@ -297,10 +301,11 @@ async fn postgres_scheduler_detached_connection_close_releases_without_unlock() 
     // Closing the detached session without an explicit unlock models a process crash.
     assert!(!held_key.is_empty());
     conn.close().await.unwrap();
-    let final_ownership = yorishiro::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
-        .await
-        .unwrap()
-        .unwrap();
+    let final_ownership =
+        yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
+            .await
+            .unwrap()
+            .unwrap();
     final_ownership.release().await.unwrap();
     pool.close().await;
 }
@@ -317,7 +322,7 @@ async fn postgres_scheduler_lock_drop_releases_after_task_cancellation() {
         .await
         .unwrap();
     let key = format!("test-scheduler-cancel-release-{}", uuid::Uuid::now_v7());
-    let ownership = yorishiro::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
+    let ownership = yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
         .await
         .unwrap()
         .unwrap();
@@ -330,7 +335,7 @@ async fn postgres_scheduler_lock_drop_releases_after_task_cancellation() {
     let mut final_ownership = None;
     for _ in 0..20 {
         if let Some(ownership) =
-            yorishiro::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
+            yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
                 .await
                 .unwrap()
         {

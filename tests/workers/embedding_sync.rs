@@ -178,7 +178,7 @@ mod conflict {
     use loco_rs::config::SqliteQueueConfig;
     use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, Statement};
     use uuid::Uuid;
-    use yorishiro::app::App;
+    use yorishiro::App;
     use yorishiro::error::YorishiroError;
     use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
     use yorishiro::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};

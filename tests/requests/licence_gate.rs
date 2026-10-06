@@ -36,8 +36,8 @@
 //! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
 use super::boot_request;
-use yorishiro::app::App;
-use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::App;
+use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
 /// Overwrites the enterprise-edition state the test process booted with.
 ///

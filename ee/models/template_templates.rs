@@ -67,13 +67,15 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
 
         match latest {
             Some(latest) => {
-                crate::ee::models::marketplace::TemplateVersionStatus::from_db_str(&latest.status)
-                    .ok_or_else(|| {
-                        YorishiroError::Internal(anyhow::anyhow!(
-                            "unknown template version status: {}",
-                            latest.status
-                        ))
-                    })?;
+                crate::edition::ee::models::marketplace::TemplateVersionStatus::from_db_str(
+                    &latest.status,
+                )
+                .ok_or_else(|| {
+                    YorishiroError::Internal(anyhow::anyhow!(
+                        "unknown template version status: {}",
+                        latest.status
+                    ))
+                })?;
                 if latest.definition == definition_json {
                     outcome.unchanged.push(summary.id.clone());
                     continue;
@@ -86,18 +88,23 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
         }
 
         // `stable`, not `draft`: a draft is visible only to its owning tenant, and this tenant has no members to view it.
-        let request = crate::ee::models::marketplace::PublishVersionRequest {
+        let request = crate::edition::ee::models::marketplace::PublishVersionRequest {
             definition: definition_json,
             changelog: Some(format!("Built-in template '{}'", summary.id)),
-            status: crate::ee::models::marketplace::TemplateVersionStatus::Stable,
+            status: crate::edition::ee::models::marketplace::TemplateVersionStatus::Stable,
         };
         // lock_for_update is transaction-scoped, so this needs its own txn rather than ctx.db.
         let txn = ctx.db.begin().await.internal()?;
         db::lock_for_update(&txn, &format!("template-version:{template_id}"))
             .await
             .internal()?;
-        crate::ee::models::marketplace::insert_next_version(&txn, template_id, &request, None)
-            .await?;
+        crate::edition::ee::models::marketplace::insert_next_version(
+            &txn,
+            template_id,
+            &request,
+            None,
+        )
+        .await?;
         txn.commit().await.internal()?;
     }
 

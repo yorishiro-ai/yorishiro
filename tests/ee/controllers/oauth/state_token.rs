@@ -1,5 +1,5 @@
-use yorishiro::ee::controllers::hmac_sign;
-use yorishiro::ee::controllers::oauth::state_token::*;
+use yorishiro::edition::ee::controllers::hmac_sign;
+use yorishiro::edition::ee::controllers::oauth::state_token::*;
 
 const KEY: &[u8] = b"a signing key";
 

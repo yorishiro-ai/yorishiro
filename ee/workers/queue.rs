@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
-use crate::ee::controllers::middleware::edition::LicenceState;
-use crate::ee::data::plan::Plan;
-use crate::ee::models::tenant_billing;
+use crate::edition::ee::controllers::middleware::edition::LicenceState;
+use crate::edition::ee::data::plan::Plan;
+use crate::edition::ee::models::tenant_billing;
 use crate::error::YorishiroError;
 use crate::models::workspace_workspaces;
 use crate::workers::embedding_sync::WorkerClass;

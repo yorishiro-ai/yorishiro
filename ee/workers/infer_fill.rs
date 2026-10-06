@@ -13,11 +13,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::db::{self, DbHandle};
-use crate::ee::models::entity_entities::infer_fill;
-use crate::ee::models::inference_jobs;
-use crate::ee::models::inference_proposals;
-use crate::ee::models::workspace_llm_keys;
-use crate::ee::services::inference::InferenceClient;
+use crate::edition::ee::models::entity_entities::infer_fill;
+use crate::edition::ee::models::inference_jobs;
+use crate::edition::ee::models::inference_proposals;
+use crate::edition::ee::models::workspace_llm_keys;
+use crate::edition::ee::services::inference::InferenceClient;
 use crate::error::ResultExt;
 use crate::models::schema_schemas;
 

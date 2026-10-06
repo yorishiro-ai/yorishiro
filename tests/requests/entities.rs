@@ -1,6 +1,6 @@
 use super::boot_request;
 use uuid::Uuid;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::{entity_entities, schema_schemas};
 
 use super::fixtures::{self, TenantArgs};

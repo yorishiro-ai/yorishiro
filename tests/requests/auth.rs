@@ -1,7 +1,7 @@
 use super::boot_request;
 use axum::http::StatusCode;
 use serial_test::serial;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]

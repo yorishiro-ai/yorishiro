@@ -1,6 +1,6 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use yorishiro::app::App;
+use yorishiro::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;

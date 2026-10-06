@@ -2,8 +2,8 @@ use std::env;
 
 use loco_rs::cli;
 use migration::Migrator;
-use yorishiro::app::App;
-use yorishiro::workers::queue::all_tags;
+use yorishiro::App;
+use yorishiro::edition::worker_tags;
 
 #[tokio::main]
 async fn main() -> loco_rs::Result<()> {
@@ -17,7 +17,7 @@ async fn main() -> loco_rs::Result<()> {
     // direct substitution into `--worker=`.
     let args: Vec<String> = env::args().collect();
     if args.len() == 2 && args[1] == "worker-tags" {
-        println!("{}", all_tags().join(","));
+        println!("{}", worker_tags().join(","));
         return Ok(());
     }
 

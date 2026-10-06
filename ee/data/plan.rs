@@ -119,8 +119,8 @@ pub(crate) struct StripePriceMapping {
 impl StripePriceMapping {
     pub(crate) fn from_env() -> Self {
         Self {
-            pro_price_id: crate::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_PRO"),
-            team_price_id: crate::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_TEAM"),
+            pro_price_id: crate::edition::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_PRO"),
+            team_price_id: crate::edition::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_TEAM"),
         }
     }
 }
