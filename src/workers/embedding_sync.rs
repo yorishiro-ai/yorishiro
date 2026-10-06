@@ -131,8 +131,8 @@ impl EmbeddingSyncArgs {
 }
 
 /// Loco has no automatic retry, so the return value decides what an operator can recover: `Err` marks the job `Failed`, which `retry_failed` can find and re-run, while `Ok` marks it `Completed` and forgets it.
-/// A structural failure (a schema no longer defining the embedded field, a dimension count not matching the provider) will not go away on retry, so it is logged and reported `Ok`.
-/// A transient one (`ProviderBusy`, `ProviderUnreachable`, `Internal`) propagates as `Err`: reporting those `Ok` would let a whole provider outage mark itself `Completed` with every embedding still `NULL`, indistinguishable from jobs that never needed to run.
+/// All embedding failures propagate as `Err`: the lifecycle records the attempt as retrying instead of marking a missing vector completed.
+/// Operators can inspect or cancel a structural failure, and a later schema/provider correction can retry it.
 ///
 /// Shared by all three worker types below, which differ only in the tag `tags()` returns.
 async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> loco_rs::Result<()> {
@@ -186,12 +186,9 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
                 tracing::warn!(entity_id = %args.entity_id, error = %err, "embedding sync failed transiently, job will be marked failed for retry_failed");
                 return Err(err.into());
             }
-            YorishiroError::ValidationFailed { .. } | YorishiroError::NotFound { .. } => {
-                tracing::warn!(entity_id = %args.entity_id, error = %err, "embedding sync failed structurally, will not be retried");
-            }
             other => {
-                // Every other variant reaches this path only via an unexpected future change to sync_embedding_for_record's error surface; treat as structural (not retried) rather than silently falling through, and the log line makes an unclassified variant visible instead of quietly swallowed.
-                tracing::warn!(entity_id = %args.entity_id, error = %other, "embedding sync failed with an unclassified error, treating as non-retryable");
+                tracing::warn!(entity_id = %args.entity_id, error = %other, "embedding sync failed, job will be recorded for retry");
+                return Err(other.into());
             }
         }
     }

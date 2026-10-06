@@ -123,11 +123,21 @@ async fn search_embeds_the_query_synchronously_as_query_kind() {
 /// The worker embeds as `Document` and the server embeds the query as `Query`, both through the same provider.
 #[tokio::test]
 async fn search_finds_an_entity_embedded_by_the_worker() {
-    use loco_rs::bgworker::BackgroundWorker;
+    use loco_rs::bgworker::{BackgroundWorker, sqlt};
+    use loco_rs::config::SqliteQueueConfig;
+    use sea_orm::{EntityTrait, FromQueryResult, Statement};
+    use yorishiro::models::queue_job_lifecycles::{
+        Enqueue, Entity as LifecycleEntity, LifecycleStatus,
+    };
     use yorishiro::models::{entity_entities, schema_schemas};
     use yorishiro::workers::embedding_sync::{
         EmbeddingSyncArgs, EmbeddingSyncWorkerShared, WorkerClass,
     };
+
+    #[derive(FromQueryResult)]
+    struct Count {
+        n: i64,
+    }
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup {
@@ -163,15 +173,103 @@ async fn search_finds_an_entity_embedded_by_the_worker() {
             kinds: kinds.clone(),
         }) as Arc<dyn EmbeddingProvider>);
 
-        EmbeddingSyncWorkerShared::build(&ctx)
-            .perform(EmbeddingSyncArgs {
-                lifecycle_id: None,
-                workspace_id,
-                entity_id: entity.id,
-                worker_class: WorkerClass::Shared,
+        let queue_dir = tempfile::tempdir().expect("queue tempdir");
+        let queue_uri = format!(
+            "sqlite://{}?mode=rwc",
+            queue_dir.path().join("queue.sqlite3").display()
+        );
+        let queue = std::sync::Arc::new(
+            sqlt::create_provider(&SqliteQueueConfig {
+                uri: queue_uri.clone(),
+                dangerously_flush: false,
+                enable_logging: false,
+                max_connections: 2,
+                min_connections: 1,
+                connect_timeout: 5_000,
+                idle_timeout: 5_000,
+                poll_interval_sec: 1,
+                num_workers: 1,
+                reaper: None,
             })
             .await
-            .expect("worker embeds the entity");
+            .expect("SQLite queue"),
+        );
+        queue.setup().await.expect("set up queue");
+        let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+        let lifecycle_id = uuid::Uuid::now_v7();
+        LifecycleEntity::record_enqueue(
+            &ctx.db,
+            Enqueue {
+                id: lifecycle_id,
+                job_name: "embedding_sync",
+                worker_class: WorkerClass::Shared,
+                workspace_id: Some(workspace_id),
+                plan: None,
+                concurrency_key: None,
+                concurrency_limit: None,
+            },
+        )
+        .await
+        .expect("record lifecycle");
+        let args = EmbeddingSyncArgs {
+            lifecycle_id: Some(lifecycle_id),
+            workspace_id,
+            entity_id: entity.id,
+            worker_class: WorkerClass::Shared,
+        };
+        EmbeddingSyncWorkerShared::perform_later_with_priority(&ctx, args, Some(100))
+            .await
+            .expect("dispatch embedding worker");
+        let queue_pool = sqlt::SqlitePool::connect(&queue_uri)
+            .await
+            .expect("connect to queue");
+        let queued = sqlt::get_jobs(&queue_pool, None, None)
+            .await
+            .expect("read queued jobs");
+        assert_eq!(queued.len(), 1, "job must reach the queue: {queued:?}");
+        assert_eq!(queued[0].name, "EmbeddingSyncWorkerShared");
+
+        queue
+            .register(EmbeddingSyncWorkerShared::build(&ctx))
+            .await
+            .expect("register embedding worker");
+        let running = queue.clone();
+        let worker =
+            tokio::spawn(async move { running.run(vec![WorkerClass::Shared.tag().into()]).await });
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let row = LifecycleEntity::find_by_id(lifecycle_id)
+                    .one(&ctx.db)
+                    .await
+                    .expect("read lifecycle")
+                    .expect("lifecycle exists");
+                if row.status == LifecycleStatus::Completed.as_db_str() {
+                    break row.status;
+                }
+                assert_ne!(row.status, LifecycleStatus::Failed.as_db_str());
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("worker must dequeue and complete the lifecycle");
+        assert_eq!(status, LifecycleStatus::Completed.as_db_str());
+        let row_count = Count::find_by_statement(Statement::from_sql_and_values(
+            ctx.db.get_database_backend(),
+            "SELECT COUNT(*) AS n FROM entity_embeddings_768 WHERE entity_id = $1",
+            [entity.id.into()],
+        ))
+        .one(&ctx.db)
+        .await
+        .expect("count stored vectors")
+        .expect("count row")
+        .n;
+        assert_eq!(
+            row_count, 1,
+            "worker completion must persist the document vector"
+        );
+        let _ = queue.shutdown();
+        queue_pool.close().await;
+        let _ = worker.await;
 
         let response = request
             .get("/api/search?query_text=roadmap")

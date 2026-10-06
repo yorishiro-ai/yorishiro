@@ -176,7 +176,10 @@ mod conflict {
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
     use loco_rs::config::SqliteQueueConfig;
-    use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, Statement};
+    use sea_orm::{
+        ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
+        Statement,
+    };
     use uuid::Uuid;
     use yorishiro::App;
     use yorishiro::error::YorishiroError;
@@ -199,12 +202,13 @@ mod conflict {
         entity_id: Uuid,
         delete: bool,
         mutate: AtomicBool,
+        width: usize,
     }
 
     #[async_trait]
     impl EmbeddingProvider for MutatingProvider {
         fn dimensions(&self) -> usize {
-            768
+            self.width
         }
 
         fn model_name(&self) -> String {
@@ -212,14 +216,14 @@ mod conflict {
         }
 
         async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-            Ok(texts.iter().map(|_| vec![1.0; 768]).collect())
+            Ok(texts.iter().map(|_| vec![1.0; self.width]).collect())
         }
 
         async fn embed_as(&self, kind: EmbedKind, _text: &str) -> Result<Vec<f32>, YorishiroError> {
             if kind == EmbedKind::Document && self.mutate.swap(false, Ordering::SeqCst) {
                 if self.delete {
                     entity_entities::delete(&self.db, self.workspace_id, self.entity_id).await?;
-                    return Ok(vec![1.0; 768]);
+                    return Ok(vec![1.0; self.width]);
                 }
                 entity_entities::update(
                     &self.db,
@@ -232,7 +236,7 @@ mod conflict {
                 )
                 .await?;
             }
-            Ok(vec![1.0; 768])
+            Ok(vec![1.0; self.width])
         }
     }
 
@@ -310,6 +314,7 @@ mod conflict {
                 entity_id,
                 delete: false,
                 mutate: AtomicBool::new(true),
+                width: 768,
             });
             ctx.shared_store
                 .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
@@ -413,11 +418,28 @@ mod conflict {
                 entity_id,
                 delete: true,
                 mutate: AtomicBool::new(true),
+                width: 768,
             }) as Arc<dyn EmbeddingProvider>);
+
+            let lifecycle_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: lifecycle_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .expect("record lifecycle");
 
             EmbeddingSyncWorkerShared::build(&ctx)
                 .perform(EmbeddingSyncArgs {
-                    lifecycle_id: None,
+                    lifecycle_id: Some(lifecycle_id),
                     workspace_id,
                     entity_id,
                     worker_class: WorkerClass::Shared,
@@ -426,6 +448,75 @@ mod conflict {
                 .expect("a deleted entity is not a failure");
 
             assert_eq!(vector_rows(&ctx, entity_id).await, 0);
+            let lifecycle = Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db)
+                .await
+                .expect("read lifecycle")
+                .expect("lifecycle row");
+            assert_eq!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
+        })
+        .await;
+    }
+
+    /// Structural failures are recorded as retryable lifecycle failures rather than completed jobs.
+    #[tokio::test]
+    async fn a_live_dimension_failure_is_not_marked_completed() {
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let mut workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+                .one(&ctx.db)
+                .await
+                .expect("read workspace")
+                .expect("workspace exists")
+                .into_active_model();
+            workspace.embedding_dimensions = sea_orm::ActiveValue::Set(Some(768));
+            workspace
+                .update(&ctx.db)
+                .await
+                .expect("stamp workspace width");
+            ctx.shared_store.insert(Arc::new(MutatingProvider {
+                db: ctx.db.clone(),
+                workspace_id,
+                entity_id,
+                delete: false,
+                mutate: AtomicBool::new(false),
+                width: 1024,
+            }) as Arc<dyn EmbeddingProvider>);
+
+            let lifecycle_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: lifecycle_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .expect("record lifecycle");
+
+            let _ = EmbeddingSyncWorkerShared::build(&ctx)
+                .perform(EmbeddingSyncArgs {
+                    lifecycle_id: Some(lifecycle_id),
+                    workspace_id,
+                    entity_id,
+                    worker_class: WorkerClass::Shared,
+                })
+                .await;
+            // The lifecycle wrapper records and requeues the failure.
+
+            let lifecycle = Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db)
+                .await
+                .expect("read lifecycle")
+                .expect("lifecycle row");
+            assert_eq!(lifecycle.status, LifecycleStatus::Retrying.as_db_str());
+            assert_ne!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
+            assert!(lifecycle.error.is_some());
         })
         .await;
     }
