@@ -1,6 +1,5 @@
-//! A per-key fixed-window rate limiter, applied to whichever routes are reachable without a bearer token: `/auth/signup` and `/auth/login`, plus `ee/`'s `/auth/oauth/authorize` and `/auth/oauth/callback` when that crate is composed in.
-//! Base has no compile-time dependency on `ee/`, so the `ee/` paths are named as string literals rather than imported; they're absent from the router entirely when `ee/` isn't linked in, so the match is simply never reached.
-//! `/auth/oauth/status` is deliberately excluded, since it carries no secret and the login page polls it on every load.
+//! A per-key fixed-window rate limiter, applied to the credential routes reachable without a bearer token.
+//! Which paths those are is not decided here: [`crate::app::RouteMounts`] collects them as route groups are mounted, so a route group added by another edition is guarded by naming its path when it is mounted, and the limiter never learns who added it.
 //!
 //! Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo` is present on the request (Loco's boot path always populates it, so this only matters for a request driven directly through the router, e.g. some test harnesses).
 
@@ -17,18 +16,10 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-/// Paths this guard applies to.
-/// Anything else passes through untouched.
-fn is_guarded(path: &str) -> bool {
-    matches!(
-        path,
-        "/auth/signup" | "/auth/login" | "/auth/oauth/authorize" | "/auth/oauth/callback"
-    )
-}
-
 pub struct RateLimiter {
     max_requests: u32,
     window: Duration,
+    guarded_paths: Vec<&'static str>,
     buckets: Mutex<HashMap<String, (Instant, u32)>>,
 }
 
@@ -37,8 +28,17 @@ impl RateLimiter {
         Self {
             max_requests,
             window,
+            guarded_paths: Vec::new(),
             buckets: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Makes [`enforce`] apply this limiter to `paths`.
+    /// Any other path passes through untouched.
+    #[must_use]
+    pub(crate) fn guarding(mut self, paths: &[&'static str]) -> Self {
+        self.guarded_paths = paths.to_vec();
+        self
     }
 
     /// `YORISHIRO_AUTH_RATE_LIMIT_MAX` (default 10) requests per
@@ -122,7 +122,7 @@ pub async fn enforce(
     req: Request,
     next: Next,
 ) -> Response {
-    if !is_guarded(req.uri().path()) {
+    if !limiter.guarded_paths.contains(&req.uri().path()) {
         return next.run(req).await;
     }
 

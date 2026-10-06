@@ -383,3 +383,33 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
     })
     .await;
 }
+
+/// The rate limit reaches the OAuth entry points by the paths the edition names when it mounts them, not by anything the limiter itself knows.
+/// `status` is mounted beside them and deliberately left out, so polling it never exhausts a client's budget.
+#[tokio::test]
+async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        for path in ["/auth/oauth/authorize", "/auth/oauth/callback"] {
+            let mut last_status = 0;
+            for _ in 0..15 {
+                last_status = request.get(path).await.status_code().as_u16();
+            }
+            assert_eq!(
+                last_status, 429,
+                "{path} must share the per-IP credential budget"
+            );
+        }
+        for _ in 0..15 {
+            assert_ne!(
+                request.get("/auth/oauth/status").await.status_code(),
+                StatusCode::TOO_MANY_REQUESTS,
+                "status carries no secret and must stay unguarded"
+            );
+        }
+    })
+    .await;
+}

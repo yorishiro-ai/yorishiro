@@ -9,7 +9,7 @@ use serde::Serialize;
 use tracing::Instrument;
 
 /// The request target used by the access log.
-/// Query strings are deliberately excluded because OAuth callback parameters carry codes, state, and provider error details.
+/// Query strings are deliberately excluded because callback parameters can carry codes, state, and provider error details.
 pub fn path_only(uri: &axum::http::Uri) -> &str {
     uri.path()
 }

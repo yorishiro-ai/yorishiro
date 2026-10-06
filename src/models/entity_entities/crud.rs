@@ -11,7 +11,7 @@ use super::{
 use crate::error::{ResultExt, YorishiroError};
 
 /// Checks the workspace's `max_entities` cap before an insert.
-/// `NULL` means unlimited, the default for the enterprise edition.
+/// `NULL` means unlimited.
 async fn check_entity_quota(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

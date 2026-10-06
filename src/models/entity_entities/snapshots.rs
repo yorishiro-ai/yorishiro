@@ -33,7 +33,7 @@ pub async fn snapshot(
 
 /// Removes one entity's snapshot from `job_id`'s group.
 ///
-/// For a caller that takes a snapshot before a write it isn't certain will land (`ee/`'s `infer_fill`, writing a model's guess straight to the entity): if that write then fails for a reason specific to it, the snapshot no longer describes a real change, and leaving it would let a later, unrelated edit to the same entity be misattributed to this job on undo.
+/// For a caller that takes a snapshot before a write it isn't certain will land (a job writing a model's guess straight to the entity): if that write then fails for a reason specific to it, the snapshot no longer describes a real change, and leaving it would let a later, unrelated edit to the same entity be misattributed to this job on undo.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

@@ -96,9 +96,12 @@ pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
         .document(edition::licence_required(
             controllers::marketplace::openapi_docs(),
         ));
+    // `/auth/oauth/status` is deliberately not guarded: it carries no secret and the login page polls it on every load.
     mounts
         .mount(controllers::oauth::routes().layer(gate.clone()))
-        .document(edition::licence_required(controllers::oauth::openapi_docs()));
+        .document(edition::licence_required(controllers::oauth::openapi_docs()))
+        .guard_credentials("/auth/oauth/authorize")
+        .guard_credentials("/auth/oauth/callback");
     mounts
         .mount(controllers::origin::routes())
         .document(controllers::origin::openapi_docs());

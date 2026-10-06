@@ -81,7 +81,12 @@ pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
 pub(crate) struct RouteMounts {
     app_routes: AppRoutes,
     inventory: RouteInventory,
+    credential_paths: Vec<&'static str>,
 }
+
+/// The unauthenticated credential paths the per-IP rate limit applies to, published by [`RouteMounts::finish`].
+#[derive(Clone)]
+struct CredentialPaths(Vec<&'static str>);
 
 impl RouteMounts {
     /// The base route groups, mounted.
@@ -93,7 +98,11 @@ impl RouteMounts {
         let mut mounts = Self {
             app_routes,
             inventory,
+            credential_paths: Vec::new(),
         };
+        mounts
+            .guard_credentials("/auth/signup")
+            .guard_credentials("/auth/login");
 
         // Registers a route group with Loco and records it, with its OpenAPI document when the
         // `openapi` feature is on, in the inventory.
@@ -184,6 +193,12 @@ impl RouteMounts {
         self
     }
 
+    /// Applies the per-IP credential rate limit to `path`, which must be reachable without a bearer token.
+    pub(crate) fn guard_credentials(&mut self, path: &'static str) -> &mut Self {
+        self.credential_paths.push(path);
+        self
+    }
+
     /// Records the OpenAPI documents of the group mounted last.
     #[cfg(feature = "openapi")]
     pub(crate) fn document(
@@ -200,6 +215,8 @@ impl RouteMounts {
     /// Panics if the inventory fails validation, so a duplicate or unlisted route stops the process at boot.
     pub(crate) fn finish(self, ctx: &AppContext) -> AppRoutes {
         ctx.shared_store.insert(self.inventory);
+        ctx.shared_store
+            .insert(CredentialPaths(self.credential_paths));
         ctx.shared_store
             .get::<RouteInventory>()
             .expect("route inventory was just installed")
@@ -235,8 +252,13 @@ pub(crate) fn after_routes(
         .shared_store
         .get::<crate::data::settings::Settings>()
         .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
+    let credential_paths = ctx
+        .shared_store
+        .get::<CredentialPaths>()
+        .ok_or_else(|| loco_rs::Error::Message("credential paths missing".into()))?;
     let rate_limiter = std::sync::Arc::new(
-        crate::controllers::middleware::rate_limit::RateLimiter::auth(&settings),
+        crate::controllers::middleware::rate_limit::RateLimiter::auth(&settings)
+            .guarding(&credential_paths.0),
     );
     let router = router.layer(axum::middleware::from_fn_with_state(
         rate_limiter,
