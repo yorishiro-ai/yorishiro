@@ -822,6 +822,95 @@ mod conflict {
         .await;
     }
 
+    /// A payload that fails `serde_json::from_value` never reaches the typed worker, so only the provider job records the failure.
+    /// The custom lifecycle row is deliberately not asserted: it is authoritative only after a successful deserialization.
+    #[tokio::test]
+    async fn a_malformed_payload_fails_the_provider_job_without_requeue() {
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let directory = tempfile::tempdir().expect("queue tempdir");
+            let queue_uri = format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("queue.sqlite3").display()
+            );
+            let queue = bgworker::sqlt::create_provider(&SqliteQueueConfig {
+                uri: queue_uri.clone(),
+                dangerously_flush: false,
+                enable_logging: false,
+                max_connections: 2,
+                min_connections: 1,
+                connect_timeout: 5_000,
+                idle_timeout: 5_000,
+                poll_interval_sec: 1,
+                num_workers: 1,
+                reaper: None,
+            })
+            .await
+            .expect("SQLite queue");
+            queue.setup().await.expect("set up queue");
+            let queue = Arc::new(queue);
+            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
+                .await
+                .expect("connect to the queue file");
+
+            queue
+                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .await
+                .expect("register embedding worker");
+            for payload in [
+                serde_json::json!({"workspace_id": "not-a-uuid", "entity_id": Uuid::now_v7(), "worker_class": "shared"}),
+                serde_json::json!({"workspace_id": Uuid::now_v7(), "entity_id": Uuid::now_v7(), "worker_class": "bogus"}),
+                serde_json::json!({"workspace_id": Uuid::now_v7(), "worker_class": "shared"}),
+            ] {
+                queue
+                    .enqueue(
+                        EmbeddingSyncWorkerShared::class_name(),
+                        None,
+                        payload,
+                        Some(vec![WorkerClass::Shared.tag().into()]),
+                        Some(100),
+                    )
+                    .await
+                    .expect("persist malformed payload through the provider");
+            }
+
+            let running = queue.clone();
+            let worker = tokio::spawn(async move {
+                running.run(vec![WorkerClass::Shared.tag().into()]).await
+            });
+            let failed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let jobs = sqlt::get_jobs(
+                        &queue_pool,
+                        Some(&vec![loco_rs::bgworker::JobStatus::Failed]),
+                        None,
+                    )
+                    .await
+                    .expect("read failed jobs");
+                    if jobs.len() == 3 {
+                        break jobs;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .expect("malformed jobs must fail in the provider");
+            assert_eq!(failed.len(), 3);
+            let _ = queue.shutdown();
+            worker.await.expect("join worker").expect("run worker");
+            assert_eq!(
+                sqlt::get_jobs(&queue_pool, None, None)
+                    .await
+                    .expect("read final queue")
+                    .len(),
+                3,
+                "no replacement job may be enqueued"
+            );
+            queue_pool.close().await;
+        })
+        .await;
+    }
+
     /// An entity deleted while it is being embedded is the one zero-row outcome that is not a conflict: there is nothing left to embed.
     /// The job finishes without error and without storing a vector.
     #[tokio::test]
