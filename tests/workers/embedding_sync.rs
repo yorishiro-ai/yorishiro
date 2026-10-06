@@ -301,10 +301,10 @@ mod conflict {
     }
 
     /// A write that lands between the worker's snapshot read and the vector persist must not store a stale vector.
-    /// The worker reports the conflict through the real lifecycle: the row becomes `retrying`, the job is requeued through a real SQLite queue, and the retry then embeds the current data.
+    /// The old delivery is terminally superseded; the normal entity update dispatch is responsible for the fresh job.
     /// Runs on whichever backend `DATABASE_URL` names, so SQLite and PostgreSQL share one assertion set.
     #[tokio::test]
-    async fn a_write_during_embedding_is_requeued_and_the_retry_persists() {
+    async fn a_write_during_embedding_supersedes_the_old_delivery() {
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
 
@@ -378,26 +378,59 @@ mod conflict {
             EmbeddingSyncWorkerShared::build(&ctx)
                 .perform(args.clone())
                 .await
-                .expect("a conflict is requeued, not surfaced");
+                .expect("a superseded delivery is a terminal no-op");
 
-            assert_eq!(status().await, LifecycleStatus::Retrying.as_db_str());
+            assert_eq!(status().await, LifecycleStatus::Cancelled.as_db_str());
             let jobs = sqlt::get_jobs(&queue_pool, None, None)
                 .await
                 .expect("get_jobs");
-            assert_eq!(jobs.len(), 1, "jobs: {jobs:?}");
-            assert_eq!(jobs[0].name, "EmbeddingSyncWorkerShared");
+            assert_eq!(jobs.len(), 0, "the old delivery must not requeue: {jobs:?}");
             assert_eq!(
                 vector_rows(&ctx, entity_id).await,
                 0,
                 "the stale vector must not be stored"
             );
 
-            EmbeddingSyncWorkerShared::build(&ctx)
-                .perform(args)
+            let fresh_lifecycle_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: fresh_lifecycle_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .expect("record fresh lifecycle");
+            let fresh_args = EmbeddingSyncArgs {
+                lifecycle_id: Some(fresh_lifecycle_id),
+                workspace_id,
+                entity_id,
+                worker_class: WorkerClass::Shared,
+            };
+            EmbeddingSyncWorkerShared::perform_later_with_priority(
+                &ctx,
+                fresh_args.clone(),
+                Some(100),
+            )
+            .await
+            .expect("dispatch fresh entity update");
+            let fresh_jobs = sqlt::get_jobs(&queue_pool, None, None)
                 .await
-                .expect("the retry succeeds");
-
-            assert_eq!(status().await, LifecycleStatus::Completed.as_db_str());
+                .expect("read fresh jobs");
+            assert_eq!(
+                fresh_jobs.len(),
+                1,
+                "the newer entity update must dispatch a fresh job"
+            );
+            EmbeddingSyncWorkerShared::build(&ctx)
+                .perform(fresh_args)
+                .await
+                .expect("fresh delivery persists current data");
             assert_eq!(vector_rows(&ctx, entity_id).await, 1);
 
             let _ = queue.shutdown();
@@ -514,7 +547,7 @@ mod conflict {
                 .await
                 .expect("read lifecycle")
                 .expect("lifecycle row");
-            assert_eq!(lifecycle.status, LifecycleStatus::Retrying.as_db_str());
+            assert_eq!(lifecycle.status, LifecycleStatus::Failed.as_db_str());
             assert_ne!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
             assert!(lifecycle.error.is_some());
         })

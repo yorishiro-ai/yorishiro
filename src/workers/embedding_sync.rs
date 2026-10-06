@@ -130,24 +130,48 @@ impl EmbeddingSyncArgs {
     pub(crate) const JOB_NAME: &'static str = "embedding_sync";
 }
 
-/// Loco has no automatic retry, so the return value decides what an operator can recover: `Err` marks the job `Failed`, which `retry_failed` can find and re-run, while `Ok` marks it `Completed` and forgets it.
-/// All embedding failures propagate as `Err`: the lifecycle records the attempt as retrying instead of marking a missing vector completed.
-/// Operators can inspect or cancel a structural failure, and a later schema/provider correction can retry it.
-///
-/// Shared by all three worker types below, which differ only in the tag `tags()` returns.
-async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> loco_rs::Result<()> {
-    let provider = match crate::controllers::extractors::resolve_embedding_provider(
-        ctx,
-        args.workspace_id,
-    )
-    .await
-    {
-        Ok(provider) => provider,
-        Err(err) => {
-            tracing::warn!(entity_id = %args.entity_id, error = %err.0, "embedding sync worker: no embedding provider configured");
-            return Ok(());
-        }
+#[derive(Debug)]
+enum EmbeddingSyncOutcome {
+    Persisted,
+    Noop(&'static str),
+    Superseded,
+}
+
+/// Keeps embedding-specific terminal outcomes in one place.
+fn classify_embedding_error(error: YorishiroError) -> Result<EmbeddingSyncOutcome, YorishiroError> {
+    match error {
+        YorishiroError::Conflict { .. } => Ok(EmbeddingSyncOutcome::Superseded),
+        error => Err(error),
+    }
+}
+
+/// Runs one embedding attempt. It never re-enqueues itself.
+async fn perform_embedding_sync(
+    ctx: &AppContext,
+    args: &EmbeddingSyncArgs,
+) -> Result<EmbeddingSyncOutcome, YorishiroError> {
+    let resolver = ctx
+        .shared_store
+        .get::<Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>>()
+        .ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!("WorkspaceEmbeddingResolver missing"))
+        })?;
+    let provider = match resolver.resolve(&ctx.db, args.workspace_id).await? {
+        Some(provider) => Some(provider),
+        None => ctx
+            .shared_store
+            .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
     };
+    let Some(provider) = provider else {
+        return Ok(EmbeddingSyncOutcome::Noop(
+            "no embedding provider configured",
+        ));
+    };
+    if provider.model_name() == "unconfigured" {
+        return Ok(EmbeddingSyncOutcome::Noop(
+            "embedding provider explicitly disabled",
+        ));
+    }
 
     // Uses `ctx.db` (the identity pool) rather than `TenantDb::begin_for_workspace()`:
     // `entity_entities`, `entity_embeddings_*`, and `schema_schemas` have no row-level
@@ -161,11 +185,11 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
         Ok(record) => record,
         Err(DbErr::RecordNotFound(_)) => {
             tracing::debug!(entity_id = %args.entity_id, "embedding sync worker: entity no longer exists, skipping");
-            return Ok(());
+            return Ok(EmbeddingSyncOutcome::Noop("entity deleted after enqueue"));
         }
         Err(err) => {
             tracing::warn!(entity_id = %args.entity_id, error = %err, "embedding sync worker: failed to re-read entity");
-            return Err(err.into());
+            return Err(YorishiroError::Internal(err.into()));
         }
     };
 
@@ -177,23 +201,78 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
     )
     .await
     {
-        use crate::error::YorishiroError;
-        match err {
-            YorishiroError::Conflict { .. }
-            | YorishiroError::ProviderBusy { .. }
-            | YorishiroError::ProviderUnreachable { .. }
-            | YorishiroError::Internal(_) => {
-                tracing::warn!(entity_id = %args.entity_id, error = %err, "embedding sync failed transiently, job will be marked failed for retry_failed");
-                return Err(err.into());
-            }
-            other => {
-                tracing::warn!(entity_id = %args.entity_id, error = %other, "embedding sync failed, job will be recorded for retry");
-                return Err(other.into());
-            }
-        }
+        return classify_embedding_error(err);
     }
 
-    Ok(())
+    Ok(EmbeddingSyncOutcome::Persisted)
+}
+
+async fn perform_embedding_with_lifecycle(
+    ctx: &AppContext,
+    args: &EmbeddingSyncArgs,
+) -> loco_rs::Result<()> {
+    let Some(id) = args.lifecycle_id else {
+        return perform_embedding_sync(ctx, args)
+            .await
+            .map(|_| ())
+            .map_err(Into::into);
+    };
+    let attempt = match crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+    {
+        crate::models::queue_job_lifecycles::Admission::Started { attempt }
+        | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
+        crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+        | crate::models::queue_job_lifecycles::Admission::Terminal => return Ok(()),
+        crate::models::queue_job_lifecycles::Admission::Saturated { .. } => {
+            return Err(loco_rs::Error::Message(
+                "embedding worker capacity saturated".into(),
+            ));
+        }
+    };
+    let result = perform_embedding_sync(ctx, args).await;
+    let (status, diagnostic, error, superseded) = match result {
+        Ok(EmbeddingSyncOutcome::Persisted) => (
+            crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+            None,
+            None,
+            false,
+        ),
+        Ok(EmbeddingSyncOutcome::Noop(diagnostic)) => (
+            crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+            Some(diagnostic),
+            None,
+            false,
+        ),
+        Ok(EmbeddingSyncOutcome::Superseded) => (
+            crate::models::queue_job_lifecycles::LifecycleStatus::Cancelled,
+            Some("superseded by a newer entity update"),
+            None,
+            true,
+        ),
+        Err(error) => (
+            crate::models::queue_job_lifecycles::LifecycleStatus::Failed,
+            None,
+            Some(error),
+            false,
+        ),
+    };
+    let error_diagnostic = error.as_ref().map(ToString::to_string);
+    let diagnostic = diagnostic.or(error_diagnostic.as_deref());
+    crate::models::queue_job_lifecycles::Entity::finish(
+        &ctx.db,
+        id,
+        Some(attempt),
+        status,
+        diagnostic,
+    )
+    .await
+    .map_err(|finish_error| loco_rs::Error::Message(finish_error.to_string()))?;
+    if superseded {
+        return Ok(());
+    }
+    error.map_or(Ok(()), |error| Err(error.into()))
 }
 
 /// Declares one `WorkerClass`'s worker type: a thin struct giving `tags()` a fixed single tag, so that class's jobs are visible only to a worker process asking for it.
@@ -219,14 +298,7 @@ macro_rules! embedding_sync_worker_for_class {
             }
 
             async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-                crate::workers::lifecycle::perform_with_lifecycle::<Self, _, _, _>(
-                    &self.ctx,
-                    args.lifecycle_id,
-                    $class,
-                    &args,
-                    || perform_embedding_sync(&self.ctx, &args),
-                )
-                .await
+                perform_embedding_with_lifecycle(&self.ctx, &args).await
             }
         }
     };
