@@ -94,17 +94,17 @@ impl RateLimiter {
 /// Charges a search query against its workspace's token budget, refusing when the budget is spent.
 ///
 /// Charged before embedding, since embedding is the work the budget protects, and counting is cheap (a query is short), which is why search is metered in tokens while writes stay on request counts.
+/// The server holds no tokenizer, so a query costs one token per four bytes, rounded up: the estimate every provider without its own tokenizer already uses, and an overestimate for non-English text, which suits a quota.
 /// A free function taking both `ctx` values rather than a method on either, so a check written for only one caller can't leave the other able to spend the budget it's meant to protect: both the REST and MCP search handlers call this same function.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub fn charge_search_tokens(
     limiter: &RateLimiter,
-    provider: &dyn crate::services::embedding::EmbeddingProvider,
     workspace_id: uuid::Uuid,
     query_text: &str,
 ) -> Result<(), crate::error::YorishiroError> {
-    let tokens = provider.count_tokens(query_text);
+    let tokens = u32::try_from(query_text.len().div_ceil(4)).unwrap_or(u32::MAX);
     if limiter.allow_cost(&workspace_id.to_string(), tokens) {
         return Ok(());
     }

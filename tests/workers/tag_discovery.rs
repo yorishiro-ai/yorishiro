@@ -4,14 +4,16 @@ use yorishiro::edition::{worker_tags, workers};
 use yorishiro::workers::embedding_sync::WorkerClass;
 use yorishiro::workers::registry::WorkerRegistry;
 
+/// Every worker class's tag, then the query embedding worker's own.
 fn community_tags() -> Vec<String> {
     WorkerClass::ALL
         .iter()
         .map(|class| class.tag().to_owned())
+        .chain(["query-embedding".to_owned()])
         .collect()
 }
 
-/// The community registry names exactly the worker classes' tags and queues, whichever edition is compiled in.
+/// The community registry names exactly the worker classes' tags and queues and the query embedding worker's, whichever edition is compiled in.
 #[test]
 fn community_registry_is_the_worker_class_baseline() {
     let registry = WorkerRegistry::community();
@@ -36,7 +38,7 @@ fn composed_registry_extends_the_community_baseline_only() {
     assert_eq!(worker_tags(), expected);
     assert_eq!(workers().queues(), expected);
     assert_eq!(
-        &worker_tags()[..WorkerClass::ALL.len()],
+        &worker_tags()[..community_tags().len()],
         WorkerRegistry::community().tags().as_slice(),
         "the edition must not reorder or replace the baseline"
     );

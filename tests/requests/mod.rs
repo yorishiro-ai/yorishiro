@@ -28,6 +28,7 @@ mod official_templates;
 mod openapi;
 #[cfg(feature = "enterprise")]
 mod origin;
+pub(crate) mod query_worker;
 #[cfg(feature = "enterprise")]
 mod queue;
 mod relations;

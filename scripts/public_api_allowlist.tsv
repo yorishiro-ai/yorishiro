@@ -921,3 +921,10 @@ src/models/query_embedding_requests.rs	fn	Entity::open	integration-test: tests/m
 src/models/query_embedding_requests.rs	fn	Entity::purge_expired	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
 src/models/query_embedding_requests.rs	fn	Entity::take	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
 src/models/query_embedding_requests.rs	use	crate::models::_entities::query_embedding_requests::{ActiveModel,Column,Entity,Model}	seaorm-facade: the table-owning model re-exports its generated entity, as every model does.
+src/services/embedding/mod.rs	fn	build_embedding_provider	integration-test: tests/requests/search.rs builds the worker-side provider from settings the way a worker process does.
+src/workers/mod.rs	mod	query_embedding	loco-task-worker: tests import the query embedding worker module.
+src/workers/query_embedding.rs	field	QueryEmbeddingArgs::request_id	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	field	QueryEmbeddingArgs::workspace_id	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	fn	embed_query	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	struct	QueryEmbeddingArgs	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	struct	QueryEmbeddingWorker	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.

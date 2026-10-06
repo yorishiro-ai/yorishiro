@@ -5,9 +5,7 @@ use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{
-    ReadScope, Verified, db_handle, resolve_embedding_provider, search_token_limiter,
-};
+use crate::controllers::extractors::{ReadScope, Verified, db_handle, search_token_limiter};
 use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::db::AppContextBackend;
 use crate::dtos::search::SearchEntitiesParams;
@@ -28,19 +26,18 @@ pub(crate) async fn search_entities(
         limit: params.limit.unwrap_or(default.limit),
     };
 
-    let provider = resolve_embedding_provider(&ctx, verified.ctx.workspace_id).await?;
-    let limiter = search_token_limiter(&ctx)?;
-    charge_search_tokens(
-        &limiter,
-        provider.as_ref(),
-        verified.ctx.workspace_id,
-        &params.query_text,
-    )?;
-
-    // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
-    let vector = search::embed_query(provider.as_ref(), &params.query_text).await?;
-
     let workspace_id = verified.ctx.workspace_id;
+    let limiter = search_token_limiter(&ctx)?;
+    charge_search_tokens(&limiter, workspace_id, &params.query_text)?;
+
+    // The server holds no model: a worker embeds the query, and no DB connection is held while waiting for it.
+    let vector = crate::workers::query_embedding::embed_query(
+        &ctx,
+        verified.ctx.tenant_id,
+        workspace_id,
+        &params.query_text,
+    )
+    .await?;
 
     // The tenant-scoped role cannot read `tenant_tenants`, which the embedding chain joins, so the table is resolved on the identity pool before the transaction opens.
     let embed_table = search::resolve_query_table(&ctx.db, workspace_id, vector.len()).await?;

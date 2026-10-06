@@ -166,7 +166,12 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 ///    The model files (~1 GiB) are fetched into `$HOME/.cache/yorishiro/` on first use.
 ///
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
-pub(crate) async fn build_embedding_provider(
+///
+/// Only a worker process calls this: the API and MCP server holds no model.
+///
+/// # Errors
+/// Returns an error when the selected provider cannot be built, for example an unknown local model or model files that cannot be fetched.
+pub async fn build_embedding_provider(
     config: &crate::data::settings::Settings,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let config = &config.embedding;

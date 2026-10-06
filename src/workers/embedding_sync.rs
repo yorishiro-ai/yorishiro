@@ -145,23 +145,36 @@ fn classify_embedding_error(error: YorishiroError) -> Result<EmbeddingSyncOutcom
     }
 }
 
-/// Runs one embedding attempt. It never re-enqueues itself.
-async fn perform_embedding_sync(
+/// The provider a worker embeds `workspace_id`'s text with: the workspace's own, else the deployment default this worker process installed.
+///
+/// `Ok(None)` means neither exists, which is what a process that never installed a default provider sees.
+///
+/// # Errors
+/// Returns `Internal` when the resolver seam is missing, or the resolver's own error.
+pub(crate) async fn resolve_worker_provider(
     ctx: &AppContext,
-    args: &EmbeddingSyncArgs,
-) -> Result<EmbeddingSyncOutcome, YorishiroError> {
+    workspace_id: Uuid,
+) -> Result<Option<Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError> {
     let resolver = ctx
         .shared_store
         .get::<Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>>()
         .ok_or_else(|| {
             YorishiroError::Internal(anyhow::anyhow!("WorkspaceEmbeddingResolver missing"))
         })?;
-    let provider = match resolver.resolve(&ctx.db, args.workspace_id).await? {
+    Ok(match resolver.resolve(&ctx.db, workspace_id).await? {
         Some(provider) => Some(provider),
         None => ctx
             .shared_store
             .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
-    };
+    })
+}
+
+/// Runs one embedding attempt. It never re-enqueues itself.
+async fn perform_embedding_sync(
+    ctx: &AppContext,
+    args: &EmbeddingSyncArgs,
+) -> Result<EmbeddingSyncOutcome, YorishiroError> {
+    let provider = resolve_worker_provider(ctx, args.workspace_id).await?;
     let Some(provider) = provider else {
         return Ok(EmbeddingSyncOutcome::Noop(
             "no embedding provider configured",
