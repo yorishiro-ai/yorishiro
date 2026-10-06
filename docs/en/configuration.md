@@ -65,6 +65,12 @@ Loco's storage extension points do not fit this cache because it is a deployment
 
 ### Changing embedding models
 
+The deployment supports the closed dimension set `768`, `1024`, and `1536`.
+Migrations create all three width partitions up front, even when no current workspace uses some of them.
+This keeps workspace-specific provider selection, credential rotation, and reindexing free of runtime table creation and allows different workspaces to coexist at different widths.
+Unused partitions contain only small catalog/index metadata; vector storage is charged only to populated partitions.
+Workspace and provider configuration selects one supported width, while `reindex_embeddings` moves existing vectors to the new model or width.
+
 If you switch to a different embedding model, existing embedded entities will still use vectors from the old model. You need to regenerate embeddings for affected workspaces:
 
 ```
