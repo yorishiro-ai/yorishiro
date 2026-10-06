@@ -13,6 +13,7 @@ mod write;
 
 pub use reindex::{ReindexFailure, ReindexOutcome, reindex_workspace};
 pub(crate) use resolution::resolve_embedding_chain;
+pub(crate) use write::EmbeddingWriteOutcome;
 pub use write::sync_embedding_for_record;
 pub(crate) use write::sync_embedding_for_snapshot;
 

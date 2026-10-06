@@ -28,11 +28,22 @@ pub enum EmbedKind {
     Document,
 }
 
+/// Whether a provider is available for document and query embedding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmbeddingProviderAvailability {
+    Enabled,
+    Disabled,
+}
+
 /// Provider that generates embedding vectors.
 /// The `entity_entities.embedding` column is dimensionless (`vector`), so any model works.
 /// All vectors in a deployment must share the same dimension count.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    fn availability(&self) -> EmbeddingProviderAvailability {
+        EmbeddingProviderAvailability::Enabled
+    }
+
     fn dimensions(&self) -> usize;
 
     /// Identifies the model this provider embeds with, for stamping onto a workspace at first successful embed.
@@ -124,6 +135,10 @@ pub struct UnconfiguredEmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
+    fn availability(&self) -> EmbeddingProviderAvailability {
+        EmbeddingProviderAvailability::Disabled
+    }
+
     fn dimensions(&self) -> usize {
         self.dimensions
     }

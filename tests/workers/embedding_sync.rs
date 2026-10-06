@@ -205,6 +205,60 @@ mod conflict {
         width: usize,
     }
 
+    enum FailureKind {
+        Busy,
+        Unreachable,
+    }
+
+    struct FailingProvider {
+        kind: FailureKind,
+    }
+
+    struct DisabledProvider;
+
+    #[async_trait]
+    impl EmbeddingProvider for DisabledProvider {
+        fn availability(&self) -> yorishiro::services::embedding::EmbeddingProviderAvailability {
+            yorishiro::services::embedding::EmbeddingProviderAvailability::Disabled
+        }
+
+        fn dimensions(&self) -> usize {
+            768
+        }
+
+        fn model_name(&self) -> String {
+            "disabled-test-provider".into()
+        }
+
+        async fn embed_batch(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            panic!("disabled providers must not be called")
+        }
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for FailingProvider {
+        fn dimensions(&self) -> usize {
+            768
+        }
+
+        fn model_name(&self) -> String {
+            "failing-test-provider".into()
+        }
+
+        async fn embed_batch(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            Err(match self.kind {
+                FailureKind::Busy => YorishiroError::ProviderBusy {
+                    message: "test provider is busy".into(),
+                    retry_after: std::time::Duration::from_secs(1),
+                },
+                FailureKind::Unreachable => YorishiroError::ProviderUnreachable {
+                    url: "http://test-provider".into(),
+                    message: "test provider is unreachable".into(),
+                },
+            })
+        }
+    }
+
     #[async_trait]
     impl EmbeddingProvider for MutatingProvider {
         fn dimensions(&self) -> usize {
@@ -282,6 +336,48 @@ mod conflict {
         (workspace.id, entity.id)
     }
 
+    async fn seed_without_embeddable_content(ctx: &AppContext) -> (Uuid, Uuid) {
+        let tenant = tenant_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("worker-no-content".into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("insert tenant");
+        let workspace = workspace_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("insert workspace");
+        let definition = serde_json::from_value(serde_json::json!({
+            "name": "plain",
+            "entity_types": { "plain": { "fields": {
+                "title": { "type": "string", "required": true }
+            } } }
+        }))
+        .expect("parse definition");
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, definition, None, None)
+            .await
+            .expect("create schema");
+        let entity = entity_entities::create(
+            &ctx.db,
+            workspace.id,
+            entity_entities::CreateEntityInput {
+                schema_name: "plain".into(),
+                entity_type: "plain".into(),
+                data: serde_json::json!({ "title": "not embedded" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+        (workspace.id, entity.id)
+    }
+
     #[derive(FromQueryResult)]
     struct Count {
         n: i64,
@@ -298,6 +394,175 @@ mod conflict {
         .expect("count vectors")
         .expect("count row")
         .n
+    }
+
+    #[tokio::test]
+    async fn provider_failures_are_terminal_and_do_not_requeue() {
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let directory = tempfile::tempdir().expect("queue tempdir");
+            let queue_uri = format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("queue.sqlite3").display()
+            );
+            let queue = bgworker::sqlt::create_provider(&SqliteQueueConfig {
+                uri: queue_uri.clone(),
+                dangerously_flush: false,
+                enable_logging: false,
+                max_connections: 2,
+                min_connections: 1,
+                connect_timeout: 5_000,
+                idle_timeout: 5_000,
+                poll_interval_sec: 1,
+                num_workers: 1,
+                reaper: None,
+            })
+            .await
+            .expect("SQLite queue");
+            queue.setup().await.expect("set up queue");
+            let queue = Arc::new(queue);
+            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
+                .await
+                .expect("connect to the queue file");
+
+            for (lifecycle_id, kind) in [
+                (Uuid::now_v7(), FailureKind::Busy),
+                (Uuid::now_v7(), FailureKind::Unreachable),
+            ] {
+                ctx.shared_store
+                    .insert(Arc::new(FailingProvider { kind }) as Arc<dyn EmbeddingProvider>);
+                Entity::record_enqueue(
+                    &ctx.db,
+                    Enqueue {
+                        id: lifecycle_id,
+                        job_name: "embedding_sync",
+                        worker_class: WorkerClass::Shared,
+                        workspace_id: Some(workspace_id),
+                        plan: None,
+                        concurrency_key: None,
+                        concurrency_limit: None,
+                    },
+                )
+                .await
+                .expect("record lifecycle");
+
+                let result = EmbeddingSyncWorkerShared::build(&ctx)
+                    .perform(EmbeddingSyncArgs {
+                        lifecycle_id: Some(lifecycle_id),
+                        workspace_id,
+                        entity_id,
+                        worker_class: WorkerClass::Shared,
+                    })
+                    .await;
+                assert!(result.is_err(), "provider failure must reach Loco");
+                let lifecycle = Entity::find_by_id(lifecycle_id)
+                    .one(&ctx.db)
+                    .await
+                    .expect("read lifecycle")
+                    .expect("lifecycle row");
+                assert_eq!(lifecycle.status, LifecycleStatus::Failed.as_db_str());
+                assert!(lifecycle.error.is_some());
+                assert!(
+                    sqlt::get_jobs(&queue_pool, None, None)
+                        .await
+                        .expect("read queue")
+                        .is_empty()
+                );
+            }
+
+            let _ = queue.shutdown();
+            queue_pool.close().await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn no_content_and_disabled_provider_are_successful_noops() {
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed_without_embeddable_content(&ctx).await;
+            ctx.shared_store.insert(Arc::new(MutatingProvider {
+                db: ctx.db.clone(),
+                workspace_id,
+                entity_id,
+                delete: false,
+                mutate: AtomicBool::new(false),
+                width: 768,
+            }) as Arc<dyn EmbeddingProvider>);
+            let no_content_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: no_content_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .expect("record no-content lifecycle");
+            EmbeddingSyncWorkerShared::build(&ctx)
+                .perform(EmbeddingSyncArgs {
+                    lifecycle_id: Some(no_content_id),
+                    workspace_id,
+                    entity_id,
+                    worker_class: WorkerClass::Shared,
+                })
+                .await
+                .expect("no content is a no-op");
+            let no_content = Entity::find_by_id(no_content_id)
+                .one(&ctx.db)
+                .await
+                .expect("read no-content lifecycle")
+                .expect("no-content lifecycle row");
+            assert_eq!(no_content.status, LifecycleStatus::Completed.as_db_str());
+            assert_eq!(
+                no_content.error.as_deref(),
+                Some("entity has no x-embed content")
+            );
+
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            ctx.shared_store
+                .insert(Arc::new(DisabledProvider) as Arc<dyn EmbeddingProvider>);
+            let disabled_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: disabled_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .expect("record disabled lifecycle");
+            EmbeddingSyncWorkerShared::build(&ctx)
+                .perform(EmbeddingSyncArgs {
+                    lifecycle_id: Some(disabled_id),
+                    workspace_id,
+                    entity_id,
+                    worker_class: WorkerClass::Shared,
+                })
+                .await
+                .expect("disabled provider is a no-op");
+            let disabled = Entity::find_by_id(disabled_id)
+                .one(&ctx.db)
+                .await
+                .expect("read disabled lifecycle")
+                .expect("disabled lifecycle row");
+            assert_eq!(disabled.status, LifecycleStatus::Completed.as_db_str());
+            assert_eq!(
+                disabled.error.as_deref(),
+                Some("embedding provider explicitly disabled")
+            );
+        })
+        .await;
     }
 
     /// A write that lands between the worker's snapshot read and the vector persist must not store a stale vector.
@@ -491,7 +756,7 @@ mod conflict {
         .await;
     }
 
-    /// Structural failures are recorded as retryable lifecycle failures rather than completed jobs.
+    /// Structural failures are recorded as terminal lifecycle failures rather than completed jobs.
     #[tokio::test]
     async fn a_live_dimension_failure_is_not_marked_completed() {
         boot_request::<App, _, _>(|_request, ctx| async move {
@@ -540,7 +805,7 @@ mod conflict {
                     worker_class: WorkerClass::Shared,
                 })
                 .await;
-            // The lifecycle wrapper records and requeues the failure.
+            // The lifecycle wrapper records the failure and does not requeue it.
 
             let lifecycle = Entity::find_by_id(lifecycle_id)
                 .one(&ctx.db)

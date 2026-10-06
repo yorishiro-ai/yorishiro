@@ -70,7 +70,10 @@ impl Task for ResyncEmbeddings {
             .await;
 
             match result {
-                Ok(()) => synced += 1,
+                Ok(entity_embeddings::EmbeddingWriteOutcome::Persisted) => synced += 1,
+                Ok(entity_embeddings::EmbeddingWriteOutcome::Noop) => {
+                    println!("  skipped entity {}: no x-embed content", candidate.id);
+                }
                 Err(err) => {
                     failed += 1;
                     eprintln!("  failed to resync entity {}: {err}", candidate.id);

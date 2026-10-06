@@ -167,7 +167,9 @@ async fn perform_embedding_sync(
             "no embedding provider configured",
         ));
     };
-    if provider.model_name() == "unconfigured" {
+    if provider.availability()
+        == crate::services::embedding::EmbeddingProviderAvailability::Disabled
+    {
         return Ok(EmbeddingSyncOutcome::Noop(
             "embedding provider explicitly disabled",
         ));
@@ -193,7 +195,7 @@ async fn perform_embedding_sync(
         }
     };
 
-    if let Err(err) = entity_embeddings::sync_embedding_for_snapshot(
+    let write = match entity_embeddings::sync_embedding_for_snapshot(
         &ctx.db,
         args.workspace_id,
         &record,
@@ -201,10 +203,15 @@ async fn perform_embedding_sync(
     )
     .await
     {
-        return classify_embedding_error(err);
-    }
-
-    Ok(EmbeddingSyncOutcome::Persisted)
+        Ok(write) => write,
+        Err(error) => return classify_embedding_error(error),
+    };
+    Ok(match write {
+        entity_embeddings::EmbeddingWriteOutcome::Persisted => EmbeddingSyncOutcome::Persisted,
+        entity_embeddings::EmbeddingWriteOutcome::Noop => {
+            EmbeddingSyncOutcome::Noop("entity has no x-embed content")
+        }
+    })
 }
 
 async fn perform_embedding_with_lifecycle(

@@ -11,6 +11,12 @@ use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmbeddingWriteOutcome {
+    Persisted,
+    Noop,
+}
+
 /// Concatenates the values of `x-embed` fields as `"field: value"` to build the text to embed.
 pub(super) fn compose_embedding_text(
     entity_type_def: &EntityTypeDef,
@@ -37,9 +43,9 @@ async fn sync_embedding(
     record: &EmbeddingSnapshot,
     entity_type_def: &EntityTypeDef,
     provider: &dyn EmbeddingProvider,
-) -> Result<(), YorishiroError> {
+) -> Result<EmbeddingWriteOutcome, YorishiroError> {
     let Some(text) = compose_embedding_text(entity_type_def, &record.data) else {
-        return Ok(());
+        return Ok(EmbeddingWriteOutcome::Noop);
     };
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
@@ -113,7 +119,11 @@ async fn sync_embedding(
         .await?;
     }
 
-    Ok(())
+    Ok(if written {
+        EmbeddingWriteOutcome::Persisted
+    } else {
+        EmbeddingWriteOutcome::Noop
+    })
 }
 
 /// Resolves the schema definition for an entity record and synchronizes its embedding.
@@ -142,7 +152,9 @@ pub async fn sync_embedding_for_record(
             other => YorishiroError::Internal(other.into()),
         })?;
 
-    sync_embedding_for_snapshot(conn, workspace_id, &snapshot, provider).await
+    sync_embedding_for_snapshot(conn, workspace_id, &snapshot, provider)
+        .await
+        .map(|_| ())
 }
 
 /// Resolves the schema definition for an entity snapshot and synchronizes its embedding.
@@ -158,7 +170,7 @@ pub(crate) async fn sync_embedding_for_snapshot(
     workspace_id: Uuid,
     record: &EmbeddingSnapshot,
     provider: &dyn EmbeddingProvider,
-) -> Result<(), YorishiroError> {
+) -> Result<EmbeddingWriteOutcome, YorishiroError> {
     let schema =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
     let entity_type_def = schema
