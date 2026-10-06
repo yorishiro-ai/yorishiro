@@ -83,6 +83,8 @@ cargo loco task reindex_embeddings workspace_id:<uuid>
 
 API からもリインデックスを登録できます：`POST /api/migration-jobs/reindex`（Migration スコープが必要）。起動時にワークスペースのモデル変更を自動検知し、リインデックスも走ります。
 
+埋め込み同期は、意図的にキュー上で 1 回だけ実行します。固定している Loco 1.2.0 のキュー API には、すべてのバックエンドで使える遅延 enqueue がなく、失敗を直ちに再 enqueue すると無制限ループになり、ライフサイクル更新とキュー更新もアトミックにコミットできません。ベクトルの永続化を確認できた場合だけ成功とし、無効化または未設定の埋め込みは明示的な no-op、enqueue 後の削除は成功する no-op、古いスナップショットは新しいエンティティ更新によって terminal に superseded と記録します。プロバイダ、resolver、データベース、バリデーション、構造上の失敗は failed として記録し Loco に返し、自動 enqueue は行いません。別途設計した scheduler ができるまでは、明示的な resync または reindex で復旧します。
+
 ### ディスパッチ境界の監査
 
 埋め込み同期とリインデックスの enqueue 経路には、Loco の `BackgroundWorker` 拡張点を本番実装として残したまま、キュー障害を決定的にテストするための小さなアプリケーション内ディスパッチ境界があります。

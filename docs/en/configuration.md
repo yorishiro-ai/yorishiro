@@ -81,6 +81,8 @@ This re-embeds every entity in the workspace with the new model. Until it finish
 
 You can also queue a reindex via the API: `POST /api/migration-jobs/reindex` (requires Migration scope). A reindex also runs automatically on startup if any workspace's model has changed.
 
+Embedding sync is deliberately a single queue attempt. The pinned Loco 1.2.0 queue API has no portable delayed-enqueue operation, and immediately re-enqueueing failures would create an unbounded loop while lifecycle and queue mutations cannot be committed atomically. A confirmed vector write is the only successful persistence outcome; disabled or unconfigured embedding is recorded as an explicit no-op, deletion after enqueue is a successful no-op, and a stale snapshot is terminally superseded by the newer entity write. Provider, resolver, database, validation, and structural failures are recorded as failed and returned to Loco, with no automatic requeue. Use the explicit resync or reindex operations for recovery until a separately designed scheduler exists.
+
 ## Stripe webhooks
 
 Set `YORISHIRO_STRIPE_WEBHOOK_SECRET` to enable inbound Stripe webhook processing.
