@@ -12,8 +12,10 @@
 | `migration/src/` | Schema migrations |
 | `src/tasks/` | Admin and one-off commands |
 | `ee/` | Enterprise edition (mirrors `models/`, `controllers/`, `services/`) |
+| `edition/` | Composition root: the only `Hooks` implementation, and the only place that knows which editions exist |
 | `data/templates/` | Built-in JSON template assets embedded by `src/data/templates.rs` |
 
+- `src/` never refers to `ee/`: no `cfg(feature = "enterprise")` and no `crate::ee`. Edition wiring goes in `edition/`, and `make edition-boundary-check` enforces it.
 - `src/models/_entities/` is auto-generated. Never edit by hand.
 - Root files under `src/models/` are Loco generator compatibility markers. Keep them when moving model implementations into feature directories.
 - Business logic goes in `src/models/<table>.rs` next to the generated entity.

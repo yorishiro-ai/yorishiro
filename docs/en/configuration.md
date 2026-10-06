@@ -166,7 +166,7 @@ The supported all-job worker command depends on how you deploy:
 
 - **Source or Docker deployment:** use `cargo loco start --worker="$(cargo loco worker-tags)"`
   (source) or `/var/lib/yorishiro/worker-wrapper.sh` (Docker image copies the wrapper there).
-  Both discover tags programmatically and stay in sync when new worker classes or job types are added.
+  Both discover tags programmatically from the worker registry the process itself registers from, so they stay in sync when new worker classes or job types are added.
 
 Pool-specific workers use an explicit tag:
 

@@ -1,6 +1,6 @@
 # Public API Guardrail
 
-The repository checks newly introduced broad `pub` declarations in changed handwritten Rust under `src/` and `ee/`.
+The repository checks newly introduced broad `pub` declarations in changed handwritten Rust under `src/`, `ee/`, and `edition/`.
 
 Run `make public-api-check` before changing a public declaration.
 
@@ -37,7 +37,8 @@ When an exception is needed, reviewers should consider these intentional boundar
 - `auth-provider-resolver`: externally implementable authentication, provider, and resolver seams.
 - `app-hooks`: `App`, `Hooks`, and application composition entry points.
 - `loco-task-worker`: Loco Task and Worker registration entry types and payloads.
-- `ce-ee-composition`: the `src/app.rs` base and Enterprise composition boundary.
+- `ce-ee-composition`: the `edition/` composition root and the inputs `src/` exposes to it.
+- `worker-registry`: the worker registry that tags, queues, and Loco registration are derived from.
 - No historical public surface needs to be listed.
 
 These labels are reviewer guidance only.

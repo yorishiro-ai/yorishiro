@@ -6,7 +6,7 @@ This repository is a [Loco](https://loco.rs) 1.2.0 application with a Laravel-li
 
 ## Repository layout
 
-Root crate + `migration/` crate + `ee/` module.
+Root crate + `migration/` crate + `ee/` module + `edition/` composition root.
 `ee/` is an overlay on `src/`: it mirrors CE's folder hierarchy and file names, so a CE path tells you where its enterprise counterpart lives.
 CE therefore follows Loco's generator layout exactly; a directory Loco does not generate needs a written reason below.
 
@@ -21,10 +21,24 @@ CE therefore follows Loco's generator layout exactly; a directory Loco does not 
 | `src/data/` | Typed settings and static data | Config |
 | `src/fixtures/` | Seed data | Seeders |
 | `src/services/` | **External clients only** (embedding providers). Loco has no equivalent, and nothing else may live here | Services |
+| `src/app.rs` | The community wiring, one function per `Hooks` method, plus the edition-neutral inputs an overlay extends it with (`RouteMounts`, `WorkerRegistry`, `McpToolSet`) | Application bootstrap |
+| `edition/` | **Composition root, assembly only.** The one `Hooks` implementation (`edition::App`), delegating to `src/app.rs` and to the active edition. Outside `src/` on purpose | Service container |
 | `src/db.rs`, `src/error.rs` | Cross-cutting infrastructure Loco leaves to the application | Exception handler, DB config |
 
 Every entry point (REST, MCP, CLI) authenticates, parses input, calls model operations, and renders.
 None of them owns domain logic or builds ordinary queries.
+
+### Edition boundary
+
+`src/` is the community base and never refers to the enterprise overlay.
+It contains no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, and no overlay names, queues, branches, or registrations.
+`make edition-boundary-check` (part of `make check-all` and `make check-all-ee`) enforces this as a text check over `src/`.
+
+`edition/` is the only place that knows which editions exist.
+It declares `ee/` behind the `enterprise` feature, implements `Hooks` once by delegating to `src/app.rs` and the active edition, and holds nothing but assembly.
+`ee/app.rs` and `edition/community.rs` expose the same functions; the build of each edition checks the signatures.
+Worker tags, Redis queues, and Loco registration derive from one composed `WorkerRegistry`.
+A trait is for a behaviour that really varies at runtime, such as `QueuePolicy` or `Authenticator`, and not for wiring one overlay.
 
 ### Model ownership
 

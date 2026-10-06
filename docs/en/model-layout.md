@@ -18,10 +18,38 @@ None of them owns domain logic or builds ordinary queries.
 | `src/data/` | Typed settings, configuration loading, and built-in data | Config |
 | `src/fixtures/` | Seed data | Seeders |
 | `src/services/` | External clients only (embedding providers), which Loco has no place for | Services |
+| `src/app.rs` | The community wiring, one function per Loco `Hooks` method, and the types an edition extends it with | Application bootstrap |
+| `edition/` | The composition root: the only `Hooks` implementation, outside `src/` | Service container |
 
 `ee/` is an overlay on `src/`.
 It mirrors the folder hierarchy and file names of the community edition, so a community path tells you where its enterprise counterpart lives.
 Its `services/` directory follows the same restriction: only outbound LLM and OAuth clients remain there; enterprise authentication, licence middleware, plan data, and persistence live under their matching controller, data, and model paths.
+
+## Edition Composition
+
+`src/` never refers to the enterprise overlay: no `cfg(feature = "enterprise")`, no `crate::ee`, and no overlay names.
+`scripts/check_edition_boundary.py` enforces this as a text check over every Rust file under `src/`, and it runs in `make check-all`, `make check-all-ee`, and CI.
+
+The crate has one `Hooks` implementation, `edition::App` in `edition/app.rs`.
+Each hook calls the matching function in `src/app.rs` and then lets the active edition add to the result.
+The active edition is `ee/app.rs` when the `enterprise` feature is on and `edition/community.rs` otherwise.
+Both expose the same functions, so a signature mismatch fails the build of whichever edition fell behind.
+There is no trait between them, because there is one overlay and no runtime choice to make.
+
+`src/` exposes small, edition-neutral inputs for the overlay to use:
+
+| Input | What an edition does with it |
+| --- | --- |
+| `workers::registry::WorkerRegistry` | Adds a worker type with `register`. Its tags and queue come from the worker type itself. |
+| `app::RouteMounts` | Mounts route groups and their OpenAPI documents, and names credential paths that share the per-IP rate limit. |
+| `controllers::mcp::McpToolSet` | Adds MCP tools and the policy that decides which of them a request may use. |
+| `shared_store` seams | Replace a rule at runtime by inserting its own `Arc<dyn Trait>`, such as the authenticator or the queue policy. |
+
+Worker tags, the Redis queue configuration, and Loco worker registration are all derived from the one composed `WorkerRegistry`, so `yorishiro worker-tags` cannot disagree with what the process registers.
+
+A table keeps its module under `src/models/` even when only the overlay uses it.
+The migrations and generated entities are one shared schema, and every generated entity needs an `ActiveModelBehavior` implementation (and, for secret-bearing ones, a redacting `Debug`) in every build.
+The behaviour the overlay owns for that table lives in the matching file under `ee/models/`.
 
 ## Generator Boundary
 
@@ -46,7 +74,7 @@ The `make entities` target therefore runs `scripts/harden_generated_entities.py`
 That post-processor uses an explicit suspicious-name policy: exact credential names and qualified credential suffixes such as `_api_token`, `_service_key`, `_password`, and `_authorization` are protected, while generic names such as `key` and `*_hash` are not.
 It removes `Debug` from the model derive and adds `serde(skip_serializing)` to every suspicious field.
 If a suspicious field appears in an unsupported generated shape, the post-processor fails instead of silently leaving the field exposed.
-The application-owned modules `src/models/workspace_llm_keys.rs` and `src/models/workspace_embedding_keys.rs` provide safe `Debug` implementations that omit `api_key` while preserving the generated query and write types.
+The application-owned modules for the two credential tables, `workspace_llm_keys.rs` and `workspace_embedding_keys.rs` under `src/models/`, provide safe `Debug` implementations that omit `api_key` while preserving the generated query and write types.
 Do not edit `_entities` by hand, and keep the post-generation hardening step in the entity workflow when changing the generator command.
 
 ## Static Data

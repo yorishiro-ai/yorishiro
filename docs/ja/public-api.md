@@ -1,6 +1,6 @@
 # 公開 API ガードレール
 
-このリポジトリでは、変更された `src/` と `ee/` の手書き Rust に新しく追加された広域 `pub` 宣言を検査します。
+このリポジトリでは、変更された `src/`、`ee/`、`edition/` の手書き Rust に新しく追加された広域 `pub` 宣言を検査します。
 
 公開宣言を変更する前に `make public-api-check` を実行してください。
 
@@ -37,7 +37,8 @@ CI では `PUBLIC_API_BASE_REF` と `PUBLIC_API_HEAD_REF` に明示的な base �
 - `auth-provider-resolver`: 外部から実装可能な認証、プロバイダー、リゾルバーの接続点。
 - `app-hooks`: `App`、`Hooks`、アプリケーションの合成入口。
 - `loco-task-worker`: Loco の Task と Worker の登録入口およびペイロード。
-- `ce-ee-composition`: `src/app.rs` にある Community Edition と Enterprise Edition の合成境界。
+- `ce-ee-composition`: `edition/` にある組み立ての起点と、`src/` がそこへ公開する入力。
+- `worker-registry`: タグ、キュー、Loco への登録の導出元となるワーカーレジストリ。
 - 過去から存在する公開宣言を列挙する必要はありません。
 
 これらのラベルはレビュー用の指針にすぎません。

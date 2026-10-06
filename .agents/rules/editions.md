@@ -6,9 +6,9 @@ One repository, two licences. Everything outside `ee/` is BUSL-1.1; `ee/` is the
 
 ## Boundary
 
-**`src/app.rs` is the only file in `src/` that may reference `crate::ee`.** Everywhere else the dependency runs from `ee/` into `src/`, never back.
+**Nothing in `src/` may refer to the enterprise overlay.** That means no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, no path into `ee/`, and no overlay names, queues, branches, or registrations, comments included. The dependency runs from `ee/` into `src/`, never back.
 
-`app.rs` is the composition root: `after_context` installs `ee/`'s seams and `routes()` mounts its routes. This is wiring, not a feature depending on a feature. One crate makes both directions compile, so this is a rule rather than a compiler error: `use crate::ee::...` in any other `src/` file is the import direction that is always wrong.
+The composition root is `edition/`, outside `src/` on purpose. It is the only place that knows which editions exist, and it is assembly only. One crate makes both directions compile, so the boundary is a rule rather than a compiler error: `scripts/check_edition_boundary.py` is the mechanical guard, run by `make edition-boundary-check`, `make check-all`, `make check-all-ee`, and CI. It has tests that include deliberate violations.
 
 ## Classification
 
@@ -22,11 +22,19 @@ Unclear cases are a question for the user, asked as the classification itself ra
 
 ## Composition
 
-**`ee/` is a module of the application crate, not a package of its own.** `src/lib.rs` declares it with `#[path = "../ee/mod.rs"]`, so the files stay at the repository root where `ee/LICENSE` scopes them ("everything under the `ee/` directory") while compiling into the same crate as everything in `src/`. The root `Cargo.toml`'s `[workspace] members` lists `"."` only; there is one binary, `yorishiro`.
+**`ee/` is a module of the application crate, not a package of its own.** `edition/mod.rs` declares it with `#[path = "../ee/mod.rs"]` behind the `enterprise` feature, and `src/lib.rs` declares `edition/` itself with `#[path = "../edition/mod.rs"]` and no feature gate. The files stay at the repository root where `ee/LICENSE` scopes them ("everything under the `ee/` directory") while compiling into the same crate as everything in `src/`. The overlay is therefore `crate::edition::ee`. The root `Cargo.toml`'s `[workspace] members` lists `"."` only; there is one binary, `yorishiro`.
 
 One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module whitelist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
 
-**There is one `Hooks` impl, `app::App`.** `ee/`-only wiring is layered inside its methods rather than composed from a second impl: `after_context` installs the licence state, the tenant-scoped authenticator (PostgreSQL only) and the two resolver seams after building base's own pools; `routes()` adds the enterprise edition's route groups after the community ones; `register_tasks` registers `ee/`'s two tasks alongside base's.
+**There is one `Hooks` impl, `edition::App` in `edition/app.rs`, re-exported as `yorishiro::App`.** Each hook calls the matching function in `src/app.rs` and then the active edition's function: `after_context` installs the licence state, the tenant-scoped authenticator (PostgreSQL only) and the resolver and policy seams after building base's own pools; `routes()` adds the enterprise edition's route groups after the community ones through `RouteMounts`; `register_tasks` registers `ee/`'s tasks alongside base's; the MCP tools and their licence policy are added through `McpToolSet`.
+
+The active edition is `ee/app.rs` when the `enterprise` feature is on and `edition/community.rs` otherwise. They expose identical functions, so the build of whichever edition fell behind fails on a signature mismatch. There is no trait between them: one overlay and no runtime choice is not a reason for a trait. A trait is for behaviour that varies at runtime, such as `QueuePolicy`, `Authenticator`, and `WorkerClassResolver`, which `ee/` replaces by inserting its own `Arc<dyn Trait>` into `shared_store`.
+
+**Workers have one registration per edition.** `src/workers/registry.rs` owns `WorkerRegistry`, a plain value whose `community()` is the baseline and whose `register::<Args, Worker>()` is how `ee/app.rs` adds `infer-fill`. A worker's tags and queue are whatever its `BackgroundWorker::tags()` and `queue()` return. `edition::workers()` composes the final registry, and Loco registration, the Redis queue configuration, and `yorishiro worker-tags` all derive from it. Do not keep a second list of tags or queues anywhere.
+
+**The overlay's paths reach the base by naming, not by the base knowing them.** For example `ee/app.rs` calls `RouteMounts::guard_credentials` for its OAuth entry points, so the per-IP rate limit in `src/` applies to them without `src/` listing any overlay path.
+
+**A table keeps its module under `src/models/` even when only `ee/` uses it.** Migrations and generated entities are one shared schema, and every generated entity needs an `ActiveModelBehavior` (and, for secret-bearing ones, a redacting `Debug`) in every build. The behaviour `ee/` owns for that table lives in `ee/models/`.
 
 `YorishiroError` is re-exported at the crate root (`pub use error::YorishiroError;`), so `ee/` code reaches it as `crate::YorishiroError`.
 
