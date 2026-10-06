@@ -446,19 +446,24 @@ pub(crate) async fn neighbors_batch(
                     e.updated_by AS entity_updated_by \
              FROM entity_relations r \
              JOIN entity_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = $1 AND r.source_id = pivot.id AND r.status = 'active' \
+             WHERE r.workspace_id = $1 AND r.source_id = pivot.id AND r.status = $4 \
              UNION ALL \
              SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
                     e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
                     e.created_at, e.updated_at, e.created_by, e.updated_by \
              FROM entity_relations r \
              JOIN entity_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = $1 AND r.target_id = pivot.id AND r.status = 'active' \
+             WHERE r.workspace_id = $1 AND r.target_id = pivot.id AND r.status = $4 \
              ORDER BY relation_created_at DESC \
              LIMIT $3 \
          ) AS n \
          ORDER BY pivot.id, n.relation_created_at DESC",
-        [workspace_id.into(), pivot_ids.into(), limit.into()],
+        [
+            workspace_id.into(),
+            pivot_ids.into(),
+            limit.into(),
+            RelationStatus::Active.as_db_str().into(),
+        ],
     ))
     .all(conn)
     .await

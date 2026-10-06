@@ -11,6 +11,12 @@ use uuid::Uuid;
 
 use crate::workers::embedding_sync::WorkerClass;
 
+/// How many jobs of one class a workspace may have running unless a policy says otherwise.
+pub const SINGLE_JOB_LIMIT: i32 = 1;
+
+/// The plan label this crate's own rule records on a lifecycle row.
+const COMMUNITY_PLAN: &str = "community";
+
 /// What a job is admitted under: the plan label recorded on its lifecycle row, and how many jobs of its class may run at once.
 pub struct ConcurrencyPolicy {
     pub plan: String,
@@ -43,8 +49,8 @@ impl QueuePolicy for CommunityQueuePolicy {
         _class: WorkerClass,
     ) -> Result<ConcurrencyPolicy, String> {
         Ok(ConcurrencyPolicy {
-            plan: "community".to_owned(),
-            limit: 1,
+            plan: COMMUNITY_PLAN.to_owned(),
+            limit: SINGLE_JOB_LIMIT,
         })
     }
 }

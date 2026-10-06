@@ -10,7 +10,7 @@ use crate::edition::ee::models::tenant_billing;
 use crate::error::YorishiroError;
 use crate::models::workspace_workspaces;
 use crate::workers::embedding_sync::WorkerClass;
-use crate::workers::queue::{ConcurrencyPolicy, QueuePolicy};
+use crate::workers::queue::{ConcurrencyPolicy, QueuePolicy, SINGLE_JOB_LIMIT};
 
 /// An active licence names the plan outright; otherwise the tenant's billing row does, and a tenant with no row is on the free plan.
 ///
@@ -29,7 +29,7 @@ impl QueuePolicy for PlanQueuePolicy {
         let plan = plan_for(ctx, workspace_id).await?;
         let limit = match class {
             WorkerClass::Official => plan.compute_policy().base_official_concurrency as i32,
-            WorkerClass::TenantPrivate | WorkerClass::Shared => 1,
+            WorkerClass::TenantPrivate | WorkerClass::Shared => SINGLE_JOB_LIMIT,
         };
         Ok(ConcurrencyPolicy {
             plan: plan.as_str().to_owned(),

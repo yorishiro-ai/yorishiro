@@ -903,3 +903,4 @@ src/workers/registry.rs	fn	WorkerRegistry::tags	worker-registry: the tag list fo
 src/workers/registry.rs	fn	WorkerRegistry::queues	worker-registry: the named queues a Redis provider must poll, read at boot and by the integration tests.
 src/controllers/mcp/mod.rs	struct	McpToolSet	ce-ee-composition: the MCP tools and access policy an edition extends from the community set.
 src/controllers/mcp/mod.rs	fn	McpToolSet::extend	ce-ee-composition: how an edition adds MCP tools and its access policy; unused by the community build, which is why it cannot be narrowed to pub(crate).
+src/workers/queue.rs	const	SINGLE_JOB_LIMIT	integration-test: the one-running-job default that the queue policy tests and the plan policy overlay both state.
