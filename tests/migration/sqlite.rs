@@ -128,3 +128,37 @@ async fn fill_defaults_audit_action_upgrades_an_existing_sqlite_schema() {
     .await
     .expect("the upgraded CHECK must accept fill_defaults");
 }
+
+/// The query embedding table is created by the newest migration and dropped again by its own `down`, so rolling back one step removes it and nothing else.
+#[tokio::test]
+#[serial(process_environment)]
+async fn query_embedding_requests_migration_is_reversible_on_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("qe.sqlite3").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    let exists = |db: &sea_orm::DatabaseConnection| {
+        let db = db.clone();
+        async move {
+            db.query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'query_embedding_requests'",
+            ))
+            .await
+            .expect("read schema")
+            .is_some()
+        }
+    };
+
+    Migrator::up(&db, None).await.expect("up");
+    assert!(exists(&db).await);
+    Migrator::down(&db, Some(1)).await.expect("down one step");
+    assert!(!exists(&db).await);
+    Migrator::up(&db, None).await.expect("up again");
+    assert!(exists(&db).await);
+}

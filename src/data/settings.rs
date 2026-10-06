@@ -7,6 +7,33 @@ pub struct Settings {
     pub embedding: Embedding,
     pub(crate) rate_limit: RateLimit,
     pub(crate) db_load_guard: DbLoadGuard,
+    #[serde(default)]
+    pub query_embedding: QueryEmbedding,
+}
+
+/// How the API and MCP server waits for a worker to embed a search query.
+///
+/// The server holds no embedding model: it enqueues a request and polls for the result, so these three values bound that wait.
+/// The section is optional so a configuration file written before it existed keeps loading with the defaults.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct QueryEmbedding {
+    /// The longest a search waits for its vector, in milliseconds.
+    pub timeout_ms: u64,
+    /// The pause between two reads of the result row, in milliseconds.
+    pub poll_interval_ms: u64,
+    /// How long an unconsumed request or result row is kept before it is purged, in seconds.
+    pub retention_seconds: u64,
+}
+
+impl Default for QueryEmbedding {
+    fn default() -> Self {
+        Self {
+            timeout_ms: 15_000,
+            poll_interval_ms: 100,
+            retention_seconds: 300,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

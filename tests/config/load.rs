@@ -133,3 +133,45 @@ async fn production_selects_queue_provider_independently_from_database() {
         Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example:6379"
     ));
 }
+
+/// Each bad value is reported by name, so an operator is not left guessing which setting a failed boot objected to.
+#[tokio::test]
+#[serial(process_environment)]
+async fn query_embedding_settings_are_validated() {
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS",
+        "YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS",
+        "YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS",
+    ]);
+    guard.set("DATABASE_URL", "sqlite:///tmp/qe-config.sqlite3?mode=rwc");
+    guard.set(
+        "QUEUE_URL",
+        "sqlite:///tmp/qe-config-queue.sqlite3?mode=rwc",
+    );
+    let environment = Environment::Any("test_sqlite".into());
+
+    let defaults = load(&environment).await.unwrap();
+    let settings = defaults
+        .settings::<yorishiro::data::settings::Settings>()
+        .unwrap();
+    assert_eq!(settings.query_embedding.timeout_ms, 15_000);
+
+    for (timeout, poll, retention, expected) in [
+        ("0", "100", "300", "greater than zero"),
+        ("1000", "0", "300", "greater than zero"),
+        ("200000", "100", "300", "must not exceed 120000"),
+        ("1000", "2000", "300", "poll_interval_ms must not exceed"),
+        ("15000", "100", "5", "retention_seconds must cover"),
+    ] {
+        guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", timeout);
+        guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", poll);
+        guard.set("YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", retention);
+        let error = load(&environment).await.unwrap_err().to_string();
+        assert!(
+            error.contains(expected),
+            "{timeout}/{poll}/{retention}: {error}"
+        );
+    }
+}

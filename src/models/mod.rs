@@ -20,6 +20,7 @@ pub mod import;
 pub mod inference_jobs;
 pub(crate) mod inference_proposals;
 pub mod pagination;
+pub mod query_embedding_requests;
 pub mod queue_job_lifecycles;
 pub mod recall;
 pub mod schema_schemas;

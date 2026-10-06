@@ -905,3 +905,19 @@ src/controllers/mcp/mod.rs	struct	McpToolSet	ce-ee-composition: the MCP tools an
 src/controllers/mcp/mod.rs	fn	McpToolSet::extend	ce-ee-composition: how an edition adds MCP tools and its access policy; unused by the community build, which is why it cannot be narrowed to pub(crate).
 src/workers/queue.rs	const	SINGLE_JOB_LIMIT	integration-test: the one-running-job default that the queue policy tests and the plan policy overlay both state.
 src/services/embedding/mod.rs	enum	EmbeddingProviderAvailability	auth-provider-resolver: typed return of the externally implementable `EmbeddingProvider::availability` contract, so a provider declares itself disabled without a model-name sentinel.
+src/data/settings.rs	field	QueryEmbedding::poll_interval_ms	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	field	QueryEmbedding::retention_seconds	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	field	QueryEmbedding::timeout_ms	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	field	Settings::query_embedding	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	struct	QueryEmbedding	integration-test: tests/config exercises the query embedding settings and their validation.
+src/models/mod.rs	mod	query_embedding_requests	integration-test: tests/models/query_embedding_requests.rs imports the table-owning model.
+src/models/query_embedding_requests.rs	enum	QueryEmbeddingStatus	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	enum	QueryOutcome	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::complete	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::expire	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::fail	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::find_pending	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::open	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::purge_expired	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::take	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	use	crate::models::_entities::query_embedding_requests::{ActiveModel,Column,Entity,Model}	seaorm-facade: the table-owning model re-exports its generated entity, as every model does.
