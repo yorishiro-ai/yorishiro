@@ -36,8 +36,7 @@ pub enum EmbeddingProviderAvailability {
 }
 
 /// Provider that generates embedding vectors.
-/// The `entity_entities.embedding` column is dimensionless (`vector`), so any model works.
-/// All vectors in a deployment must share the same dimension count.
+/// All vectors written by a deployment must use one of the pre-created supported widths.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     fn availability(&self) -> EmbeddingProviderAvailability {

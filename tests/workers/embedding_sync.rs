@@ -180,11 +180,14 @@ mod conflict {
         ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
         Statement,
     };
+    use serial_test::serial;
     use uuid::Uuid;
     use yorishiro::App;
     use yorishiro::error::YorishiroError;
-    use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+    use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+    use yorishiro::models::api_keys::ApiKeyScope;
     use yorishiro::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
+    use yorishiro::models::tenant_memberships::MembershipRole;
     use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
     use yorishiro::models::{entity_entities, schema_schemas};
     use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
@@ -471,6 +474,84 @@ mod conflict {
                 );
             }
 
+            // Also drive one failure through Loco's provider runner so the queue's own job
+            // status is observed alongside the custom lifecycle status.
+            let live_id = Uuid::now_v7();
+            ctx.shared_store.insert(Arc::new(FailingProvider {
+                kind: FailureKind::Busy,
+            }) as Arc<dyn EmbeddingProvider>);
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: live_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .expect("record live failure lifecycle");
+            EmbeddingSyncWorkerShared::perform_later_with_priority(
+                &ctx,
+                EmbeddingSyncArgs {
+                    lifecycle_id: Some(live_id),
+                    workspace_id,
+                    entity_id,
+                    worker_class: WorkerClass::Shared,
+                },
+                Some(100),
+            )
+            .await
+            .expect("enqueue live failure");
+            queue
+                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .await
+                .expect("register embedding worker");
+            let running = queue.clone();
+            let worker =
+                tokio::spawn(
+                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
+                );
+            let failed_jobs = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let jobs = sqlt::get_jobs(
+                        &queue_pool,
+                        Some(&vec![loco_rs::bgworker::JobStatus::Failed]),
+                        None,
+                    )
+                    .await
+                    .expect("read failed jobs");
+                    if !jobs.is_empty() {
+                        break jobs;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .expect("live queue job must fail");
+            assert_eq!(failed_jobs.len(), 1);
+            let live_lifecycle = Entity::find_by_id(live_id)
+                .one(&ctx.db)
+                .await
+                .expect("read live lifecycle")
+                .expect("live lifecycle row");
+            assert_eq!(live_lifecycle.status, LifecycleStatus::Failed.as_db_str());
+            assert_eq!(
+                sqlt::get_jobs(&queue_pool, None, None)
+                    .await
+                    .expect("read final queue")
+                    .len(),
+                failed_jobs.len()
+            );
+            let _ = queue.shutdown();
+            worker
+                .await
+                .expect("join failure worker")
+                .expect("run failure worker");
+
             let _ = queue.shutdown();
             queue_pool.close().await;
         })
@@ -566,11 +647,25 @@ mod conflict {
     }
 
     /// A write that lands between the worker's snapshot read and the vector persist must not store a stale vector.
-    /// The old delivery is terminally superseded; the normal entity update dispatch is responsible for the fresh job.
+    /// The old delivery is terminally superseded; the REST update dispatches the fresh job.
     /// Runs on whichever backend `DATABASE_URL` names, so SQLite and PostgreSQL share one assertion set.
     #[tokio::test]
+    #[serial(process_environment)]
     async fn a_write_during_embedding_supersedes_the_old_delivery() {
-        boot_request::<App, _, _>(|_request, ctx| async move {
+        if !std::env::var("DATABASE_URL")
+            .map(|url| url.starts_with("sqlite:"))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let queue_dir = tempfile::tempdir().expect("queue tempdir");
+        let queue_uri = format!(
+            "sqlite://{}?mode=rwc",
+            queue_dir.path().join("queue.sqlite3").display()
+        );
+        let env = crate::EnvGuard::capture(&["QUEUE_URL"]);
+        env.set("QUEUE_URL", &queue_uri);
+        boot_request::<App, _, _>(|request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
 
             let provider = Arc::new(MutatingProvider {
@@ -584,28 +679,7 @@ mod conflict {
             ctx.shared_store
                 .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
 
-            let directory = tempfile::tempdir().expect("queue tempdir");
-            let queue_uri = format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("queue.sqlite3").display()
-            );
-            let queue = bgworker::sqlt::create_provider(&SqliteQueueConfig {
-                uri: queue_uri.clone(),
-                dangerously_flush: false,
-                enable_logging: false,
-                max_connections: 2,
-                min_connections: 1,
-                connect_timeout: 5_000,
-                idle_timeout: 5_000,
-                poll_interval_sec: 1,
-                num_workers: 1,
-                reaper: None,
-            })
-            .await
-            .expect("SQLite queue");
-            queue.setup().await.expect("set up queue");
-            let queue = Arc::new(queue);
-            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+            let queue = ctx.queue_provider.clone().expect("booted SQLite queue");
             let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
                 .await
                 .expect("connect to the queue file");
@@ -656,46 +730,90 @@ mod conflict {
                 "the stale vector must not be stored"
             );
 
-            let fresh_lifecycle_id = Uuid::now_v7();
-            Entity::record_enqueue(
+            let owner = yorishiro::models::user_users::create_user(
                 &ctx.db,
-                Enqueue {
-                    id: fresh_lifecycle_id,
-                    job_name: "embedding_sync",
-                    worker_class: WorkerClass::Shared,
-                    workspace_id: Some(workspace_id),
-                    plan: None,
-                    concurrency_key: None,
-                    concurrency_limit: None,
-                },
+                "embedding-update@example.com",
+                "test-password-test",
+                None,
             )
             .await
-            .expect("record fresh lifecycle");
-            let fresh_args = EmbeddingSyncArgs {
-                lifecycle_id: Some(fresh_lifecycle_id),
-                workspace_id,
-                entity_id,
-                worker_class: WorkerClass::Shared,
-            };
-            EmbeddingSyncWorkerShared::perform_later_with_priority(
-                &ctx,
-                fresh_args.clone(),
-                Some(100),
-            )
-            .await
-            .expect("dispatch fresh entity update");
-            let fresh_jobs = sqlt::get_jobs(&queue_pool, None, None)
+            .expect("create update owner");
+            let tenant_id = workspace_workspaces::Entity::find_by_id(workspace_id)
+                .one(&ctx.db)
                 .await
-                .expect("read fresh jobs");
+                .expect("read update workspace")
+                .expect("update workspace")
+                .tenant_id;
+            yorishiro::models::tenant_memberships::add_member(
+                &ctx.db,
+                tenant_id,
+                owner.id,
+                MembershipRole::Owner,
+            )
+            .await
+            .expect("add update owner");
+            let write_key = api_keys::Entity::create_api_key(
+                &ctx.db,
+                workspace_id,
+                ApiKeyScope::Write,
+                Some(owner.id),
+                false,
+            )
+            .await
+            .expect("create write key")
+            .plaintext;
+            let fresh_update = request
+                .put(&format!("/api/entities/{entity_id}"))
+                .add_header("Authorization", format!("Bearer {write_key}"))
+                .json(&serde_json::json!({"data": {"title": "current through REST"}}))
+                .await;
+            assert_eq!(
+                fresh_update.status_code(),
+                200,
+                "REST update: {}",
+                fresh_update.text()
+            );
+            let fresh_jobs = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    let jobs = sqlt::get_jobs(&queue_pool, None, None)
+                        .await
+                        .expect("read fresh jobs");
+                    if !jobs.is_empty() {
+                        break jobs;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .expect("REST update must dispatch a fresh job");
             assert_eq!(
                 fresh_jobs.len(),
                 1,
-                "the newer entity update must dispatch a fresh job"
+                "the newer entity update must dispatch a fresh job; response={}, jobs={fresh_jobs:?}",
+                fresh_update.text()
             );
-            EmbeddingSyncWorkerShared::build(&ctx)
-                .perform(fresh_args)
+            queue
+                .register(EmbeddingSyncWorkerShared::build(&ctx))
                 .await
-                .expect("fresh delivery persists current data");
+                .expect("register embedding worker");
+            let running = queue.clone();
+            let worker =
+                tokio::spawn(
+                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
+                );
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let count = vector_rows(&ctx, entity_id).await;
+                    if count == 1 {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .expect("fresh delivery persists current data");
+            let _ = queue.shutdown();
+            worker.await.expect("join worker").expect("run worker");
             assert_eq!(vector_rows(&ctx, entity_id).await, 1);
 
             let _ = queue.shutdown();
