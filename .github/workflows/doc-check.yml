@@ -1,6 +1,6 @@
 name: Documentation Check
 
-# Runs on develop. The source-path detection below covers `src/` and `ee/`, which is
+# Runs on develop. The source-path detection below covers `src/`, `ee/` and `edition/`, which is
 # where this repository's Rust lives; `master`'s own layout is different and its workflow is
 # separate.
 
@@ -37,7 +37,7 @@ jobs:
             });
 
             const srcChanged = files.some(f =>
-              (f.filename.startsWith('src/') || f.filename.startsWith('ee/')) &&
+              (f.filename.startsWith('src/') || f.filename.startsWith('ee/') || f.filename.startsWith('edition/')) &&
               f.filename.endsWith('.rs') &&
               !f.filename.includes('/tests/')
             );

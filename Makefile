@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check coverage test-postgres test-sqlite test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check coverage test-postgres test-sqlite test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee
 
 check: check-ce
 
@@ -38,6 +38,11 @@ python-lint:
 public-api-check:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_public_api.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_public_api.py
+	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
+
+edition-boundary-check:
+	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_edition_boundary.py
+	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_edition_boundary.py
 	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
 
 # Nightly is required because LLVM branch coverage is not available on stable.
@@ -100,6 +105,6 @@ entities: build
 	docker compose down -v testdb
 
 # CE is the base boundary. EE compatibility is checked separately after CE work is complete.
-check-all: fmt-check python-lint public-api-check check-ce clippy-ce
+check-all: fmt-check python-lint public-api-check edition-boundary-check check-ce clippy-ce
 
-check-all-ee: fmt-check python-lint public-api-check check-ee clippy-ee
+check-all-ee: fmt-check python-lint public-api-check edition-boundary-check check-ee clippy-ee
