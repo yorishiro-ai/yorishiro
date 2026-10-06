@@ -889,7 +889,7 @@ src/workers/queue.rs	trait	QueuePolicy	integration-test: tests/workers/queue.rs 
 src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/lib.rs	mod	edition	ce-ee-composition: the only Hooks implementation lives in this module, which sits outside src/ so that nothing under src/ names an edition overlay.
-src/lib.rs	use	edition::App	ce-ee-composition: the binary and the integration tests boot the application through this single Hooks implementation.
+src/lib.rs	use	edition::{App,worker_tags}	ce-ee-composition: the binary and the integration tests boot the application and read its worker tags through the single composition root, without src naming it elsewhere.
 edition/app.rs	struct	App	ce-ee-composition: the crate's only Hooks implementation, delegating to src/app.rs and the active edition.
 edition/app.rs	fn	workers	ce-ee-composition: the composed worker registry that Loco registration, the Redis queue configuration and worker-tags all derive from.
 edition/app.rs	fn	worker_tags	ce-ee-composition: the tag list printed by the worker-tags command, derived from the composed worker registry.

@@ -32,7 +32,7 @@ None of them owns domain logic or builds ordinary queries.
 
 `src/` is the community base and never refers to the enterprise overlay.
 It contains no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, and no overlay names, queues, branches, or registrations.
-`make edition-boundary-check` (part of `make check-all` and `make check-all-ee`) enforces this as a text check over `src/`.
+`make edition-boundary-check` (part of `make check-all` and `make check-all-ee`) enforces this over `src/`, including aliases and paths split across spaces or lines: only `src/lib.rs` may name `edition`, to declare the composition root and re-export from it.
 
 `edition/` is the only place that knows which editions exist.
 It declares `ee/` behind the `enterprise` feature, implements `Hooks` once by delegating to `src/app.rs` and the active edition, and holds nothing but assembly.

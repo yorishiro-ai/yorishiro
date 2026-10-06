@@ -18,5 +18,5 @@ pub mod services;
 pub mod tasks;
 pub mod workers;
 
-pub use edition::App;
+pub use edition::{App, worker_tags};
 pub use error::YorishiroError;

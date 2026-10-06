@@ -28,7 +28,8 @@ Its `services/` directory follows the same restriction: only outbound LLM and OA
 ## Edition Composition
 
 `src/` never refers to the enterprise overlay: no `cfg(feature = "enterprise")`, no `crate::ee`, and no overlay names.
-`scripts/check_edition_boundary.py` enforces this as a text check over every Rust file under `src/`, and it runs in `make check-all`, `make check-all-ee`, and CI.
+`scripts/check_edition_boundary.py` enforces this over every Rust file under `src/`, and it runs in `make check-all`, `make check-all-ee`, and CI.
+It also rejects `edition` and `ee` as identifiers anywhere in `src/` except that `src/lib.rs` may declare and re-export the composition root, so an alias or a path split across spaces or lines cannot get around it.
 
 The crate has one `Hooks` implementation, `edition::App` in `edition/app.rs`.
 Each hook calls the matching function in `src/app.rs` and then lets the active edition add to the result.

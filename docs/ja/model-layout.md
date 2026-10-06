@@ -29,7 +29,8 @@
 
 `src/` はエンタープライズ層を参照しません。
 `cfg(feature = "enterprise")` も `crate::ee` も、エンタープライズ層の名前も置きません。
-`scripts/check_edition_boundary.py` が `src/` 以下のすべての Rust ファイルを文字列として検査し、`make check-all`、`make check-all-ee`、CI で実行されます。
+`scripts/check_edition_boundary.py` が `src/` 以下のすべての Rust ファイルを検査し、`make check-all`、`make check-all-ee`、CI で実行されます。
+`src/lib.rs` が組み立ての起点を宣言して再エクスポートする場合を除き、`src/` 内では `edition` と `ee` を識別子として使うことも禁止します。エイリアスや、空白・改行で分割したパスでも回避できません。
 
 このクレートの `Hooks` 実装は `edition/app.rs` の `edition::App` だけです。
 各フックは `src/app.rs` の対応する関数を呼び、その結果に有効なエディションが追加します。

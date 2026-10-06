@@ -8,7 +8,7 @@ One repository, two licences. Everything outside `ee/` is BUSL-1.1; `ee/` is the
 
 **Nothing in `src/` may refer to the enterprise overlay.** That means no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, no path into `ee/`, and no overlay names, queues, branches, or registrations, comments included. The dependency runs from `ee/` into `src/`, never back.
 
-The composition root is `edition/`, outside `src/` on purpose. It is the only place that knows which editions exist, and it is assembly only. One crate makes both directions compile, so the boundary is a rule rather than a compiler error: `scripts/check_edition_boundary.py` is the mechanical guard, run by `make edition-boundary-check`, `make check-all`, `make check-all-ee`, and CI. It has tests that include deliberate violations.
+The composition root is `edition/`, outside `src/` on purpose. It is the only place that knows which editions exist, and it is assembly only. One crate makes both directions compile, so the boundary is a rule rather than a compiler error: `scripts/check_edition_boundary.py` is the mechanical guard, run by `make edition-boundary-check`, `make check-all`, `make check-all-ee`, and CI. It reads comments and strings as text, and reads code with comments and strings blanked so that spacing, line breaks and aliases cannot hide a path: `edition` and `ee` must not appear as identifiers anywhere under `src/`, except that `src/lib.rs` may name `edition` to declare the composition root and re-export from it. It has tests that include deliberate violations.
 
 ## Classification
 

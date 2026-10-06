@@ -2,8 +2,7 @@ use std::env;
 
 use loco_rs::cli;
 use migration::Migrator;
-use yorishiro::App;
-use yorishiro::edition::worker_tags;
+use yorishiro::{App, worker_tags};
 
 #[tokio::main]
 async fn main() -> loco_rs::Result<()> {
