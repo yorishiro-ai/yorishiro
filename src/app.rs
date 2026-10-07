@@ -57,10 +57,7 @@ pub(crate) async fn boot<H: Hooks>(
 }
 
 pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
-    vec![
-        Box::new(initializers::startup_reindex::StartupReindex),
-        Box::new(initializers::db_load_guard::LoadGuard),
-    ]
+    vec![Box::new(initializers::db_load_guard::LoadGuard)]
 }
 
 /// Builds the base pools and shared-store seams.
@@ -297,6 +294,44 @@ pub(crate) fn middlewares(
     stack
 }
 
+/// Gives a queue-consuming process what only it needs, then registers its workers.
+///
+/// Loco calls this only for start modes that run workers, and only on the second of the two contexts `start` builds, so the provider is built once per worker process.
+/// The check keeps that true if a caller ever connects twice.
+/// With the provider and workers in place, the startup reindex scan runs once.
+///
+/// # Errors
+/// Returns an error when the configured provider cannot be built, so a worker with a misconfigured model fails at start rather than on its first job, or when Loco refuses a registration.
+pub(crate) async fn connect_workers(
+    ctx: &AppContext,
+    queue: &loco_rs::bgworker::Queue,
+    workers: &WorkerRegistry,
+) -> Result<()> {
+    install_embedding_provider(ctx).await?;
+    workers.connect(ctx, queue).await?;
+    crate::workers::startup_reindex::run(ctx).await;
+    Ok(())
+}
+
+async fn install_embedding_provider(ctx: &AppContext) -> Result<()> {
+    if ctx
+        .shared_store
+        .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
+        .is_some()
+    {
+        return Ok(());
+    }
+    let settings = ctx
+        .shared_store
+        .get::<crate::data::settings::Settings>()
+        .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
+    let provider = crate::services::embedding::build_embedding_provider(&settings)
+        .await
+        .map_err(|e| loco_rs::Error::Message(format!("failed to build embedding provider: {e}")))?;
+    ctx.shared_store.insert(provider);
+    Ok(())
+}
+
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::create_tenant::CreateTenant);
     tasks.register(tasks::create_workspace::CreateWorkspace);
@@ -343,6 +378,10 @@ pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
 }
 
 /// Builds the pools and shared services every entry point, tasks included, depends on.
+///
+/// The embedding provider is deliberately not among them: it can hold a model of a gigabyte or more, and the API and MCP server, the scheduler, and every CLI command run without one.
+/// Only a process that consumes the queue installs it, in [`connect_workers`].
+/// Loco builds a context twice for `yorishiro start`, so anything built here would be built twice.
 async fn install_services(ctx: AppContext) -> Result<AppContext> {
     if ctx.is_sqlite() {
         crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
@@ -359,12 +398,6 @@ async fn install_services(ctx: AppContext) -> Result<AppContext> {
             .insert(crate::controllers::middleware::auth::default_authenticator());
     }
 
-    // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the
-    // error to the first search.
-    let embedding_provider = crate::services::embedding::build_embedding_provider(&settings)
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("failed to build embedding provider: {e}")))?;
-    ctx.shared_store.insert(embedding_provider);
     ctx.shared_store
         .insert(crate::workers::queue::default_queue_policy());
     // Both resolvers are installed on every backend, unlike the authenticator above: they read

@@ -314,6 +314,28 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
     Ok(())
 }
 
+/// Takes the transaction-scoped advisory lock `key` if no other transaction holds it, without waiting.
+///
+/// The lock lasts until `conn`'s transaction ends.
+/// Always `true` on SQLite, which has no named-lock primitive and one writer process, so there is no other holder to exclude.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub async fn try_lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<bool, DbErr> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return Ok(true);
+    }
+    let row = conn
+        .query_one_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS locked",
+            [key.into()],
+        ))
+        .await?
+        .ok_or_else(|| DbErr::Custom("advisory lock query returned no row".into()))?;
+    row.try_get("", "locked")
+}
+
 /// A guard that holds a session-scoped advisory lock on a workspace for reindex serialization.
 ///
 /// `conn` is detached so returning it to the pool does not release the lock.

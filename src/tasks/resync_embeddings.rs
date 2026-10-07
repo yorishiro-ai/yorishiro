@@ -3,21 +3,21 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::entity_embeddings;
 use crate::models::entity_entities;
-use crate::services::embedding;
+use crate::workers::embedding_sync::{self, EmbeddingSyncArgs};
 
 /// `cargo loco task resync_embeddings workspace_id:<uuid>`
 ///
-/// Re-syncs embeddings for entities that have no row in `entity_embeddings`: an operational recovery command for entities that fell out of search because no sync ever completed for them.
+/// Queues an embedding job for every entity that has no row in an embedding table: an operational recovery command for entities that fell out of search because no sync ever completed for them.
 ///
-/// Two things leave an entity in that state. A sync that was enqueued but never succeeded (an embedding provider outage that outlasts the job's own retries), and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the pg_trgm / FTS5 fuzzy fallback.
+/// Two things leave an entity in that state. A sync that failed, because embedding is a single attempt and a failed job is not retried, and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the pg_trgm / FTS5 fuzzy fallback.
 ///
-/// Uses a LEFT JOIN anti-join against `entity_embeddings` so the query works on both PostgreSQL and SQLite.
-///
-/// This calls `sync_embedding_for_record`, the same guarded path a normal entity write uses, deliberately: if the deployment's configured provider does not match a workspace's stamped model (`services/embedding/sync.rs`'s write-time model check), every candidate here fails for that reason and none get a vector.
-/// That is correct, not a bug to route around: filling NULLs with vectors from a model the workspace is not stamped for would create the same silent model mix that check exists to prevent, just via this recovery path instead of an ordinary write.
+/// The command only enqueues.
+/// It holds no embedding provider, because only a worker process loads a model, so the worker's own guarded write path embeds each entity and the command's output counts queued jobs, not stored vectors.
+/// That path refuses a vector from a model the workspace is not stamped for, which is correct, not a bug to route around: filling NULLs with vectors from another model would create the silent model mix that check exists to prevent.
 /// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
+///
+/// Uses a LEFT JOIN anti-join against the embedding tables so the query works on both PostgreSQL and SQLite.
 pub(crate) struct ResyncEmbeddings;
 
 #[async_trait]
@@ -25,7 +25,7 @@ impl Task for ResyncEmbeddings {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "resync_embeddings".to_string(),
-            detail: "Re-syncs entities with no embedding: cargo loco task resync_embeddings workspace_id:<uuid>".to_string(),
+            detail: "Queues an embedding job for entities with no embedding: cargo loco task resync_embeddings workspace_id:<uuid>".to_string(),
         }
     }
 
@@ -39,53 +39,42 @@ impl Task for ResyncEmbeddings {
             }
         })?;
 
-        // An unconfigured embedding provider satisfies the dimension count but errors on every actual call.
-        // Probe it once up front so a misconfiguration is one clear failure, not N per-candidate ones that read as an ordinary "N failed" outcome.
-        let provider = app_context
-            .shared_store
-            .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
-            .ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
-            })?;
-        provider
-            .embed_batch(&[])
-            .await
-            .map_err(|err| YorishiroError::ValidationFailed {
-                message: format!("embedding provider must be configured: {err}"),
-                details: vec![],
-                hint: "check YORISHIRO_EMBEDDING_PROVIDER and YORISHIRO_LOCAL_MODEL config".into(),
-            })?;
-
         let candidates = entity_entities::missing_embeddings(&app_context.db, workspace_id).await?;
+        let worker_class =
+            crate::controllers::extractors::resolve_worker_class(app_context, workspace_id)
+                .await
+                .map_err(|error| error.0)?;
 
-        let mut synced = 0;
+        let mut queued = 0;
         let mut failed = 0;
         for candidate in &candidates {
-            let result = entity_embeddings::sync_embedding_for_snapshot(
-                &app_context.db,
+            let job = EmbeddingSyncArgs {
+                lifecycle_id: None,
                 workspace_id,
-                candidate,
-                provider.as_ref(),
-            )
-            .await;
-
-            match result {
-                Ok(entity_embeddings::EmbeddingWriteOutcome::Persisted) => synced += 1,
-                Ok(entity_embeddings::EmbeddingWriteOutcome::Noop) => {
-                    println!("  skipped entity {}: no x-embed content", candidate.id);
-                }
+                entity_id: candidate.id,
+                worker_class,
+            };
+            match embedding_sync::enqueue_for_class(app_context, job).await {
+                Ok(()) => queued += 1,
                 Err(err) => {
                     failed += 1;
-                    eprintln!("  failed to resync entity {}: {err}", candidate.id);
+                    eprintln!("  failed to queue entity {}: {err}", candidate.id);
                 }
             }
         }
 
         println!(
-            "resync finished: {} entities had no embedding, {synced} synced, {failed} failed \
+            "resync queued: {} entities had no embedding, {queued} queued for a worker, {failed} could not be queued \
              (entities whose entity_type has no x-embed field stay without embedding)",
             candidates.len(),
         );
+        if failed > 0 {
+            return Err(YorishiroError::Internal(anyhow::anyhow!(
+                "{failed} of {} entities could not be queued",
+                candidates.len()
+            ))
+            .into());
+        }
         Ok(())
     }
 }

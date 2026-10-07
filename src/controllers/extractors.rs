@@ -62,46 +62,6 @@ pub fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, ApiErro
         })
 }
 
-/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
-/// Returns the deployment-wide provider, ignoring any workspace-level assignment: the caller has no `workspace_id` yet (setup, a fresh workspace's dimension stamp) or explicitly wants the deployment default regardless of what a workspace is assigned.
-/// A caller resolving a provider *for* a workspace's own work (search, embedding sync) wants `resolve_embedding_provider` instead.
-pub(crate) fn embedding_provider(
-    ctx: &AppContext,
-) -> Result<Arc<dyn crate::services::embedding::EmbeddingProvider>, ApiError> {
-    ctx.shared_store
-        .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
-        .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "EmbeddingProvider missing"
-            )))
-        })
-}
-
-/// The embedding provider `workspace_id` should actually use: its own assignment through the `WorkspaceEmbeddingResolver` trait object if it has one, the deployment default otherwise.
-/// Also used by `controllers::mcp`.
-pub(crate) async fn resolve_embedding_provider(
-    ctx: &AppContext,
-    workspace_id: Uuid,
-) -> Result<Arc<dyn crate::services::embedding::EmbeddingProvider>, ApiError> {
-    let resolver = ctx
-        .shared_store
-        .get::<Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>>()
-        .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "WorkspaceEmbeddingResolver missing"
-            )))
-        })?;
-
-    match resolver
-        .resolve(&ctx.db, workspace_id)
-        .await
-        .map_err(ApiError)?
-    {
-        Some(provider) => Ok(provider),
-        None => embedding_provider(ctx),
-    }
-}
-
 /// The `WorkerClass` `workspace_id`'s queued jobs should carry: its own assignment through the `WorkerClassResolver` trait object if it has one, `WorkerClass::Shared` otherwise.
 pub(crate) async fn resolve_worker_class(
     ctx: &AppContext,

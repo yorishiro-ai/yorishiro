@@ -148,3 +148,27 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
     })
     .await;
 }
+
+/// A worker process that never installed a provider cannot embed, and says so instead of guessing.
+#[tokio::test]
+async fn a_worker_without_any_provider_records_an_accurate_failure() {
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let ws = workspace(&ctx).await;
+        assert!(
+            ctx.shared_store
+                .get::<Arc<dyn EmbeddingProvider>>()
+                .is_none(),
+            "a booted server holds no provider"
+        );
+        let id = Requests::open(&ctx.db, ws, "alpha", 60).await.unwrap();
+
+        perform(&ctx, ws, id).await.expect_err("no provider");
+        match Requests::take(&ctx.db, ws, id).await.unwrap() {
+            Some(QueryOutcome::Failed(message)) => {
+                assert!(message.contains("no embedding provider"), "{message}");
+            }
+            other => panic!("expected a recorded failure, got {other:?}"),
+        }
+    })
+    .await;
+}

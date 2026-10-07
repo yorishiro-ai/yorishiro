@@ -960,7 +960,8 @@ async fn embedding_tables_tenant_read_grant_is_applied_and_rolled_back() {
             .expect("migrations before the grant");
         assert_eq!(value::<i64>(db, can_select).await, 0, "no grant before the migration");
 
-        Migrator::up(db, Some(through_grant))
+        // `Some(n)` is a number of steps, not a target version, so exactly one step applies the grant migration whatever follows it.
+        Migrator::up(db, Some(1))
             .await
             .expect("apply the grant migration");
         assert_eq!(value::<i64>(db, can_select).await, 1, "SELECT granted");

@@ -8,6 +8,7 @@ mod infer_fill;
 mod query_embedding;
 mod queue_routing;
 mod reindex;
+mod startup_reindex;
 mod tag_discovery;
 
 use loco_rs::app::{AppContext, Hooks};

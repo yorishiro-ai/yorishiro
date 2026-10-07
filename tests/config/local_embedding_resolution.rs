@@ -1,42 +1,94 @@
-//! Tests for local embedding provider resolution without loading real model files.
+//! Which process roles build the embedding provider.
 //!
-//! These tests verify that the embedding provider resolution path works correctly.
+//! The provider can hold a model of a gigabyte or more, so only a process that consumes the queue builds it.
+//! The API and MCP server, the scheduler, and every CLI command run without one.
+//! These tests boot with the real `Hooks` and a configuration that would make provider construction fail loudly, so a role that built one would fail instead of passing.
+
+use std::sync::Arc;
 
 use loco_rs::{app::Hooks, boot::StartMode, environment::Environment};
+use yorishiro::services::embedding::EmbeddingProvider;
 
-/// A local provider with an unknown model name fails the boot with a clear error.
-/// The provider is never replaced by a no-op, so the mistake surfaces at boot instead of at the first search.
-/// `ServerOnly` is the mode that used to skip the provider: the server embeds search queries, so it builds the provider like every other mode.
+const UNKNOWN_MODEL: &str = "nonexistent-model-that-does-not-exist";
+
+fn provider_of(ctx: &loco_rs::app::AppContext) -> Option<Arc<dyn EmbeddingProvider>> {
+    ctx.shared_store.get::<Arc<dyn EmbeddingProvider>>()
+}
+
+fn unknown_model_config(dir: &tempfile::TempDir) -> loco_rs::config::Config {
+    let (uri, queue_uri) = sqlite_uris(dir);
+    serde_yaml::from_str(&minimal_config_with_unknown_model(
+        &uri,
+        &queue_uri,
+        UNKNOWN_MODEL,
+    ))
+    .unwrap()
+}
+
+/// The server boots with a local provider that could never load, because it never builds one, and its liveness probe does not depend on a model.
 #[tokio::test]
-async fn unknown_local_model_name_fails_at_boot() {
+async fn the_server_boots_without_building_a_provider() {
     let dir = tempfile::tempdir().unwrap();
-    let (uri, queue_uri) = sqlite_uris(&dir);
-    let config =
-        serde_yaml::from_str::<loco_rs::config::Config>(&minimal_config_with_unknown_model(
-            &uri,
-            &queue_uri,
-            "nonexistent-model-that-does-not-exist",
-        ))
-        .unwrap();
+    let boot = yorishiro::App::boot(
+        StartMode::ServerOnly,
+        &Environment::Test,
+        unknown_model_config(&dir),
+    )
+    .await
+    .expect("a server must not need the embedding model");
 
-    let result = yorishiro::App::boot(StartMode::ServerOnly, &Environment::Test, config).await;
+    assert!(provider_of(&boot.app_context).is_none());
 
-    match result {
-        Ok(_) => panic!("unknown model name must fail at boot"),
-        Err(e) => {
-            let err_str = format!("{e}");
-            assert!(
-                err_str.contains("not a known local model"),
-                "error must mention unknown model name: {err_str}"
-            );
+    let router = boot.router.expect("a server builds a router");
+    let server = axum_test::TestServer::new(
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .unwrap();
+    for probe in ["/_ping", "/_health"] {
+        assert_eq!(server.get(probe).await.status_code(), 200, "{probe}");
+    }
+}
+
+/// `create_context` is what every CLI command, the scheduler and the first of `start`'s two contexts run, so nothing built after it can be built by them.
+#[tokio::test]
+async fn a_context_alone_never_builds_a_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = loco_rs::boot::create_context::<yorishiro::App>(
+        &Environment::Test,
+        unknown_model_config(&dir),
+    )
+    .await
+    .expect("a bare context must not need the embedding model");
+
+    assert!(provider_of(&ctx).is_none());
+}
+
+/// A worker builds the provider at start, so an unknown model fails the worker loudly instead of failing its first job.
+#[tokio::test]
+async fn a_worker_with_an_unknown_local_model_fails_at_start() {
+    for mode in [
+        StartMode::WorkerOnly { tags: vec![] },
+        StartMode::ServerAndWorker,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let result =
+            yorishiro::App::boot(mode, &Environment::Test, unknown_model_config(&dir)).await;
+        match result {
+            Ok(_) => panic!("unknown model name must fail a worker's start"),
+            Err(e) => {
+                let err_str = format!("{e}");
+                assert!(
+                    err_str.contains("not a known local model"),
+                    "error must mention unknown model name: {err_str}"
+                );
+            }
         }
     }
 }
 
-/// When `YORISHIRO_EMBEDDING_PROVIDER=none`, the provider is explicitly disabled
-/// and `UnconfiguredEmbeddingProvider` is installed with a clear remedy message.
+/// With `YORISHIRO_EMBEDDING_PROVIDER=none` the worker holds the explicitly disabled provider with a clear remedy, and connecting its workers again keeps that one instance.
 #[tokio::test]
-async fn none_provider_installs_noop_with_clear_message() {
+async fn a_worker_holds_exactly_one_provider_and_none_means_disabled() {
     let dir = tempfile::tempdir().unwrap();
     let (uri, queue_uri) = sqlite_uris(&dir);
     let config = serde_yaml::from_str::<loco_rs::config::Config>(
@@ -44,33 +96,31 @@ async fn none_provider_installs_noop_with_clear_message() {
     )
     .unwrap();
 
-    let result = yorishiro::App::boot(StartMode::ServerOnly, &Environment::Test, config).await;
+    let boot = yorishiro::App::boot(
+        StartMode::WorkerOnly { tags: vec![] },
+        &Environment::Test,
+        config,
+    )
+    .await
+    .expect("none provider boot should succeed");
+    let ctx = boot.app_context;
+    let provider = provider_of(&ctx).expect("a worker installs its provider");
 
-    match result {
-        Ok(boot) => {
-            let ctx = boot.app_context;
-            let provider = ctx
-                .shared_store
-                .get::<std::sync::Arc<dyn yorishiro::services::embedding::EmbeddingProvider>>()
-                .expect("embedding provider must be installed");
+    assert_eq!(provider.model_name(), "unconfigured");
+    let err = provider.embed("test").await.unwrap_err();
+    assert!(
+        format!("{err}").contains("YORISHIRO_EMBEDDING_PROVIDER is set to \"none\""),
+        "none provider error must mention provider=none: {err}"
+    );
 
-            assert_eq!(
-                provider.model_name(),
-                "unconfigured",
-                "none provider must install no-op"
-            );
-
-            let err = provider.embed("test").await.unwrap_err();
-            let err_str = format!("{err}");
-            assert!(
-                err_str.contains("YORISHIRO_EMBEDDING_PROVIDER is set to \"none\""),
-                "none provider error must mention provider=none: {err_str}"
-            );
-        }
-        Err(e) => {
-            panic!("none provider boot should succeed: {e}");
-        }
-    }
+    let queue = ctx.queue_provider.clone().expect("queue");
+    yorishiro::App::connect_workers(&ctx, &queue)
+        .await
+        .expect("connecting again");
+    assert!(
+        Arc::ptr_eq(&provider, &provider_of(&ctx).unwrap()),
+        "a second connect keeps the single instance"
+    );
 }
 
 /// Application and queue databases private to one test, so parallel tests share no file.

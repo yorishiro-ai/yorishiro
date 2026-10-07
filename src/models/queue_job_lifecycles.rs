@@ -121,6 +121,28 @@ impl Entity {
         row.update(db).await.map(|_| ())
     }
 
+    /// Whether `workspace_id` already has a `job_name` job that is queued, running or waiting for a retry.
+    ///
+    /// # Errors
+    /// Returns an error if the read fails.
+    pub async fn has_active(
+        db: &impl ConnectionTrait,
+        job_name: &str,
+        workspace_id: Uuid,
+    ) -> Result<bool, DbErr> {
+        Ok(Entity::find()
+            .filter(Column::JobName.eq(job_name))
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Status.is_in([
+                LifecycleStatus::Queued.as_db_str(),
+                LifecycleStatus::Running.as_db_str(),
+                LifecycleStatus::Retrying.as_db_str(),
+            ]))
+            .count(db)
+            .await?
+            > 0)
+    }
+
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.

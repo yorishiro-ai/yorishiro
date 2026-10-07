@@ -928,3 +928,7 @@ src/workers/query_embedding.rs	field	QueryEmbeddingArgs::workspace_id	loco-task-
 src/workers/query_embedding.rs	fn	embed_query	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
 src/workers/query_embedding.rs	struct	QueryEmbeddingArgs	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
 src/workers/query_embedding.rs	struct	QueryEmbeddingWorker	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/db.rs	fn	try_lock_for_update	integration-test: tests/workers/startup_reindex.rs takes the scan lock as a second replica.
+src/models/queue_job_lifecycles.rs	fn	Entity::has_active	integration-test: the startup reindex scan reads active reindex jobs through the table-owning model.
+src/workers/mod.rs	mod	startup_reindex	loco-task-worker: tests import the startup reindex module.
+src/workers/startup_reindex.rs	fn	run	loco-task-worker: the worker-start reindex scan; tests/workers/startup_reindex.rs drives it.
