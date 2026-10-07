@@ -19,7 +19,7 @@ use yorishiro::error::YorishiroError;
 use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
 use yorishiro::workers::query_embedding::QueryEmbeddingWorker;
 
-use super::{boot_request, is_sqlite_backend};
+use super::boot_request;
 
 /// The tag the query embedding worker consumes, as `worker-tags` prints it.
 pub(crate) const QUERY_TAG: &str = "query-embedding";
@@ -104,7 +104,7 @@ pub(crate) async fn boot_with_query_worker<F, Fut>(
 {
     let queue_dir = tempfile::tempdir().expect("queue tempdir");
     let guard = crate::EnvGuard::capture(&["QUEUE_URL"]);
-    if is_sqlite_backend() {
+    if std::env::var("LOCO_ENV").as_deref() == Ok("test_sqlite") {
         guard.set(
             "QUEUE_URL",
             format!(
