@@ -106,6 +106,13 @@ fn is_sqlite_backend() -> bool {
     url.starts_with("sqlite://") || url.starts_with("sqlite::memory:")
 }
 
+pub(crate) fn is_sqlite_queue() -> bool {
+    match std::env::var("QUEUE_URL") {
+        Ok(url) => url.starts_with("sqlite://") || url.starts_with("sqlite::"),
+        Err(_) => is_sqlite_backend(),
+    }
+}
+
 /// Unified entry point for request tests across PostgreSQL and SQLite backends.
 ///
 /// Detects the backend from `DATABASE_URL` and dispatches to

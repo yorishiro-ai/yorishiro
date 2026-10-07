@@ -535,7 +535,7 @@ async fn present_invalid_billing_plan_remains_diagnostic() {
 #[serial_test::serial(queue_postgres)]
 #[serial_test::serial(process_environment)]
 async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
-    if std::env::var("LOCO_ENV").as_deref() != Ok("test_sqlite") {
+    if !super::is_sqlite_queue() {
         return;
     }
     let directory = tempfile::tempdir().expect("queue tempdir");
