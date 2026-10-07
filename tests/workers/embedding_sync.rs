@@ -658,13 +658,6 @@ mod conflict {
         {
             return;
         }
-        let queue_dir = tempfile::tempdir().expect("queue tempdir");
-        let queue_uri = format!(
-            "sqlite://{}?mode=rwc",
-            queue_dir.path().join("queue.sqlite3").display()
-        );
-        let env = crate::EnvGuard::capture(&["QUEUE_URL"]);
-        env.set("QUEUE_URL", &queue_uri);
         boot_request::<App, _, _>(|request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
 
@@ -680,6 +673,11 @@ mod conflict {
                 .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
 
             let queue = ctx.queue_provider.clone().expect("booted SQLite queue");
+            let queue_uri = match ctx.config.queue.as_ref() {
+                Some(loco_rs::config::QueueConfig::Sqlite(queue)) => queue.uri.clone(),
+                _ => panic!("booted test context must use a SQLite queue"),
+            };
+            queue.ping().await.expect("ping booted SQLite queue");
             let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
                 .await
                 .expect("connect to the queue file");
