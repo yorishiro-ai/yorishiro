@@ -245,7 +245,8 @@ detached connection はスケジュールの選択、更新の commit、すべ�
 スケジュールの commit 後に scheduler が落ちても重複キューは作られませんが、その commit 後に落ちるかキューが失敗するとその tick の dispatch は失われます。
 キューへの dispatch は対象をすべて試行し、1 件でも enqueue に失敗した場合は集約した task failure を返します。
 失敗した interval は再試行せず、復旧点は次のスケジュール間隔です。
-手動、起動時、定期実行のジョブが重なった場合も、既存のワーカー側ワークスペース単位 advisory lock が実際の再インデックス処理を直列化します。
+PostgreSQL では、手動、起動時、定期実行のジョブが重なった場合に、既存のワーカー側ワークスペース単位 advisory lock が実際の再インデックス処理を直列化します。
+SQLite では、再インデックスワーカーが単一テナント用のモデル所有経路を直接使い、PostgreSQL の advisory lock は取得しません。
 
 SQLite には PostgreSQL のような advisory lock がないため、scheduler ownership には待機しない OS file lock を使います。
 有効な SQLite database path の隣に `.scheduler.lock` suffix の lock file を作り、待機しない OS file lock を取得します。

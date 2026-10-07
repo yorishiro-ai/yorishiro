@@ -242,7 +242,8 @@ The ownership transaction reads due schedules and advances them before queue dis
 This is deliberate at-most-once dispatch protection: a scheduler crash cannot create duplicate queue jobs after the schedule commit, but a crash or queue failure after that commit can miss that tick.
 The task attempts every due queue dispatch, then reports one aggregated task failure if any enqueue fails.
 Those intervals are not retried, and the next scheduled interval remains the recovery point.
-The reindex worker's existing per-workspace advisory lock still serializes actual reindex effects when manual, startup, or scheduled jobs overlap.
+On PostgreSQL, the reindex worker's existing per-workspace advisory lock serializes actual reindex effects when manual, startup, or scheduled jobs overlap.
+On SQLite, reindex workers use the direct single-tenant, model-owned reindex path and do not acquire that PostgreSQL advisory lock.
 
 SQLite has no PostgreSQL-style advisory locks, so scheduler ownership uses a non-blocking OS file lock instead.
 The lock file is adjacent to the effective SQLite database path and has the `.scheduler.lock` suffix.
