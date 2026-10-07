@@ -98,7 +98,7 @@ where
 ///
 /// # Errors
 /// Returns an error if lifecycle persistence fails.
-pub async fn perform_with_terminal_lifecycle<W, A, F, Fut>(
+pub(crate) async fn perform_with_terminal_lifecycle<W, A, F, Fut>(
     ctx: &AppContext,
     lifecycle_id: Option<Uuid>,
     class: WorkerClass,

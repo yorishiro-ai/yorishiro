@@ -119,7 +119,12 @@ where
     Fut: std::future::Future<Output = ()>,
 {
     if is_sqlite_backend() {
-        let db_path = format!("sqlite_{}.sqlite3", uuid::Uuid::new_v4());
+        // Use an absolute path so parallel tests cannot make SQLite resolve the
+        // database through another test's process-global working directory.
+        let db_path = std::env::temp_dir()
+            .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .into_owned();
         request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
             let result =
                 std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();

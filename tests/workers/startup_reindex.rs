@@ -31,11 +31,7 @@ impl ReindexDispatcher for RecordingDispatcher {
             &ctx.db,
             Enqueue {
                 id: Uuid::now_v7(),
-                job_name: if args.startup {
-                    "startup_reindex"
-                } else {
-                    "reindex"
-                },
+                job_name: "startup_reindex",
                 worker_class: args.worker_class,
                 workspace_id: Some(args.workspace_id),
                 plan: None,

@@ -28,6 +28,7 @@ src/models/workspace_invites/operations.rs	fn	create_invite_at	integration-test:
 src/models/workspace_invites/operations.rs	fn	redeem_invite_at	integration-test: the injected-time variant lets backend tests pin the expiry boundary without a clock.
 src/workers/mod.rs	mod	dispatch	integration-test: the module that names the dispatcher seam traits integration tests substitute through `AppContext::shared_store`.
 src/workers/dispatch.rs	trait	ReindexDispatcher	integration-test: reindex dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
+src/workers/reindex.rs	field	ReindexArgs::startup	queue-protocol: serialized worker arguments expose whether the job uses startup-only admission; production dispatch and external integration fixtures construct this transport type.
 ee/workers/infer_fill.rs	trait	InferFillDispatcher	integration-test: infer-fill dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
 ee/controllers/inference.rs	field	InferJobStatus::proposed	Public JSON response field for the durable proposal count.
 ee/models/inference_jobs.rs	field	InferenceJobRecord::proposed	Public durable job record field for the proposal count.
