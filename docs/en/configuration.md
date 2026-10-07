@@ -16,9 +16,11 @@ Embeddings are generated in two distinct paths:
 
 **Document embedding (background).** The embedding sync worker (`workers::embedding_sync`) runs as a background job and stores vectors after entity writes. This is the only path that writes to `entity_embeddings`.
 
-**Query embedding (synchronous).** The search endpoint calls `search::embed_query` before acquiring a database connection. This generates a vector for similarity comparison but does not store it. The embedding call happens outside any transaction to avoid holding connections during the external API round trip.
+**Query embedding (worker-backed).** The search endpoint persists a short-lived query-embedding request and polls it within the configured bound. A query-embedding worker invokes the provider and stores the result; the server does not load a provider or hold a database connection while waiting.
 
-Both paths use the same embedding provider and model, so vectors share one embedding space.
+Within a workspace, document and query embeddings resolve the same configured provider and model. Different workspaces may intentionally use different providers, models, and supported widths.
+
+If the worker times out or reports a provider failure, search returns `503`; it does not silently fall back to lexical-only results.
 
 There is one exception: if you import a backup file (`import_jsonl`), the imported entities do not have embeddings yet. They are still searchable through fuzzy text matching (the words you type are matched against the text), but similarity search results will be incomplete until embeddings are generated. You can generate embeddings for all entities with:
 

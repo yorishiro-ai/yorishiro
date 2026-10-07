@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::db::DbHandle;
-use crate::services::embedding;
+use crate::services::embedding::EmbeddingProviderAvailability;
 use crate::workers::dispatch::ReindexDispatcher;
 use crate::workers::embedding_sync::WorkerClass;
 
@@ -47,12 +47,17 @@ impl ReindexArgs {
 ///
 /// Shared by all three worker types below, which differ only in the tag `tags()` returns.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
-    // Build and verify the provider: a reindex fails fast if the provider is
-    // unconfigured, same as the task.
-    let provider = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
-        .ok_or_else(|| loco_rs::Error::Message("embedding provider missing".into()))?;
+    // Resolve in the worker so enterprise workspace overrides are honored without putting
+    // credentials in the queue payload.
+    let provider = crate::workers::embedding_sync::resolve_worker_provider(ctx, args.workspace_id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .ok_or_else(|| loco_rs::Error::Message("embedding provider absent".into()))?;
+    if provider.availability() == EmbeddingProviderAvailability::Disabled {
+        return Err(loco_rs::Error::Message(
+            "embedding provider disabled".into(),
+        ));
+    }
     provider
         .embed_batch(&[])
         .await
