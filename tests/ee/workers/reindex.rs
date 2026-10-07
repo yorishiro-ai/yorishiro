@@ -48,6 +48,40 @@ impl WorkspaceEmbeddingResolver for Resolver {
     }
 }
 
+struct Disabled;
+
+#[async_trait]
+impl EmbeddingProvider for Disabled {
+    fn availability(&self) -> yorishiro::services::embedding::EmbeddingProviderAvailability {
+        yorishiro::services::embedding::EmbeddingProviderAvailability::Disabled
+    }
+    fn dimensions(&self) -> usize {
+        768
+    }
+    fn model_name(&self) -> String {
+        "disabled".into()
+    }
+    async fn embed_batch(
+        &self,
+        _texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, yorishiro::error::YorishiroError> {
+        unreachable!("disabled provider must be rejected before embedding")
+    }
+}
+
+struct Missing;
+
+#[async_trait]
+impl WorkspaceEmbeddingResolver for Missing {
+    async fn resolve(
+        &self,
+        _conn: &sea_orm::DatabaseConnection,
+        _workspace_id: Uuid,
+    ) -> Result<Option<Arc<dyn EmbeddingProvider>>, yorishiro::error::YorishiroError> {
+        Ok(None)
+    }
+}
+
 #[tokio::test]
 async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     let ctx = crate::workers::test_context().await;
@@ -100,4 +134,41 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     assert_eq!(row.embedding_model.as_deref(), Some("workspace-model"));
     assert_eq!(row.embedding_dimensions, Some(768));
     assert!(*calls.lock().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn absent_and_disabled_providers_are_terminal_worker_errors() {
+    for provider in [
+        Arc::new(Missing) as Arc<dyn WorkspaceEmbeddingResolver>,
+        Arc::new(Resolver(Arc::new(Disabled))) as Arc<dyn WorkspaceEmbeddingResolver>,
+    ] {
+        let ctx = crate::workers::test_context().await;
+        Migrator::up(&ctx.db, None).await.expect("migrations");
+        let tenant = tenant_tenants::ActiveModel {
+            name: Set("ee-terminal".into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("tenant");
+        let workspace = workspace_workspaces::ActiveModel {
+            tenant_id: Set(tenant.id),
+            name: Set("main".into()),
+            status: Set(WORKSPACE_STATUS_ACTIVE.into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("workspace");
+        ctx.shared_store.insert(provider);
+        let result = ReindexWorkerShared::build(&ctx)
+            .perform(ReindexArgs {
+                lifecycle_id: None,
+                workspace_id: workspace.id,
+                worker_class: WorkerClass::Shared,
+                startup: false,
+            })
+            .await;
+        assert!(result.is_err());
+    }
 }

@@ -95,6 +95,9 @@ where
 ///
 /// Reindex provider and validation failures are terminal for this queued attempt;
 /// operators can correct the provider or explicitly request another reindex.
+///
+/// # Errors
+/// Returns an error if lifecycle persistence fails.
 pub async fn perform_with_terminal_lifecycle<W, A, F, Fut>(
     ctx: &AppContext,
     lifecycle_id: Option<Uuid>,
