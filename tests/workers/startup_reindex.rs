@@ -3,6 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use futures::future::join_all;
 use loco_rs::app::AppContext;
 use loco_rs::environment::Environment;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, TransactionTrait};
@@ -220,4 +221,20 @@ async fn concurrent_sqlite_scans_admit_only_one_reindex() {
         );
     })
     .await;
+}
+
+/// The automatic request harness must keep each SQLite parent directory alive while parallel boots open their databases.
+#[tokio::test]
+async fn parallel_sqlite_boots_keep_their_database_parents_alive() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+
+    let boots = (0..8).map(|_| async {
+        crate::requests::boot_request::<App, _, _>(|_request, ctx| async move {
+            ctx.db.ping().await.expect("ping sqlite test database");
+        })
+        .await;
+    });
+    join_all(boots).await;
 }
