@@ -47,7 +47,7 @@ impl ReindexArgs {
 ///
 /// Shared by all three worker types below, which differ only in the tag `tags()` returns.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
-    // Resolve in the worker so enterprise workspace overrides are honored without putting
+    // Resolve in the worker so workspace-specific overrides are honored without putting
     // credentials in the queue payload.
     let provider = crate::workers::embedding_sync::resolve_worker_provider(ctx, args.workspace_id)
         .await
