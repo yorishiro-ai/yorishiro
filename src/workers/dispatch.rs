@@ -82,7 +82,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
 impl ReindexDispatcher for LocoJobDispatcher {
     async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
         let spec = JobSpec {
-            job_name: ReindexArgs::JOB_NAME,
+            job_name: args.job_name(),
             workspace_id: args.workspace_id,
             class: args.worker_class,
         };

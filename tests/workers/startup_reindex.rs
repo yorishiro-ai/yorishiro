@@ -31,7 +31,11 @@ impl ReindexDispatcher for RecordingDispatcher {
             &ctx.db,
             Enqueue {
                 id: Uuid::now_v7(),
-                job_name: "reindex",
+                job_name: if args.startup {
+                    "startup_reindex"
+                } else {
+                    "reindex"
+                },
                 worker_class: args.worker_class,
                 workspace_id: Some(args.workspace_id),
                 plan: None,
@@ -123,7 +127,7 @@ async fn a_workspace_stamped_with_another_model_is_queued_for_reindex() {
 #[tokio::test]
 async fn a_workspace_already_on_the_configured_model_is_left_alone() {
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let (worker, dispatcher, _) =
+        let (worker, dispatcher, _workspace) =
             scenario(&ctx, Environment::Production, "keyword-test-provider").await;
         startup_reindex::run(&worker).await;
         assert!(queued(&dispatcher).is_empty());
@@ -131,7 +135,7 @@ async fn a_workspace_already_on_the_configured_model_is_left_alone() {
     .await;
 }
 
-/// Replicas that start together must not each queue the same reindex: a workspace with a reindex already queued, running or waiting is skipped, which is the whole guard on SQLite.
+/// An already-admitted startup scan wins the atomic admission without another queue delivery.
 #[tokio::test]
 async fn a_workspace_with_a_reindex_already_active_is_skipped() {
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -141,7 +145,7 @@ async fn a_workspace_with_a_reindex_already_active_is_skipped() {
             &ctx.db,
             Enqueue {
                 id: Uuid::now_v7(),
-                job_name: "reindex",
+                job_name: "startup_reindex",
                 worker_class: WorkerClass::Shared,
                 workspace_id: Some(workspace),
                 plan: None,
@@ -214,7 +218,7 @@ async fn concurrent_sqlite_scans_admit_only_one_reindex() {
         tokio::join!(first, second);
         assert_eq!(queued(&dispatcher), [workspace]);
         assert!(
-            Lifecycles::has_active(&ctx.db, "reindex", workspace)
+            Lifecycles::has_active(&ctx.db, "startup_reindex", workspace)
                 .await
                 .expect("check active lifecycle")
         );

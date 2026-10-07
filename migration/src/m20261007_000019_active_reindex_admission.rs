@@ -16,14 +16,14 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("queue_reindex_active_workspace_idx")
+                    .name("queue_startup_reindex_active_workspace_idx")
                     .unique()
                     .table(Alias::new("queue_job_lifecycles"))
                     .col(Alias::new("job_name"))
                     .col(Alias::new("workspace_id"))
                     .and_where(
                         Expr::col(Alias::new("job_name"))
-                            .eq("reindex")
+                            .eq("startup_reindex")
                             .and(Expr::col(Alias::new("workspace_id")).is_not_null())
                             .and(
                                 Expr::col(Alias::new("status"))
@@ -39,7 +39,7 @@ impl MigrationTrait for Migration {
         manager
             .drop_index(
                 Index::drop()
-                    .name("queue_reindex_active_workspace_idx")
+                    .name("queue_startup_reindex_active_workspace_idx")
                     .table(Alias::new("queue_job_lifecycles"))
                     .to_owned(),
             )

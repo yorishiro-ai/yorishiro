@@ -20,7 +20,6 @@ use loco_rs::bgworker::BackgroundWorker;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::db::DbHandle;
 use crate::services::embedding::EmbeddingProviderAvailability;
 use crate::workers::dispatch::ReindexDispatcher;
 use crate::workers::embedding_sync::WorkerClass;
@@ -35,11 +34,22 @@ pub struct ReindexArgs {
     pub lifecycle_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub worker_class: WorkerClass,
+    #[serde(default)]
+    pub startup: bool,
 }
 
 impl ReindexArgs {
     /// The name this job is recorded under in the queue lifecycle.
     pub(crate) const JOB_NAME: &'static str = "reindex";
+    pub(crate) const STARTUP_JOB_NAME: &'static str = "startup_reindex";
+
+    pub(crate) fn job_name(&self) -> &'static str {
+        if self.startup {
+            Self::STARTUP_JOB_NAME
+        } else {
+            Self::JOB_NAME
+        }
+    }
 }
 
 /// Shared implementation of the reindex worker's `perform` body: builds the provider,
@@ -69,20 +79,32 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
             .await
             .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
-    // Acquire the session-scoped lock and run the reindex.
-    let db_handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-        loco_rs::Error::Message(
-            "reindex requires the tenant pool, which this deployment did not build".into(),
+    let outcome = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        crate::models::entity_embeddings::reindex_workspace(
+            &ctx.db,
+            args.workspace_id,
+            &candidate_ids,
+            provider.as_ref(),
         )
-    })?;
-    let outcome = crate::db::reindex_workspace_with_lock(
-        db_handle.tenant.pool().clone(),
-        args.workspace_id,
-        &ctx.db,
-        &candidate_ids,
-        provider.as_ref(),
-    )
-    .await
+        .await
+    } else {
+        let db_handle = ctx
+            .shared_store
+            .get::<crate::db::DbHandle>()
+            .ok_or_else(|| {
+                loco_rs::Error::Message(
+                    "reindex requires the tenant pool, which this deployment did not build".into(),
+                )
+            })?;
+        crate::db::reindex_workspace_with_lock(
+            db_handle.tenant.pool().clone(),
+            args.workspace_id,
+            &ctx.db,
+            &candidate_ids,
+            provider.as_ref(),
+        )
+        .await
+    }
     .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
     if !outcome.failures.is_empty() {
@@ -121,7 +143,7 @@ macro_rules! reindex_worker_for_class {
             }
 
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-                crate::workers::lifecycle::perform_with_lifecycle::<Self, _, _, _>(
+                crate::workers::lifecycle::perform_with_terminal_lifecycle::<Self, _, _, _>(
                     &self.ctx,
                     args.lifecycle_id,
                     $class,
@@ -196,6 +218,7 @@ pub async fn enqueue_reindex_with_dispatcher(
                 lifecycle_id: None,
                 workspace_id,
                 worker_class,
+                startup: false,
             },
         )
         .await

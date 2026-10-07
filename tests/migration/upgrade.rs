@@ -746,6 +746,40 @@ async fn queue_starvation_index_matches_admission_predicate() {
     .await;
 }
 
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn startup_admission_upgrade_preserves_ordinary_active_duplicates() {
+    with_database("startup_admission_upgrade", |db| Box::pin(async move {
+        let through_requests = migrations_through("m20261006_000018_query_embedding_requests");
+        Migrator::up(db, Some(through_requests))
+            .await
+            .expect("migrations through query requests");
+        seed_initial_rows(db).await;
+        let workspace = id(db, WORKSPACE);
+        execute(
+            db,
+            format!(
+                "INSERT INTO queue_job_lifecycles (id, job_name, worker_class, workspace_id, status, enqueue_at) VALUES ({}, 'reindex', 'shared', {workspace}, 'queued', CURRENT_TIMESTAMP), ({}, 'reindex', 'shared', {workspace}, 'queued', CURRENT_TIMESTAMP)",
+                id(db, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                id(db, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+            ),
+        )
+        .await;
+        Migrator::up(db, None)
+            .await
+            .expect("startup admission migration must not reject ordinary duplicates");
+        let count: i64 = value(
+            db,
+            format!("SELECT COUNT(*) FROM queue_job_lifecycles WHERE job_name = 'reindex' AND workspace_id = {workspace} AND status = 'queued'"),
+        )
+        .await;
+        assert_eq!(count, 2);
+        assert_index_exists(db, "queue_startup_reindex_active_workspace_idx").await;
+    }))
+    .await;
+}
+
 /// The embedding-sync token column is present, non-empty, and rotates on every write.
 #[tokio::test]
 #[serial(postgres_cluster)]

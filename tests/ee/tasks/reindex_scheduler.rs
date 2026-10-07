@@ -60,6 +60,7 @@ async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
                     lifecycle_id: None,
                     workspace_id: Uuid::now_v7(),
                     worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
+                    startup: false,
                 },
             )
         })

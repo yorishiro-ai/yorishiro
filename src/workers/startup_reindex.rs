@@ -118,6 +118,7 @@ async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
         lifecycle_id: None,
         workspace_id,
         worker_class,
+        startup: true,
     };
     match crate::workers::reindex::enqueue_for_class(ctx, args).await {
         Ok(()) => tracing::info!(%workspace_id, "startup reindex: enqueue success"),

@@ -374,6 +374,7 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
                     lifecycle_id: None,
                     workspace_id,
                     worker_class: class,
+                    startup: false,
                 },
             )
             .await
@@ -436,6 +437,7 @@ async fn missing_billing_uses_free_policy_for_both_dispatchers() {
                 lifecycle_id: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
+                startup: false,
             },
         )
         .await

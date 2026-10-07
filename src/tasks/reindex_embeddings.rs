@@ -48,6 +48,7 @@ impl Task for ReindexEmbeddings {
                 lifecycle_id: None,
                 workspace_id,
                 worker_class,
+                startup: false,
             },
         )
         .await?;
