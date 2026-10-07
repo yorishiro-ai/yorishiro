@@ -16,7 +16,8 @@ use crate::workers::reindex::{self, ReindexArgs};
 /// The restamp happens only after every entity embeds successfully, never before and never partially; `entity_embeddings::reindex_workspace` is where that ordering actually lives, and the reindex worker is a thin shell over it.
 /// A failure partway through leaves the workspace stamped with its old model, which correctly keeps the write-time check refusing new writes until a reindex succeeds, and re-running is safe.
 ///
-/// PostgreSQL only in practice, for the same reason as the reindex worker: it takes the tenant pool's advisory lock.
+/// On PostgreSQL the worker takes the tenant pool's per-workspace advisory lock.
+/// On SQLite the worker uses the table-owned model path directly under the single-tenant backend semantics.
 pub(crate) struct ReindexEmbeddings;
 
 #[async_trait]
