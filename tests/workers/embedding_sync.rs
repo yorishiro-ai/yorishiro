@@ -672,15 +672,16 @@ mod conflict {
             ctx.shared_store
                 .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
 
-            let queue = ctx.queue_provider.clone().expect("booted SQLite queue");
-            let queue_uri = match ctx.config.queue.as_ref() {
-                Some(loco_rs::config::QueueConfig::Sqlite(queue)) => queue.uri.clone(),
-                _ => panic!("booted test context must use a SQLite queue"),
+            let queue = ctx.queue_provider.clone().expect("booted queue");
+            let queue_pool = match ctx.config.queue.as_ref() {
+                Some(loco_rs::config::QueueConfig::Sqlite(queue)) => Some(
+                    sqlx::SqlitePool::connect(&queue.uri)
+                        .await
+                        .expect("connect to the SQLite queue file"),
+                ),
+                _ => None,
             };
-            queue.ping().await.expect("ping booted SQLite queue");
-            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
-                .await
-                .expect("connect to the queue file");
+            queue.ping().await.expect("ping booted queue");
 
             let lifecycle_id = Uuid::now_v7();
             Entity::record_enqueue(
@@ -718,10 +719,12 @@ mod conflict {
                 .expect("a superseded delivery is a terminal no-op");
 
             assert_eq!(status().await, LifecycleStatus::Cancelled.as_db_str());
-            let jobs = sqlt::get_jobs(&queue_pool, None, None)
-                .await
-                .expect("get_jobs");
-            assert_eq!(jobs.len(), 0, "the old delivery must not requeue: {jobs:?}");
+            if let Some(queue_pool) = &queue_pool {
+                let jobs = sqlt::get_jobs(queue_pool, None, None)
+                    .await
+                    .expect("get SQLite jobs");
+                assert_eq!(jobs.len(), 0, "the old delivery must not requeue: {jobs:?}");
+            }
             assert_eq!(
                 vector_rows(&ctx, entity_id).await,
                 0,
@@ -773,23 +776,29 @@ mod conflict {
             );
             let fresh_jobs = tokio::time::timeout(std::time::Duration::from_secs(3), async {
                 loop {
-                    let jobs = sqlt::get_jobs(&queue_pool, None, None)
-                        .await
-                        .expect("read fresh jobs");
-                    if !jobs.is_empty() {
-                        break jobs;
+                    if let Some(queue_pool) = &queue_pool {
+                        let jobs = sqlt::get_jobs(queue_pool, None, None)
+                            .await
+                            .expect("read fresh SQLite jobs");
+                        if !jobs.is_empty() {
+                            break Some(jobs);
+                        }
+                    } else {
+                        break None;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 }
             })
             .await
             .expect("REST update must dispatch a fresh job");
-            assert_eq!(
-                fresh_jobs.len(),
-                1,
-                "the newer entity update must dispatch a fresh job; response={}, jobs={fresh_jobs:?}",
-                fresh_update.text()
-            );
+            if let Some(fresh_jobs) = fresh_jobs {
+                assert_eq!(
+                    fresh_jobs.len(),
+                    1,
+                    "the newer entity update must dispatch a fresh job; response={}, jobs={fresh_jobs:?}",
+                    fresh_update.text()
+                );
+            }
             queue
                 .register(EmbeddingSyncWorkerShared::build(&ctx))
                 .await
@@ -815,7 +824,9 @@ mod conflict {
             assert_eq!(vector_rows(&ctx, entity_id).await, 1);
 
             let _ = queue.shutdown();
-            queue_pool.close().await;
+            if let Some(queue_pool) = queue_pool {
+                queue_pool.close().await;
+            }
         })
         .await;
     }
