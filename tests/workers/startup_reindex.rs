@@ -213,11 +213,10 @@ async fn concurrent_sqlite_scans_admit_only_one_reindex() {
         let second = startup_reindex::run(&worker);
         tokio::join!(first, second);
         assert_eq!(queued(&dispatcher), [workspace]);
-        assert_eq!(
+        assert!(
             Lifecycles::has_active(&ctx.db, "reindex", workspace)
                 .await
-                .expect("check active lifecycle"),
-            true
+                .expect("check active lifecycle")
         );
     })
     .await;
