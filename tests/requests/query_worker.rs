@@ -21,6 +21,20 @@ use yorishiro::workers::query_embedding::QueryEmbeddingWorker;
 
 use super::{boot_request, is_sqlite_queue};
 
+fn isolated_redis_url(url: &str) -> String {
+    let database = uuid::Uuid::now_v7().as_u128() % 16;
+    let (base, query) = url.split_once('?').unwrap_or((url, ""));
+    let base = base
+        .rsplit_once('/')
+        .filter(|(_, suffix)| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
+        .map_or(base, |(prefix, _)| prefix);
+    if query.is_empty() {
+        format!("{base}/{database}")
+    } else {
+        format!("{base}/{database}?{query}")
+    }
+}
+
 /// The tag the query embedding worker consumes, as `worker-tags` prints it.
 pub(crate) const QUERY_TAG: &str = "query-embedding";
 
@@ -112,6 +126,9 @@ pub(crate) async fn boot_with_query_worker<F, Fut>(
                 queue_dir.path().join("queue.sqlite3").display()
             ),
         );
+    } else if let Ok(url) = std::env::var("QUEUE_URL") {
+        // Query workers use a fixed queue name; isolate Redis-backed tests by DB number.
+        guard.set("QUEUE_URL", isolated_redis_url(&url));
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         ctx.shared_store.insert(provider);

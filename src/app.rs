@@ -353,6 +353,10 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
 
 pub(crate) async fn on_shutdown(ctx: &AppContext) {
     initializers::db_load_guard::shutdown(ctx).await;
+    if let Some(db) = ctx.shared_store.get::<crate::db::DbHandle>() {
+        db.identity.close().await;
+        db.tenant.pool().close().await;
+    }
 }
 
 /// Seeds the demo tenant and workspace from `fixtures/`.

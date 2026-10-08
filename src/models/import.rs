@@ -21,6 +21,8 @@ pub struct ImportResult {
     pub schemas: u64,
     pub entities: u64,
     pub relations: u64,
+    #[serde(skip)]
+    pub(crate) entity_ids: Vec<Uuid>,
 }
 
 /// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
@@ -112,6 +114,7 @@ pub async fn import_jsonl(
                     .await
                     .map_err(|err| annotate_line(line_no, err))?;
                 entity_id_map.insert(old_id, created.id);
+                result.entity_ids.push(created.id);
                 result.entities += 1;
             }
             ExportRecord::Relation(relation) => {
