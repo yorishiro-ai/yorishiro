@@ -298,7 +298,7 @@ pub(crate) fn middlewares(
 ///
 /// Loco calls this only for start modes that run workers, and only on the second of the two contexts `start` builds, so the provider is built once per worker process.
 /// The check keeps that true if a caller ever connects twice.
-/// With the provider and workers in place, the startup reindex scan runs once.
+/// With the provider and workers in place, the startup reindex scan runs and a periodic recovery task starts.
 ///
 /// # Errors
 /// Returns an error when the configured provider cannot be built, so a worker with a misconfigured model fails at start rather than on its first job, or when Loco refuses a registration.
@@ -315,6 +315,7 @@ pub(crate) async fn connect_workers(
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             crate::workers::startup_reindex::run(&scan_ctx).await;
+            crate::workers::dispatch::recover_pending(&scan_ctx).await;
         }
     });
     ctx.shared_store.insert(StartupReindexHandle(task));

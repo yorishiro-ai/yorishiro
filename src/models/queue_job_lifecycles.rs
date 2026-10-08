@@ -371,6 +371,16 @@ impl Entity {
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
         }
+        if matches!(
+            status,
+            LifecycleStatus::Completed
+                | LifecycleStatus::Failed
+                | LifecycleStatus::Cancelled
+                | LifecycleStatus::Unavailable
+        ) && let Err(error) = crate::models::queue_job_dispatch_outbox::remove(db, id).await
+        {
+            tracing::warn!(lifecycle_id = %id, diagnostic = %error, "terminal lifecycle outbox cleanup failed");
+        }
         Ok(())
     }
 }

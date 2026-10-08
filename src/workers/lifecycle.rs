@@ -65,7 +65,7 @@ where
                 None => Entity::defer(&ctx.db, id, None, SATURATED).await,
             }
             .map_err(message)?;
-            return requeue::<W, A>(ctx, class, args).await;
+            return requeue::<W, A>(ctx, id, class, args).await;
         }
     };
 
@@ -86,7 +86,7 @@ where
             Entity::defer(&ctx.db, id, Some(attempt), &error.to_string())
                 .await
                 .map_err(message)?;
-            requeue::<W, A>(ctx, class, args).await
+            requeue::<W, A>(ctx, id, class, args).await
         }
     }
 }
@@ -132,7 +132,7 @@ where
                 None => Entity::defer(&ctx.db, id, None, SATURATED).await,
             }
             .map_err(message)?;
-            return requeue::<W, A>(ctx, class, args).await;
+            return requeue::<W, A>(ctx, id, class, args).await;
         }
     };
     let heartbeat = Entity::heartbeat(ctx.db.clone(), id, attempt);
@@ -161,11 +161,19 @@ where
     }
 }
 
-async fn requeue<W, A>(ctx: &AppContext, class: WorkerClass, args: &A) -> loco_rs::Result<()>
+async fn requeue<W, A>(
+    ctx: &AppContext,
+    lifecycle_id: Uuid,
+    class: WorkerClass,
+    args: &A,
+) -> loco_rs::Result<()>
 where
     W: BackgroundWorker<A>,
     A: Clone + Send + Sync + Serialize + 'static,
 {
+    crate::models::queue_job_dispatch_outbox::attempted(&ctx.db, lifecycle_id)
+        .await
+        .map_err(message)?;
     let scheduling = crate::workers::queue::decide(class);
     W::perform_later_with_priority(ctx, args.clone(), Some(scheduling.priority)).await?;
     Ok(())

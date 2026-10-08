@@ -157,9 +157,7 @@ async fn query_embedding_requests_migration_is_reversible_on_sqlite() {
 
     Migrator::up(&db, None).await.expect("up");
     assert!(exists(&db).await);
-    Migrator::down(&db, Some(3))
-        .await
-        .expect("down three steps");
+    Migrator::down(&db, Some(4)).await.expect("down four steps");
     assert!(!exists(&db).await);
     Migrator::up(&db, None).await.expect("up again");
     assert!(exists(&db).await);
