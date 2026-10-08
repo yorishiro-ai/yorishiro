@@ -1,14 +1,22 @@
+use sea_orm::entity::prelude::*;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, Statement, TransactionTrait};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::workers::embedding_sync::WorkerClass;
+
+const RETRY_COOLDOWN_SECONDS: i64 = 60;
+const RECOVERY_BATCH_SIZE: usize = 100;
+
+#[async_trait::async_trait]
+impl ActiveModelBehavior for crate::models::_entities::queue_job_dispatch_outbox::ActiveModel {}
 
 #[derive(Clone)]
 pub(crate) struct PendingDispatch {
     pub(crate) lifecycle_id: Uuid,
     pub(crate) job_name: String,
-    pub(crate) worker_class: String,
+    pub(crate) worker_class: WorkerClass,
     pub(crate) payload: Value,
     pub(crate) worker_name: String,
     pub(crate) queue_name: Option<String>,
@@ -48,12 +56,12 @@ pub(crate) async fn record(
 pub(crate) async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, YorishiroError> {
     let backend = db.get_database_backend();
     let cooldown = match backend {
-        sea_orm::DatabaseBackend::Sqlite => {
-            "(o.last_attempt_at IS NULL OR o.last_attempt_at <= datetime('now', '-60 seconds'))"
-        }
-        _ => {
-            "(o.last_attempt_at IS NULL OR o.last_attempt_at <= CURRENT_TIMESTAMP - INTERVAL '60 seconds')"
-        }
+        sea_orm::DatabaseBackend::Sqlite => format!(
+            "(o.last_attempt_at IS NULL OR o.last_attempt_at <= datetime('now', '-{RETRY_COOLDOWN_SECONDS} seconds'))"
+        ),
+        _ => format!(
+            "(o.last_attempt_at IS NULL OR o.last_attempt_at <= CURRENT_TIMESTAMP - INTERVAL '{RETRY_COOLDOWN_SECONDS} seconds')"
+        ),
     };
     let retry_due = match backend {
         sea_orm::DatabaseBackend::Sqlite => {
@@ -69,7 +77,7 @@ pub(crate) async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch
          WHERE ((l.status = 'queued' AND l.provider_job_id IS NULL) OR l.status = 'retrying') \
            AND {retry_due} \
            AND {cooldown} \
-         ORDER BY l.enqueue_at LIMIT 100"
+          ORDER BY l.enqueue_at LIMIT {RECOVERY_BATCH_SIZE}"
         ),
     ))
     .await
@@ -90,10 +98,14 @@ pub(crate) async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch
         } else {
             row.try_get("", "tags").internal()?
         };
+        let worker_class_str = row.try_get::<String>("", "worker_class").internal()?;
+        let worker_class = WorkerClass::from_db_str(&worker_class_str)
+            .ok_or_else(|| DbErr::Type(format!("unknown worker class {worker_class_str:?}")))
+            .internal()?;
         Ok(PendingDispatch {
             lifecycle_id: row.try_get("", "id").internal()?,
             job_name: row.try_get("", "job_name").internal()?,
-            worker_class: row.try_get("", "worker_class").internal()?,
+            worker_class,
             payload,
             worker_name: row.try_get("", "worker_name").internal()?,
             queue_name: row.try_get("", "queue_name").internal()?,
@@ -116,9 +128,13 @@ pub(crate) async fn attempted(db: &impl ConnectionTrait, id: Uuid) -> Result<(),
 pub(crate) async fn claim_due(db: &impl ConnectionTrait, id: Uuid) -> Result<bool, DbErr> {
     let backend = db.get_database_backend();
     let cooldown = if backend == sea_orm::DatabaseBackend::Sqlite {
-        "last_attempt_at IS NULL OR last_attempt_at <= datetime('now', '-60 seconds')"
+        format!(
+            "last_attempt_at IS NULL OR last_attempt_at <= datetime('now', '-{RETRY_COOLDOWN_SECONDS} seconds')"
+        )
     } else {
-        "last_attempt_at IS NULL OR last_attempt_at <= CURRENT_TIMESTAMP - INTERVAL '60 seconds'"
+        format!(
+            "last_attempt_at IS NULL OR last_attempt_at <= CURRENT_TIMESTAMP - INTERVAL '{RETRY_COOLDOWN_SECONDS} seconds'"
+        )
     };
     let result = db
         .execute_raw(Statement::from_sql_and_values(

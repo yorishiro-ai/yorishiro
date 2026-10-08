@@ -57,17 +57,15 @@ server:
     logger:
       enable: true
 
-# Scheduler Configuration
-#
-# Runs registered tasks on a recurring schedule.
-# `cargo loco scheduler` starts the scheduler daemon.
-# scheduler:
-#   output: stdout
-#   jobs:
-#     tenant_reindex_daily:
-#       run: "tenant_reindex_scheduler"
-#       schedule: "0 3 * * * * 2030"
-#       run_on_start: false
+# Loco's scheduler executes registered tasks as separate processes.
+# Run `cargo loco scheduler` in a dedicated process to recover durable dispatch records and interrupted reindexes.
+scheduler:
+  output: stdout
+  jobs:
+    worker_dispatch_recovery:
+      run: "recover_worker_dispatches"
+      schedule: "0 * * * * *"
+      run_on_start: true
 # SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
 # PostgreSQL scheduler replicas use a detached session advisory lock and may run concurrently.
 # YORISHIRO_SCHEDULER_REPLICAS is diagnostic compatibility metadata only and is not enforced.

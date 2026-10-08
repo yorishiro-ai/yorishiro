@@ -100,6 +100,8 @@ contents:
     dst: /lib/systemd/system/yorishiro.service
   - src: ./packaging/yorishiro-worker.service
     dst: /lib/systemd/system/yorishiro-worker.service
+  - src: ./packaging/yorishiro-scheduler.service
+    dst: /lib/systemd/system/yorishiro-scheduler.service
   # The systemd unit loads this editable Loco production configuration.
   # `config|noreplace` preserves an operator's changes during package upgrades.
   - src: ./config/production.yaml

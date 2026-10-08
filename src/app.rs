@@ -310,19 +310,8 @@ pub(crate) async fn connect_workers(
     install_embedding_provider(ctx).await?;
     workers.connect(ctx, queue).await?;
     crate::workers::startup_reindex::run(ctx).await;
-    let scan_ctx = ctx.clone();
-    let task = tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            crate::workers::startup_reindex::run(&scan_ctx).await;
-            crate::workers::dispatch::recover_pending(&scan_ctx).await;
-        }
-    });
-    ctx.shared_store.insert(StartupReindexHandle(task));
     Ok(())
 }
-
-struct StartupReindexHandle(tokio::task::JoinHandle<()>);
 
 async fn install_embedding_provider(ctx: &AppContext) -> Result<()> {
     if ctx
@@ -359,14 +348,11 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
     tasks.register(tasks::maintenance::Maintenance);
     tasks.register(tasks::maintenance_status::MaintenanceStatus);
+    tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
     tasks.register(tasks::db_load_guard::DbLoadGuard);
 }
 
 pub(crate) async fn on_shutdown(ctx: &AppContext) {
-    if let Some(StartupReindexHandle(task)) = ctx.shared_store.remove::<StartupReindexHandle>() {
-        task.abort();
-        let _ = task.await;
-    }
     initializers::db_load_guard::shutdown(ctx).await;
     if let Some(db) = ctx.shared_store.get::<crate::db::DbHandle>() {
         db.identity.close().await;

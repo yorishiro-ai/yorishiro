@@ -40,7 +40,7 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 # The container's PID 1 is systemd, so `docker logs` never carries the service's output.
-dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -n 40 --no-pager >&2; }
+dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -u yorishiro-scheduler -n 40 --no-pager >&2; }
 
 DEB="$(basename "$PKG_FILE")"
 NET="ysr-sd-$$" APP="ysr-sd-app-$$" PG="ysr-sd-pg-$$"
@@ -95,6 +95,11 @@ execstart=$(docker exec "$APP" bash -c '
 echo "$execstart" | grep -q "worker-wrapper" \
   && ok "yorishiro-worker.service ExecStart points to the wrapper" \
   || bad "yorishiro-worker.service ExecStart does not reference the wrapper: $execstart"
+scheduler_execstart=$(docker exec "$APP" bash -c '
+  grep -m1 "^ExecStart=" /lib/systemd/system/yorishiro-scheduler.service' 2>/dev/null)
+echo "$scheduler_execstart" | grep -q '^ExecStart=/usr/bin/yorishiro scheduler$' \
+  && ok "yorishiro-scheduler.service starts the Loco scheduler" \
+  || bad "yorishiro-scheduler.service has an unexpected ExecStart: $scheduler_execstart"
 
 # Integrity probes: /var/lib/yorishiro is root:yorishiro mode 1770.
 # Root records wrapper checksum and creates a protected backup before
@@ -178,7 +183,7 @@ for marker in INTEG_META_INTACT INTEG_RESTORED; do
   case "$restore" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($restore)" ;; esac
 done
 
-# Use an OpenAI-compatible provider configuration so both the server and the worker construct the provider at startup without downloading the ~1 GiB local model.
+# Use an OpenAI-compatible provider configuration so the server and worker construct the provider at startup without downloading the ~1 GiB local model.
 # `base_url` + `model` take priority over the enum in `build_embedding_provider`, so no `provider` variable is needed.
 # `none` is rejected (#524) because the server needs query embeddings in this smoke test.
 # The endpoint is not reachable.
@@ -240,7 +245,7 @@ docker exec "$APP" systemctl set-environment \
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
-  systemctl enable yorishiro yorishiro-worker
+  systemctl enable yorishiro yorishiro-worker yorishiro-scheduler
   systemctl restart yorishiro' >/dev/null 2>&1
 
 server_ready=
@@ -267,6 +272,12 @@ if [ -z "${worker_skipped:-}" ]; then
     systemctl restart yorishiro-worker' >/dev/null 2>&1
 fi
 
+if [ -z "${worker_skipped:-}" ]; then
+  docker exec "$APP" bash -c '
+    systemctl reset-failed yorishiro-scheduler
+    systemctl restart yorishiro-scheduler' >/dev/null 2>&1
+fi
+
 worker_ready=
 if [ -z "${worker_skipped:-}" ]; then
   for _ in $(seq 1 120); do
@@ -286,8 +297,10 @@ fi
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
   echo "worker-active=$(systemctl is-active yorishiro-worker)"
+  echo "scheduler-active=$(systemctl is-active yorishiro-scheduler)"
   echo "enabled=$(systemctl is-enabled yorishiro)"
   echo "worker-enabled=$(systemctl is-enabled yorishiro-worker)"
+  echo "scheduler-enabled=$(systemctl is-enabled yorishiro-scheduler)"
   echo "ping=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:5150/_ping)"' 2>&1)
 
 grep -q 'active=active' <<<"$state" \
@@ -303,12 +316,20 @@ else
   bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
   dump_logs
 fi
+if [ -z "${worker_skipped:-}" ] && grep -q 'scheduler-active=active' <<<"$state"; then
+  ok "the scheduler is active"
+else
+  [ -n "${worker_skipped:-}" ] || bad "expected scheduler active, got: $(grep -o 'scheduler-active=[a-z-]*' <<<"$state")"
+fi
 grep -q 'enabled=enabled' <<<"$state" \
   && ok "the service is enabled" \
   || bad "expected enabled, got: $(grep -o 'enabled=[a-z-]*' <<<"$state")"
 grep -q 'worker-enabled=enabled' <<<"$state" \
   && ok "the worker is enabled" \
   || bad "expected worker enabled, got: $(grep -o 'worker-enabled=[a-z-]*' <<<"$state")"
+grep -q 'scheduler-enabled=enabled' <<<"$state" \
+  && ok "the scheduler is enabled" \
+  || bad "expected scheduler enabled, got: $(grep -o 'scheduler-enabled=[a-z-]*' <<<"$state")"
 grep -q 'ping=200' <<<"$state" \
   && ok "it answers /_ping" \
   || { bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"; dump_logs; }

@@ -214,16 +214,6 @@ async fn enqueue_pending(
     ctx: &AppContext,
     row: &crate::models::queue_job_dispatch_outbox::PendingDispatch,
 ) -> loco_rs::Result<String> {
-    let class = match row.worker_class.as_str() {
-        "tenant_private" => WorkerClass::TenantPrivate,
-        "official" => WorkerClass::Official,
-        "shared" => WorkerClass::Shared,
-        other => {
-            return Err(loco_rs::Error::Message(format!(
-                "unknown worker class {other}"
-            )));
-        }
-    };
     let queue = ctx
         .queue_provider
         .as_ref()
@@ -234,7 +224,7 @@ async fn enqueue_pending(
             row.queue_name.clone(),
             row.payload.clone(),
             row.tags.clone(),
-            Some(crate::workers::queue::decide(class).priority),
+            Some(crate::workers::queue::decide(row.worker_class).priority),
         )
         .await
         .map(|id| id.unwrap_or_else(|| Uuid::now_v7().to_string()))

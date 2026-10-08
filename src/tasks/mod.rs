@@ -11,6 +11,7 @@ pub(crate) mod list_tenants;
 pub(crate) mod list_workspaces;
 pub mod maintenance;
 pub(crate) mod maintenance_status;
+pub(crate) mod recover_worker_dispatches;
 pub mod reindex_embeddings;
 pub(crate) mod resync_embeddings;
 pub(crate) mod revoke_api_key;

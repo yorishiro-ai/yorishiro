@@ -5,23 +5,44 @@ Copy the following to `compose.yml` and run from that directory.
 ## Default (SQLite)
 
 ```yaml
+x-yorishiro: &yorishiro
+  image: ghcr.io/yorishiro-ai/yorishiro:latest
+  restart: unless-stopped
+  volumes:
+    - state:/var/lib/yorishiro/state
+    - model-cache:/home/yorishiro/.cache/yorishiro
+  environment:
+    - DATABASE_URL=sqlite:///var/lib/yorishiro/state/yorishiro.sqlite3?mode=rwc
+    - QUEUE_URL=sqlite:///var/lib/yorishiro/state/yorishiro_queue.sqlite3?mode=rwc
+
 services:
   app:
-    image: ghcr.io/yorishiro-ai/yorishiro:latest
-    restart: unless-stopped
+    <<: *yorishiro
     ports:
       - "80:5150"
-    volumes:
-      - data:/home/yorishiro/.cache/yorishiro
-    environment:
-      - DATABASE_URL=sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc
-      - QUEUE_URL=sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc
+  worker:
+    <<: *yorishiro
+    entrypoint: ["/var/lib/yorishiro/worker-wrapper.sh"]
+    command: []
+    depends_on:
+      - app
+  scheduler:
+    <<: *yorishiro
+    command: ["scheduler"]
+    healthcheck:
+      disable: true
+    depends_on:
+      - app
 
 volumes:
-  data:
+  state:
+  model-cache:
 ```
 
 Start with `docker compose up -d`. Stop with `docker compose down`.
+
+Keep the `worker` and `scheduler` services in PostgreSQL and Valkey deployments as well.
+Pass the same database and queue settings to all three services.
 
 The local embedding provider downloads about 522 MiB on first use.
 Set `YORISHIRO_EMBEDDING_PROVIDER=none` to skip that download when embedding is not required.

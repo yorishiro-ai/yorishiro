@@ -136,6 +136,16 @@ services:
       redis:
         condition: service_healthy
 
+  scheduler:
+    <<: *yorishiro
+    container_name: scheduler
+    command: ["scheduler"]
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+
 volumes:
   pgdata:
   test_pgdata:

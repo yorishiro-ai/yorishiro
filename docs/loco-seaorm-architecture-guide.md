@@ -34,7 +34,7 @@ Locoの`AppContext`は`db`、`config`、`mailer`、`storage`、`cache`、`queue_
 
 `ctx.mailer`、`ctx.storage`、`ctx.cache`はLoco標準componentですが、現状のアプリコードでは利用されていません。development configにはSMTP設定が残る一方、メール送信実装はなく、production側はopt-in構成です。標準JWT/authもproductionでは使わず、API key認証を`src/models/api_keys.rs:96-154`で実装しています。これらは未使用だから削除すべき機能ではなく、同じ責務を追加する要件が発生した場合の第一候補です（[Loco監査](../research_notes/Loco%20SeaORM%20architecture%20audit/loco.md#L38-L47)）。
 
-development schedulerは`config/development.yaml:47-53`で有効ですが、productionの`config/production.yaml:64-70`ではコメントアウトされています。Enterpriseのreindexをproductionで必要とする要件があるなら、worker常駐loopへの置換ではなく、Loco schedulerからTaskを起動し、Taskからqueue workerへ渡す構造を維持したまま設定を確認します。これはコード欠陥と断定できず、運用要件の確認事項です。
+developmentとproductionの両方でLoco schedulerから`recover_worker_dispatches` Taskを毎分実行し、dispatch outboxとinterrupted startup reindexを回収します。productionでは`cargo loco scheduler`をHTTP server/workerとは別processで起動する必要があります。
 
 ### 提案：新機能の配置
 
@@ -66,7 +66,7 @@ migrationは`migration/src/mYYYYMMDD_*.rs`に置き、`migration/src/lib.rs`へ�
 
 ### Loco標準からの意図的な拡張
 
-二重poolとRLS session lifecycle（`src/db.rs:1-11,52-64,123-180`）は、接続取得・返却時の`SET ROLE`、`RESET`、GUC、advisory lockを扱うための境界です。Loco標準DB接続の単純な置換やrepository化では代替できません。Loco queue上の`queue_job_lifecycles`と`workers/lifecycle.rs`も、retryそのものではなくadmission、heartbeat、reconcile、domain stateを記録する業務層です。Loco queueと責任範囲を文書化すれば維持できます。
+二重poolとRLS session lifecycle（`src/db.rs:1-11,52-64,123-180`）は、接続取得・返却時の`SET ROLE`、`RESET`、GUC、advisory lockを扱うための境界です。Loco標準DB接続の単純な置換やrepository化では代替できません。Loco queue上の`queue_job_lifecycles`と`workers/lifecycle.rs`はadmission、heartbeat、retry stateを記録し、`queue_job_dispatch_outbox`はDB commitとLoco enqueue間のcrash windowを補います。queue providerは実行基盤、これらは業務lifecycleとdispatch recoveryという分担です。
 
 `src/controllers/middleware/rate_limit.rs:19-24`のprocess-local rate limitは、共有cacheの代替ではありません。単一processの明示的な制限に留める限り追加抽象化は不要です。複数replicaで共有する要件が出たときだけLoco cache、queue backend、DB lockを比較します。`src/services/`はembeddingなど外部clientに限定され、domain serviceやrepositoryを置いていない点も現行ルールに適合します。
 
@@ -122,7 +122,7 @@ migrationは`migration/src/mYYYYMMDD_*.rs`に置き、`migration/src/lib.rs`へ�
 
 **P0（新規実装の必須境界）**として、repository層・汎用DAO・別ORMを追加せず、通常DB操作をtable-owned SeaORM modelに置きます。raw SQLは既存の例外領域だけに限定し、bindとidentifier allowlistを必須レビュー項目にします。これは既存設計の中心を守るアクションです。
 
-**P1（安全性と運用の固定）**として、Enterprise PostgreSQL-only queryに到達不能契約またはbackend guardを追加し、raw queryごとのintegration testを維持します。productionでreindexが必要か、scheduler設定が意図的に無効なのかも運用担当と確認します。
+**P1（安全性と運用の固定）**として、Enterprise PostgreSQL-only queryに到達不能契約またはbackend guardを追加し、raw queryごとのintegration testを維持します。production schedulerを稼働させる運用設定とoutbox recovery taskの登録を確認します。
 
 **P2（保守性）**として、migrationの古い「repository layer」コメントを現行用語へ直し、未使用SMTP設定をdevelopmentでどう扱うか決めます。`cargo tree -i`で複数versionを定期確認しますが、互換性検証なしの統合は行いません。
 
@@ -130,6 +130,6 @@ migrationは`migration/src/mYYYYMMDD_*.rs`に置き、`migration/src/lib.rs`へ�
 
 ## 調査限界
 
-本稿は指定された3つの調査ノートと、そのノートが参照したコード位置に基づく監査です。調査ノートではfull `make check-all`、PostgreSQL/SQLite integration suiteは未実行とされています。したがって、依存削除の安全性、SQLiteでの全到達経路、production schedulerの運用意図、将来の性能特性は要確認です。
+本稿は調査ノートと現在のrepository-wide reviewに基づく設計ガイドです。`make check-all`/`make check-all-ee`、outbox SQLite model test、SQLite migration suiteを実行しました。PostgreSQL/SQLiteの全integration suiteとproduction schedulerの運用起動確認は別途必要です。
 
 また、`cargo machete`や`rg`はmacro展開、feature条件、generated codeの意味を完全には判定しません。Cargo.lockのduplicateは、Loco、SeaORM、RMCP、Candleなど異なるupstream要求の結果であり、すべてをアプリ側の無駄とはみなせません。行番号は調査時点のものです。実装前には対象ファイルを再読し、変更後に該当featureのbuild、migration、PostgreSQL/SQLiteテストを実行してください。

@@ -23,6 +23,7 @@ pub struct Model {
     pub embedding_dimensions: Option<i32>,
     pub schema_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
+    pub embedding_reindexing: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

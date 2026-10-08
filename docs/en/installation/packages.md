@@ -24,6 +24,7 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | `/var/lib/yorishiro/worker-wrapper.sh` | Wrapper that discovers tags at boot |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
 | `/lib/systemd/system/yorishiro-worker.service` | Tagged background worker unit |
+| `/lib/systemd/system/yorishiro-scheduler.service` | Scheduled task unit |
 | `/etc/yorishiro/production.yaml` | Editable Loco production configuration |
 
 The EE package installs the same shared paths and additionally installs `/etc/yorishiro/LICENSE.enterprise`.
@@ -54,12 +55,15 @@ See [docs/configuration.md](../configuration.md) for all settings.
 ```console
 $ sudo systemctl enable --now yorishiro
 $ sudo systemctl enable --now yorishiro-worker
+$ sudo systemctl enable --now yorishiro-scheduler
 $ sudo systemctl status yorishiro
 $ sudo systemctl status yorishiro-worker
+$ sudo systemctl status yorishiro-scheduler
 ```
 
 The worker is a separate unit because Loco 1.2.0 cannot combine `--server-and-worker` with tagged workers.
 The wrapper script calls `yorishiro worker-tags` at boot to discover every registered worker tag and passes them as a comma-separated list to `start --worker=`, so the list stays correct when new worker classes or job types are added.
+The scheduler is separate because Loco runs scheduled tasks in their own process.
 
 ## Directory integrity
 

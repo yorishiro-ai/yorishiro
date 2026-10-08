@@ -1,0 +1,25 @@
+# Enable with `systemctl enable --now yorishiro-scheduler` alongside yorishiro.service.
+[Unit]
+Description=Yorishiro scheduled tasks
+After=network.target yorishiro.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=yorishiro
+Group=yorishiro
+WorkingDirectory=/var/lib/yorishiro
+Environment=LOCO_ENV=production
+Environment=LOCO_CONFIG_FOLDER=/etc/yorishiro
+ExecStart=/usr/bin/yorishiro scheduler
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yorishiro
+
+[Install]
+WantedBy=multi-user.target

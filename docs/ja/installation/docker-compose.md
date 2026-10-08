@@ -5,23 +5,44 @@
 ## デフォルト（SQLite）
 
 ```yaml
+x-yorishiro: &yorishiro
+  image: ghcr.io/yorishiro-ai/yorishiro:latest
+  restart: unless-stopped
+  volumes:
+    - state:/var/lib/yorishiro/state
+    - model-cache:/home/yorishiro/.cache/yorishiro
+  environment:
+    - DATABASE_URL=sqlite:///var/lib/yorishiro/state/yorishiro.sqlite3?mode=rwc
+    - QUEUE_URL=sqlite:///var/lib/yorishiro/state/yorishiro_queue.sqlite3?mode=rwc
+
 services:
   app:
-    image: ghcr.io/yorishiro-ai/yorishiro:latest
-    restart: unless-stopped
+    <<: *yorishiro
     ports:
       - "80:5150"
-    volumes:
-      - data:/home/yorishiro/.cache/yorishiro
-    environment:
-      - DATABASE_URL=sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc
-      - QUEUE_URL=sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc
+  worker:
+    <<: *yorishiro
+    entrypoint: ["/var/lib/yorishiro/worker-wrapper.sh"]
+    command: []
+    depends_on:
+      - app
+  scheduler:
+    <<: *yorishiro
+    command: ["scheduler"]
+    healthcheck:
+      disable: true
+    depends_on:
+      - app
 
 volumes:
-  data:
+  state:
+  model-cache:
 ```
 
 `docker compose up -d` で開始、`docker compose down` で停止します。
+
+PostgreSQLまたはValkeyを使う場合も`worker`と`scheduler`サービスを残してください。
+3つのサービスすべてに同じデータベースとキューの設定を渡します。
 
 ローカル埋め込みプロバイダは初回使用時に約 522 MiB をダウンロードします。
 埋め込みが不要な場合は `YORISHIRO_EMBEDDING_PROVIDER=none` を設定するとダウンロードを省略できます。

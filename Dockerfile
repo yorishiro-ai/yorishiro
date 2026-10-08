@@ -85,7 +85,9 @@ COPY config/production.yaml /app/config/production.yaml
 WORKDIR /app
 # The production configuration defaults SQLite state to /var/lib/yorishiro.
 # The directory is already created with root:yorishiro 1770 by the wrapper install step.
-RUN chown -R yorishiro:yorishiro /app
+RUN chown -R yorishiro:yorishiro /app \
+    && mkdir -p /var/lib/yorishiro/state /home/yorishiro/.cache/yorishiro \
+    && chown -R yorishiro:yorishiro /var/lib/yorishiro/state /home/yorishiro/.cache/yorishiro
 
 # The account has a real home, and `HOME` is set for it, because the model fetch needs somewhere
 # to write. `services::embedding::model_fetch::cache_dir` reads `HOME` and gives up when it is

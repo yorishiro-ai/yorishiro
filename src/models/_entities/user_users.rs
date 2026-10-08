@@ -14,9 +14,17 @@ pub struct Model {
     pub password_hash: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub display_name: Option<String>,
-    #[sea_orm(column_type = "Text", nullable)]
+    #[sea_orm(
+        column_type = "Text",
+        nullable,
+        unique_key = "user_users_oauth_identity_idx"
+    )]
     pub oauth_provider: Option<String>,
-    #[sea_orm(column_type = "Text", nullable)]
+    #[sea_orm(
+        column_type = "Text",
+        nullable,
+        unique_key = "user_users_oauth_identity_idx"
+    )]
     pub oauth_subject_id: Option<String>,
     pub created_at: DateTimeWithTimeZone,
 }
