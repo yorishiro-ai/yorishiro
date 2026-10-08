@@ -115,6 +115,16 @@ async fn embed(
         .ok_or_else(|| YorishiroError::BackendUnavailable {
             message: "no embedding provider is configured on the worker".into(),
         })?;
+    let concurrency = ctx
+        .shared_store
+        .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
+        .ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!("embedding concurrency missing"))
+        })?;
+    let _permit = concurrency
+        .acquire()
+        .await
+        .map_err(|error| YorishiroError::Internal(error.into()))?;
     let vector = provider.embed_as(EmbedKind::Query, query_text).await?;
     search::check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     Ok((vector, provider.model_name()))

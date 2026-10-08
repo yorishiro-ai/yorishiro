@@ -1,5 +1,6 @@
 //! Embedding provider trait and implementations.
 
+pub(crate) mod concurrency;
 pub mod local;
 pub mod model_fetch;
 pub mod openai;

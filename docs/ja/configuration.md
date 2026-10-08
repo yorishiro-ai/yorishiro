@@ -42,6 +42,7 @@ cargo loco task resync_embeddings workspace_id:<uuid>
 | `YORISHIRO_EMBEDDING_API_KEY` | OpenAI 互換プロバイダの API キー。ローカルサービスでは空のままにする |
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | ベクトルの次元数（既定：`768`）。使うモデルに合わせる |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストに `dimensions` フィールドを含めるか。既定は `false` |
+| `YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY` | 1 ワーカープロセス内で同時に実行するドキュメントとクエリのプロバイダ呼び出し数。`0` は不可。既定は `1` |
 
 OpenAI 互換プロバイダは、ドメイン境界として公開の `EmbeddingProvider` 契約を維持します。
 ネットワークを使わずに失敗をテストできるよう、外部リクエストはプロバイダ固有の非公開 transport seam の内側に置いています。
@@ -212,6 +213,21 @@ Yorishiro のバックグラウンドジョブには、タグなしの `cargo lo
 Yorishiro が登録するジョブにはタグが付くため、これらのモードでは処理されません。
 
 各ワーカープロセスには、同じキュー設定と、そのジョブに必要な埋め込みまたは推論の設定が必要です。
+
+`YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY` は、ドキュメントとクエリの埋め込みで共有するプロセス内の公平な Tokio permit 上限です。
+全体のプロバイダ容量は、この上限にワーカープロセス数とレプリカ数を掛けた値です。
+permit 待機はカスタムライフサイクルが `Running` に入る前に行われ、待機中にデータベースのトランザクションまたは接続を保持せず、成功、no-op、エラー、キャンセル、panic のすべてで解放されます。
+プロバイダと resolver のエラーは policy D の terminal failure のままで、自動再 enqueue しません。
+Loco 1.2.0 の `queue.num_workers` は dequeue ループ数を指定するだけで、プロバイダ容量ではありません。
+タグはジョブをワーカーへ振り分けますが、named queue を使うのは Redis だけで、SQL queue provider は queue 名を無視します。
+Loco queue は handler の前にジョブを `processing` へ変更するため、カスタムライフサイクル境界は dequeue の後、プロバイダ呼び出しの前にあります。
+
+ネイティブパッケージは完全な参照用既定値を `/etc/yorishiro/example.yaml` にインストールします。
+`production.yaml` と `production.local.yaml` がない場合だけ、同じバイト列をバイナリに埋め込み、既定値として使います。
+管理者が上書きする場合は完全な `/etc/yorishiro/production.yaml` を作成し、通常の Loco の base と local の merge を使う場合は対応する `.local.yaml` を作成します。
+local だけの設定は拒否し、存在する外部設定が読めない、壊れている、または不完全な場合は fallback せず失敗します。
+パッケージのライフサイクルスクリプトは `production.yaml` をインストール、作成、変更、merge、chmod、削除しません。
+Docker は変更せず、immutable な `config/production.yaml` を使います。
 ワーカーは HTTP サーバと同じホストでも別サーバでも動かせます。
 別サーバのワーカーは、サーバと同じ `QUEUE_URL` を必ず使ってください。
 SQLite ファイルを共有キューにする場合は絶対パスを使ってください。

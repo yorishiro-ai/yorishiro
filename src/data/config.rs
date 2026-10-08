@@ -18,9 +18,77 @@ use sqlx::sqlite::SqliteConnectOptions;
 /// Returns an error if the operation cannot be completed.
 pub async fn load(environment: &Environment) -> Result<Config> {
     let environment = test_environment(environment);
-    let config = environment.load()?;
+    let config = load_environment(&environment)?;
     validate(&config)?;
     Ok(config)
+}
+
+const EMBEDDED_EXAMPLE: &[u8] = include_bytes!("../../config/example.yaml");
+
+fn load_environment(environment: &Environment) -> Result<Config> {
+    let folder = env::var("LOCO_CONFIG_FOLDER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("config"));
+    let base = folder.join(format!("{environment}.yaml"));
+    let local = folder.join(format!("{environment}.local.yaml"));
+    let base_present = config_file_state(&base)?;
+    let local_present = config_file_state(&local)?;
+
+    if local_present {
+        if !base_present {
+            return Err(Error::Message(format!(
+                "configuration override exists without base configuration: {}",
+                local.display()
+            )));
+        }
+        return environment.load_from_folder(&folder);
+    }
+
+    if base_present {
+        return environment.load_from_folder(&folder);
+    }
+
+    tracing::info!(environment = %environment, "using embedded example configuration defaults");
+    let temp = tempfile_path();
+    fs::create_dir(&temp).map_err(|error| {
+        Error::Message(format!(
+            "could not create embedded configuration directory {}: {error}",
+            temp.display()
+        ))
+    })?;
+    let embedded = temp.join(format!("{environment}.yaml"));
+    fs::write(&embedded, EMBEDDED_EXAMPLE).map_err(|error| {
+        Error::Message(format!(
+            "could not materialize embedded configuration: {error}"
+        ))
+    })?;
+    let result = environment.load_from_folder(&temp);
+    let _ = fs::remove_file(&embedded);
+    let _ = fs::remove_dir(&temp);
+    result
+}
+
+fn tempfile_path() -> PathBuf {
+    env::temp_dir().join(format!(
+        "yorishiro-config-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ))
+}
+
+fn config_file_state(path: &Path) -> Result<bool> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => Err(Error::Message(format!(
+            "configuration path is not a file: {}",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(Error::Message(format!(
+            "cannot access configuration file {}: {error}",
+            path.display()
+        ))),
+    }
 }
 
 fn test_environment(environment: &Environment) -> Environment {
@@ -57,9 +125,10 @@ fn validate(config: &Config) -> Result<()> {
         || settings.rate_limit.search_tokens_per_minute == 0
         || settings.db_load_guard.sustain_seconds == 0
         || settings.db_load_guard.poll_seconds == 0
+        || settings.embedding.provider_concurrency == 0
     {
         return Err(Error::Message(
-            "embedding dimensions and sequence length, rate limits, and database load guard durations must be greater than zero".into(),
+            "embedding dimensions, provider concurrency, sequence length, rate limits, and database load guard durations must be greater than zero".into(),
         ));
     }
     validate_query_embedding(&settings.query_embedding)?;

@@ -73,8 +73,9 @@ probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   getent passwd yorishiro >/dev/null && echo "USER"
   [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "EE_LICENCE"
-  [ -f /etc/yorishiro/production.yaml ] && echo "CONFIG"
-  [ "$(stat -c "%a %U:%G" /etc/yorishiro/production.yaml)" = "640 root:yorishiro" ] && echo "CONFIGPERM"
+  [ ! -e /etc/yorishiro/production.yaml ] && echo "NO_CONFIG"
+  [ -f /etc/yorishiro/example.yaml ] && echo "EXAMPLE"
+  cmp /etc/yorishiro/example.yaml /etc/yorishiro/example.yaml && echo "EXAMPLE_BYTES"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "root" ] && echo "STATEOWNER"
   [ "$(stat -c "%a" /var/lib/yorishiro)" = "1770" ] && echo "STATEPERMS"
   [ "$(stat -c "%G" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEGRP"
@@ -134,7 +135,7 @@ probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
     echo "POST_RESTORE_FAILED"
   fi
 ' 2>&1)
-ALL_WANTS="RUNS USER COPYRIGHT CONFIG CONFIGPERM STATEOWNER STATEPERMS STATEGRP WRAPPEROWNER WRAPPERPERMS STATEWRITE WRAPPER_UNRMED_BY_YORISHIRO WRAPPER_INTACT_AFTER_MV REDIRECTOVERWRITE_FAILED POST_META_INTACT POST_RESTORED"
+ALL_WANTS="RUNS USER COPYRIGHT NO_CONFIG EXAMPLE STATEOWNER STATEPERMS STATEGRP WRAPPEROWNER WRAPPERPERMS STATEWRITE WRAPPER_UNRMED_BY_YORISHIRO WRAPPER_INTACT_AFTER_MV REDIRECTOVERWRITE_FAILED POST_META_INTACT POST_RESTORED"
 if [ "$(edition)" = ee ]; then ALL_WANTS="$ALL_WANTS EE_LICENCE"; fi
 for want in $ALL_WANTS; do
   case "$probe" in
@@ -329,10 +330,7 @@ else
   # Started the way the unit does, since there is no systemd here: the same Loco environment
   # selects the packaged production configuration.
   #
-  # The package ships /etc/yorishiro/production.yaml and its header documents the variables an
-  # operator sets to point it at PostgreSQL, so this sets those instead of writing a second
-  # configuration. A hand-written copy drifts from the shipped one: it once omitted `settings:`
-  # and the server exited at start with "missing field `max_tenants`".
+  # The package ships only example.yaml. External production.yaml is optional and admin-owned.
   #
   # The output goes to a file because `docker exec -d` discards it and PID 1 here is `sleep`,
   # so `docker logs` never shows the server.

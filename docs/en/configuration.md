@@ -42,6 +42,7 @@ You can choose between a local model that runs on your machine, or an OpenAI-com
 | `YORISHIRO_EMBEDDING_API_KEY` | API key for the OpenAI-compatible provider. Leave empty for local services |
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector size (default: `768`). Must match your chosen model |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | Include a `dimensions` field in the request. Default `false` |
+| `YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY` | Maximum concurrent document and query provider calls in one worker process. Must be greater than zero. Default `1` |
 
 The OpenAI-compatible provider keeps the public `EmbeddingProvider` contract as its domain boundary.
 Its outbound request is behind a private provider-specific transport seam so failure tests can substitute the network without changing embedding behavior or exposing another application-wide HTTP service.
@@ -198,6 +199,21 @@ Loco passes an empty tag list for those modes, which consumes only untagged jobs
 Yorishiro's registered jobs are tagged, so those modes do not consume them.
 
 Every worker process needs the same queue configuration and embedding or inference configuration that its jobs require.
+
+`YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY` is a process-local, fair Tokio permit limit shared by document and query embedding calls.
+The aggregate provider capacity is this limit multiplied by the number of worker processes and replicas.
+Waiting for a permit happens before the custom lifecycle enters `Running`, holds no database transaction or connection, and releases on success, no-op, error, cancellation, or panic.
+Provider and resolver errors remain terminal policy-D failures and are not requeued.
+Loco 1.2.0 `queue.num_workers` controls dequeue loops, not provider capacity.
+Tags route jobs to workers, while named queues are honored only by Redis because the SQL queue providers ignore queue names.
+The Loco queue marks a job `processing` before the handler runs, so the custom lifecycle boundary is deliberately later than queue dequeue and earlier than the provider call.
+
+Native packages install the complete reference-only defaults at `/etc/yorishiro/example.yaml`.
+The same bytes are embedded in the binary and used only when both `production.yaml` and `production.local.yaml` are absent.
+Create a complete `/etc/yorishiro/production.yaml` for administrator overrides, or use a matching `.local.yaml` for the normal Loco base-plus-local merge.
+Local-only configuration is rejected, and any present unreadable, malformed, or incomplete external configuration fails without fallback.
+Package lifecycle scripts never install, create, modify, merge, chmod, or remove `production.yaml`.
+Docker remains unchanged and uses its immutable `config/production.yaml`.
 Workers may run on the same host as the HTTP server or on a separate server.
 Separate-server workers must use the same `QUEUE_URL` as the server.
 When that URL names a shared SQLite file, use an absolute path because a relative path is resolved independently on each host and is not a shared queue.

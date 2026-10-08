@@ -24,15 +24,17 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | `/var/lib/yorishiro/worker-wrapper.sh` | Wrapper that discovers tags at boot |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
 | `/lib/systemd/system/yorishiro-worker.service` | Tagged background worker unit |
-| `/etc/yorishiro/production.yaml` | Editable Loco production configuration |
+| `/etc/yorishiro/example.yaml` | Complete reference configuration with defaults |
 
 The EE package installs the same shared paths and additionally installs `/etc/yorishiro/LICENSE.enterprise`.
 CE does not install the enterprise licence file.
 
 ## Configuration
 
-Edit `/etc/yorishiro/production.yaml` to configure the packaged service.
-Package upgrades preserve local changes to this file.
+Create `/etc/yorishiro/production.yaml` only when you need administrator overrides.
+The package never installs, creates, modifies, merges, chmods, or removes that file.
+If it is absent, the application uses the embedded bytes of `example.yaml` as its defaults.
+Package upgrades update `example.yaml` only.
 The application database can use SQLite or PostgreSQL, while queue storage is independently selected through Loco's queue provider.
 
 ```yaml

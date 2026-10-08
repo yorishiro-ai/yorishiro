@@ -228,10 +228,8 @@ docker exec "$PG" psql -U yorishiro -d yorishiro \
 # on a real host.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
 
-# The package ships /etc/yorishiro/production.yaml and its header documents the variables an
-# operator sets to point it at PostgreSQL, so this sets those instead of writing a second
-# configuration. A hand-written copy drifts from the shipped one: it once omitted `settings:`
-# and the server exited at start with "missing field `max_tenants`".
+# The package ships only example.yaml. The absent production.yaml path uses embedded defaults.
+# This sets environment overrides instead of writing an admin-owned configuration file.
 docker exec "$APP" systemctl set-environment \
   DATABASE_URL="postgres://yorishiro:secret@$PGIP:5432/yorishiro" \
   HOST=http://127.0.0.1:5150 \

@@ -76,6 +76,7 @@ settings:
     api_key: '<%= get_env(name="YORISHIRO_EMBEDDING_API_KEY", default="") %>'
     model: <%= get_env(name="YORISHIRO_EMBEDDING_MODEL", default="") %>
     send_dimensions_param: <%= get_env(name="YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM", default="false") %>
+    provider_concurrency: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY", default="1") %>
     local_model: <%= get_env(name="YORISHIRO_LOCAL_MODEL", default="multilingual-e5-base") %>
     local_max_sequence_length: <%= get_env(name="YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH", default="512") %>
   rate_limit:

@@ -231,6 +231,14 @@ async fn perform_embedding_with_lifecycle(
     ctx: &AppContext,
     args: &EmbeddingSyncArgs,
 ) -> loco_rs::Result<()> {
+    let concurrency = ctx
+        .shared_store
+        .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
+        .ok_or_else(|| loco_rs::Error::Message("embedding concurrency missing".into()))?;
+    let _permit = concurrency
+        .acquire()
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     let Some(id) = args.lifecycle_id else {
         return perform_embedding_sync(ctx, args)
             .await

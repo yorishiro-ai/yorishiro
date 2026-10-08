@@ -26,6 +26,7 @@ run_deb_transition() {
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
     printf 'edited-by-transition' > /etc/yorishiro/production.yaml
+    cp /etc/yorishiro/production.yaml /tmp/production.before
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
@@ -35,7 +36,8 @@ run_deb_transition() {
     apt-get install -y -qq /pkg/yorishiro-${to}-${VERSION}-amd64.deb
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${to})\" = 'install ok installed'
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${from} 2>/dev/null || true)\" != 'install ok installed'
-    grep -qx edited-by-transition /etc/yorishiro/production.yaml
+    cmp /tmp/production.before /etc/yorishiro/production.yaml
+    test -f /etc/yorishiro/example.yaml
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = root:yorishiro
     test \"\$(stat -c '%a' /var/lib/yorishiro)\" = 1770
@@ -64,6 +66,7 @@ run_rpm_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$UNIFIED_DIR":/unified:ro almalinux:10 bash -eu -c "
     dnf install -y -q $base
     printf 'edited-by-transition' > /etc/yorishiro/production.yaml
+    cp /etc/yorishiro/production.yaml /tmp/production.before
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
@@ -73,7 +76,8 @@ run_rpm_transition() {
     dnf install -y -q /pkg/yorishiro-${to}-${VERSION}-amd64.rpm
     rpm -q yorishiro-${to}
     ! rpm -q yorishiro-${from}
-    grep -qx edited-by-transition /etc/yorishiro/production.yaml
+    cmp /tmp/production.before /etc/yorishiro/production.yaml
+    test -f /etc/yorishiro/example.yaml
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = root:yorishiro
     test \"\$(stat -c '%a' /var/lib/yorishiro)\" = 1770

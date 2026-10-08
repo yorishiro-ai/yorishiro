@@ -1,7 +1,7 @@
 # Enable with `systemctl enable --now yorishiro`.
 #
-# Settings go in /etc/yorishiro/production.yaml.
-# The package installs it as an editable template and preserves local changes on upgrade.
+# Optional administrator settings go in /etc/yorishiro/production.yaml.
+# The package installs the reference-only /etc/yorishiro/example.yaml and never manages production.yaml.
 [Unit]
 Description=Yorishiro server
 After=network.target
