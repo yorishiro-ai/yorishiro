@@ -140,7 +140,8 @@ PostgreSQL の負荷ガードは、デプロイメント全体のメンテナン
 Yorishiro は Loco 標準の `config/<environment>.yaml` 構成を使います。
 `LOCO_ENV` が環境を選び、未設定時は `development` です。
 `LOCO_CONFIG_FOLDER` で、選択した YAML を置く別のディレクトリを指定できます。
-パッケージ版と Docker 版は `LOCO_ENV=production` を設定し、それぞれの設定ディレクトリにある `production.yaml` を使います。
+パッケージ版と Docker 版は `LOCO_ENV=production` を設定します。
+完全な外部 `production.yaml` と任意の `production.local.yaml` があればそれを使い、なければ `example.yaml` の埋め込みバイト列を使います。
 
 YAML では Loco の Tera `get_env` 式を使い、`DATABASE_URL`、`QUEUE_URL`、埋め込み設定などのデプロイ時の値を読み込みます。
 アプリケーションデータは SQLite と PostgreSQL に対応します。
@@ -215,6 +216,8 @@ Yorishiro が登録するジョブにはタグが付くため、これらのモ�
 各ワーカープロセスには、同じキュー設定と、そのジョブに必要な埋め込みまたは推論の設定が必要です。
 
 `YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY` は、ドキュメントとクエリの埋め込みで共有するプロセス内の公平な Tokio permit 上限です。
+公平性は queue dequeue の順序ではなく、semaphore acquire / provider-call admission に到達した時点から始まります。
+provider 解決と短い database read は acquire より前に行いますが、待機中に transaction や database connection は保持しません。
 全体のプロバイダ容量は、この上限にワーカープロセス数とレプリカ数を掛けた値です。
 permit 待機はカスタムライフサイクルが `Running` に入る前に行われ、待機中にデータベースのトランザクションまたは接続を保持せず、成功、no-op、エラー、キャンセル、panic のすべてで解放されます。
 プロバイダと resolver のエラーは policy D の terminal failure のままで、自動再 enqueue しません。
@@ -227,7 +230,8 @@ Loco queue は handler の前にジョブを `processing` へ変更するため�
 管理者が上書きする場合は完全な `/etc/yorishiro/production.yaml` を作成し、通常の Loco の base と local の merge を使う場合は対応する `.local.yaml` を作成します。
 local だけの設定は拒否し、存在する外部設定が読めない、壊れている、または不完全な場合は fallback せず失敗します。
 パッケージのライフサイクルスクリプトは `production.yaml` をインストール、作成、変更、merge、chmod、削除しません。
-Docker は変更せず、immutable な `config/production.yaml` を使います。
+Docker は参照用の `config/example.yaml` だけを `/app/config` にコピーします。
+Docker Compose は `BINDING=0.0.0.0` を明示し、イメージの安全な既定値は `127.0.0.1` のままです。
 ワーカーは HTTP サーバと同じホストでも別サーバでも動かせます。
 別サーバのワーカーは、サーバと同じ `QUEUE_URL` を必ず使ってください。
 SQLite ファイルを共有キューにする場合は絶対パスを使ってください。

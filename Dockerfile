@@ -75,8 +75,9 @@ COPY packaging/yorishiro-worker-wrapper.sh /var/lib/yorishiro/worker-wrapper.sh
 RUN chmod +x /var/lib/yorishiro/worker-wrapper.sh \
     && chown root:yorishiro /var/lib/yorishiro \
     && chmod 1770 /var/lib/yorishiro
-# Keep Loco's environment-based configuration layout in the runtime image.
-COPY config/production.yaml /app/config/production.yaml
+# Keep only the canonical reference configuration in the runtime image.
+# production.yaml and production.local.yaml remain administrator-owned mount points.
+COPY config/example.yaml /app/config/example.yaml
 
 # Relative paths in embedding provider settings (YORISHIRO_LOCAL_MODEL_PATH defaults to
 # `models/model.safetensors`) resolve against this directory, so a model directory can be
@@ -103,7 +104,7 @@ ENV HOME=/home/yorishiro
 ENV LOCO_ENV=production
 ENV LOCO_CONFIG_FOLDER=/app/config
 USER yorishiro
-# 5150 is the server's own default port (`config/production.yaml`'s `server.port`), which is what the
+# 5150 is the server's own default port (`config/example.yaml`'s `server.port`), which is what the
 # compose file and the healthcheck below expect.
 EXPOSE 5150
 # `/_ping` rather than `/_health`: both come from loco's default routes, and `_ping` answers

@@ -49,31 +49,19 @@ fn load_environment(environment: &Environment) -> Result<Config> {
     }
 
     tracing::info!(environment = %environment, "using embedded example configuration defaults");
-    let temp = tempfile_path();
-    fs::create_dir(&temp).map_err(|error| {
+    let temp = tempfile::tempdir().map_err(|error| {
         Error::Message(format!(
-            "could not create embedded configuration directory {}: {error}",
-            temp.display()
+            "could not create embedded configuration directory: {error}"
         ))
     })?;
-    let embedded = temp.join(format!("{environment}.yaml"));
+    let temp_path = temp.path();
+    let embedded = temp_path.join(format!("{environment}.yaml"));
     fs::write(&embedded, EMBEDDED_EXAMPLE).map_err(|error| {
         Error::Message(format!(
             "could not materialize embedded configuration: {error}"
         ))
     })?;
-    let result = environment.load_from_folder(&temp);
-    let _ = fs::remove_file(&embedded);
-    let _ = fs::remove_dir(&temp);
-    result
-}
-
-fn tempfile_path() -> PathBuf {
-    env::temp_dir().join(format!(
-        "yorishiro-config-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ))
+    environment.load_from_folder(temp_path)
 }
 
 fn config_file_state(path: &Path) -> Result<bool> {

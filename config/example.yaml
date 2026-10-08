@@ -41,12 +41,11 @@ logger:
 
 # Web server configuration
 server:
-  # Port on which the server will listen. the server binding is 0.0.0.0:{PORT}
+  # Port on which the server will listen. The native default is loopback-only.
   port: <%= get_env(name="PORT", default="5150") %>
   # Binding for the server (which interface to bind to).
-  # `0.0.0.0`, not `localhost`: inside a container or a VM, a server bound to
-  # loopback is unreachable from outside it.
-  binding: <%= get_env(name="BINDING", default="0.0.0.0") %>
+  # Set BINDING=0.0.0.0 explicitly when external access is required.
+  binding: <%= get_env(name="BINDING", default="127.0.0.1") %>
   # The UI hostname or IP address that mailers will point to.
   # Defaults to localhost for an unconfigured trial instance.
   host: <%= get_env(name="HOST", default="http://localhost") %>

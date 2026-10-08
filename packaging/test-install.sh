@@ -64,7 +64,7 @@ note "deb on ubuntu:24.04 — the supported case"
 # --------------------------------------------------------------------------------------------
 # Single container: install, root backup/metadata, unprivileged probes as yorishiro,
 # root verify/atomic restore, then emit all markers to the host for assertion.
-probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/example.yaml":/canonical-example.yaml:ro ubuntu:24.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
@@ -75,7 +75,7 @@ probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "EE_LICENCE"
   [ ! -e /etc/yorishiro/production.yaml ] && echo "NO_CONFIG"
   [ -f /etc/yorishiro/example.yaml ] && echo "EXAMPLE"
-  cmp /etc/yorishiro/example.yaml /etc/yorishiro/example.yaml && echo "EXAMPLE_BYTES"
+  cmp /etc/yorishiro/example.yaml /canonical-example.yaml && echo "EXAMPLE_BYTES"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "root" ] && echo "STATEOWNER"
   [ "$(stat -c "%a" /var/lib/yorishiro)" = "1770" ] && echo "STATEPERMS"
   [ "$(stat -c "%G" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEGRP"

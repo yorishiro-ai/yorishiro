@@ -420,7 +420,7 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
     .await;
 }
 
-/// Community/self-hosted tenants have no billing row, but both dispatchers still use Free policy.
+/// Reindex uses the queue policy; embedding admission is process-local and records no queue limit.
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn missing_billing_uses_free_policy_for_both_dispatchers() {
@@ -448,11 +448,17 @@ async fn missing_billing_uses_free_policy_for_both_dispatchers() {
             .await
             .expect("read queue lifecycles");
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|row| {
-            row.plan.as_deref() == Some("free")
-                && row.concurrency_key.as_deref() == Some("official:free")
-                && row.concurrency_limit == Some(1)
-        }));
+        let embedding = rows
+            .iter()
+            .find(|row| row.job_name == "embedding_sync")
+            .unwrap();
+        assert_eq!(embedding.plan, None);
+        assert_eq!(embedding.concurrency_key, None);
+        assert_eq!(embedding.concurrency_limit, None);
+        let reindex = rows.iter().find(|row| row.job_name == "reindex").unwrap();
+        assert_eq!(reindex.plan.as_deref(), Some("free"));
+        assert_eq!(reindex.concurrency_key.as_deref(), Some("official:free"));
+        assert_eq!(reindex.concurrency_limit, Some(1));
     })
     .await;
 }
@@ -486,9 +492,17 @@ async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
         .await
         .expect("insert billing");
 
-        embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Official, workspace_id))
-            .await
-            .expect("embedding enqueue with active licence");
+        reindex::enqueue_for_class(
+            &ctx,
+            ReindexArgs {
+                lifecycle_id: None,
+                workspace_id,
+                worker_class: WorkerClass::Official,
+                startup: false,
+            },
+        )
+        .await
+        .expect("reindex enqueue with active licence");
         let row = queue_job_lifecycles::Entity::find()
             .one(&ctx.db)
             .await

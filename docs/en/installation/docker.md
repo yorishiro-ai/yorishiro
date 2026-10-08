@@ -49,5 +49,8 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 ## Configuration
 
 See [docs/en/configuration.md](../configuration.md) for all settings.
-The production configuration is at `/app/config/production.yaml` inside the image.
-Mount a replacement there or point `LOCO_CONFIG_FOLDER` at another configuration directory.
+The image contains the reference-only configuration at `/app/config/example.yaml`.
+When `/app/config/production.yaml` and `/app/config/production.local.yaml` are absent, the binary uses the embedded bytes of `config/example.yaml`.
+To configure the container with files, mount a complete administrator-owned `/app/config/production.yaml` and optionally `/app/config/production.local.yaml`, or replace `LOCO_CONFIG_FOLDER` with a directory containing those files.
+The image never creates, merges, rewrites, chmods, or removes mounted configuration files.
+The reference default binds to `127.0.0.1`; Docker Compose sets `BINDING=0.0.0.0` explicitly because it publishes port `5150`.

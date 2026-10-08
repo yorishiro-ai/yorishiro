@@ -14,6 +14,7 @@ services:
     volumes:
       - data:/home/yorishiro/.cache/yorishiro
     environment:
+      - BINDING=0.0.0.0
       - DATABASE_URL=sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc
       - QUEUE_URL=sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc
 
@@ -47,6 +48,7 @@ services:
     depends_on:
       - valkey
     environment:
+      - BINDING=0.0.0.0
       - YORISHIRO_QUEUE_KIND=Redis
       - QUEUE_URL=redis://valkey:6379
 
@@ -73,6 +75,7 @@ services:
       - postgres
       - valkey
     environment:
+      - BINDING=0.0.0.0
       - DATABASE_URL=postgres://user:pass@host:5432/yorishiro
       - YORISHIRO_QUEUE_KIND=Redis
       - QUEUE_URL=redis://valkey:6379

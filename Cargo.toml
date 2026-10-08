@@ -92,6 +92,7 @@ reqwest.workspace = true
 # from safetensors weights. candle-core/candle-nn/candle-transformers build a fully static binary
 # (no openssl-sys, no libstdc++ link).
 candle-core = { version = "0.11.0" }
+tempfile = { version = "3.27.0" }
 candle-nn = { version = "0.11.0" }
 candle-transformers = { version = "0.11.0" }
 tokenizers = { version = "0.23.2", features = ["onig"] }
@@ -117,8 +118,6 @@ required-features = []
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
 tracing-subscriber = "0.3.23"
-# Used by tests/requests/queue.rs to give the SQLite queue a file that is removed with the test.
-tempfile = { version = "3.27.0" }
 # Used by the ee/ request tests folded into tests/requests/.
 axum-test = { version = "17.3.0" }
 # Required for catch_unwind on non-Send futures in boot_request wrapper.

@@ -134,6 +134,7 @@ async fn production_without_external_files_uses_embedded_example_defaults() {
         config.database.uri,
         "sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc"
     );
+    assert_eq!(config.server.binding, "127.0.0.1");
     assert!(config.settings::<serde_json::Value>().is_ok());
 }
 

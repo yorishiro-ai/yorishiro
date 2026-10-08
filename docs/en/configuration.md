@@ -127,7 +127,8 @@ This is the port of the earlier guard implementation, with its opt-in default re
 Yorishiro uses Loco's `config/<environment>.yaml` layout.
 `LOCO_ENV` selects the environment and defaults to `development`.
 `LOCO_CONFIG_FOLDER` can point Loco at another directory containing the selected YAML file.
-Package and Docker installations set `LOCO_ENV=production` and provide `production.yaml` in their configuration directory.
+Package and Docker installations set `LOCO_ENV=production`.
+They use a complete external `production.yaml` plus optional `production.local.yaml` when supplied; otherwise they use the embedded `example.yaml` bytes.
 
 The YAML files use Loco's Tera `get_env` expressions for deploy-time values such as `DATABASE_URL`, `QUEUE_URL`, and embedding settings.
 Application data supports SQLite and PostgreSQL.
@@ -201,6 +202,8 @@ Yorishiro's registered jobs are tagged, so those modes do not consume them.
 Every worker process needs the same queue configuration and embedding or inference configuration that its jobs require.
 
 `YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY` is a process-local, fair Tokio permit limit shared by document and query embedding calls.
+Fairness begins when a call reaches semaphore acquisition/provider-call admission, not at queue dequeue order.
+Provider resolution and short database reads happen before acquisition, but no transaction or database connection is held while waiting.
 The aggregate provider capacity is this limit multiplied by the number of worker processes and replicas.
 Waiting for a permit happens before the custom lifecycle enters `Running`, holds no database transaction or connection, and releases on success, no-op, error, cancellation, or panic.
 Provider and resolver errors remain terminal policy-D failures and are not requeued.
@@ -213,7 +216,8 @@ The same bytes are embedded in the binary and used only when both `production.ya
 Create a complete `/etc/yorishiro/production.yaml` for administrator overrides, or use a matching `.local.yaml` for the normal Loco base-plus-local merge.
 Local-only configuration is rejected, and any present unreadable, malformed, or incomplete external configuration fails without fallback.
 Package lifecycle scripts never install, create, modify, merge, chmod, or remove `production.yaml`.
-Docker remains unchanged and uses its immutable `config/production.yaml`.
+Docker copies only the reference `config/example.yaml` into `/app/config`.
+Docker Compose sets `BINDING=0.0.0.0` explicitly; the image's safe default remains `127.0.0.1`.
 Workers may run on the same host as the HTTP server or on a separate server.
 Separate-server workers must use the same `QUEUE_URL` as the server.
 When that URL names a shared SQLite file, use an absolute path because a relative path is resolved independently on each host and is not a shared queue.

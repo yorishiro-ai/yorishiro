@@ -47,6 +47,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
             dispatch_payload: serde_json::to_value(&args)
                 .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
             route,
+            use_queue_concurrency: false,
         };
         dispatch_job(ctx, spec, |lifecycle_id, priority| {
             let args = EmbeddingSyncArgs {
@@ -102,6 +103,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
             dispatch_payload: serde_json::to_value(&args)
                 .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
             route,
+            use_queue_concurrency: true,
         };
         dispatch_job(ctx, spec, |lifecycle_id, priority| {
             let args = ReindexArgs {
@@ -238,6 +240,7 @@ pub(crate) struct JobSpec {
     pub(crate) class: WorkerClass,
     pub(crate) dispatch_payload: serde_json::Value,
     pub(crate) route: JobRoute,
+    pub(crate) use_queue_concurrency: bool,
 }
 
 /// Admits one job: resolves its concurrency policy and priority, records the lifecycle row, then hands the job to the class's worker through `enqueue`.
@@ -256,22 +259,20 @@ where
     let lifecycle_id = Uuid::now_v7();
     let class = spec.class.as_db_str();
 
-    let (plan, concurrency_limit) = match super::queue::concurrency_for(
-        ctx,
-        spec.workspace_id,
-        spec.class,
-    )
-    .await
-    {
-        Ok(policy) => (policy.plan, policy.limit),
-        Err(error) => {
-            // No plan is known, so the row is closed with no capacity at all.
-            refuse(ctx, &spec, lifecycle_id, None, class, 0, &error).await;
-            tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, diagnostic = %error, "queue policy unavailable");
-            return Err(loco_rs::Error::Message(error));
-        }
+    let (plan, concurrency_key, concurrency_limit) = if spec.use_queue_concurrency {
+        let policy = match super::queue::concurrency_for(ctx, spec.workspace_id, spec.class).await {
+            Ok(policy) => policy,
+            Err(error) => {
+                refuse(ctx, &spec, lifecycle_id, None, class, 0, &error).await;
+                tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, diagnostic = %error, "queue policy unavailable");
+                return Err(loco_rs::Error::Message(error));
+            }
+        };
+        let key = format!("{class}:{}", policy.plan);
+        (Some(policy.plan), Some(key), Some(policy.limit))
+    } else {
+        (None, None, None)
     };
-    let concurrency_key = format!("{class}:{plan}");
 
     let scheduling = match crate::workers::queue::decide_for_dispatch(&ctx.db, spec.class).await {
         Ok(scheduling) => scheduling,
@@ -281,9 +282,9 @@ where
                 ctx,
                 &spec,
                 lifecycle_id,
-                Some(&plan),
-                &concurrency_key,
-                concurrency_limit,
+                plan.as_deref(),
+                concurrency_key.as_deref().unwrap_or(class),
+                concurrency_limit.unwrap_or(0),
                 &diagnostic,
             )
             .await;
@@ -313,9 +314,9 @@ where
             job_name: spec.job_name,
             worker_class: spec.class,
             workspace_id: Some(spec.workspace_id),
-            plan: Some(&plan),
-            concurrency_key: Some(&concurrency_key),
-            concurrency_limit: Some(concurrency_limit),
+            plan: plan.as_deref(),
+            concurrency_key: concurrency_key.as_deref(),
+            concurrency_limit,
         },
         spec.dispatch_payload.clone(),
         spec.route.worker_name,
