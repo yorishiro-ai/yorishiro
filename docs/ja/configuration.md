@@ -87,13 +87,9 @@ API からもリインデックスを登録できます：`POST /api/migration-j
 
 PostgreSQL では、テナントプールのワークスペース単位 advisory lock により再インデックスの実行を直列化します。SQLite では、単一テナントのバックエンド仕様に従い、ワーカーがモデル所有の再インデックス経路を直接実行します。
 
-transactional dispatch outboxは、lifecycle状態、worker引数、Locoのworker routeをenqueue前に同一DB transactionで保存します。Loco Taskの`recover_worker_dispatches`はcooldown後に初回dispatch未完了とdeferred lifecycle requeueを再試行するため、enqueue失敗やプロセス停止で行が恒久的に取り残されません。重複deliveryはlifecycle admissionが並行実行とterminal状態をfenceします。
+埋め込み同期は、意図的にキュー上で 1 回だけ実行します。固定している Loco 1.2.0 のキュー API には、すべてのバックエンドで使える遅延 enqueue がなく、失敗を直ちに再 enqueue すると無制限ループになり、ライフサイクル更新とキュー更新もアトミックにコミットできません。ベクトルの永続化を確認できた場合だけ成功とし、無効化または未設定の埋め込みは明示的な no-op、enqueue 後の削除は成功する no-op、古いスナップショットは新しいエンティティ更新によって terminal に superseded と記録します。プロバイダ、resolver、データベース、バリデーション、構造上の失敗は failed として記録し Loco に返し、自動 enqueue は行いません。別途設計した scheduler ができるまでは、明示的な resync または reindex で復旧します。
 
-埋め込み実行エラーはdeferredとして記録し、同じclass専用Loco workerへ再enqueueします。再enqueueが失敗した場合はoutbox Taskが再試行します。埋め込みの無効化または未設定は明示的なno-op、enqueue後の削除は成功するno-op、古いsnapshotは新しいentity更新によりsupersededになります。
-
-**失敗した埋め込みジョブの運用上の境界。** `queue_job_lifecycles` はLocoがpayloadをdeserializeし、`lifecycle_id`のadmissionを通過した時点から実行状態を記録します。outboxは元のtyped payloadとqueue routeを保持します。worker実行前にpayloadが拒否された場合はqueue providerのfailed jobを選択backendから確認してください。
-
-productionでは`cargo loco scheduler`をworkerやHTTP serverとは別プロセスとして起動してください。登録Taskが毎分、dispatch未完了と起動時reindex中断を回収します。
+**失敗した埋め込みジョブの運用上の境界。** `queue_job_lifecycles` の行が正となるのは、Loco がジョブのペイロードをデシリアライズでき、かつ有効な `lifecycle_id` を含んでいる場合に限ります。UUID の不正、未知の `worker_class`、必須フィールドの欠落などでデシリアライズに失敗したペイロードは、埋め込み処理に入る前に Loco のキューランナーが拒否します。この失敗はキュープロバイダの失敗ジョブにのみ記録され、ライフサイクルの行は `queued` のまま残ることがあります。確認するには、プロバイダの失敗ジョブ（キューテーブルの `JobStatus::Failed` の行、Redis の場合は対応する failed セット）を参照してください。型付きの埋め込み実行エラーはこれと異なり、ライフサイクルの行が `failed` となって `error` に診断が残り、プロバイダのジョブも失敗になります。どちらの場合も自動では再試行されません。
 
 ### ディスパッチ境界の監査
 

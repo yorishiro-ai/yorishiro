@@ -24,7 +24,6 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | `/var/lib/yorishiro/worker-wrapper.sh` | 起動時にタグを自動検出するラッパースクリプト |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
 | `/lib/systemd/system/yorishiro-worker.service` | タグ付きバックグラウンドワーカーユニット |
-| `/lib/systemd/system/yorishiro-scheduler.service` | スケジュール済みTaskユニット |
 | `/etc/yorishiro/production.yaml` | 編集可能な Loco production 設定 |
 
 EE パッケージは同じ共有パスに加えて `/etc/yorishiro/LICENSE.enterprise` をインストールします。
@@ -55,15 +54,12 @@ Redis 互換キューサービスを使う場合は、PostgreSQL のキューブ
 ```console
 $ sudo systemctl enable --now yorishiro
 $ sudo systemctl enable --now yorishiro-worker
-$ sudo systemctl enable --now yorishiro-scheduler
 $ sudo systemctl status yorishiro
 $ sudo systemctl status yorishiro-worker
-$ sudo systemctl status yorishiro-scheduler
 ```
 
 Loco 1.2.0では、`--server-and-worker`とタグ付きワーカーを組み合わせられないため、ワーカーは別ユニットで起動します。
 ラッパースクリプトは起動時に `yorishiro worker-tags` を実行して登録済みのすべてのタグを自動検出するため、新しいワーカークラスやジョブタイプが追加されてもリストは常に正しく保たれます。
-LocoのschedulerはTaskを別プロセスで実行するため、schedulerも独立したユニットとして起動します。
 
 ## ディレクトリの整合性
 
