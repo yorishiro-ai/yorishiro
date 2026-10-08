@@ -49,7 +49,11 @@ scheduler:
   jobs:
     tenant_reindex_every_hour:
       run: "tenant_reindex_scheduler"
-      schedule: "0 * * * * * 2030"
+      schedule: "0 * * * * *"
+      run_on_start: true
+    worker_dispatch_recovery:
+      run: "recover_worker_dispatches"
+      schedule: "0 * * * * *"
       run_on_start: true
 
 # Yorishiro's registered jobs use tags. Run HTTP and worker processes separately, and start
@@ -148,6 +152,10 @@ settings:
     threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
     sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
     poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
+  query_embedding:
+    timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
+    poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
+    retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
 
 
 # Mailer Configuration.

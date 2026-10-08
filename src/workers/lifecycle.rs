@@ -65,7 +65,7 @@ where
                 None => Entity::defer(&ctx.db, id, None, SATURATED).await,
             }
             .map_err(message)?;
-            return requeue::<W, A>(ctx, class, args).await;
+            return requeue::<W, A>(ctx, id, class, args).await;
         }
     };
 
@@ -86,16 +86,94 @@ where
             Entity::defer(&ctx.db, id, Some(attempt), &error.to_string())
                 .await
                 .map_err(message)?;
-            requeue::<W, A>(ctx, class, args).await
+            requeue::<W, A>(ctx, id, class, args).await
         }
     }
 }
 
-async fn requeue<W, A>(ctx: &AppContext, class: WorkerClass, args: &A) -> loco_rs::Result<()>
+/// Runs a job whose failures are deterministic and must not be immediately requeued.
+///
+/// Reindex provider and validation failures are terminal for this queued attempt;
+/// operators can correct the provider or explicitly request another reindex.
+///
+/// # Errors
+/// Returns an error if lifecycle persistence fails.
+pub(crate) async fn perform_with_terminal_lifecycle<W, A, F, Fut>(
+    ctx: &AppContext,
+    lifecycle_id: Option<Uuid>,
+    class: WorkerClass,
+    args: &A,
+    work: F,
+) -> loco_rs::Result<()>
+where
+    W: BackgroundWorker<A>,
+    A: Clone + Send + Sync + Serialize + 'static,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = loco_rs::Result<()>>,
+{
+    let Some(id) = lifecycle_id else {
+        return work().await;
+    };
+    let attempt = match Entity::start(&ctx.db, id).await.map_err(message)? {
+        Admission::Started { attempt } | Admission::Recovered { attempt } => attempt,
+        Admission::Duplicate { .. } | Admission::Terminal => return Ok(()),
+        Admission::Saturated { attempt } => {
+            match attempt {
+                Some(attempt) => {
+                    Entity::defer_at(
+                        &ctx.db,
+                        id,
+                        attempt,
+                        SATURATED,
+                        chrono::Utc::now().fixed_offset(),
+                    )
+                    .await
+                }
+                None => Entity::defer(&ctx.db, id, None, SATURATED).await,
+            }
+            .map_err(message)?;
+            return requeue::<W, A>(ctx, id, class, args).await;
+        }
+    };
+    let heartbeat = Entity::heartbeat(ctx.db.clone(), id, attempt);
+    let result = work().await;
+    heartbeat.abort();
+    match result {
+        Ok(()) => {
+            Entity::finish(&ctx.db, id, Some(attempt), LifecycleStatus::Completed, None)
+                .await
+                .map_err(message)?;
+            Ok(())
+        }
+        Err(error) => {
+            Entity::finish(
+                &ctx.db,
+                id,
+                Some(attempt),
+                LifecycleStatus::Failed,
+                Some(&error.to_string()),
+            )
+            .await
+            .map_err(message)?;
+            tracing::error!(lifecycle_id = %id, worker_class = class.as_db_str(), error = %error, "terminal worker failure");
+            Ok(())
+        }
+    }
+}
+
+async fn requeue<W, A>(
+    ctx: &AppContext,
+    lifecycle_id: Uuid,
+    class: WorkerClass,
+    args: &A,
+) -> loco_rs::Result<()>
 where
     W: BackgroundWorker<A>,
     A: Clone + Send + Sync + Serialize + 'static,
 {
+    crate::models::queue_job_dispatch_outbox::attempted(&ctx.db, lifecycle_id)
+        .await
+        .map_err(message)?;
     let scheduling = crate::workers::queue::decide(class);
     W::perform_later_with_priority(ctx, args.clone(), Some(scheduling.priority)).await?;
     Ok(())

@@ -2,26 +2,22 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
-use crate::db::DbHandle;
-use crate::error::{ResultExt, YorishiroError};
-use crate::models::entity_embeddings;
-use crate::services::embedding;
+use crate::error::YorishiroError;
+use crate::workers::reindex::{self, ReindexArgs};
 
 /// `cargo loco task reindex_embeddings workspace_id:<uuid>`
 ///
-/// Re-embeds every entity in a workspace with the deployment's currently configured embedding provider, then restamps `workspace_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values, so a workspace can move from one local model to another (nomic-embed-text-v1.5 to multilingual-e5-base, or any future model change) without the write-time model check in `services/embedding/sync.rs` refusing every subsequent write forever.
+/// Queues a reindex job that re-embeds every entity in a workspace with the embedding provider the worker is configured with, then restamps `workspace_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values, so a workspace can move from one local model to another without the write-time model check refusing every subsequent write forever.
 ///
-/// Unlike `resync_embeddings`, which only fills entities whose `embedding` column is NULL, this re-embeds every entity with `x-embed` fields regardless of whether it already has a vector: the whole point is replacing vectors from the old model, not filling gaps left by the old model.
+/// The command only enqueues, the same as `POST /api/migration-jobs/reindex`.
+/// It holds no embedding provider, because only a worker process loads a model, so it cannot compare the workspace's stamp with the model and always queues the job: the worker re-embeds every entity with an `x-embed` field whether or not it already has a vector, since the point is replacing vectors from the old model.
+/// A `force` argument is accepted and ignored, so existing runbooks keep working.
 ///
-/// The restamp happens only after every entity embeds successfully, never before and never partially; `entity_embeddings::reindex_workspace` is where that ordering actually lives, and this task is a thin CLI shell over it.
-/// Restamping first (or on partial success) would make the stamp claim a model that only some of the workspace's vectors actually came from, passing the write-time model check while the column itself still holds a mix: the exact failure this whole mechanism exists to prevent, just caused by the migration tool instead of an unconfigured deployment.
-/// A failure partway through leaves the workspace stamped with its old model, which correctly keeps the write-time check refusing new writes until this task is re-run and succeeds; re-running is safe, since every entity is re-embedded again regardless of whether an earlier attempt already wrote a (partial, mixed) result.
+/// The restamp happens only after every entity embeds successfully, never before and never partially; `entity_embeddings::reindex_workspace` is where that ordering actually lives, and the reindex worker is a thin shell over it.
+/// A failure partway through leaves the workspace stamped with its old model, which correctly keeps the write-time check refusing new writes until a reindex succeeds, and re-running is safe.
 ///
-/// An entity created or updated while a reindex is in flight goes through the ordinary guarded write path, which still checks against the workspace's (old, not yet restamped) stamp: it succeeds if it embeds with the old model and is refused if the deployment's provider has already moved to the new one, in which case it stays without a vector until `resync_embeddings` runs after this task's restamp completes.
-///
-/// This loads every candidate `EntityRecord` into memory in one batch, the same shape `resync_embeddings` already uses, rather than paging: consistent with that task, not a new consideration introduced here.
-///
-/// PostgreSQL only, for the same reason as `resync_embeddings`: `entity_entities` has no `embedding` column at all on SQLite.
+/// On PostgreSQL the worker takes the tenant pool's per-workspace advisory lock.
+/// On SQLite the worker uses the table-owned model path directly under the single-tenant backend semantics.
 pub(crate) struct ReindexEmbeddings;
 
 #[async_trait]
@@ -29,7 +25,7 @@ impl Task for ReindexEmbeddings {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "reindex_embeddings".to_string(),
-            detail: "Re-embeds every entity in a workspace with the current provider and restamps the workspace's model: cargo loco task reindex_embeddings workspace_id:<uuid>".to_string(),
+            detail: "Queues a reindex that re-embeds every entity in a workspace and restamps its model: cargo loco task reindex_embeddings workspace_id:<uuid>".to_string(),
         }
     }
 
@@ -43,109 +39,23 @@ impl Task for ReindexEmbeddings {
             }
         })?;
 
-        // Mirrors resync_embeddings's own up-front probe: an unconfigured provider satisfies the
-        // dimension count but errors on every actual call, so this turns that into one clear
-        // failure instead of N per-entity ones that would read as an ordinary "N failed" outcome.
-        let provider = app_context
-            .shared_store
-            .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
-            .ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
-            })?;
-        provider
-            .embed_batch(&[])
-            .await
-            .map_err(|err| YorishiroError::ValidationFailed {
-                message: format!("embedding provider must be configured: {err}"),
-                details: vec![],
-                hint: "check YORISHIRO_EMBEDDING_PROVIDER and YORISHIRO_LOCAL_MODEL config"
-                    .to_string(),
-            })?;
-
-        // Skip when the workspace already matches and the user didn't ask for force.
-        // The REST endpoint (which is the primary entry point) always enqueues to give
-        // the caller an immediate answer and a job to track; the task is the direct
-        // CLI path and benefits from the same shortcut so the operator doesn't have to
-        // guess whether the workspace needs reindexing before calling.
-        let force: bool = vars
-            .cli_arg("force")
-            .ok()
-            .map(|v| v.parse().unwrap_or(false))
-            .unwrap_or(false);
-        if !force {
-            let chain = entity_embeddings::resolve_embedding_chain(
-                &app_context.db,
-                workspace_id,
-                provider.dimensions(),
-            )
-            .await
-            .internal()?;
-            if chain.workspace_model.as_deref() == Some(provider.model_name().as_str()) {
-                println!(
-                    "workspace {} already stamped with model {:?}; nothing to reindex \
-                     (add force:true to reindex despite matching model)",
-                    workspace_id,
-                    provider.model_name()
-                );
-                return Ok(());
-            }
-        }
-
-        let candidate_ids =
-            crate::models::entity_entities::ids_for_workspace(&app_context.db, workspace_id)
+        let worker_class =
+            crate::controllers::extractors::resolve_worker_class(app_context, workspace_id)
                 .await
-                .internal()?;
-
-        // Serialize concurrent reindex runs against the same workspace: two runs with different
-        // providers would both bypass the write-time model check by design, and embedding writes
-        // do not touch `updated_at`, so neither run's guard sees the other. Each believes it
-        // succeeded on every row and both restamp, leaving the final stamp and per-row vector
-        // provenance in silent disagreement -- the exact failure the mechanism exists to prevent.
-        // An automated runbook serializes rather than errors out by waiting for the prior run.
-        // The task holds `app_context.db` and never resolves a `tenant_id`, so we grab the pool
-        // from `shared_store` directly to acquire the session-scoped lock.
-        // A missing `DbHandle` on Postgres is a real defect — it means the boot path skipped
-        // building the tenant pool, and proceeding without the lock would silently back off.
-        let handle = app_context.shared_store.get::<DbHandle>().ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "reindex requires the tenant pool, which this deployment did not build"
-            ))
-        })?;
-        let outcome = crate::db::reindex_workspace_with_lock(
-            handle.tenant.pool().clone(),
-            workspace_id,
-            &app_context.db,
-            &candidate_ids,
-            provider.as_ref(),
+                .map_err(|error| error.0)?;
+        reindex::enqueue_for_class(
+            app_context,
+            ReindexArgs {
+                lifecycle_id: None,
+                workspace_id,
+                worker_class,
+                startup: false,
+            },
         )
-        .await
-        .internal()?;
-
-        if !outcome.failures.is_empty() {
-            for failure in &outcome.failures {
-                eprintln!(
-                    "  failed to reindex entity {}: {}",
-                    failure.entity_id, failure.error
-                );
-            }
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "reindex incomplete: {} entities, {} reindexed, {} failed; the workspace's \
-                 stamped model was left unchanged, so the write-time model check keeps refusing \
-                 new writes until this task is re-run and every entity succeeds",
-                outcome.total,
-                outcome.reindexed,
-                outcome.failures.len(),
-            ))
-            .into());
-        }
+        .await?;
 
         println!(
-            "reindex finished: {} entities, {} reindexed, workspace restamped to {:?} ({} \
-             dimensions) (entities whose entity_type has no x-embed field stay without embedding)",
-            outcome.total,
-            outcome.reindexed,
-            provider.model_name(),
-            provider.dimensions(),
+            "reindex queued for workspace {workspace_id}; a worker re-embeds it and restamps its model when every entity succeeds"
         );
         Ok(())
     }

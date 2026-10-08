@@ -23,6 +23,24 @@ mod redis_routing {
 
     use yorishiro::workers::embedding_sync::EmbeddingSyncWorkerOfficial;
 
+    /// This context is built by hand, so it carries none of the services `App::after_context` installs.
+    /// The embedding worker treats a missing resolver as a wiring failure, so the test supplies the community rule: no workspace-specific provider.
+    struct NoWorkspaceProvider;
+
+    #[async_trait::async_trait]
+    impl yorishiro::services::embedding::WorkspaceEmbeddingResolver for NoWorkspaceProvider {
+        async fn resolve(
+            &self,
+            _conn: &sea_orm::DatabaseConnection,
+            _workspace_id: Uuid,
+        ) -> Result<
+            Option<Arc<dyn yorishiro::services::embedding::EmbeddingProvider>>,
+            yorishiro::error::YorishiroError,
+        > {
+            Ok(None)
+        }
+    }
+
     fn args(class: WorkerClass, lifecycle_id: Option<Uuid>) -> EmbeddingSyncArgs {
         EmbeddingSyncArgs {
             lifecycle_id,
@@ -71,6 +89,8 @@ mod redis_routing {
         let ctx = AppContext::builder(Environment::Test, db, template.config.clone())
             .queue_provider(queue.clone())
             .build();
+        ctx.shared_store.insert(Arc::new(NoWorkspaceProvider)
+            as Arc<dyn yorishiro::services::embedding::WorkspaceEmbeddingResolver>);
 
         queue
             .register(EmbeddingSyncWorkerShared::build(&ctx))

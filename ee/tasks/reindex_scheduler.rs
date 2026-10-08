@@ -305,6 +305,7 @@ impl TenantReindexScheduler {
                     lifecycle_id: None,
                     workspace_id: ws.id,
                     worker_class,
+                    startup: false,
                 };
                 dispatches.push((schedule.tenant_id, args));
             }

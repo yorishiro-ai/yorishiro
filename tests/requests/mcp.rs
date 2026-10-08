@@ -786,3 +786,96 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     })
     .await;
 }
+
+/// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+#[serial_test::serial(queue_postgres)]
+async fn mcp_search_asks_a_worker_to_embed_the_query() {
+    use super::query_worker::{FailingProvider, KeywordProvider, boot_with_query_worker};
+    use std::sync::Arc;
+    use yorishiro::error::YorishiroError;
+    use yorishiro::models::entity_embeddings;
+
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    let provider = Arc::new(KeywordProvider::new(768));
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let (tenant_id, workspace_id, owner_id, _schema_key) =
+            fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
+        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let definition = serde_json::from_value(json!({
+            "name": "note",
+            "entity_types": { "note": { "fields": {
+                "title": { "type": "string", "required": true, "x-embed": true }
+            } } }
+        }))
+        .expect("definition");
+        schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, definition, None, None)
+            .await
+            .expect("create schema");
+        for title in ["alpha plan", "beta plan"] {
+            let record = entity_entities::create(
+                &ctx.db,
+                workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: json!({ "title": title }),
+                },
+                None,
+            )
+            .await
+            .expect("create entity");
+            entity_embeddings::sync_embedding_for_record(
+                &ctx.db,
+                workspace_id,
+                &record,
+                provider.as_ref(),
+            )
+            .await
+            .expect("embed entity");
+        }
+
+        let session = initialize(&request).await;
+        let found = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            2,
+            "tools/call",
+            json!({ "name": "search_entities", "arguments": { "query_text": "beta", "limit": 2 } }),
+        )
+        .await;
+        assert_eq!(found["result"]["isError"], false, "MCP call: {found}");
+        let hits = tool_result_json(&found);
+        assert_eq!(
+            hits[0]["entity"]["data"]["title"], "beta plan",
+            "nearest entity first: {hits}"
+        );
+        // The worker's provider is replaced by one that fails: the tool reports the worker's diagnostic.
+        ctx.shared_store.insert(
+            Arc::new(FailingProvider(|| YorishiroError::ProviderUnreachable {
+                url: "http://embedding.invalid".into(),
+                message: "connection refused".into(),
+            })) as Arc<dyn yorishiro::services::embedding::EmbeddingProvider>,
+        );
+        let failed = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({ "name": "search_entities", "arguments": { "query_text": "alpha" } }),
+        )
+        .await;
+        assert_eq!(failed["result"]["isError"], true, "MCP call: {failed}");
+        assert!(
+            failed["result"]["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("connection refused"))
+        );
+    })
+    .await;
+}

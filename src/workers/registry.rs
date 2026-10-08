@@ -19,6 +19,7 @@ use crate::workers::embedding_sync::{
     EmbeddingSyncArgs, EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
     EmbeddingSyncWorkerTenantPrivate,
 };
+use crate::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
 use crate::workers::reindex::{
     ReindexArgs, ReindexWorkerOfficial, ReindexWorkerShared, ReindexWorkerTenantPrivate,
 };
@@ -52,7 +53,7 @@ pub struct WorkerRegistry {
 }
 
 impl WorkerRegistry {
-    /// The workers the base application owns: embedding sync and reindex, one type per worker class.
+    /// The workers the base application owns: embedding sync and reindex, one type per worker class, and the query embedding worker.
     #[must_use]
     pub fn community() -> Self {
         Self::default()
@@ -62,6 +63,7 @@ impl WorkerRegistry {
             .register::<ReindexArgs, ReindexWorkerTenantPrivate>()
             .register::<ReindexArgs, ReindexWorkerOfficial>()
             .register::<ReindexArgs, ReindexWorkerShared>()
+            .register::<QueryEmbeddingArgs, QueryEmbeddingWorker>()
     }
 
     /// Adds worker type `W`, whose tags and queue are whatever `W` declares.

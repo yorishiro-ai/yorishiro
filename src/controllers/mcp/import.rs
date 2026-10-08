@@ -54,6 +54,14 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
         authorized.commit().await?;
+        for entity_id in result.entity_ids.iter().copied() {
+            crate::workers::embedding_sync::enqueue_after_write(
+                self.app_context(),
+                workspace_id,
+                entity_id,
+            )
+            .await;
+        }
         ok_json(result)
     }
 }

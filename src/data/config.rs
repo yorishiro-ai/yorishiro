@@ -62,7 +62,36 @@ fn validate(config: &Config) -> Result<()> {
             "embedding dimensions and sequence length, rate limits, and database load guard durations must be greater than zero".into(),
         ));
     }
+    validate_query_embedding(&settings.query_embedding)?;
     validate_queue_policy(config)
+}
+
+/// The longest a search may be told to wait for a worker, so a typo cannot hold a request open for hours.
+const MAX_QUERY_EMBEDDING_TIMEOUT_MS: u64 = 120_000;
+
+fn validate_query_embedding(settings: &crate::data::settings::QueryEmbedding) -> Result<()> {
+    if settings.timeout_ms == 0 || settings.poll_interval_ms == 0 {
+        return Err(Error::Message(
+            "settings.query_embedding.timeout_ms and poll_interval_ms must be greater than zero"
+                .into(),
+        ));
+    }
+    if settings.timeout_ms > MAX_QUERY_EMBEDDING_TIMEOUT_MS {
+        return Err(Error::Message(format!(
+            "settings.query_embedding.timeout_ms must not exceed {MAX_QUERY_EMBEDDING_TIMEOUT_MS}"
+        )));
+    }
+    if settings.poll_interval_ms > settings.timeout_ms {
+        return Err(Error::Message(
+            "settings.query_embedding.poll_interval_ms must not exceed timeout_ms".into(),
+        ));
+    }
+    if settings.retention_seconds.saturating_mul(1000) < settings.timeout_ms {
+        return Err(Error::Message(
+            "settings.query_embedding.retention_seconds must cover timeout_ms".into(),
+        ));
+    }
+    Ok(())
 }
 
 ///

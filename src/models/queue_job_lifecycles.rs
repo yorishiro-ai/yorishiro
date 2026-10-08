@@ -121,6 +121,28 @@ impl Entity {
         row.update(db).await.map(|_| ())
     }
 
+    /// Whether `workspace_id` already has a `job_name` job that is queued, running or waiting for a retry.
+    ///
+    /// # Errors
+    /// Returns an error if the read fails.
+    pub async fn has_active(
+        db: &impl ConnectionTrait,
+        job_name: &str,
+        workspace_id: Uuid,
+    ) -> Result<bool, DbErr> {
+        Ok(Entity::find()
+            .filter(Column::JobName.eq(job_name))
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Status.is_in([
+                LifecycleStatus::Queued.as_db_str(),
+                LifecycleStatus::Running.as_db_str(),
+                LifecycleStatus::Retrying.as_db_str(),
+            ]))
+            .count(db)
+            .await?
+            > 0)
+    }
+
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -158,6 +180,35 @@ impl Entity {
         tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
+        }
+        Ok(())
+    }
+
+    /// Closes a row that was never admitted as `failed`, fenced to the statuses a delivery may still claim.
+    ///
+    /// # Errors
+    /// Returns `RecordNotFound` when another delivery has already claimed the row.
+    pub(crate) async fn fail_unadmitted(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        error: &str,
+    ) -> Result<(), DbErr> {
+        let result = Entity::update_many()
+            .col_expr(
+                Column::Status,
+                Expr::value(LifecycleStatus::Failed.as_db_str()),
+            )
+            .col_expr(Column::FailedAt, Expr::value(Utc::now().fixed_offset()))
+            .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
+            .filter(Column::Id.eq(id))
+            .filter(Column::Status.is_in([
+                LifecycleStatus::Queued.as_db_str(),
+                LifecycleStatus::Retrying.as_db_str(),
+            ]))
+            .exec(db)
+            .await?;
+        if result.rows_affected == 0 {
+            return Err(DbErr::RecordNotFound("unclaimed queue lifecycle".into()));
         }
         Ok(())
     }
@@ -319,6 +370,16 @@ impl Entity {
         let result = update.exec(db).await?;
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
+        }
+        if matches!(
+            status,
+            LifecycleStatus::Completed
+                | LifecycleStatus::Failed
+                | LifecycleStatus::Cancelled
+                | LifecycleStatus::Unavailable
+        ) && let Err(error) = crate::models::queue_job_dispatch_outbox::remove(db, id).await
+        {
+            tracing::warn!(lifecycle_id = %id, diagnostic = %error, "terminal lifecycle outbox cleanup failed");
         }
         Ok(())
     }

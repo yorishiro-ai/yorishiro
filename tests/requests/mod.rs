@@ -28,6 +28,7 @@ mod official_templates;
 mod openapi;
 #[cfg(feature = "enterprise")]
 mod origin;
+pub(crate) mod query_worker;
 #[cfg(feature = "enterprise")]
 mod queue;
 mod relations;
@@ -83,8 +84,11 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
 /// so there is only `ctx.db` to close.
 /// `config/test_sqlite.yaml` has no `queue:` block, so the queue provider is `None` for every
 /// test that boots through `request_with_create_db`.
-/// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
+/// When a queue provider is configured, shutdown cancels its workers before file cleanup.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
+    if let Some(queue) = &ctx.queue_provider {
+        queue.shutdown().expect("shutdown sqlite test queue");
+    }
     ctx.db.get_sqlite_connection_pool().close().await;
     // Clean up the temp SQLite file and its journaling siblings.
     let _ = std::fs::remove_file(db_path);
@@ -100,6 +104,13 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
 fn is_sqlite_backend() -> bool {
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
     url.starts_with("sqlite://") || url.starts_with("sqlite::memory:")
+}
+
+pub(crate) fn is_sqlite_queue() -> bool {
+    match std::env::var("QUEUE_URL") {
+        Ok(url) => url.starts_with("sqlite://") || url.starts_with("sqlite::"),
+        Err(_) => is_sqlite_backend(),
+    }
 }
 
 /// Unified entry point for request tests across PostgreSQL and SQLite backends.
@@ -118,7 +129,14 @@ where
     Fut: std::future::Future<Output = ()>,
 {
     if is_sqlite_backend() {
-        let db_path = format!("sqlite_{}.sqlite3", uuid::Uuid::new_v4());
+        // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
+        // SQLite must not open a path whose parent can disappear during concurrent test teardown.
+        let directory = tempfile::tempdir().expect("create sqlite test directory");
+        let db_path = directory
+            .path()
+            .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .into_owned();
         request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
             let result =
                 std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
@@ -134,6 +152,7 @@ where
             }
         })
         .await;
+        drop(directory);
     } else {
         request_with_create_db::<H, _, _>(|request, ctx| {
             let result =
@@ -203,6 +222,13 @@ where
         .await
         .expect("load sqlite config");
     config.database.uri = format!("sqlite://{}?mode=rwc", db_path);
+    if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
+        let queue_path = std::path::Path::new(&db_path)
+            .with_file_name(format!("{}_queue.sqlite3", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .into_owned();
+        queue.uri = format!("sqlite://{queue_path}?mode=rwc");
+    }
     // Override the server port so tests don't collide with each other.
     let port = loco_rs::testing::prelude::get_available_port().await;
     config.server.port = port;

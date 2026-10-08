@@ -1,5 +1,6 @@
-use axum::Json;
 use axum::routing::post;
+use axum::{Json, extract::State};
+use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
@@ -12,6 +13,7 @@ use crate::models::import::{self, ImportResult};
 /// All-or-nothing: on the first error the request fails with that error and, because the handler never reaches `Authorized::commit()`, nothing imported so far is applied.
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/import.jsonl", request_body(content = String, content_type = "application/x-ndjson"), responses((status = 200, body = crate::models::import::ImportResult), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
 pub(crate) async fn import_jsonl(
+    State(ctx): State<AppContext>,
     authorized: Authorized<SchemaScope>,
     body: String,
 ) -> Result<Json<ImportResult>, ApiError> {
@@ -27,6 +29,9 @@ pub(crate) async fn import_jsonl(
     )
     .await?;
     authorized.commit().await?;
+    for entity_id in result.entity_ids.iter().copied() {
+        crate::workers::embedding_sync::enqueue_after_write(&ctx, workspace_id, entity_id).await;
+    }
     Ok(Json(result))
 }
 

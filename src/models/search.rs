@@ -10,7 +10,7 @@
 //!
 //! Embedding generation follows two paths.
 //! Document embedding is asynchronous: the embedding sync worker (`workers::embedding_sync`) generates and stores vectors after entity writes.
-//! Query embedding is synchronous: `embed_query` runs in the request handler, before any DB connection is acquired, so no connection is held during the external API call.
+//! Query embedding is not done here: the server holds no model, so `workers::query_embedding` asks a worker for the vector before any DB connection is held for the search.
 //! Both use the same provider, so documents and queries share one vector space.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
@@ -20,7 +20,6 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_entities::EntityRecord;
-use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 const DEFAULT_SEARCH_LIMIT: i64 = 10;
 pub(crate) const MIN_SEARCH_LIMIT: i64 = 1;
@@ -89,17 +88,6 @@ impl SearchRow {
     }
 }
 
-/// Converts query text into an embedding vector; used together with [`search_by_vector`].
-/// On request paths, call this before acquiring a DB connection: embedding generation can
-/// take a long time (an external API call), and holding a connection while waiting would
-/// let pool exhaustion spill over onto unrelated endpoints.
-pub(crate) async fn embed_query(
-    provider: &dyn EmbeddingProvider,
-    query_text: &str,
-) -> Result<Vec<f32>, YorishiroError> {
-    provider.embed_as(EmbedKind::Query, query_text).await
-}
-
 /// The `WHERE` fragment (and its bound values) both halves of the search apply, appended
 /// after `$2` (vector half) / no vector (trigram/FTS5 half) so callers pass in the params
 /// that come before it and get back the ones to append.
@@ -158,7 +146,9 @@ impl VectorKnn {
             "SELECT {HIT_COLUMNS}, (ee.embedding <=> $1) AS distance \
              FROM entity_entities e \
              JOIN {table_name} ee ON ee.entity_id = e.id \
-             WHERE ee.embedding IS NOT NULL{scope_sql} \
+             WHERE ee.embedding IS NOT NULL \
+               AND NOT EXISTS (SELECT 1 FROM workspace_workspaces w WHERE w.id = e.workspace_id AND w.embedding_reindexing) \
+               {scope_sql} \
              ORDER BY ee.embedding <=> $1 \
              LIMIT {limit}"
         );
@@ -182,7 +172,8 @@ impl VectorKnn {
             "SELECT {HIT_COLUMNS}, vec_distance_cosine(?, ee.embedding) AS distance \
              FROM entity_entities e \
              JOIN {table_name} ee ON e.id = ee.entity_id \
-             WHERE ee.embedding IS NOT NULL AND e.workspace_id = ?"
+             WHERE ee.embedding IS NOT NULL AND e.workspace_id = ? \
+               AND NOT EXISTS (SELECT 1 FROM workspace_workspaces w WHERE w.id = e.workspace_id AND w.embedding_reindexing)"
         );
         let mut values: Vec<sea_orm::Value> = vec![
             sea_orm::Value::from(crate::db::sqlite_vec_blob(&vector)),
@@ -230,6 +221,32 @@ pub async fn resolve_search_table(
 ///
 /// # Errors
 /// Returns an error if the workspace is missing or no table exists for the resolved width.
+/// Checks that a freshly embedded query vector has the width the workspace's vectors have, and returns that width's table.
+///
+/// The worker calls this before it stores a result, so a model that disagrees with the workspace fails as a diagnostic on the request instead of as a database error in the search that would have used the vector.
+/// A width with no table is refused by the same registry the writes use.
+///
+/// # Errors
+/// Returns `ValidationFailed` when the width differs from the workspace's or has no table.
+pub(crate) async fn check_query_width(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    vector_len: usize,
+) -> Result<&'static str, YorishiroError> {
+    let (dimension, table) =
+        resolve_search_table_with_dimensions(conn, workspace_id, vector_len).await?;
+    if dimension != vector_len {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!(
+                "this workspace holds {dimension}-dimensional vectors, but the configured embedding provider produced a {vector_len}-dimensional query vector"
+            ),
+            details: vec![],
+            hint: "point the deployment at the workspace's model, or re-embed the workspace".into(),
+        });
+    }
+    Ok(table)
+}
+
 pub(crate) async fn resolve_query_table(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -288,6 +305,11 @@ pub(crate) async fn search_in_table(
     query: SearchQuery,
     embed_table: &str,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
+    if crate::models::workspace_workspaces::embedding_reindexing(conn, workspace_id).await? {
+        return Err(YorishiroError::BackendUnavailable {
+            message: "semantic search is temporarily unavailable while workspace embeddings are being reindexed".into(),
+        });
+    }
     // The table name is interpolated into SQL, so only a known embedding table is accepted.
     if !crate::models::entity_embeddings::embedding_tables().any(|table| table == embed_table) {
         return Err(YorishiroError::ValidationFailed {
@@ -361,7 +383,8 @@ pub(crate) async fn search_in_table(
                  FROM entity_fts \
                  JOIN entity_entities e ON CAST(e.id AS TEXT) = entity_fts.entity_id \
                  LEFT JOIN {embed_table} ee ON ee.entity_id = e.id \
-                 WHERE entity_fts MATCH ? AND ee.entity_id IS NULL AND e.workspace_id = ?"
+                 WHERE entity_fts MATCH ? AND ee.entity_id IS NULL AND e.workspace_id = ? \
+                   AND NOT EXISTS (SELECT 1 FROM workspace_workspaces w WHERE w.id = e.workspace_id AND w.embedding_reindexing)"
             );
             let mut values: Vec<sea_orm::Value> = vec![query_text.into(), workspace_id.into()];
             if let Some(entity_type) = &query.entity_type {

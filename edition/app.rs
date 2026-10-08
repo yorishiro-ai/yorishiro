@@ -84,7 +84,7 @@ impl Hooks for App {
     }
 
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
-        workers().connect(ctx, queue).await
+        base::connect_workers(ctx, queue, &workers()).await
     }
 
     fn register_tasks(tasks: &mut Tasks) {

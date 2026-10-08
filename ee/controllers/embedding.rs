@@ -61,6 +61,7 @@ async fn set_embedding_key(
                     auth_ctx.workspace_id,
                 )
                 .await?,
+                startup: false,
             };
             if let Err(err) = enqueue_for_class(&ctx, args).await {
                 tracing::warn!(

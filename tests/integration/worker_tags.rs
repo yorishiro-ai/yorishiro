@@ -118,7 +118,8 @@ fn worker_tags_command_prints_the_edition_exact_list() {
         .expect("run yorishiro");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("valid UTF-8");
-    let baseline = "worker-class:tenant-private,worker-class:official,worker-class:shared";
+    let baseline =
+        "worker-class:tenant-private,worker-class:official,worker-class:shared,query-embedding";
     #[cfg(feature = "enterprise")]
     let expected = format!("{baseline},infer-fill");
     #[cfg(not(feature = "enterprise"))]

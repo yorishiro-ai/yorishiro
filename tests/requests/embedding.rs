@@ -282,7 +282,7 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "the resolved provider must carry the assigned dimensions, not the deployment default"
         );
 
-        // A different, still-unassigned workspace must not see the first workspace's assignment.
+        // A different workspace can select another supported width without changing the first.
         let other = setup_second_workspace(&ctx, &setup).await;
         let other_result = resolver
             .resolve(&ctx.db, other)
@@ -290,8 +290,23 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             .expect("resolve unrelated workspace");
         assert!(
             other_result.is_none(),
-            "one workspace's assignment must not leak to another"
+            "an unassigned workspace must not inherit another workspace's assignment"
         );
+
+        yorishiro::edition::ee::models::workspace_embedding_keys::set(
+            &ctx.db,
+            other,
+            "https://embed.example.com/v1",
+            "embed-1024",
+            "sk-other-secret",
+            1024,
+            false,
+            None,
+        )
+        .await
+        .expect("assign a different supported width");
+        assert_eq!(resolver.resolve(&ctx.db, setup.workspace_id).await.unwrap().unwrap().dimensions(), 1536);
+        assert_eq!(resolver.resolve(&ctx.db, other).await.unwrap().unwrap().dimensions(), 1024);
 
     })
     .await;

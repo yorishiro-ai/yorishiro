@@ -20,10 +20,10 @@ use super::helpers;
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::DbBackend;
 
-/// Common widths this migration creates tables for.
-/// A table for a width that no workspace uses is harmless: it is simply
-/// never queried, and only occupies negligible catalog metadata.
-/// When a deployment needs a new width, the helper below creates the table.
+/// The deployment-wide closed set of widths supported by the application.
+/// Every partition is created up front so workspaces can select different
+/// providers, rotate keys, and reindex between widths without runtime DDL or
+/// a migration race. An unused partition has only small catalog/index cost.
 pub(crate) const WIDTHS: &[i32] = &[768, 1024, 1536];
 
 /// The table name for a given width.

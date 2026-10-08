@@ -746,6 +746,40 @@ async fn queue_starvation_index_matches_admission_predicate() {
     .await;
 }
 
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn startup_admission_upgrade_preserves_ordinary_active_duplicates() {
+    with_database("startup_admission_upgrade", |db| Box::pin(async move {
+        let through_requests = migrations_through("m20261005_000017_embedding_tables_tenant_read");
+        Migrator::up(db, Some(through_requests))
+            .await
+            .expect("migrations before the embedding queue state");
+        seed_initial_rows(db).await;
+        let workspace = id(db, WORKSPACE);
+        execute(
+            db,
+            format!(
+                "INSERT INTO queue_job_lifecycles (id, job_name, worker_class, workspace_id, status, enqueue_at) VALUES ({}, 'reindex', 'shared', {workspace}, 'queued', CURRENT_TIMESTAMP), ({}, 'reindex', 'shared', {workspace}, 'queued', CURRENT_TIMESTAMP)",
+                id(db, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                id(db, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+            ),
+        )
+        .await;
+        Migrator::up(db, None)
+            .await
+            .expect("startup admission migration must not reject ordinary duplicates");
+        let count: i64 = value(
+            db,
+            format!("SELECT COUNT(*) FROM queue_job_lifecycles WHERE job_name = 'reindex' AND workspace_id = {workspace} AND status = 'queued'"),
+        )
+        .await;
+        assert_eq!(count, 2);
+        assert_index_exists(db, "queue_startup_reindex_active_workspace_idx").await;
+    }))
+    .await;
+}
+
 /// The embedding-sync token column is present, non-empty, and rotates on every write.
 #[tokio::test]
 #[serial(postgres_cluster)]
@@ -960,7 +994,8 @@ async fn embedding_tables_tenant_read_grant_is_applied_and_rolled_back() {
             .expect("migrations before the grant");
         assert_eq!(value::<i64>(db, can_select).await, 0, "no grant before the migration");
 
-        Migrator::up(db, Some(through_grant))
+        // `Some(n)` is a number of steps, not a target version, so exactly one step applies the grant migration whatever follows it.
+        Migrator::up(db, Some(1))
             .await
             .expect("apply the grant migration");
         assert_eq!(value::<i64>(db, can_select).await, 1, "SELECT granted");

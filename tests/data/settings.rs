@@ -39,3 +39,24 @@ fn provider_is_typed_and_unknown_settings_are_rejected() {
     unknown_key["rate_limit"]["obsolete"] = 1.into();
     assert!(serde_json::from_value::<Settings>(unknown_key).is_err());
 }
+
+#[test]
+fn query_embedding_section_is_optional_and_has_bounded_defaults() {
+    use yorishiro::data::settings::QueryEmbedding;
+
+    let parsed: Settings = serde_json::from_value(settings()).unwrap();
+    assert_eq!(parsed.query_embedding, QueryEmbedding::default());
+    assert_eq!(parsed.query_embedding.timeout_ms, 15_000);
+    assert_eq!(parsed.query_embedding.poll_interval_ms, 100);
+    assert_eq!(parsed.query_embedding.retention_seconds, 300);
+
+    let mut tuned = settings();
+    tuned["query_embedding"] = serde_json::json!({"timeout_ms": 2000});
+    let parsed: Settings = serde_json::from_value(tuned).unwrap();
+    assert_eq!(parsed.query_embedding.timeout_ms, 2000);
+    assert_eq!(parsed.query_embedding.poll_interval_ms, 100);
+
+    let mut unknown = settings();
+    unknown["query_embedding"] = serde_json::json!({"obsolete": 1});
+    assert!(serde_json::from_value::<Settings>(unknown).is_err());
+}

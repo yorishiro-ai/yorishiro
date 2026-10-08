@@ -68,6 +68,7 @@ mod unit {
             lifecycle_id: None,
             workspace_id: Uuid::now_v7(),
             worker_class: WorkerClass::TenantPrivate,
+            startup: false,
         };
         let dispatcher = RecordingDispatcher {
             args: Mutex::new(Vec::new()),
@@ -98,6 +99,7 @@ mod unit {
                 lifecycle_id: None,
                 workspace_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,
+                startup: false,
             },
             &dispatcher,
         )

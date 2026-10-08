@@ -1,3 +1,5 @@
+mod query_embedding_requests;
+mod queue_job_dispatch_outbox;
 mod queue_job_lifecycles;
 mod workspace_workspaces;
 

@@ -28,6 +28,7 @@ src/models/workspace_invites/operations.rs	fn	create_invite_at	integration-test:
 src/models/workspace_invites/operations.rs	fn	redeem_invite_at	integration-test: the injected-time variant lets backend tests pin the expiry boundary without a clock.
 src/workers/mod.rs	mod	dispatch	integration-test: the module that names the dispatcher seam traits integration tests substitute through `AppContext::shared_store`.
 src/workers/dispatch.rs	trait	ReindexDispatcher	integration-test: reindex dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
+src/workers/reindex.rs	field	ReindexArgs::startup	queue-protocol: serialized worker arguments expose whether the job uses startup-only admission; production dispatch and external integration fixtures construct this transport type.
 ee/workers/infer_fill.rs	trait	InferFillDispatcher	integration-test: infer-fill dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
 ee/controllers/inference.rs	field	InferJobStatus::proposed	Public JSON response field for the durable proposal count.
 ee/models/inference_jobs.rs	field	InferenceJobRecord::proposed	Public durable job record field for the proposal count.
@@ -904,3 +905,44 @@ src/workers/registry.rs	fn	WorkerRegistry::queues	worker-registry: the named que
 src/controllers/mcp/mod.rs	struct	McpToolSet	ce-ee-composition: the MCP tools and access policy an edition extends from the community set.
 src/controllers/mcp/mod.rs	fn	McpToolSet::extend	ce-ee-composition: how an edition adds MCP tools and its access policy; unused by the community build, which is why it cannot be narrowed to pub(crate).
 src/workers/queue.rs	const	SINGLE_JOB_LIMIT	integration-test: the one-running-job default that the queue policy tests and the plan policy overlay both state.
+src/services/embedding/mod.rs	enum	EmbeddingProviderAvailability	auth-provider-resolver: typed return of the externally implementable `EmbeddingProvider::availability` contract, so a provider declares itself disabled without a model-name sentinel.
+src/data/settings.rs	field	QueryEmbedding::poll_interval_ms	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	field	QueryEmbedding::retention_seconds	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	field	QueryEmbedding::timeout_ms	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	field	Settings::query_embedding	integration-test: tests/config exercises the query embedding settings and their validation.
+src/data/settings.rs	struct	QueryEmbedding	integration-test: tests/config exercises the query embedding settings and their validation.
+src/models/mod.rs	mod	query_embedding_requests	integration-test: tests/models/query_embedding_requests.rs imports the table-owning model.
+src/models/query_embedding_requests.rs	enum	QueryEmbeddingStatus	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	enum	QueryOutcome	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::complete	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::expire	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::fail	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::find_pending	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::open	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::purge_expired	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	fn	Entity::take	integration-test: tests/models/query_embedding_requests.rs exercises the request lifecycle through the table-owning model.
+src/models/query_embedding_requests.rs	use	crate::models::_entities::query_embedding_requests::{ActiveModel,Column,Entity,Model}	seaorm-facade: the table-owning model re-exports its generated entity, as every model does.
+src/services/embedding/mod.rs	fn	build_embedding_provider	integration-test: tests/requests/search.rs builds the worker-side provider from settings the way a worker process does.
+src/workers/mod.rs	mod	query_embedding	loco-task-worker: tests import the query embedding worker module.
+src/workers/query_embedding.rs	field	QueryEmbeddingArgs::request_id	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	field	QueryEmbeddingArgs::workspace_id	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	fn	embed_query	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	struct	QueryEmbeddingArgs	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/workers/query_embedding.rs	struct	QueryEmbeddingWorker	loco-task-worker: the query embedding worker, its payload and the server-side entry point; tests/workers and tests/requests drive them.
+src/db.rs	fn	try_lock_for_update	integration-test: tests/workers/startup_reindex.rs takes the scan lock as a second replica.
+src/models/queue_job_lifecycles.rs	fn	Entity::has_active	integration-test: the startup reindex scan reads active reindex jobs through the table-owning model.
+src/workers/mod.rs	mod	startup_reindex	loco-task-worker: tests import the startup reindex module.
+src/workers/startup_reindex.rs	fn	run	loco-task-worker: the worker-start reindex scan; tests/workers/startup_reindex.rs drives it.
+src/models/workspace_workspaces.rs	field	StartupReindexRow::embedding_reindexing	integration-test: startup reindex tests cover recovery of a workspace left marked during an interrupted reindex.
+src/models/mod.rs	mod	queue_job_dispatch_outbox	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	struct	PendingDispatch	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	fn	record	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	fn	due	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	fn	claim_due	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::lifecycle_id	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::job_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::worker_class	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::payload	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::worker_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::queue_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::tags	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.

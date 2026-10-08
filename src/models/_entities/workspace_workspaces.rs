@@ -23,6 +23,7 @@ pub struct Model {
     pub embedding_dimensions: Option<i32>,
     pub schema_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
+    pub embedding_reindexing: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -45,6 +46,8 @@ pub enum Relation {
     InferenceJobs,
     #[sea_orm(has_many = "super::inference_proposals::Entity")]
     InferenceProposals,
+    #[sea_orm(has_many = "super::query_embedding_requests::Entity")]
+    QueryEmbeddingRequests,
     #[sea_orm(
         belongs_to = "super::schema_schemas::Entity",
         from = "Column::SchemaId",
@@ -120,6 +123,12 @@ impl Related<super::inference_jobs::Entity> for Entity {
 impl Related<super::inference_proposals::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::InferenceProposals.def()
+    }
+}
+
+impl Related<super::query_embedding_requests::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::QueryEmbeddingRequests.def()
     }
 }
 

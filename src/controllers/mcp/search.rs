@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::controllers::extractors::{db_handle, resolve_embedding_provider, search_token_limiter};
+use crate::controllers::extractors::{db_handle, search_token_limiter};
 use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
@@ -52,35 +52,28 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        let provider = match resolve_embedding_provider(self.app_context(), auth_ctx.workspace_id)
-            .await
-            .map_err(|err| err.0)
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let workspace_id = auth_ctx.workspace_id;
         let limiter = match search_token_limiter(self.app_context()).map_err(|err| err.0) {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
         // Charged before embedding, same as the REST adapter: the budget bounds embedding work, and this tool does exactly as much of it as `GET /api/search`.
-        match charge_search_tokens(
-            &limiter,
-            provider.as_ref(),
-            auth_ctx.workspace_id,
+        if let Err(err) = charge_search_tokens(&limiter, workspace_id, &args.query_text) {
+            return Ok(err_to_tool_result(err));
+        }
+
+        // The server holds no model: a worker embeds the query, and no DB connection is held while waiting for it.
+        let vector = match crate::workers::query_embedding::embed_query(
+            self.app_context(),
+            auth_ctx.tenant_id,
+            workspace_id,
             &args.query_text,
-        ) {
+        )
+        .await
+        {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-
-        // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
-        let vector = match search::embed_query(provider.as_ref(), &args.query_text).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
-
-        let workspace_id = auth_ctx.workspace_id;
 
         // Resolved on the identity pool: the tenant-scoped role cannot read `tenant_tenants`, which the embedding chain joins.
         let embed_table =

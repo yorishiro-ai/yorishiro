@@ -16,9 +16,11 @@ Embeddings are generated in two distinct paths:
 
 **Document embedding (background).** The embedding sync worker (`workers::embedding_sync`) runs as a background job and stores vectors after entity writes. This is the only path that writes to `entity_embeddings`.
 
-**Query embedding (synchronous).** The search endpoint calls `search::embed_query` before acquiring a database connection. This generates a vector for similarity comparison but does not store it. The embedding call happens outside any transaction to avoid holding connections during the external API round trip.
+**Query embedding (worker-backed).** The search endpoint persists a short-lived query-embedding request and polls it within the configured bound. A query-embedding worker invokes the provider and stores the result; the server does not load a provider or hold a database connection while waiting.
 
-Both paths use the same embedding provider and model, so vectors share one embedding space.
+Within a workspace, document and query embeddings resolve the same configured provider and model. Different workspaces may intentionally use different providers, models, and supported widths.
+
+If the worker times out or reports a provider failure, search returns `503`; it does not silently fall back to lexical-only results.
 
 There is one exception: if you import a backup file (`import_jsonl`), the imported entities do not have embeddings yet. They are still searchable through fuzzy text matching (the words you type are matched against the text), but similarity search results will be incomplete until embeddings are generated. You can generate embeddings for all entities with:
 
@@ -65,6 +67,12 @@ Loco's storage extension points do not fit this cache because it is a deployment
 
 ### Changing embedding models
 
+The deployment supports the closed dimension set `768`, `1024`, and `1536`.
+Migrations create all three width partitions up front, even when no current workspace uses some of them.
+This keeps workspace-specific provider selection, credential rotation, and reindexing free of runtime table creation and allows different workspaces to coexist at different widths.
+Unused partitions contain only small catalog/index metadata; vector storage is charged only to populated partitions.
+Workspace and provider configuration selects one supported width, while `reindex_embeddings` moves existing vectors to the new model or width.
+
 If you switch to a different embedding model, existing embedded entities will still use vectors from the old model. You need to regenerate embeddings for affected workspaces:
 
 ```
@@ -74,6 +82,12 @@ cargo loco task reindex_embeddings workspace_id:<uuid>
 This re-embeds every entity in the workspace with the new model. Until it finishes, new writes to that workspace will be rejected until the reindex completes.
 
 You can also queue a reindex via the API: `POST /api/migration-jobs/reindex` (requires Migration scope). A reindex also runs automatically on startup if any workspace's model has changed.
+
+On PostgreSQL, reindex execution is serialized per workspace by the tenant-pool advisory lock. On SQLite, the worker uses the model-owned reindex path directly under SQLite's single-tenant semantics.
+
+Embedding sync is deliberately a single queue attempt. The pinned Loco 1.2.0 queue API has no portable delayed-enqueue operation, and immediately re-enqueueing failures would create an unbounded loop while lifecycle and queue mutations cannot be committed atomically. A confirmed vector write is the only successful persistence outcome; disabled or unconfigured embedding is recorded as an explicit no-op, deletion after enqueue is a successful no-op, and a stale snapshot is terminally superseded by the newer entity write. Provider, resolver, database, validation, and structural failures are recorded as failed and returned to Loco, with no automatic requeue. Use the explicit resync or reindex operations for recovery until a separately designed scheduler exists.
+
+**Operational boundary for failed embedding jobs.** The custom `queue_job_lifecycles` row is authoritative only once Loco has deserialized the job payload and the payload carries a valid `lifecycle_id`. A payload that fails deserialization (a malformed UUID, an unknown `worker_class`, a missing required field) is rejected by the Loco queue runner before any embedding code runs, so such a failure is recorded solely as a failed job in the queue provider, and its lifecycle row may remain `queued`. To inspect these, list failed jobs through the provider (the `JobStatus::Failed` rows in the queue table, or the equivalent Redis failed set). A typed embedding execution failure is different: the lifecycle row is `failed` with its diagnostic in `error`, and the provider job is failed as well. Neither case is retried automatically.
 
 ## Stripe webhooks
 
@@ -228,7 +242,8 @@ The ownership transaction reads due schedules and advances them before queue dis
 This is deliberate at-most-once dispatch protection: a scheduler crash cannot create duplicate queue jobs after the schedule commit, but a crash or queue failure after that commit can miss that tick.
 The task attempts every due queue dispatch, then reports one aggregated task failure if any enqueue fails.
 Those intervals are not retried, and the next scheduled interval remains the recovery point.
-The reindex worker's existing per-workspace advisory lock still serializes actual reindex effects when manual, startup, or scheduled jobs overlap.
+On PostgreSQL, the reindex worker's existing per-workspace advisory lock serializes actual reindex effects when manual, startup, or scheduled jobs overlap.
+On SQLite, reindex workers use the direct single-tenant, model-owned reindex path and do not acquire that PostgreSQL advisory lock.
 
 SQLite has no PostgreSQL-style advisory locks, so scheduler ownership uses a non-blocking OS file lock instead.
 The lock file is adjacent to the effective SQLite database path and has the `.scheduler.lock` suffix.
