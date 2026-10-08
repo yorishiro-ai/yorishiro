@@ -10,10 +10,8 @@ pub struct Model {
     pub id: Uuid,
     #[sea_orm(unique)]
     pub provider_job_id: Option<String>,
-    #[sea_orm(unique_key = "queue_startup_reindex_active_workspace_idx")]
     pub job_name: String,
     pub worker_class: String,
-    #[sea_orm(unique_key = "queue_startup_reindex_active_workspace_idx")]
     pub workspace_id: Option<Uuid>,
     pub plan: Option<String>,
     pub status: String,
