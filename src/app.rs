@@ -310,8 +310,18 @@ pub(crate) async fn connect_workers(
     install_embedding_provider(ctx).await?;
     workers.connect(ctx, queue).await?;
     crate::workers::startup_reindex::run(ctx).await;
+    let scan_ctx = ctx.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            crate::workers::startup_reindex::run(&scan_ctx).await;
+        }
+    });
+    ctx.shared_store.insert(StartupReindexHandle(task));
     Ok(())
 }
+
+struct StartupReindexHandle(tokio::task::JoinHandle<()>);
 
 async fn install_embedding_provider(ctx: &AppContext) -> Result<()> {
     if ctx
@@ -352,6 +362,10 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
 }
 
 pub(crate) async fn on_shutdown(ctx: &AppContext) {
+    if let Some(StartupReindexHandle(task)) = ctx.shared_store.remove::<StartupReindexHandle>() {
+        task.abort();
+        let _ = task.await;
+    }
     initializers::db_load_guard::shutdown(ctx).await;
     if let Some(db) = ctx.shared_store.get::<crate::db::DbHandle>() {
         db.identity.close().await;

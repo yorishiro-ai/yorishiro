@@ -77,6 +77,7 @@ pub async fn reindex_workspace(
     candidate_ids: &[Uuid],
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
+    crate::models::workspace_workspaces::set_embedding_reindexing(conn, workspace_id, true).await?;
     let records =
         crate::models::entity_entities::get_batch_with_tokens(conn, workspace_id, candidate_ids)
             .await
@@ -120,6 +121,8 @@ pub async fn reindex_workspace(
             dimensions,
         )
         .await?;
+        crate::models::workspace_workspaces::set_embedding_reindexing(conn, workspace_id, false)
+            .await?;
     }
 
     Ok(ReindexOutcome {

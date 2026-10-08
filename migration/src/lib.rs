@@ -23,6 +23,7 @@ mod m20261005_000016_add_entity_embedding_sync_token;
 mod m20261005_000017_embedding_tables_tenant_read;
 mod m20261006_000018_query_embedding_requests;
 mod m20261007_000019_active_reindex_admission;
+mod m20261008_000020_workspace_reindex_state;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -49,6 +50,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261005_000017_embedding_tables_tenant_read::Migration),
             Box::new(m20261006_000018_query_embedding_requests::Migration),
             Box::new(m20261007_000019_active_reindex_admission::Migration),
+            Box::new(m20261008_000020_workspace_reindex_state::Migration),
             // inject-above (do not remove this comment)
         ]
     }

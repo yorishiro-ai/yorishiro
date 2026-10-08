@@ -933,3 +933,4 @@ src/db.rs	fn	try_lock_for_update	integration-test: tests/workers/startup_reindex
 src/models/queue_job_lifecycles.rs	fn	Entity::has_active	integration-test: the startup reindex scan reads active reindex jobs through the table-owning model.
 src/workers/mod.rs	mod	startup_reindex	loco-task-worker: tests import the startup reindex module.
 src/workers/startup_reindex.rs	fn	run	loco-task-worker: the worker-start reindex scan; tests/workers/startup_reindex.rs drives it.
+src/models/workspace_workspaces.rs	field	StartupReindexRow::embedding_reindexing	integration-test: startup reindex tests cover recovery of a workspace left marked during an interrupted reindex.

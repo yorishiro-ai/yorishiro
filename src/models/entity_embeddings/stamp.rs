@@ -1,4 +1,4 @@
-use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait};
+use sea_orm::{ConnectionTrait, Statement};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -26,12 +26,14 @@ pub(super) async fn restamp_workspace_embedding(
     model: String,
     dimensions: i32,
 ) -> Result<(), YorishiroError> {
-    let mut active = crate::models::workspace_workspaces::ActiveModel {
-        id: ActiveValue::Unchanged(workspace_id),
-        ..Default::default()
-    };
-    active.embedding_model = ActiveValue::Set(Some(model));
-    active.embedding_dimensions = ActiveValue::Set(Some(dimensions));
-    active.update(conn).await.internal()?;
+    let backend = conn.get_database_backend();
+    conn.execute_raw(Statement::from_sql_and_values(
+        backend,
+        "UPDATE workspace_workspaces SET embedding_model = $1, embedding_dimensions = $2, \
+         embedding_reindexing = FALSE WHERE id = $3",
+        [model.into(), dimensions.into(), workspace_id.into()],
+    ))
+    .await
+    .internal()?;
     Ok(())
 }

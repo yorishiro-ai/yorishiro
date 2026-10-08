@@ -146,7 +146,9 @@ impl VectorKnn {
             "SELECT {HIT_COLUMNS}, (ee.embedding <=> $1) AS distance \
              FROM entity_entities e \
              JOIN {table_name} ee ON ee.entity_id = e.id \
-             WHERE ee.embedding IS NOT NULL{scope_sql} \
+             WHERE ee.embedding IS NOT NULL \
+               AND NOT EXISTS (SELECT 1 FROM workspace_workspaces w WHERE w.id = e.workspace_id AND w.embedding_reindexing) \
+               {scope_sql} \
              ORDER BY ee.embedding <=> $1 \
              LIMIT {limit}"
         );
@@ -170,7 +172,8 @@ impl VectorKnn {
             "SELECT {HIT_COLUMNS}, vec_distance_cosine(?, ee.embedding) AS distance \
              FROM entity_entities e \
              JOIN {table_name} ee ON e.id = ee.entity_id \
-             WHERE ee.embedding IS NOT NULL AND e.workspace_id = ?"
+             WHERE ee.embedding IS NOT NULL AND e.workspace_id = ? \
+               AND NOT EXISTS (SELECT 1 FROM workspace_workspaces w WHERE w.id = e.workspace_id AND w.embedding_reindexing)"
         );
         let mut values: Vec<sea_orm::Value> = vec![
             sea_orm::Value::from(crate::db::sqlite_vec_blob(&vector)),
@@ -302,6 +305,11 @@ pub(crate) async fn search_in_table(
     query: SearchQuery,
     embed_table: &str,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
+    if crate::models::workspace_workspaces::embedding_reindexing(conn, workspace_id).await? {
+        return Err(YorishiroError::BackendUnavailable {
+            message: "semantic search is temporarily unavailable while workspace embeddings are being reindexed".into(),
+        });
+    }
     // The table name is interpolated into SQL, so only a known embedding table is accepted.
     if !crate::models::entity_embeddings::embedding_tables().any(|table| table == embed_table) {
         return Err(YorishiroError::ValidationFailed {
@@ -375,7 +383,8 @@ pub(crate) async fn search_in_table(
                  FROM entity_fts \
                  JOIN entity_entities e ON CAST(e.id AS TEXT) = entity_fts.entity_id \
                  LEFT JOIN {embed_table} ee ON ee.entity_id = e.id \
-                 WHERE entity_fts MATCH ? AND ee.entity_id IS NULL AND e.workspace_id = ?"
+                 WHERE entity_fts MATCH ? AND ee.entity_id IS NULL AND e.workspace_id = ? \
+                   AND NOT EXISTS (SELECT 1 FROM workspace_workspaces w WHERE w.id = e.workspace_id AND w.embedding_reindexing)"
             );
             let mut values: Vec<sea_orm::Value> = vec![query_text.into(), workspace_id.into()];
             if let Some(entity_type) = &query.entity_type {

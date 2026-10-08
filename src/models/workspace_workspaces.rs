@@ -45,15 +45,18 @@ pub(crate) struct EmbeddingChainRow {
 pub struct StartupReindexRow {
     pub id: Uuid,
     pub embedding_model: Option<String>,
+    pub embedding_reindexing: bool,
 }
 
 impl StartupReindexRow {
     /// Whether the workspace's stored vectors came from a model other than `provider_model`.
     /// A workspace with no stamp has no vectors to replace: its first write stamps it.
     pub fn is_stamped_with_other_model(&self, provider_model: &str) -> bool {
-        self.embedding_model
-            .as_deref()
-            .is_some_and(|stamped| stamped != provider_model)
+        self.embedding_reindexing
+            || self
+                .embedding_model
+                .as_deref()
+                .is_some_and(|stamped| stamped != provider_model)
     }
 }
 
@@ -78,20 +81,59 @@ pub(crate) async fn embedding_chain(
         .internal()
 }
 
+pub(crate) async fn set_embedding_reindexing(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    reindexing: bool,
+) -> Result<(), YorishiroError> {
+    let backend = conn.get_database_backend();
+    conn.execute_raw(Statement::from_sql_and_values(
+        backend,
+        "UPDATE workspace_workspaces SET embedding_reindexing = $1 WHERE id = $2",
+        [reindexing.into(), workspace_id.into()],
+    ))
+    .await
+    .internal()?;
+    Ok(())
+}
+
+pub(crate) async fn embedding_reindexing(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<bool, YorishiroError> {
+    let backend = conn.get_database_backend();
+    let row = conn
+        .query_one_raw(Statement::from_sql_and_values(
+            backend,
+            "SELECT embedding_reindexing FROM workspace_workspaces WHERE id = $1",
+            [workspace_id.into()],
+        ))
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+    row.try_get("", "embedding_reindexing").internal()
+}
+
 pub(crate) async fn stamped_for_reindex(
     conn: &impl ConnectionTrait,
 ) -> Result<Vec<StartupReindexRow>, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces::Column;
-
-    Entity::find()
-        .select_only()
-        .column(Column::Id)
-        .column(Column::EmbeddingModel)
-        .filter(Column::EmbeddingModel.is_not_null())
-        .into_model::<StartupReindexRow>()
-        .all(conn)
-        .await
-        .internal()
+    let backend = conn.get_database_backend();
+    conn.query_all_raw(Statement::from_string(
+        backend,
+        "SELECT id, embedding_model, embedding_reindexing FROM workspace_workspaces \
+         WHERE embedding_model IS NOT NULL OR embedding_reindexing = TRUE",
+    ))
+    .await
+    .internal()?
+    .into_iter()
+    .map(|row| {
+        Ok(StartupReindexRow {
+            id: row.try_get("", "id").internal()?,
+            embedding_model: row.try_get("", "embedding_model").internal()?,
+            embedding_reindexing: row.try_get("", "embedding_reindexing").internal()?,
+        })
+    })
+    .collect()
 }
 
 pub(crate) async fn list_for_tenant(

@@ -27,6 +27,11 @@ pub(crate) async fn search_entities(
     };
 
     let workspace_id = verified.ctx.workspace_id;
+    if crate::models::workspace_workspaces::embedding_reindexing(&ctx.db, workspace_id).await? {
+        return Err(crate::error::YorishiroError::BackendUnavailable {
+            message: "semantic search is temporarily unavailable while workspace embeddings are being reindexed".into(),
+        }.into());
+    }
     let limiter = search_token_limiter(&ctx)?;
     charge_search_tokens(&limiter, workspace_id, &params.query_text)?;
 
