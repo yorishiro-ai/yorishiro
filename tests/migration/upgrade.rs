@@ -751,10 +751,10 @@ async fn queue_starvation_index_matches_admission_predicate() {
 #[serial(process_environment)]
 async fn startup_admission_upgrade_preserves_ordinary_active_duplicates() {
     with_database("startup_admission_upgrade", |db| Box::pin(async move {
-        let through_requests = migrations_through("m20261006_000018_query_embedding_requests");
+        let through_requests = migrations_through("m20261005_000017_embedding_tables_tenant_read");
         Migrator::up(db, Some(through_requests))
             .await
-            .expect("migrations through query requests");
+            .expect("migrations before the embedding queue state");
         seed_initial_rows(db).await;
         let workspace = id(db, WORKSPACE);
         execute(

@@ -21,10 +21,7 @@ mod m20261001_000014_queue_lifecycle_starvation_index;
 mod m20261002_000015_api_key_name;
 mod m20261005_000016_add_entity_embedding_sync_token;
 mod m20261005_000017_embedding_tables_tenant_read;
-mod m20261006_000018_query_embedding_requests;
-mod m20261007_000019_active_reindex_admission;
-mod m20261008_000020_workspace_reindex_state;
-mod m20261008_000022_queue_job_dispatch_outbox;
+mod m20261006_000018_embedding_queue_state;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -49,10 +46,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261002_000015_api_key_name::Migration),
             Box::new(m20261005_000016_add_entity_embedding_sync_token::Migration),
             Box::new(m20261005_000017_embedding_tables_tenant_read::Migration),
-            Box::new(m20261006_000018_query_embedding_requests::Migration),
-            Box::new(m20261007_000019_active_reindex_admission::Migration),
-            Box::new(m20261008_000020_workspace_reindex_state::Migration),
-            Box::new(m20261008_000022_queue_job_dispatch_outbox::Migration),
+            Box::new(m20261006_000018_embedding_queue_state::Migration),
+            Box::new(m20261006_000018_embedding_queue_state::QueueState),
             // inject-above (do not remove this comment)
         ]
     }
