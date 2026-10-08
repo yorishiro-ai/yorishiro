@@ -126,8 +126,11 @@ pub(crate) async fn boot_with_query_worker<F, Fut>(
                 queue_dir.path().join("queue.sqlite3").display()
             ),
         );
-    } else if let Ok(url) = std::env::var("QUEUE_URL") {
+    } else if let Ok(url) = std::env::var("QUEUE_URL")
+        && url.starts_with("redis")
+    {
         // Query workers use a fixed queue name; isolate Redis-backed tests by DB number.
+        // A PostgreSQL queue is the shared queue table, which callers serialize instead.
         guard.set("QUEUE_URL", isolated_redis_url(&url));
     }
     boot_request::<App, _, _>(|request, ctx| async move {
