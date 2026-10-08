@@ -219,6 +219,26 @@ mod conflict {
 
     struct DisabledProvider;
 
+    struct GatedProvider {
+        calls: AtomicBool,
+        width: usize,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for GatedProvider {
+        fn dimensions(&self) -> usize {
+            self.width
+        }
+        fn model_name(&self) -> String {
+            "gated-test-provider".into()
+        }
+
+        async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            self.calls.store(true, Ordering::SeqCst);
+            Ok(texts.iter().map(|_| vec![1.0; self.width]).collect())
+        }
+    }
+
     #[async_trait]
     impl EmbeddingProvider for DisabledProvider {
         fn availability(&self) -> yorishiro::services::embedding::EmbeddingProviderAvailability {
@@ -554,6 +574,91 @@ mod conflict {
 
             let _ = queue.shutdown();
             queue_pool.close().await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn three_document_worker_entries_share_the_installed_limiter() {
+        let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        _guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/embedding-concurrency.sqlite3?mode=rwc",
+        );
+        _guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/embedding-concurrency-queue.sqlite3?mode=rwc",
+        );
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, first) = seed(&ctx).await;
+            let second = entity_entities::create(
+                &ctx.db,
+                workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({"title":"second"}),
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .id;
+            let third = entity_entities::create(
+                &ctx.db,
+                workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({"title":"third"}),
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .id;
+            let provider = Arc::new(GatedProvider {
+                calls: AtomicBool::new(false),
+                width: 768,
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            let ids = [first, second, third];
+            let mut jobs = Vec::new();
+            for entity_id in ids {
+                let lifecycle_id = Uuid::now_v7();
+                Entity::record_enqueue(
+                    &ctx.db,
+                    Enqueue {
+                        id: lifecycle_id,
+                        job_name: "embedding_sync",
+                        worker_class: WorkerClass::Shared,
+                        workspace_id: Some(workspace_id),
+                        plan: None,
+                        concurrency_key: None,
+                        concurrency_limit: None,
+                    },
+                )
+                .await
+                .unwrap();
+                let worker = EmbeddingSyncWorkerShared::build(&ctx);
+                jobs.push(tokio::spawn(async move {
+                    worker
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(lifecycle_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }));
+            }
+            for job in jobs {
+                job.await.unwrap().unwrap();
+            }
+            assert_eq!(vector_rows(&ctx, first).await, 1);
+            assert_eq!(vector_rows(&ctx, second).await, 1);
+            assert_eq!(vector_rows(&ctx, third).await, 1);
         })
         .await;
     }

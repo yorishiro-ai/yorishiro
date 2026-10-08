@@ -71,3 +71,7 @@ runs:
       run: |
         ./packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
         ./packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
+
+    - name: Test Docker configuration ownership and fallback
+      shell: bash
+      run: make package-docker-check

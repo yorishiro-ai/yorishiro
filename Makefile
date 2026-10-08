@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check coverage test-postgres test-sqlite test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check coverage test-postgres test-sqlite test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -108,3 +108,6 @@ entities: build
 check-all: fmt-check python-lint public-api-check edition-boundary-check check-ce clippy-ce
 
 check-all-ee: fmt-check python-lint public-api-check edition-boundary-check check-ee clippy-ee
+
+package-docker-check:
+	./packaging/test-docker.sh
