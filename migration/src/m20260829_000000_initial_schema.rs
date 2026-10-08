@@ -233,6 +233,13 @@ async fn create_workspace(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         // No foreign_key constraint here on Postgres since schema_schemas may not exist yet when this migration runs; that FK is added further down, once that table exists.
         .col(helpers::uuid_col(manager, Alias::new("schema_id")))
         .col(helpers::created_at(manager))
+        // True while a reindex is replacing the workspace's vectors.
+        .col(
+            ColumnDef::new(Alias::new("embedding_reindexing"))
+                .boolean()
+                .not_null()
+                .default(false),
+        )
         .foreign_key(
             ForeignKey::create()
                 .name("fk_workspace_workspaces_tenant_id")

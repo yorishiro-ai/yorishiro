@@ -47,7 +47,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20261005_000016_add_entity_embedding_sync_token::Migration),
             Box::new(m20261005_000017_embedding_tables_tenant_read::Migration),
             Box::new(m20261006_000018_embedding_queue_state::Migration),
-            Box::new(m20261006_000018_embedding_queue_state::QueueState),
             // inject-above (do not remove this comment)
         ]
     }
