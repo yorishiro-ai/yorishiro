@@ -934,3 +934,15 @@ src/models/queue_job_lifecycles.rs	fn	Entity::has_active	integration-test: the s
 src/workers/mod.rs	mod	startup_reindex	loco-task-worker: tests import the startup reindex module.
 src/workers/startup_reindex.rs	fn	run	loco-task-worker: the worker-start reindex scan; tests/workers/startup_reindex.rs drives it.
 src/models/workspace_workspaces.rs	field	StartupReindexRow::embedding_reindexing	integration-test: startup reindex tests cover recovery of a workspace left marked during an interrupted reindex.
+src/models/mod.rs	mod	queue_job_dispatch_outbox	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	struct	PendingDispatch	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	fn	record	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	fn	due	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	fn	claim_due	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::lifecycle_id	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::job_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::worker_class	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::payload	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::worker_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::queue_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::tags	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.

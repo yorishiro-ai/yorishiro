@@ -13,17 +13,21 @@ const RECOVERY_BATCH_SIZE: usize = 100;
 impl ActiveModelBehavior for crate::models::_entities::queue_job_dispatch_outbox::ActiveModel {}
 
 #[derive(Clone)]
-pub(crate) struct PendingDispatch {
-    pub(crate) lifecycle_id: Uuid,
-    pub(crate) job_name: String,
-    pub(crate) worker_class: WorkerClass,
-    pub(crate) payload: Value,
-    pub(crate) worker_name: String,
-    pub(crate) queue_name: Option<String>,
-    pub(crate) tags: Option<Vec<String>>,
+pub struct PendingDispatch {
+    pub lifecycle_id: Uuid,
+    pub job_name: String,
+    pub worker_class: WorkerClass,
+    pub payload: Value,
+    pub worker_name: String,
+    pub queue_name: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
-pub(crate) async fn record(
+/// Records the lifecycle row and its dispatch payload in one transaction.
+///
+/// # Errors
+/// Returns an error if the payload cannot be serialized or the transaction fails.
+pub async fn record(
     db: &DatabaseConnection,
     lifecycle: crate::models::queue_job_lifecycles::Enqueue<'_>,
     mut payload: Value,
@@ -53,7 +57,11 @@ pub(crate) async fn record(
     txn.commit().await
 }
 
-pub(crate) async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, YorishiroError> {
+/// Dispatches whose lifecycle is waiting for the queue and whose retry cooldown has passed.
+///
+/// # Errors
+/// Returns an error if the query fails or a stored row cannot be decoded.
+pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, YorishiroError> {
     let backend = db.get_database_backend();
     let cooldown = match backend {
         sea_orm::DatabaseBackend::Sqlite => format!(
@@ -125,7 +133,11 @@ pub(crate) async fn attempted(db: &impl ConnectionTrait, id: Uuid) -> Result<(),
     .map(|_| ())
 }
 
-pub(crate) async fn claim_due(db: &impl ConnectionTrait, id: Uuid) -> Result<bool, DbErr> {
+/// Stamps the dispatch as attempted when its cooldown has passed, so only one caller recovers it.
+///
+/// # Errors
+/// Returns an error if the update fails.
+pub async fn claim_due(db: &impl ConnectionTrait, id: Uuid) -> Result<bool, DbErr> {
     let backend = db.get_database_backend();
     let cooldown = if backend == sea_orm::DatabaseBackend::Sqlite {
         format!(
@@ -154,52 +166,4 @@ pub(crate) async fn remove(db: &impl ConnectionTrait, id: Uuid) -> Result<(), Db
     ))
     .await
     .map(|_| ())
-}
-
-#[cfg(test)]
-mod tests {
-    use migration::MigratorTrait;
-    use sea_orm::Database;
-
-    use super::*;
-    use crate::models::queue_job_lifecycles::Enqueue;
-
-    #[tokio::test]
-    async fn record_is_recoverable_until_attempted() {
-        let path = tempfile::tempdir().unwrap().keep().join("outbox.sqlite3");
-        let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display()))
-            .await
-            .unwrap();
-        migration::Migrator::up(&db, None).await.unwrap();
-        let id = Uuid::now_v7();
-        record(
-            &db,
-            Enqueue {
-                id,
-                job_name: "test",
-                worker_class: crate::workers::embedding_sync::WorkerClass::Shared,
-                workspace_id: None,
-                plan: None,
-                concurrency_key: Some("shared"),
-                concurrency_limit: Some(1),
-            },
-            serde_json::json!({"value": 7}),
-            "TestWorker".into(),
-            None,
-            Some(vec!["test-tag".into()]),
-        )
-        .await
-        .unwrap();
-
-        let rows = due(&db).await.unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].lifecycle_id, id);
-        assert_eq!(rows[0].payload["lifecycle_id"], id.to_string());
-        assert_eq!(rows[0].worker_name, "TestWorker");
-        assert_eq!(rows[0].tags, Some(vec!["test-tag".into()]));
-
-        assert!(claim_due(&db, id).await.unwrap());
-        assert!(!claim_due(&db, id).await.unwrap());
-        assert!(due(&db).await.unwrap().is_empty());
-    }
 }
