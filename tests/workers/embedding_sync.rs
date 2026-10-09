@@ -670,7 +670,7 @@ mod conflict {
                     connect_timeout: 5_000,
                     idle_timeout: 5_000,
                     poll_interval_sec: 1,
-                    num_workers: 1,
+                    num_workers: 3,
                     reaper: None,
                 })
                 .await
@@ -769,6 +769,18 @@ mod conflict {
                     .expect("count blocked jobs")
                     .len(),
                 initial_jobs
+            );
+            let processing = sqlt::get_jobs(
+                &queue_pool,
+                Some(&vec![loco_rs::bgworker::JobStatus::Processing]),
+                None,
+            )
+            .await
+            .expect("read dispatched jobs");
+            assert_eq!(
+                processing.len(),
+                3,
+                "all consumers must have dequeued a job"
             );
             provider.release.add_permits(3);
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
