@@ -170,27 +170,32 @@ mod unit {
 
 mod conflict {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use async_trait::async_trait;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
     use loco_rs::config::SqliteQueueConfig;
     use sea_orm::{
-        ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
-        Statement,
+        ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult,
+        IntoActiveModel, PaginatorTrait, QueryFilter, Statement,
     };
     use serial_test::serial;
+    use tokio::sync::{Notify, Semaphore};
     use uuid::Uuid;
     use yorishiro::App;
     use yorishiro::error::YorishiroError;
-    use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+    use yorishiro::models::_entities::{
+        api_keys, queue_job_lifecycles, tenant_tenants, workspace_workspaces,
+    };
     use yorishiro::models::api_keys::ApiKeyScope;
     use yorishiro::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
     use yorishiro::models::tenant_memberships::MembershipRole;
     use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
     use yorishiro::models::{entity_entities, schema_schemas};
-    use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
+    use yorishiro::services::embedding::{
+        EmbedKind, EmbeddingProvider, WorkspaceEmbeddingResolver,
+    };
     use yorishiro::workers::embedding_sync::{
         EmbeddingSyncArgs, EmbeddingSyncWorkerShared, WorkerClass,
     };
@@ -220,8 +225,25 @@ mod conflict {
     struct DisabledProvider;
 
     struct GatedProvider {
-        calls: AtomicBool,
+        calls: AtomicUsize,
+        active: AtomicUsize,
+        max_active: AtomicUsize,
+        entered: Notify,
+        release: Semaphore,
         width: usize,
+    }
+
+    struct TestResolver(Arc<dyn EmbeddingProvider>);
+
+    #[async_trait]
+    impl WorkspaceEmbeddingResolver for TestResolver {
+        async fn resolve(
+            &self,
+            _db: &DatabaseConnection,
+            _workspace_id: Uuid,
+        ) -> Result<Option<Arc<dyn EmbeddingProvider>>, YorishiroError> {
+            Ok(Some(self.0.clone()))
+        }
     }
 
     #[async_trait]
@@ -234,7 +256,12 @@ mod conflict {
         }
 
         async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-            self.calls.store(true, Ordering::SeqCst);
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            self.entered.notify_waiters();
+            self.release.acquire().await.unwrap().forget();
+            self.active.fetch_sub(1, Ordering::SeqCst);
             Ok(texts.iter().map(|_| vec![1.0; self.width]).collect())
         }
     }
@@ -618,11 +645,18 @@ mod conflict {
             .unwrap()
             .id;
             let provider = Arc::new(GatedProvider {
-                calls: AtomicBool::new(false),
+                calls: AtomicUsize::new(0),
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
                 width: 768,
             });
             ctx.shared_store
                 .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
             let ids = [first, second, third];
             let mut jobs = Vec::new();
             for entity_id in ids {
@@ -653,9 +687,30 @@ mod conflict {
                         .await
                 }));
             }
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while provider.calls.load(Ordering::SeqCst) == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("first provider call entered");
+            tokio::task::yield_now().await;
+            assert_eq!(provider.active.load(Ordering::SeqCst), 1);
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+            let queued = Entity::find()
+                .filter(
+                    queue_job_lifecycles::Column::Status.eq(LifecycleStatus::Queued.as_db_str()),
+                )
+                .count(&ctx.db)
+                .await
+                .expect("count queued lifecycles");
+            assert!(queued >= 2);
+            provider.release.add_permits(3);
             for job in jobs {
                 job.await.unwrap().unwrap();
             }
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             assert_eq!(vector_rows(&ctx, first).await, 1);
             assert_eq!(vector_rows(&ctx, second).await, 1);
             assert_eq!(vector_rows(&ctx, third).await, 1);

@@ -41,18 +41,27 @@ if [[ $# -gt 0 ]]; then
     before_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
     before_local=$(sha256sum "$tmp/config/production.local.yaml" 2>/dev/null || true)
     container="yorishiro-docker-$name-$$"
+    cleanup_case() {
+      docker rm -f "$container" >/dev/null 2>&1 || true
+      rm -rf "$tmp/config" "$tmp/state"
+    }
+    trap cleanup_case RETURN
     docker run -d --name "$container" \
       -e DATABASE_URL='sqlite:///var/lib/yorishiro/runtime.sqlite3?mode=rwc' \
       -e QUEUE_URL='sqlite:///var/lib/yorishiro/runtime-queue.sqlite3?mode=rwc' \
       -e YORISHIRO_EMBEDDING_PROVIDER=none \
-      -e BINDING=127.0.0.1 \
+      -e BINDING=0.0.0.0 \
       -v "$tmp/config:/app/config" \
       -v "$tmp/state:/var/lib/yorishiro" \
-      --network host \
-      --entrypoint yorishiro "$image" start >/tmp/yorishiro-docker-$name.log 2>&1
+      -p 0:5150 \
+      --entrypoint yorishiro "$image" start >/dev/null 2>&1 >/dev/null
+    host_port=""
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" = true ]]; then
+      host_port=$(docker port "$container" 5150/tcp | sed 's/.*://' | head -1)
+    fi
     ready=false
     for _ in $(seq 1 20); do
-      if curl -fsS http://127.0.0.1:5150/_readiness >/dev/null 2>&1; then ready=true; break; fi
+      if [[ -n "$host_port" ]] && curl -fsS "http://127.0.0.1:$host_port/_ping" >/dev/null 2>&1; then ready=true; break; fi
       if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != true ]]; then break; fi
       sleep 1
     done
@@ -60,7 +69,14 @@ if [[ $# -gt 0 ]]; then
       docker stop "$container" >/dev/null
     fi
     actual=$(docker inspect -f '{{.State.ExitCode}}' "$container")
-    docker rm "$container" >/dev/null
+    docker logs "$container" >/tmp/yorishiro-docker-$name.log 2>&1 || true
+    if [[ "$expected" = failure && "$ready" != true ]]; then
+      log=$(cat "/tmp/yorishiro-docker-$name.log")
+      case "$name" in
+        malformed) [[ "$log" == *"YAMLFile"*"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
+        local-only) [[ "$log" == *"production.local.yaml"*"without base"* ]] || { echo "$log" >&2; return 1; };;
+      esac
+    fi
     after_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
     after_local=$(sha256sum "$tmp/config/production.local.yaml" 2>/dev/null || true)
     test "$before_base" = "$after_base" && test "$before_local" = "$after_local"
@@ -76,6 +92,8 @@ if [[ $# -gt 0 ]]; then
       cat "/tmp/yorishiro-docker-$name.log" >&2
       return 1
     fi
+    trap - RETURN
+    cleanup_case
   }
 
   run_config_case embedded success rm "$tmp/config/production.yaml"

@@ -31,6 +31,8 @@ for edition in ce ee; do
 done
 test "$(find "$PKG_DIR" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
 
+legacy_config_metadata='test -f /etc/yorishiro/production.yaml && test "$(stat -c "%U:%G" /etc/yorishiro/production.yaml)" = root:yorishiro && test "$(stat -c "%a" /etc/yorishiro/production.yaml)" = 640'
+
 run_deb_transition() {
   local from="$1" to="$2"
   local base="/pkg/yorishiro-${from}-${VERSION}-amd64.deb"
@@ -38,6 +40,7 @@ run_deb_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
+    $legacy_config_metadata
     # The unified artifact is the prior package identity/layout in this transition matrix.
     # Seed the legacy package-owned path before installing the new edition package.
     printf 'edited-by-transition' > /etc/yorishiro/production.yaml
@@ -71,6 +74,7 @@ run_deb_untouched_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv /legacy/yorishiro-${VERSION}-amd64.deb
+    $legacy_config_metadata
     cp /etc/yorishiro/production.yaml /tmp/production.before
     stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
     apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
@@ -97,6 +101,7 @@ run_deb_absent_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq $base
+    $legacy_config_metadata
     rm -f /etc/yorishiro/production.yaml
     apt-get install -y -qq /pkg/yorishiro-${to}-${VERSION}-amd64.deb
     test ! -e /etc/yorishiro/production.yaml
@@ -141,6 +146,7 @@ run_rpm_transition() {
 run_rpm_untouched_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro almalinux:10 bash -eu -c "
     dnf install -y -q /legacy/yorishiro-${VERSION}-amd64.rpm
+    $legacy_config_metadata
     cp /etc/yorishiro/production.yaml /tmp/production.before
     stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
     dnf install -y -q /pkg/yorishiro-ce-${VERSION}-amd64.rpm
