@@ -177,17 +177,15 @@ mod conflict {
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
     use loco_rs::config::SqliteQueueConfig;
     use sea_orm::{
-        ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult,
-        IntoActiveModel, PaginatorTrait, QueryFilter, Statement,
+        ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
+        Statement,
     };
     use serial_test::serial;
     use tokio::sync::{Notify, Semaphore};
     use uuid::Uuid;
     use yorishiro::App;
     use yorishiro::error::YorishiroError;
-    use yorishiro::models::_entities::{
-        api_keys, queue_job_lifecycles, tenant_tenants, workspace_workspaces,
-    };
+    use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
     use yorishiro::models::api_keys::ApiKeyScope;
     use yorishiro::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
     use yorishiro::models::tenant_memberships::MembershipRole;
@@ -657,10 +655,41 @@ mod conflict {
             ctx.shared_store.insert(
                 Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
             );
+            let directory = tempfile::tempdir().expect("queue tempdir");
+            let queue_uri = format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("queue.sqlite3").display()
+            );
+            let queue = Arc::new(
+                bgworker::sqlt::create_provider(&SqliteQueueConfig {
+                    uri: queue_uri.clone(),
+                    dangerously_flush: false,
+                    enable_logging: false,
+                    max_connections: 2,
+                    min_connections: 1,
+                    connect_timeout: 5_000,
+                    idle_timeout: 5_000,
+                    poll_interval_sec: 1,
+                    num_workers: 1,
+                    reaper: None,
+                })
+                .await
+                .expect("SQLite queue"),
+            );
+            queue.setup().await.expect("set up queue");
+            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
+                .await
+                .expect("queue pool");
+            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+            queue
+                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .await
+                .expect("register worker");
             let ids = [first, second, third];
-            let mut jobs = Vec::new();
+            let mut lifecycle_ids = Vec::new();
             for entity_id in ids {
                 let lifecycle_id = Uuid::now_v7();
+                lifecycle_ids.push(lifecycle_id);
                 Entity::record_enqueue(
                     &ctx.db,
                     Enqueue {
@@ -675,18 +704,33 @@ mod conflict {
                 )
                 .await
                 .unwrap();
-                let worker = EmbeddingSyncWorkerShared::build(&ctx);
-                jobs.push(tokio::spawn(async move {
-                    worker
-                        .perform(EmbeddingSyncArgs {
+                queue
+                    .enqueue(
+                        EmbeddingSyncWorkerShared::class_name(),
+                        None,
+                        serde_json::to_value(EmbeddingSyncArgs {
                             lifecycle_id: Some(lifecycle_id),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
                         })
-                        .await
-                }));
+                        .unwrap(),
+                        Some(vec![WorkerClass::Shared.tag().into()]),
+                        Some(100),
+                    )
+                    .await
+                    .expect("enqueue document job");
             }
+            let initial_jobs = sqlt::get_jobs(&queue_pool, None, None)
+                .await
+                .expect("count jobs")
+                .len();
+            assert_eq!(initial_jobs, 3);
+            let running = queue.clone();
+            let runner =
+                tokio::spawn(
+                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
+                );
             tokio::time::timeout(std::time::Duration::from_secs(1), async {
                 while provider.calls.load(Ordering::SeqCst) == 0 {
                     tokio::task::yield_now().await;
@@ -697,18 +741,65 @@ mod conflict {
             tokio::task::yield_now().await;
             assert_eq!(provider.active.load(Ordering::SeqCst), 1);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
-            let queued = Entity::find()
-                .filter(
-                    queue_job_lifecycles::Column::Status.eq(LifecycleStatus::Queued.as_db_str()),
-                )
-                .count(&ctx.db)
-                .await
-                .expect("count queued lifecycles");
-            assert!(queued >= 2);
+            let rows = Entity::find().all(&ctx.db).await.expect("read lifecycles");
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| lifecycle_ids.contains(&row.id)
+                        && row.status == LifecycleStatus::Running.as_db_str())
+                    .count(),
+                1
+            );
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| lifecycle_ids.contains(&row.id)
+                        && row.status == LifecycleStatus::Queued.as_db_str())
+                    .count(),
+                2
+            );
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| lifecycle_ids.contains(&row.id)
+                        && row.status == LifecycleStatus::Failed.as_db_str())
+                    .count(),
+                0
+            );
+            assert_eq!(
+                sqlt::get_jobs(&queue_pool, None, None)
+                    .await
+                    .expect("count blocked jobs")
+                    .len(),
+                initial_jobs
+            );
             provider.release.add_permits(3);
-            for job in jobs {
-                job.await.unwrap().unwrap();
-            }
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let done = Entity::find()
+                        .all(&ctx.db)
+                        .await
+                        .unwrap()
+                        .into_iter()
+                        .filter(|row| {
+                            lifecycle_ids.contains(&row.id)
+                                && row.status == LifecycleStatus::Completed.as_db_str()
+                        })
+                        .count();
+                    if done == 3 {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("all queued jobs complete");
+            let _ = queue.shutdown();
+            runner.await.unwrap().unwrap();
+            assert_eq!(
+                sqlt::get_jobs(&queue_pool, None, None)
+                    .await
+                    .expect("final queue")
+                    .len(),
+                3
+            );
             assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             assert_eq!(vector_rows(&ctx, first).await, 1);
