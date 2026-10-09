@@ -330,7 +330,8 @@ else
   # Started the way the unit does, since there is no systemd here: the same Loco environment
   # selects the packaged production configuration.
   #
-  # The package ships only example.yaml. External production.yaml is optional and admin-owned.
+  # The package ships only example.yaml. The administrator creates production.yaml before start.
+  docker exec "app-$$" cp /etc/yorishiro/example.yaml /etc/yorishiro/production.yaml
   #
   # The output goes to a file because `docker exec -d` discards it and PID 1 here is `sleep`,
   # so `docker logs` never shows the server.

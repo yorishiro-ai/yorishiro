@@ -1,7 +1,8 @@
 # Enable with `systemctl enable --now yorishiro`.
 #
-# Optional administrator settings go in /etc/yorishiro/production.yaml.
-# The package installs the reference-only /etc/yorishiro/example.yaml and never manages production.yaml.
+# Before enabling this unit, copy /etc/yorishiro/example.yaml to
+# /etc/yorishiro/production.yaml and edit the administrator-owned copy.
+# The package never manages production.yaml.
 [Unit]
 Description=Yorishiro server
 After=network.target

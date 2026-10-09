@@ -29,7 +29,6 @@ if [[ $# -gt 0 ]]; then
     --entrypoint sh "$image" -ec '
       test -f /app/config/production.yaml
       cmp /app/config/production.yaml /canonical-example.yaml
-      test ! -e /app/config/production.yaml
       test ! -e /app/config/production.local.yaml
     '
 
@@ -78,7 +77,7 @@ if [[ $# -gt 0 ]]; then
       log=$(cat "/tmp/yorishiro-docker-$name.log")
       case "$name" in
         malformed) [[ "$log" == *"YAMLFile"*"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
-        local-only) [[ "$log" == *"without base configuration"*"production.local.yaml"* ]] || { echo "$log" >&2; return 1; };;
+        missing|local-only|incomplete|unreadable) [[ "$log" == *"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
       esac
     fi
     after_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
@@ -101,10 +100,12 @@ if [[ $# -gt 0 ]]; then
     cleanup_case
   }
 
-  run_config_case embedded success rm "$tmp/config/production.yaml"
   run_config_case external success true
   run_config_case merged success sh -c "printf 'settings:\\n  max_tenants: 1\\n' > '$tmp/config/production.local.yaml'"
   run_config_case malformed failure sh -c "printf 'not: [valid' > '$tmp/config/production.yaml'"
   rm -f "$tmp/config/production.local.yaml"
+  run_config_case missing failure rm "$tmp/config/production.yaml"
   run_config_case local-only failure sh -c "rm '$tmp/config/production.yaml'; printf 'settings:\\n  max_tenants: 1\\n' > '$tmp/config/production.local.yaml'"
+  run_config_case incomplete failure sh -c "printf 'logger: {}\\n' > '$tmp/config/production.yaml'"
+  run_config_case unreadable failure sh -c "chmod 000 '$tmp/config/production.yaml'"
 fi
