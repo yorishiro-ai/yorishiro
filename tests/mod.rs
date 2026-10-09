@@ -166,6 +166,10 @@ fn require_backend(expected: &str) -> bool {
     } else {
         "skipped"
     };
+
+    if actual == expected {
+        record_topology();
+    }
     let reason = if outcome == "executed" {
         format!("selected {expected}-specific test on {actual} backend")
     } else {

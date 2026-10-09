@@ -271,27 +271,45 @@ jobs:
           - db: Postgres
             backend: postgres
             queue: Postgres
+            queue_key: postgres
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           - db: SQLite
             backend: sqlite
             queue: SQLite
+            queue_key: sqlite
             loco_env: test_sqlite
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
           - db: Postgres
             backend: postgres
-            queue: Redis-compatible
-            loco_env: test_redis
+            queue: Valkey
+            queue_key: valkey
+            loco_env: test_postgres_valkey
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379/15
           - db: SQLite
             backend: sqlite
-            queue: Redis-compatible
-            loco_env: test_redis
+            queue: Valkey
+            queue_key: valkey
+            loco_env: test_sqlite_valkey
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379/15
+          - db: Postgres
+            backend: postgres
+            queue: SQLite
+            queue_key: sqlite
+            loco_env: test_postgres_sqlite
+            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+            queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
+          - db: SQLite
+            backend: sqlite
+            queue: Postgres
+            queue_key: postgres
+            loco_env: test_sqlite_postgres
+            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+            queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -417,20 +435,20 @@ jobs:
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
-        run: uv run scripts/test_backend.py ${{ matrix.backend }}
+        run: uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }}
 
-      - name: Verify backend gate rejects a mismatch
+      - name: Verify topology gate rejects a mismatch
         env:
           DATABASE_URL: sqlite:///tmp/yorishiro-gate-check.sqlite3?mode=rwc
           LOCO_ENV: test_sqlite
         run: |
           set +e
-          output=$(uv run scripts/test_backend.py postgres models::maintenance:: 2>&1)
+          output=$(uv run scripts/test_topology.py postgres-valkey models::maintenance:: 2>&1)
           status=$?
           set -e
           echo "$output"
-          if [ "$status" -eq 0 ] || ! grep -q "zero postgres-specific tests" <<<"$output"; then
-            echo "ERROR: backend wrapper accepted a SQLite run as PostgreSQL"
+          if [ "$status" -eq 0 ] || ! grep -q "zero topology-specific tests" <<<"$output"; then
+            echo "ERROR: topology wrapper accepted a mismatched lane"
             exit 1
           fi
 
