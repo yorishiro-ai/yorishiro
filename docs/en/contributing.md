@@ -5,8 +5,8 @@
 Use `make test-postgres` or `make test-sqlite` to run the integration suite.
 Both commands keep shared tests in the run and verify that at least one test specific to the selected backend executes.
 The final output reports selected, executed, and skipped backend-specific gate counts, including the reason for skipped gates.
-The backend gate wrapper is `uv run scripts/test_backend.py`.
-Use `make test-redis` to run the dedicated Valkey queue and configuration tests against a local or explicitly configured endpoint.
+The topology gate wrapper is `uv run scripts/test_topology.py`.
+Use `make test-valkey` to run the Valkey topology tests against a local or explicitly configured endpoint.
 The Redis test URL must select database 15 because Loco clears that reserved database during queue cleanup.
 The remaining repository helper scripts also run through the uv project and use only Python's standard library.
 Every test lives in `tests/`.

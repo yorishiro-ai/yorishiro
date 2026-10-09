@@ -7,7 +7,7 @@
 //!
 //! `tests/workers/queue_routing.rs` covers tag filtering through the public
 //! `Queue::run(tags)` API for both SQL providers.  The Valkey provider is covered
-//! by `uv run scripts/test_redis.py` against a real Valkey service.
+//! by `uv run scripts/test_topology.py sqlite-valkey` against a real Valkey service.
 
 use futures::FutureExt;
 use std::collections::HashMap;
