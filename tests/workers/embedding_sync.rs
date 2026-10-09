@@ -170,6 +170,7 @@ mod unit {
 
 mod conflict {
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use async_trait::async_trait;
@@ -187,6 +188,7 @@ mod conflict {
     use yorishiro::error::YorishiroError;
     use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
     use yorishiro::models::api_keys::ApiKeyScope;
+    use yorishiro::models::query_embedding_requests::{Entity as QueryRequests, QueryOutcome};
     use yorishiro::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
     use yorishiro::models::tenant_memberships::MembershipRole;
     use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
@@ -232,6 +234,42 @@ mod conflict {
     }
 
     struct TestResolver(Arc<dyn EmbeddingProvider>);
+
+    struct MixedProvider {
+        active: AtomicUsize,
+        max_active: AtomicUsize,
+        entered: Notify,
+        release: Semaphore,
+        order: Mutex<Vec<EmbedKind>>,
+    }
+
+    impl MixedProvider {
+        async fn gate(&self, kind: EmbedKind) -> Vec<f32> {
+            self.order.lock().unwrap().push(kind);
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            self.entered.notify_waiters();
+            self.release.acquire().await.unwrap().forget();
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            vec![1.0; 768]
+        }
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for MixedProvider {
+        fn dimensions(&self) -> usize {
+            768
+        }
+        fn model_name(&self) -> String {
+            "mixed-test-provider".into()
+        }
+        async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            Ok(vec![self.gate(EmbedKind::Document).await; texts.len()])
+        }
+        async fn embed_as(&self, kind: EmbedKind, _text: &str) -> Result<Vec<f32>, YorishiroError> {
+            Ok(self.gate(kind).await)
+        }
+    }
 
     #[async_trait]
     impl WorkspaceEmbeddingResolver for TestResolver {
@@ -817,6 +855,118 @@ mod conflict {
             assert_eq!(vector_rows(&ctx, first).await, 1);
             assert_eq!(vector_rows(&ctx, second).await, 1);
             assert_eq!(vector_rows(&ctx, third).await, 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn document_and_query_workers_share_fifo_embedding_admission() {
+        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/mixed-worker.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/mixed-worker-queue.sqlite3?mode=rwc",
+        );
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let provider = Arc::new(MixedProvider {
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
+                order: Mutex::new(Vec::new()),
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+            let lifecycle_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: lifecycle_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .expect("record document lifecycle");
+            let document = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(lifecycle_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while provider.active.load(Ordering::SeqCst) != 1 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("document acquired first");
+            let request_id = QueryRequests::open(&ctx.db, workspace_id, "alpha", 60)
+                .await
+                .expect("open query");
+            let query = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    yorishiro::workers::query_embedding::QueryEmbeddingWorker::build(&ctx)
+                        .perform(yorishiro::workers::query_embedding::QueryEmbeddingArgs {
+                            request_id,
+                            workspace_id,
+                        })
+                        .await
+                }
+            });
+            tokio::task::yield_now().await;
+            assert_eq!(provider.active.load(Ordering::SeqCst), 1);
+            assert!(matches!(
+                provider.order.lock().unwrap().as_slice(),
+                [EmbedKind::Document]
+            ));
+            provider.release.add_permits(1);
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while provider.order.lock().unwrap().len() < 2 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("query is admitted after document");
+            assert!(matches!(
+                provider.order.lock().unwrap().as_slice(),
+                [EmbedKind::Document, EmbedKind::Query]
+            ));
+            provider.release.add_permits(1);
+            document.await.unwrap().unwrap();
+            query.await.unwrap().unwrap();
+            let lifecycle = Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
+            assert!(matches!(
+                QueryRequests::take(&ctx.db, workspace_id, request_id)
+                    .await
+                    .unwrap(),
+                Some(QueryOutcome::Ready { .. })
+            ));
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
         })
         .await;
     }
