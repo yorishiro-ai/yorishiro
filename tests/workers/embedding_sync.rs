@@ -1863,30 +1863,59 @@ mod conflict {
             row.lease_until = sea_orm::ActiveValue::Set(Some(stale));
             row.update(&ctx.db).await.unwrap();
 
-            // Loco's queue reaper owns Processing delivery reclamation.  The actual
-            // worker performs the recovered application admission for this redelivery.
-            let args = EmbeddingSyncArgs {
-                lifecycle_id: Some(lifecycle_id),
-                workspace_id,
-                entity_id,
-                worker_class: WorkerClass::Shared,
-            };
-            EmbeddingSyncWorkerShared::build(&ctx)
-                .perform(args)
+            let queue_dir = tempfile::tempdir().unwrap();
+            let queue_uri = format!(
+                "sqlite://{}?mode=rwc",
+                queue_dir.path().join("recovery-queue.sqlite3").display()
+            );
+            let harness = QueueHarness::sqlite(ctx, queue_uri).await;
+            // Loco's queue reaper owns Processing delivery reclamation.  This test
+            // starts the already-reclaimed payload directly in the real queue runner.
+            harness
+                .queue
+                .enqueue(
+                    EmbeddingSyncWorkerShared::class_name(),
+                    None,
+                    EmbeddingSyncArgs {
+                        lifecycle_id: Some(lifecycle_id),
+                        workspace_id,
+                        entity_id,
+                        worker_class: WorkerClass::Shared,
+                    },
+                    Some(vec![WorkerClass::Shared.tag().into()]),
+                    Some(100),
+                )
                 .await
                 .unwrap();
+            let original_queue_count = harness.observation.total_count().await;
+            assert_eq!(original_queue_count, 1);
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let row = Entity::find_by_id(lifecycle_id)
+                        .one(&harness.ctx.db)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    if row.status == LifecycleStatus::Completed.as_db_str() {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
             let final_row = Entity::find_by_id(lifecycle_id)
-                .one(&ctx.db)
+                .one(&harness.ctx.db)
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(final_row.attempt, 2);
             assert_eq!(final_row.status, LifecycleStatus::Completed.as_db_str());
             assert!(final_row.error.is_none());
-            assert_eq!(vector_rows(&ctx, entity_id).await, 1);
+            assert_eq!(vector_rows(&harness.ctx, entity_id).await, 1);
             assert!(
                 Entity::finish(
-                    &ctx.db,
+                    &harness.ctx.db,
                     lifecycle_id,
                     Some(1),
                     LifecycleStatus::Failed,
@@ -1897,7 +1926,7 @@ mod conflict {
             );
             assert_eq!(
                 Entity::find_by_id(lifecycle_id)
-                    .one(&ctx.db)
+                    .one(&harness.ctx.db)
                     .await
                     .unwrap()
                     .unwrap()
@@ -1906,6 +1935,11 @@ mod conflict {
             );
             assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                harness.observation.total_count().await,
+                original_queue_count
+            );
+            harness.shutdown().await;
         })
         .await;
     }
