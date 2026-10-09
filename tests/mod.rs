@@ -17,7 +17,7 @@ mod services;
 mod tasks;
 mod workers;
 
-/// Records the database and queue provider selected for this test process.
+/// Records the database and queue provider after Loco has booted the app.
 pub(crate) fn record_configured_topology(config: &loco_rs::config::Config) {
     let database = if config.database.uri.starts_with("sqlite://")
         || config.database.uri.starts_with("sqlite::")
@@ -36,6 +36,10 @@ pub(crate) fn record_configured_topology(config: &loco_rs::config::Config) {
         Some(loco_rs::config::QueueConfig::Redis(_)) => "valkey",
         _ => "unknown",
     };
+    assert!(
+        config.queue.is_some(),
+        "configured app has no queue provider"
+    );
     let Some(root) = std::env::var_os("YORISHIRO_TOPOLOGY_MARKER_DIR") else {
         return;
     };

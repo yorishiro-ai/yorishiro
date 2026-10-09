@@ -45,20 +45,9 @@ Async waits release the task to do other work, but one physical connection still
 
 Run the full suite with Rust's default parallel test execution.
 
-PostgreSQL:
-
-```console
-$ DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15432/yorishiro \
-    DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres \
-    cargo test --locked --workspace
-```
-
-SQLite:
-
-```console
-$ DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' \
-    LOCO_ENV=test_sqlite cargo test --locked --workspace
-```
+Use `make test-postgres`, `make test-sqlite`, or `make test-valkey` locally.
+For the complete six-topology matrix, use `uv run scripts/test_topology.py <topology>`.
+The wrapper selects CE or EE explicitly and requires configured-app evidence from a successful Loco boot.
 
 Request tests must call `close_app_pools` before returning. See `tests/requests/mod.rs` for the pattern.
 

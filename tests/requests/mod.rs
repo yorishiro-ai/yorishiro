@@ -72,6 +72,9 @@ use std::net::SocketAddr;
 /// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
+    if let Some(queue) = &ctx.queue_provider {
+        queue.shutdown().expect("shutdown test queue");
+    }
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
         db.tenant.pool().close().await;
@@ -127,10 +130,6 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let config = H::load_config(&loco_rs::environment::Environment::Test)
-        .await
-        .expect("load configured test app");
-    crate::record_configured_topology(&config);
     if is_sqlite_backend() {
         // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
         // SQLite must not open a path whose parent can disappear during concurrent test teardown.
@@ -158,6 +157,7 @@ where
         drop(directory);
     } else {
         request_with_create_db::<H, _, _>(|request, ctx| {
+            crate::record_configured_topology(&ctx.config);
             let result =
                 std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
             async move {
@@ -222,7 +222,6 @@ where
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
         .expect("load sqlite config");
-    crate::record_configured_topology(&config);
     config.database.uri = format!("sqlite://{}?mode=rwc", db_path);
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
         let queue_path = std::path::Path::new(&db_path)
@@ -242,6 +241,11 @@ where
     )
     .await
     .expect("boot sqlite app");
+    assert!(
+        boot.app_context.queue_provider.is_some(),
+        "booted app has no queue provider"
+    );
+    crate::record_configured_topology(&boot.app_context.config);
 
     // Build the TestServer from the app's router, using the same pattern as
     // loco's own `request_internal`.
