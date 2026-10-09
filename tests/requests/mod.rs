@@ -61,6 +61,7 @@ use axum_test::TestServer;
 use futures::FutureExt;
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
+use serial_test::serial;
 use sqlx::sqlite::SqliteConnectOptions;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -82,10 +83,8 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
         db.tenant.pool().close().await;
     }
     ctx.db.get_postgres_connection_pool().close().await;
-    if is_sqlite_queue() {
-        if let Some(path) = sqlite_queue_path(&ctx.config) {
-            remove_sqlite_files(&path);
-        }
+    if let Some(path) = sqlite_queue_path(&ctx.config) {
+        remove_sqlite_files(&path);
     }
 }
 
@@ -140,6 +139,11 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
     remove_sqlite_files(db_path);
 }
 
+pub(crate) fn is_sqlite_queue() -> bool {
+    std::env::var("QUEUE_URL")
+        .is_ok_and(|url| url.starts_with("sqlite://") || url.starts_with("sqlite::"))
+}
+
 /// Whether `DATABASE_URL` names a SQLite backend (file or in-memory).
 ///
 /// Used by `boot_request` to dispatch to the correct boot path so the same
@@ -147,13 +151,6 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
 fn is_sqlite_backend() -> bool {
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
     url.starts_with("sqlite://") || url.starts_with("sqlite::memory:")
-}
-
-pub(crate) fn is_sqlite_queue() -> bool {
-    match std::env::var("QUEUE_URL") {
-        Ok(url) => url.starts_with("sqlite://") || url.starts_with("sqlite::"),
-        Err(_) => is_sqlite_backend(),
-    }
 }
 
 /// Unified entry point for request tests across PostgreSQL and SQLite backends.
@@ -198,7 +195,7 @@ where
         drop(directory);
     } else {
         request_with_create_db::<H, _, _>(|request, ctx| {
-            crate::record_configured_topology(&ctx.config);
+            crate::record_configured_topology(&ctx);
             let result =
                 std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
             async move {
@@ -286,7 +283,7 @@ where
         boot.app_context.queue_provider.is_some(),
         "booted app has no queue provider"
     );
-    crate::record_configured_topology(&boot.app_context.config);
+    crate::record_configured_topology(&boot.app_context);
 
     // Build the TestServer from the app's router, using the same pattern as
     // loco's own `request_internal`.
@@ -298,4 +295,44 @@ where
         .expect("build TestServer");
 
     callback(server, boot.app_context.clone()).await;
+}
+
+#[tokio::test]
+#[serial(postgres_sqlite_queue)]
+async fn postgres_sqlite_queue_boots_clean_up_before_the_next_boot() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+
+    let queue_path = std::sync::Arc::new(std::sync::Mutex::new(None));
+    for _ in 0..2 {
+        let prior = queue_path.clone();
+        boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+            let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = ctx.config.queue.as_ref()
+            else {
+                return;
+            };
+            let path = sqlite_queue_path(&ctx.config).expect("SQLite queue path");
+            if let Some(previous) = prior.lock().expect("queue path lock").as_ref() {
+                assert_eq!(previous, &path, "the configured regression queue is stable");
+            }
+            assert!(ctx.queue_provider.is_some(), "SQLite queue did not boot");
+            std::fs::write(&path, format!("queue={}", queue.uri)).expect("write queue artifact");
+            *prior.lock().expect("queue path lock") = Some(path);
+        })
+        .await;
+
+        let path = queue_path
+            .lock()
+            .expect("queue path lock")
+            .clone()
+            .expect("queue path after boot");
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "queue file leaked after shutdown"
+        );
+        assert!(!std::path::Path::new(&format!("{path}-wal")).exists());
+        assert!(!std::path::Path::new(&format!("{path}-shm")).exists());
+        assert!(!std::path::Path::new(&format!("{path}-journal")).exists());
+    }
 }
