@@ -110,4 +110,5 @@ check-all: fmt-check python-lint public-api-check edition-boundary-check check-c
 check-all-ee: fmt-check python-lint public-api-check edition-boundary-check check-ee clippy-ee
 
 package-docker-check:
-	./packaging/test-docker.sh
+	@test -n "$(IMAGE)" || { echo 'IMAGE is required' >&2; exit 2; }
+	./packaging/test-docker.sh "$(IMAGE)"

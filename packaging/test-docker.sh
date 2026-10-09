@@ -38,22 +38,37 @@ if [[ $# -gt 0 ]]; then
     chmod 0777 "$tmp/state"
     cp "$repo/config/example.yaml" "$tmp/config/production.yaml"
     "$@"
-    set +e
-    timeout 20 docker run --rm \
+    before_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
+    before_local=$(sha256sum "$tmp/config/production.local.yaml" 2>/dev/null || true)
+    container="yorishiro-docker-$name-$$"
+    docker run -d --name "$container" \
       -e DATABASE_URL='sqlite:///var/lib/yorishiro/runtime.sqlite3?mode=rwc' \
       -e QUEUE_URL='sqlite:///var/lib/yorishiro/runtime-queue.sqlite3?mode=rwc' \
       -e YORISHIRO_EMBEDDING_PROVIDER=none \
       -e BINDING=127.0.0.1 \
       -v "$tmp/config:/app/config" \
       -v "$tmp/state:/var/lib/yorishiro" \
-      --entrypoint yorishiro "$image" start >/tmp/yorishiro-docker-$name.log 2>&1 &
-    pid=$!
-    sleep 3
-    kill "$pid" 2>/dev/null || true
-    wait "$pid"
-    actual=$?
-    set -e
-    if [[ "$expected" = success && "$actual" -ne 0 && "$actual" -ne 143 ]]; then
+      --network host \
+      --entrypoint yorishiro "$image" start >/tmp/yorishiro-docker-$name.log 2>&1
+    ready=false
+    for _ in $(seq 1 20); do
+      if curl -fsS http://127.0.0.1:5150/_readiness >/dev/null 2>&1; then ready=true; break; fi
+      if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != true ]]; then break; fi
+      sleep 1
+    done
+    if [[ "$expected" = success && "$ready" = true ]]; then
+      docker stop "$container" >/dev/null
+    fi
+    actual=$(docker inspect -f '{{.State.ExitCode}}' "$container")
+    docker rm "$container" >/dev/null
+    after_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
+    after_local=$(sha256sum "$tmp/config/production.local.yaml" 2>/dev/null || true)
+    test "$before_base" = "$after_base" && test "$before_local" = "$after_local"
+    if [[ "$expected" = success && "$ready" != true ]]; then
+      cat "/tmp/yorishiro-docker-$name.log" >&2
+      return 1
+    fi
+    if [[ "$expected" = failure && "$ready" = true ]]; then
       cat "/tmp/yorishiro-docker-$name.log" >&2
       return 1
     fi

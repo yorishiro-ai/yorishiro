@@ -74,4 +74,6 @@ runs:
 
     - name: Test Docker configuration ownership and fallback
       shell: bash
-      run: make package-docker-check
+      run: |
+        docker build --build-arg EDITION=ce -t yorishiro-package-test:${{ inputs.version }} .
+        make package-docker-check IMAGE=yorishiro-package-test:${{ inputs.version }}

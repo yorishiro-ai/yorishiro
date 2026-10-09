@@ -936,9 +936,9 @@ mod conflict {
         .await;
     }
 
-    /// Capacity denial is terminal under the single-attempt policy: the row must not stay `queued` while Loco fails the job.
+    /// Legacy queue capacity metadata does not block an embedding worker after process-local admission.
     #[tokio::test]
-    async fn a_saturated_embedding_job_is_failed_not_orphaned() {
+    async fn legacy_saturated_embedding_metadata_is_ignored() {
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
             let enqueue = |id| Enqueue {
@@ -970,15 +970,16 @@ mod conflict {
                     worker_class: WorkerClass::Shared,
                 })
                 .await;
-            assert!(result.is_err(), "capacity denial must reach Loco");
+            assert!(
+                result.is_ok(),
+                "legacy capacity metadata must not block embedding"
+            );
             let row = Entity::find_by_id(waiting)
                 .one(&ctx.db)
                 .await
                 .expect("read waiting")
                 .expect("waiting row");
-            assert_eq!(row.status, LifecycleStatus::Failed.as_db_str());
-            assert!(row.error.is_some_and(|e| e.contains("saturated")));
-            assert_eq!(vector_rows(&ctx, entity_id).await, 0);
+            assert_ne!(row.status, LifecycleStatus::Failed.as_db_str());
             let holder = Entity::find_by_id(holder)
                 .one(&ctx.db)
                 .await
