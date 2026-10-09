@@ -170,6 +170,7 @@ run_rpm_absent_transition() {
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.rpm"; fi
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro almalinux:10 bash -eu -c "
     dnf install -y -q $base
+    $legacy_config_metadata
     rm -f /etc/yorishiro/production.yaml
     dnf install -y -q /pkg/yorishiro-${to}-${VERSION}-amd64.rpm
     test ! -e /etc/yorishiro/production.yaml

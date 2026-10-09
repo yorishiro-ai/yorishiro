@@ -19,7 +19,12 @@ fi
 if [[ $# -gt 0 ]]; then
   image=$1
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
+  active_container=""
+  cleanup() {
+    if [[ -n "$active_container" ]]; then docker rm -f "$active_container" >/dev/null 2>&1 || true; fi
+    rm -rf "$tmp"
+  }
+  trap cleanup EXIT
   docker run --rm \
     -v "$repo/config/example.yaml:/canonical-example.yaml:ro" \
     --entrypoint sh "$image" -ec '
@@ -41,11 +46,11 @@ if [[ $# -gt 0 ]]; then
     before_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
     before_local=$(sha256sum "$tmp/config/production.local.yaml" 2>/dev/null || true)
     container="yorishiro-docker-$name-$$"
+    active_container="$container"
     cleanup_case() {
       docker rm -f "$container" >/dev/null 2>&1 || true
       rm -rf "$tmp/config" "$tmp/state"
     }
-    trap cleanup_case RETURN
     docker run -d --name "$container" \
       -e DATABASE_URL='sqlite:///var/lib/yorishiro/runtime.sqlite3?mode=rwc' \
       -e QUEUE_URL='sqlite:///var/lib/yorishiro/runtime-queue.sqlite3?mode=rwc' \
@@ -92,7 +97,8 @@ if [[ $# -gt 0 ]]; then
       cat "/tmp/yorishiro-docker-$name.log" >&2
       return 1
     fi
-    trap - RETURN
+    docker rm -f "$container" >/dev/null 2>&1 || true
+    active_container=""
     cleanup_case
   }
 
