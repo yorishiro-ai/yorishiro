@@ -109,6 +109,24 @@ run_deb_absent_transition() {
   "
 }
 
+run_deb_current_remove_preserves_admin_config() {
+  docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -eu -c "
+    apt-get update -qq
+    apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
+    test -f /etc/yorishiro/example.yaml
+    cp /etc/yorishiro/example.yaml /etc/yorishiro/production.yaml
+    printf '\n# administrator-owned\n' >> /etc/yorishiro/production.yaml
+    chown root:root /etc/yorishiro/production.yaml
+    chmod 0600 /etc/yorishiro/production.yaml
+    cp /etc/yorishiro/production.yaml /tmp/production.before
+    stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
+    apt-get remove -y -qq yorishiro-ce
+    cmp /tmp/production.before /etc/yorishiro/production.yaml
+    test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
+    test ! -e /etc/yorishiro/example.yaml
+  "
+}
+
 run_rpm_transition() {
   local from="$1" to="$2"
   local base="/pkg/yorishiro-${from}-${VERSION}-amd64.rpm"
@@ -179,12 +197,30 @@ run_rpm_absent_transition() {
   "
 }
 
+run_rpm_current_remove_preserves_admin_config() {
+  docker run --rm -v "$PKG_DIR":/pkg:ro almalinux:10 bash -eu -c "
+    dnf install -y -q /pkg/yorishiro-ce-${VERSION}-amd64.rpm
+    test -f /etc/yorishiro/example.yaml
+    cp /etc/yorishiro/example.yaml /etc/yorishiro/production.yaml
+    printf '\n# administrator-owned\n' >> /etc/yorishiro/production.yaml
+    chown root:root /etc/yorishiro/production.yaml
+    chmod 0600 /etc/yorishiro/production.yaml
+    cp /etc/yorishiro/production.yaml /tmp/production.before
+    stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
+    dnf remove -y -q yorishiro-ce
+    cmp /tmp/production.before /etc/yorishiro/production.yaml
+    test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
+    test ! -e /etc/yorishiro/example.yaml
+  "
+}
+
 run_deb_transition yorishiro ce
 run_deb_untouched_transition
 run_deb_transition ce ee
 run_deb_transition ee ce
 run_deb_colocation_refusal
 run_deb_absent_transition yorishiro ce
+run_deb_current_remove_preserves_admin_config
 run_rpm_transition yorishiro ce
 run_rpm_transition yorishiro ee
 run_rpm_transition ce ee
@@ -192,3 +228,4 @@ run_rpm_transition ee ce
 run_rpm_colocation_refusal
 run_rpm_absent_transition yorishiro ce
 run_rpm_untouched_transition
+run_rpm_current_remove_preserves_admin_config
