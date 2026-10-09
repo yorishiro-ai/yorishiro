@@ -233,6 +233,61 @@ mod conflict {
         width: usize,
     }
 
+    struct ErrorThenSuccessProvider {
+        calls: AtomicUsize,
+        active: AtomicUsize,
+        max_active: AtomicUsize,
+        entered: Notify,
+        release: Semaphore,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for ErrorThenSuccessProvider {
+        fn dimensions(&self) -> usize {
+            768
+        }
+
+        fn model_name(&self) -> String {
+            "error-then-success-provider".into()
+        }
+
+        async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            self.entered.notify_waiters();
+            self.release.acquire().await.unwrap().forget();
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            if call == 0 {
+                return Err(YorishiroError::ProviderBusy {
+                    message: "scripted provider failure".into(),
+                    retry_after: std::time::Duration::from_secs(1),
+                });
+            }
+            Ok(texts.iter().map(|_| vec![1.0; 768]).collect())
+        }
+
+        async fn embed_as(
+            &self,
+            _kind: EmbedKind,
+            _text: &str,
+        ) -> Result<Vec<f32>, YorishiroError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            self.entered.notify_waiters();
+            self.release.acquire().await.unwrap().forget();
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            if call == 0 {
+                return Err(YorishiroError::ProviderBusy {
+                    message: "scripted provider failure".into(),
+                    retry_after: std::time::Duration::from_secs(1),
+                });
+            }
+            Ok(vec![1.0; 768])
+        }
+    }
+
     struct TestResolver(Arc<dyn EmbeddingProvider>);
 
     struct MixedProvider {
@@ -243,14 +298,70 @@ mod conflict {
         order: Mutex<Vec<EmbedKind>>,
     }
 
+    struct PanicProvider {
+        calls: AtomicUsize,
+        active: AtomicUsize,
+        max_active: AtomicUsize,
+        entered: Notify,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for PanicProvider {
+        fn dimensions(&self) -> usize {
+            768
+        }
+
+        fn model_name(&self) -> String {
+            "panic-test-provider".into()
+        }
+
+        async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.enter();
+                panic!("controlled provider panic");
+            }
+            Ok(texts.iter().map(|_| vec![1.0; 768]).collect())
+        }
+
+        async fn embed_as(
+            &self,
+            _kind: EmbedKind,
+            _text: &str,
+        ) -> Result<Vec<f32>, YorishiroError> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.enter();
+                panic!("controlled provider panic");
+            }
+            Ok(vec![1.0; 768])
+        }
+    }
+
+    impl PanicProvider {
+        fn enter(&self) {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            let _active_guard = ActiveGuard(&self.active);
+            self.entered.notify_waiters();
+            panic!("controlled provider panic");
+        }
+    }
+
+    struct ActiveGuard<'a>(&'a AtomicUsize);
+
+    impl Drop for ActiveGuard<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     impl MixedProvider {
         async fn gate(&self, kind: EmbedKind) -> Vec<f32> {
             self.order.lock().unwrap().push(kind);
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active.fetch_max(active, Ordering::SeqCst);
+            let _active_guard = ActiveGuard(&self.active);
             self.entered.notify_waiters();
             self.release.acquire().await.unwrap().forget();
-            self.active.fetch_sub(1, Ordering::SeqCst);
             vec![1.0; 768]
         }
     }
@@ -967,6 +1078,520 @@ mod conflict {
                 Some(QueryOutcome::Ready { .. })
             ));
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn real_workers_release_embedding_permits_after_success_error_abort_and_panic() {
+        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/outcome-worker.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/outcome-worker-queue.sqlite3?mode=rwc",
+        );
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let provider = Arc::new(MixedProvider {
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
+                order: Mutex::new(Vec::new()),
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+            let lifecycle_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: lifecycle_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .unwrap();
+            let holder = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(lifecycle_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                provider.entered.notified(),
+            )
+            .await
+            .unwrap();
+            let request_id = QueryRequests::open(&ctx.db, workspace_id, "alpha", 60)
+                .await
+                .unwrap();
+            let follower = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    yorishiro::workers::query_embedding::QueryEmbeddingWorker::build(&ctx)
+                        .perform(yorishiro::workers::query_embedding::QueryEmbeddingArgs {
+                            request_id,
+                            workspace_id,
+                        })
+                        .await
+                }
+            });
+            provider.release.add_permits(1);
+            holder.await.unwrap().unwrap();
+            provider.release.add_permits(1);
+            follower.await.unwrap().unwrap();
+            assert_eq!(
+                Entity::find_by_id(lifecycle_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                LifecycleStatus::Completed.as_db_str()
+            );
+            assert!(matches!(
+                QueryRequests::take(&ctx.db, workspace_id, request_id)
+                    .await
+                    .unwrap(),
+                Some(QueryOutcome::Ready { .. })
+            ));
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+
+            let no_content = seed_without_embeddable_content(&ctx).await;
+            ctx.shared_store
+                .insert(Arc::new(DisabledProvider) as Arc<dyn EmbeddingProvider>);
+            let noop_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: noop_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(no_content.0),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .unwrap();
+            EmbeddingSyncWorkerShared::build(&ctx)
+                .perform(EmbeddingSyncArgs {
+                    lifecycle_id: Some(noop_id),
+                    workspace_id: no_content.0,
+                    entity_id: no_content.1,
+                    worker_class: WorkerClass::Shared,
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                Entity::find_by_id(noop_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                LifecycleStatus::Completed.as_db_str()
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn provider_error_releases_real_worker_permit_without_replacement() {
+        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/error-release.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/error-release-queue.sqlite3?mode=rwc",
+        );
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let provider = Arc::new(ErrorThenSuccessProvider {
+                calls: AtomicUsize::new(0),
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+            let failed_id = Uuid::now_v7();
+            let waiting_id = Uuid::now_v7();
+            for id in [failed_id, waiting_id] {
+                Entity::record_enqueue(
+                    &ctx.db,
+                    Enqueue {
+                        id,
+                        job_name: "embedding_sync",
+                        worker_class: WorkerClass::Shared,
+                        workspace_id: Some(workspace_id),
+                        plan: None,
+                        concurrency_key: None,
+                        concurrency_limit: None,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            let failed = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(failed_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while provider.active.load(Ordering::SeqCst) != 1 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            let waiting = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(waiting_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::task::yield_now().await;
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+            provider.release.add_permits(1);
+            assert!(failed.await.unwrap().is_err());
+            let failed_row = Entity::find_by_id(failed_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(failed_row.status, LifecycleStatus::Failed.as_db_str());
+            assert!(
+                failed_row
+                    .error
+                    .is_some_and(|error| error.contains("scripted provider failure"))
+            );
+            provider.release.add_permits(1);
+            waiting.await.unwrap().unwrap();
+            let waiting_row = Entity::find_by_id(waiting_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(waiting_row.status, LifecycleStatus::Completed.as_db_str());
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_real_worker_releases_permit_and_is_reconciled() {
+        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/cancel-release.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/cancel-release-queue.sqlite3?mode=rwc",
+        );
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let provider = Arc::new(MixedProvider {
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
+                order: Mutex::new(Vec::new()),
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+
+            let holder_id = Uuid::now_v7();
+            let follower_id = Uuid::now_v7();
+            for id in [holder_id, follower_id] {
+                Entity::record_enqueue(
+                    &ctx.db,
+                    Enqueue {
+                        id,
+                        job_name: "embedding_sync",
+                        worker_class: WorkerClass::Shared,
+                        workspace_id: Some(workspace_id),
+                        plan: None,
+                        concurrency_key: None,
+                        concurrency_limit: None,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+
+            let holder = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(holder_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while provider.active.load(Ordering::SeqCst) != 1 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+
+            let follower = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(follower_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while Entity::find_by_id(follower_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status
+                    != LifecycleStatus::Queued.as_db_str()
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+
+            holder.abort();
+            let join = holder.await.unwrap_err();
+            assert!(join.is_cancelled());
+            assert_eq!(provider.active.load(Ordering::SeqCst), 0);
+
+            // Cancellation bypasses the worker's normal finish path.  The lifecycle
+            // authority reconciles the live lease explicitly as Cancelled.
+            Entity::finish(
+                &ctx.db,
+                holder_id,
+                Some(1),
+                LifecycleStatus::Cancelled,
+                Some("worker task cancelled"),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                Entity::find_by_id(holder_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                LifecycleStatus::Cancelled.as_db_str()
+            );
+
+            provider.release.add_permits(1);
+            follower.await.unwrap().unwrap();
+            assert_eq!(
+                Entity::find_by_id(follower_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                LifecycleStatus::Completed.as_db_str()
+            );
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+            assert!(
+                Entity::find_by_id(holder_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                Entity::find_by_id(follower_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn panicked_real_worker_releases_permit_and_is_reconciled() {
+        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/panic-release.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/panic-release-queue.sqlite3?mode=rwc",
+        );
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let provider = Arc::new(PanicProvider {
+                calls: AtomicUsize::new(0),
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+            let holder_id = Uuid::now_v7();
+            let follower_id = Uuid::now_v7();
+            for id in [holder_id, follower_id] {
+                Entity::record_enqueue(
+                    &ctx.db,
+                    Enqueue {
+                        id,
+                        job_name: "embedding_sync",
+                        worker_class: WorkerClass::Shared,
+                        workspace_id: Some(workspace_id),
+                        plan: None,
+                        concurrency_key: None,
+                        concurrency_limit: None,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            let holder = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(holder_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                provider.entered.notified(),
+            )
+            .await
+            .unwrap();
+            let follower = tokio::spawn({
+                let ctx = ctx.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(follower_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            let join = holder.await.unwrap_err();
+            assert!(join.is_panic());
+            assert_eq!(provider.active.load(Ordering::SeqCst), 0);
+            Entity::finish(
+                &ctx.db,
+                holder_id,
+                Some(1),
+                LifecycleStatus::Failed,
+                Some("controlled provider panic"),
+            )
+            .await
+            .unwrap();
+            let holder_row = Entity::find_by_id(holder_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(holder_row.status, LifecycleStatus::Failed.as_db_str());
+            assert_eq!(
+                holder_row.error.as_deref(),
+                Some("controlled provider panic")
+            );
+            follower.await.unwrap().unwrap();
+            assert_eq!(
+                Entity::find_by_id(follower_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                LifecycleStatus::Completed.as_db_str()
+            );
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+            assert!(
+                Entity::find_by_id(holder_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                Entity::find_by_id(follower_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
         })
         .await;
     }
