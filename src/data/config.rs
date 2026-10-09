@@ -26,10 +26,8 @@ pub async fn load(environment: &Environment) -> Result<Config> {
 fn test_environment(environment: &Environment) -> Environment {
     match environment {
         Environment::Test => {
-            if env::var("QUEUE_URL")
-                .is_ok_and(|url| url.starts_with("redis://") || url.starts_with("rediss://"))
-            {
-                return Environment::Any("test_redis".into());
+            if let Ok(topology) = env::var("YORISHIRO_TEST_TOPOLOGY") {
+                return Environment::Any(format!("test_{}", topology.replace('-', "_")));
             }
             let url = env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());

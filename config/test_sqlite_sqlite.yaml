@@ -1,0 +1,88 @@
+# Test environment for the SQLite backend: boots the app against a SQLite file directly with
+# LOCO_ENV=test_sqlite. SQLite-specific tests use this environment; request_with_create_db
+# remains PostgreSQL-only because it issues CREATE DATABASE, which SQLite does not support.
+#
+# YORISHIRO_MAX_TENANTS must still be set (to any value) for POST /setup to answer as enabled:
+# setup.rs's wizard_enabled() checks only that the variable is set, not its value: the SQLite cap
+# of 1 is enforced separately by tenancy::create_tenant regardless of what this variable says.
+
+logger:
+  enable: true
+  pretty_backtrace: true
+  level: debug
+  format: compact
+
+server:
+  port: <%= get_env(name="PORT", default="5150") %>
+  binding: <%= get_env(name="BINDING", default="localhost") %>
+  host: http://localhost
+  middlewares:
+    request_id:
+      enable: true
+    logger:
+      enable: true
+
+# Scheduler Configuration (disabled in test)
+scheduler:
+
+# Queue Configuration
+queue:
+  kind: Sqlite
+
+  uri: <%= get_env(name="QUEUE_URL", default="sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc") %>
+  # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
+  dangerously_flush: false
+
+  # Workers dequeuing in parallel, tunable per deployment.
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+
+  # Requeues jobs left in `processing` by a worker that died before completing or failing them.
+  reaper:
+    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
+    interval_seconds: 60
+
+workers:
+  mode: BackgroundQueue
+
+settings:
+  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="0") %>
+  embedding:
+    provider: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER", default="none") %>
+    dimensions: <%= get_env(name="YORISHIRO_EMBEDDING_DIMENSIONS", default="768") %>
+    base_url: <%= get_env(name="YORISHIRO_EMBEDDING_BASE_URL", default="") %>
+    api_key: '<%= get_env(name="YORISHIRO_EMBEDDING_API_KEY", default="") %>'
+    model: <%= get_env(name="YORISHIRO_EMBEDDING_MODEL", default="") %>
+    send_dimensions_param: <%= get_env(name="YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM", default="false") %>
+    provider_concurrency: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY", default="1") %>
+    local_model: <%= get_env(name="YORISHIRO_LOCAL_MODEL", default="multilingual-e5-base") %>
+    local_max_sequence_length: <%= get_env(name="YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH", default="512") %>
+  rate_limit:
+    auth_max_requests: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_MAX", default="10") %>
+    auth_window_seconds: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS", default="60") %>
+    search_tokens_per_minute: <%= get_env(name="YORISHIRO_SEARCH_TOKENS_PER_MINUTE", default="100000") %>
+  db_load_guard:
+    threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
+    sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
+    poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
+  query_embedding:
+    timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
+    poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
+    retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
+
+# Database Configuration
+database:
+  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") %>'
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: 500
+  idle_timeout: 500
+  min_connections: 1
+  max_connections: 10
+  auto_migrate: true
+  dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
+  dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
+
+# Authentication Configuration
+auth:
+  jwt:
+    secret: sqliteTierManualVerification
+    expiration: 604800 # 7 days

@@ -17,6 +17,45 @@ mod services;
 mod tasks;
 mod workers;
 
+/// Records the database and queue provider selected for this test process.
+pub(crate) fn record_topology() {
+    let database = std::env::var("DATABASE_URL").unwrap_or_default();
+    let database = if database.starts_with("sqlite://") || database.starts_with("sqlite::") {
+        "sqlite"
+    } else if database.starts_with("postgres://") || database.starts_with("postgresql://") {
+        "postgres"
+    } else {
+        "unknown"
+    };
+    let queue = std::env::var("YORISHIRO_TEST_QUEUE").unwrap_or_else(|_| {
+        std::env::var("QUEUE_URL")
+            .map(|url| {
+                if url.starts_with("redis://") || url.starts_with("rediss://") {
+                    "valkey"
+                } else if url.starts_with("sqlite://") || url.starts_with("sqlite::") {
+                    "sqlite"
+                } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+                    "postgres"
+                } else {
+                    "unknown"
+                }
+            })
+            .unwrap_or("unknown")
+            .to_owned()
+    });
+    let Some(root) = std::env::var_os("YORISHIRO_TOPOLOGY_MARKER_DIR") else {
+        return;
+    };
+    let path = std::path::Path::new(&root).join(database).join(queue);
+    std::fs::create_dir_all(&path).expect("create topology marker directory");
+    let file = path.join(format!(
+        "{}-{}",
+        std::process::id(),
+        BACKEND_MARKER_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(file, b"executed\n").expect("write topology marker");
+}
+
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;

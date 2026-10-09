@@ -128,6 +128,7 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    crate::record_topology();
     if is_sqlite_backend() {
         // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
         // SQLite must not open a path whose parent can disappear during concurrent test teardown.
