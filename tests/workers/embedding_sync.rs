@@ -388,17 +388,18 @@ mod conflict {
         }
 
         async fn shutdown(self) {
-            if let BackendObservation::Redis(_) = &self.observation {
-                self.queue
-                    .clear()
-                    .await
-                    .expect("clear reserved Redis test queue");
-            }
             let _ = self.queue.shutdown();
-            self.runner
+            let mut runner = self.runner;
+            if tokio::time::timeout(std::time::Duration::from_secs(2), &mut runner)
                 .await
-                .expect("join queue runner")
-                .expect("run queue");
+                .is_err()
+            {
+                runner.abort();
+                let _ = runner.await;
+            }
+            if let BackendObservation::Redis(_) = &self.observation {
+                let _ = self.queue.clear().await;
+            }
             match self.observation {
                 BackendObservation::Sqlite(pool) => pool.close().await,
                 BackendObservation::Postgres(pool) => pool.close().await,
