@@ -176,7 +176,7 @@ mod conflict {
     use async_trait::async_trait;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
-    use loco_rs::config::SqliteQueueConfig;
+    use loco_rs::config::{PostgresQueueConfig, RedisQueueConfig, SqliteQueueConfig};
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
         Statement,
@@ -201,6 +201,201 @@ mod conflict {
     };
 
     use crate::requests::{boot_request, request_with_create_sqlite};
+
+    enum BackendObservation {
+        Sqlite(sqlx::SqlitePool),
+        Postgres(sqlx::PgPool),
+        Redis(loco_rs::bgworker::redis::RedisPool),
+    }
+
+    impl BackendObservation {
+        async fn processing_count(&self) -> usize {
+            match self {
+                Self::Sqlite(pool) => sqlt::get_jobs(
+                    pool,
+                    Some(&vec![loco_rs::bgworker::JobStatus::Processing]),
+                    None,
+                )
+                .await
+                .expect("read SQLite processing jobs")
+                .len(),
+                Self::Postgres(pool) => loco_rs::bgworker::pg::get_jobs(
+                    pool,
+                    Some(&vec![loco_rs::bgworker::JobStatus::Processing]),
+                    None,
+                )
+                .await
+                .expect("read PostgreSQL processing jobs")
+                .len(),
+                Self::Redis(client) => loco_rs::bgworker::redis::get_jobs(
+                    client,
+                    Some(&vec![loco_rs::bgworker::JobStatus::Processing]),
+                    None,
+                )
+                .await
+                .expect("read Redis processing jobs")
+                .len(),
+            }
+        }
+
+        async fn total_count(&self) -> usize {
+            match self {
+                Self::Sqlite(pool) => sqlt::get_jobs(pool, None, None)
+                    .await
+                    .expect("read SQLite queue jobs")
+                    .len(),
+                Self::Postgres(pool) => loco_rs::bgworker::pg::get_jobs(pool, None, None)
+                    .await
+                    .expect("read PostgreSQL queue jobs")
+                    .len(),
+                Self::Redis(client) => loco_rs::bgworker::redis::get_jobs(client, None, None)
+                    .await
+                    .expect("read Redis queue jobs")
+                    .len(),
+            }
+        }
+    }
+
+    struct QueueHarness {
+        queue: Arc<bgworker::Queue>,
+        ctx: AppContext,
+        observation: BackendObservation,
+        runner: tokio::task::JoinHandle<loco_rs::Result<()>>,
+    }
+
+    impl QueueHarness {
+        async fn sqlite(ctx: AppContext, queue_uri: String) -> Self {
+            let queue = Arc::new(
+                bgworker::sqlt::create_provider(&SqliteQueueConfig {
+                    uri: queue_uri.clone(),
+                    dangerously_flush: false,
+                    enable_logging: false,
+                    max_connections: 2,
+                    min_connections: 1,
+                    connect_timeout: 5_000,
+                    idle_timeout: 5_000,
+                    poll_interval_sec: 1,
+                    num_workers: 2,
+                    reaper: None,
+                })
+                .await
+                .expect("SQLite queue"),
+            );
+            queue.setup().await.expect("set up SQLite queue");
+            let observation = BackendObservation::Sqlite(
+                sqlx::SqlitePool::connect(&queue_uri)
+                    .await
+                    .expect("connect to SQLite queue"),
+            );
+            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+            queue
+                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .await
+                .expect("register embedding worker");
+            let running = queue.clone();
+            let runner =
+                tokio::spawn(
+                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
+                );
+            Self {
+                queue,
+                ctx,
+                observation,
+                runner,
+            }
+        }
+
+        async fn postgres(ctx: AppContext, uri: String) -> Self {
+            let queue = Arc::new(
+                bgworker::pg::create_provider(&PostgresQueueConfig {
+                    uri: uri.clone(),
+                    dangerously_flush: false,
+                    enable_logging: false,
+                    max_connections: 2,
+                    min_connections: 1,
+                    connect_timeout: 5_000,
+                    idle_timeout: 5_000,
+                    poll_interval_sec: 1,
+                    num_workers: 2,
+                    reaper: None,
+                })
+                .await
+                .expect("PostgreSQL queue"),
+            );
+            queue.setup().await.expect("set up PostgreSQL queue");
+            let observation = BackendObservation::Postgres(
+                sqlx::PgPool::connect(&uri)
+                    .await
+                    .expect("connect to PostgreSQL queue"),
+            );
+            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+            queue
+                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .await
+                .expect("register embedding worker");
+            let running = queue.clone();
+            let runner =
+                tokio::spawn(
+                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
+                );
+            Self {
+                queue,
+                ctx,
+                observation,
+                runner,
+            }
+        }
+
+        async fn redis(ctx: AppContext, uri: String) -> Self {
+            let queue = Arc::new(
+                bgworker::redis::create_provider(&RedisQueueConfig {
+                    uri: uri.clone(),
+                    dangerously_flush: false,
+                    queues: Some(
+                        yorishiro::workers::registry::WorkerRegistry::community().queues(),
+                    ),
+                    num_workers: 2,
+                    reaper: None,
+                })
+                .await
+                .expect("Redis queue"),
+            );
+            queue.setup().await.expect("set up Redis queue");
+            let observation = BackendObservation::Redis(
+                loco_rs::bgworker::redis::RedisPool::open(uri)
+                    .expect("connect Redis observation client"),
+            );
+            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
+            queue
+                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .await
+                .expect("register embedding worker");
+            let running = queue.clone();
+            let runner =
+                tokio::spawn(
+                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
+                );
+            Self {
+                queue,
+                ctx,
+                observation,
+                runner,
+            }
+        }
+
+        async fn shutdown(self) {
+            let _ = self.queue.shutdown();
+            self.runner
+                .await
+                .expect("join queue runner")
+                .expect("run queue");
+            match self.observation {
+                BackendObservation::Sqlite(pool) => pool.close().await,
+                BackendObservation::Postgres(pool) => pool.close().await,
+                BackendObservation::Redis(_) => {}
+            }
+        }
+    }
 
     /// Updates the entity once, during the first document embedding.
     /// The worker has already read its snapshot by then, so the snapshot's token is stale when the vector is persisted.
@@ -231,51 +426,6 @@ mod conflict {
         entered: Notify,
         release: Semaphore,
         width: usize,
-    }
-
-    struct ContextProvider {
-        active: AtomicUsize,
-        max_active: AtomicUsize,
-        aggregate: Arc<AtomicUsize>,
-        aggregate_max: Arc<AtomicUsize>,
-        entered: Arc<Notify>,
-        release: Arc<Semaphore>,
-    }
-
-    #[async_trait]
-    impl EmbeddingProvider for ContextProvider {
-        fn dimensions(&self) -> usize {
-            768
-        }
-        fn model_name(&self) -> String {
-            "two-context-provider".into()
-        }
-        async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-            self.max_active.fetch_max(active, Ordering::SeqCst);
-            let total = self.aggregate.fetch_add(1, Ordering::SeqCst) + 1;
-            self.aggregate_max.fetch_max(total, Ordering::SeqCst);
-            self.entered.notify_waiters();
-            let _guard = ActiveGuard(&self.active);
-            self.release.acquire().await.unwrap().forget();
-            self.aggregate.fetch_sub(1, Ordering::SeqCst);
-            Ok(texts.iter().map(|_| vec![1.0; 768]).collect())
-        }
-        async fn embed_as(
-            &self,
-            _kind: EmbedKind,
-            _text: &str,
-        ) -> Result<Vec<f32>, YorishiroError> {
-            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-            self.max_active.fetch_max(active, Ordering::SeqCst);
-            let total = self.aggregate.fetch_add(1, Ordering::SeqCst) + 1;
-            self.aggregate_max.fetch_max(total, Ordering::SeqCst);
-            self.entered.notify_waiters();
-            let _guard = ActiveGuard(&self.active);
-            self.release.acquire().await.unwrap().forget();
-            self.aggregate.fetch_sub(1, Ordering::SeqCst);
-            Ok(vec![1.0; 768])
-        }
     }
 
     struct ErrorThenSuccessProvider {
@@ -1760,44 +1910,31 @@ mod conflict {
         .await;
     }
 
-    #[tokio::test]
-    async fn independently_booted_contexts_have_independent_embedding_limits() {
-        let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        let directory = tempfile::tempdir().unwrap();
-        let db_path = directory
-            .path()
-            .join("shared.sqlite3")
-            .display()
-            .to_string();
-        let aggregate = Arc::new(AtomicUsize::new(0));
-        let aggregate_max = Arc::new(AtomicUsize::new(0));
-        let entered = Arc::new(Notify::new());
-        let release = Arc::new(Semaphore::new(0));
-        let first_provider = Arc::new(ContextProvider {
-            active: AtomicUsize::new(0),
-            max_active: AtomicUsize::new(0),
-            aggregate: aggregate.clone(),
-            aggregate_max: aggregate_max.clone(),
-            entered: entered.clone(),
-            release: release.clone(),
-        });
-        request_with_create_sqlite::<App, _, _>(db_path.clone(), |_request, ctx_a| async move {
-            let (workspace_a, entity_a) = seed(&ctx_a).await;
-            ctx_a
-                .shared_store
-                .insert(first_provider.clone() as Arc<dyn EmbeddingProvider>);
-            ctx_a
-                .shared_store
-                .insert(Arc::new(TestResolver(first_provider.clone()))
-                    as Arc<dyn WorkspaceEmbeddingResolver>);
-            let id_a = Uuid::now_v7();
+    async fn run_backend_admission_scenario(harness: QueueHarness, provider: Arc<GatedProvider>) {
+        let (workspace_id, first) = seed(&harness.ctx).await;
+        let second = entity_entities::create(
+            &harness.ctx.db,
+            workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({"title":"second"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let mut ids = Vec::new();
+        for entity_id in [first, second.id] {
+            let id = Uuid::now_v7();
+            ids.push(id);
             Entity::record_enqueue(
-                &ctx_a.db,
+                &harness.ctx.db,
                 Enqueue {
-                    id: id_a,
+                    id,
                     job_name: "embedding_sync",
                     worker_class: WorkerClass::Shared,
-                    workspace_id: Some(workspace_a),
+                    workspace_id: Some(workspace_id),
                     plan: None,
                     concurrency_key: None,
                     concurrency_limit: None,
@@ -1805,162 +1942,165 @@ mod conflict {
             )
             .await
             .unwrap();
-            let holder_a = tokio::spawn({
-                let ctx = ctx_a.clone();
-                async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
-                        .perform(EmbeddingSyncArgs {
-                            lifecycle_id: Some(id_a),
-                            workspace_id: workspace_a,
-                            entity_id: entity_a,
-                            worker_class: WorkerClass::Shared,
-                        })
-                        .await
-                }
-            });
-            tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
+            harness
+                .queue
+                .enqueue(
+                    EmbeddingSyncWorkerShared::class_name(),
+                    None,
+                    EmbeddingSyncArgs {
+                        lifecycle_id: Some(id),
+                        workspace_id,
+                        entity_id,
+                        worker_class: WorkerClass::Shared,
+                    },
+                    Some(vec![WorkerClass::Shared.tag().into()]),
+                    Some(100),
+                )
                 .await
                 .unwrap();
-            let waiter_id = Uuid::now_v7();
-            Entity::record_enqueue(
-                &ctx_a.db,
-                Enqueue {
-                    id: waiter_id,
-                    job_name: "embedding_sync",
-                    worker_class: WorkerClass::Shared,
-                    workspace_id: Some(workspace_a),
-                    plan: None,
-                    concurrency_key: None,
-                    concurrency_limit: None,
-                },
-            )
-            .await
-            .unwrap();
-            let waiter_a = tokio::spawn({
-                let ctx = ctx_a.clone();
-                async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
-                        .perform(EmbeddingSyncArgs {
-                            lifecycle_id: Some(waiter_id),
-                            workspace_id: workspace_a,
-                            entity_id: entity_a,
-                            worker_class: WorkerClass::Shared,
-                        })
-                        .await
+        }
+        let total = harness.observation.total_count().await;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            provider.entered.notified(),
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while harness.observation.processing_count().await < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let rows = Entity::find().all(&harness.ctx.db).await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|r| ids.contains(&r.id) && r.status == LifecycleStatus::Running.as_db_str())
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|r| ids.contains(&r.id) && r.status == LifecycleStatus::Queued.as_db_str())
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|r| ids.contains(&r.id) && r.status == LifecycleStatus::Failed.as_db_str())
+                .count(),
+            0
+        );
+        assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+        assert_eq!(harness.observation.total_count().await, total);
+        provider.release.add_permits(2);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let rows = Entity::find().all(&harness.ctx.db).await.unwrap();
+                if ids.iter().all(|id| {
+                    rows.iter()
+                        .any(|r| r.id == *id && r.status == LifecycleStatus::Completed.as_db_str())
+                }) {
+                    break;
                 }
-            });
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(harness.observation.total_count().await, total);
+        let final_rows = Entity::find().all(&harness.ctx.db).await.unwrap();
+        assert_eq!(final_rows.iter().filter(|r| ids.contains(&r.id)).count(), 2);
+        harness.shutdown().await;
+    }
 
-            let second_provider = Arc::new(ContextProvider {
+    #[tokio::test]
+    async fn sqlite_harness_observes_real_embedding_deliveries_waiting_for_capacity() {
+        let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        let directory = tempfile::tempdir().unwrap();
+        let db_path = directory.path().join("app.sqlite3").display().to_string();
+        let queue_uri = format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("queue.sqlite3").display()
+        );
+        request_with_create_sqlite::<App, _, _>(db_path, |_request, ctx| async move {
+            let provider = Arc::new(GatedProvider {
+                calls: AtomicUsize::new(0),
                 active: AtomicUsize::new(0),
                 max_active: AtomicUsize::new(0),
-                aggregate: aggregate.clone(),
-                aggregate_max: aggregate_max.clone(),
-                entered: entered.clone(),
-                release: release.clone(),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
+                width: 768,
             });
-            request_with_create_sqlite::<App, _, _>(
-                db_path.clone(),
-                |_request, ctx_b| async move {
-                    let (workspace_b, entity_b) = seed(&ctx_b).await;
-                    ctx_b
-                        .shared_store
-                        .insert(second_provider.clone() as Arc<dyn EmbeddingProvider>);
-                    ctx_b
-                        .shared_store
-                        .insert(Arc::new(TestResolver(second_provider.clone()))
-                            as Arc<dyn WorkspaceEmbeddingResolver>);
-                    let id_b = Uuid::now_v7();
-                    Entity::record_enqueue(
-                        &ctx_b.db,
-                        Enqueue {
-                            id: id_b,
-                            job_name: "embedding_sync",
-                            worker_class: WorkerClass::Shared,
-                            workspace_id: Some(workspace_b),
-                            plan: None,
-                            concurrency_key: None,
-                            concurrency_limit: None,
-                        },
-                    )
-                    .await
-                    .unwrap();
-                    let holder_b = tokio::spawn({
-                        let ctx = ctx_b.clone();
-                        async move {
-                            EmbeddingSyncWorkerShared::build(&ctx)
-                                .perform(EmbeddingSyncArgs {
-                                    lifecycle_id: Some(id_b),
-                                    workspace_id: workspace_b,
-                                    entity_id: entity_b,
-                                    worker_class: WorkerClass::Shared,
-                                })
-                                .await
-                        }
-                    });
-                    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                        while aggregate.load(Ordering::SeqCst) < 2 {
-                            tokio::task::yield_now().await;
-                        }
-                    })
-                    .await
-                    .unwrap();
-                    let waiter_b_id = Uuid::now_v7();
-                    Entity::record_enqueue(
-                        &ctx_b.db,
-                        Enqueue {
-                            id: waiter_b_id,
-                            job_name: "embedding_sync",
-                            worker_class: WorkerClass::Shared,
-                            workspace_id: Some(workspace_b),
-                            plan: None,
-                            concurrency_key: None,
-                            concurrency_limit: None,
-                        },
-                    )
-                    .await
-                    .unwrap();
-                    let waiter_b = tokio::spawn({
-                        let ctx = ctx_b.clone();
-                        async move {
-                            EmbeddingSyncWorkerShared::build(&ctx)
-                                .perform(EmbeddingSyncArgs {
-                                    lifecycle_id: Some(waiter_b_id),
-                                    workspace_id: workspace_b,
-                                    entity_id: entity_b,
-                                    worker_class: WorkerClass::Shared,
-                                })
-                                .await
-                        }
-                    });
-                    release.add_permits(4);
-                    holder_b.await.unwrap().unwrap();
-                    waiter_b.await.unwrap().unwrap();
-                    assert_eq!(second_provider.max_active.load(Ordering::SeqCst), 1);
-                    assert_eq!(
-                        Entity::find_by_id(id_b)
-                            .one(&ctx_b.db)
-                            .await
-                            .unwrap()
-                            .unwrap()
-                            .status,
-                        LifecycleStatus::Completed.as_db_str()
-                    );
-                },
-            )
-            .await;
-            holder_a.await.unwrap().unwrap();
-            waiter_a.await.unwrap().unwrap();
-            assert_eq!(first_provider.max_active.load(Ordering::SeqCst), 1);
-            assert_eq!(aggregate_max.load(Ordering::SeqCst), 2);
-            assert_eq!(
-                Entity::find_by_id(id_a)
-                    .one(&ctx_a.db)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .status,
-                LifecycleStatus::Completed.as_db_str()
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
             );
+            run_backend_admission_scenario(QueueHarness::sqlite(ctx, queue_uri).await, provider)
+                .await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial(queue_postgres)]
+    #[serial(process_environment)]
+    async fn postgres_harness_observes_real_embedding_deliveries_waiting_for_capacity() {
+        if !crate::require_postgres_backend() {
+            return;
+        }
+        let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        let uri = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let provider = Arc::new(GatedProvider {
+                calls: AtomicUsize::new(0),
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
+                width: 768,
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+            run_backend_admission_scenario(QueueHarness::postgres(ctx, uri).await, provider).await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial(queue_postgres)]
+    #[serial(process_environment)]
+    async fn redis_harness_observes_real_embedding_deliveries_waiting_for_capacity() {
+        let Ok(uri) = std::env::var("YORISHIRO_REDIS_TEST_URL") else {
+            return;
+        };
+        if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {
+            return;
+        }
+        if reqwest::Url::parse(&uri).map_or(true, |url| url.path() != "/15") {
+            return;
+        }
+        let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let provider = Arc::new(GatedProvider {
+                calls: AtomicUsize::new(0),
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(0),
+                width: 768,
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+            run_backend_admission_scenario(QueueHarness::redis(ctx, uri).await, provider).await;
         })
         .await;
     }
