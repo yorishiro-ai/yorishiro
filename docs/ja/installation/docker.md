@@ -49,8 +49,5 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 ## 設定
 
 全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。
-イメージには参照用設定 `/app/config/example.yaml` だけが含まれます。
-`/app/config/production.yaml` と `/app/config/production.local.yaml` がなければ、バイナリに埋め込まれた `config/example.yaml` と同じバイト列を使います。
-ファイルで設定する場合は、完全な管理者所有の `/app/config/production.yaml` と必要に応じて `/app/config/production.local.yaml` を mount するか、これらを含むディレクトリを `LOCO_CONFIG_FOLDER` に指定してください。
-イメージは mount された設定ファイルを作成、merge、書換え、chmod、削除しません。
-参照用既定値は `127.0.0.1` に bind します。Docker Compose は `5150` を公開するため `BINDING=0.0.0.0` を明示します。
+production 設定はイメージ内の `/app/config/production.yaml` にあります。
+このパスへ置き換えファイルをマウントするか、`LOCO_CONFIG_FOLDER` で別の設定ディレクトリを指定してください。

@@ -18,65 +18,9 @@ use sqlx::sqlite::SqliteConnectOptions;
 /// Returns an error if the operation cannot be completed.
 pub async fn load(environment: &Environment) -> Result<Config> {
     let environment = test_environment(environment);
-    let config = load_environment(&environment)?;
+    let config = environment.load()?;
     validate(&config)?;
     Ok(config)
-}
-
-const EMBEDDED_EXAMPLE: &[u8] = include_bytes!("../../config/example.yaml");
-
-fn load_environment(environment: &Environment) -> Result<Config> {
-    let folder = env::var("LOCO_CONFIG_FOLDER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("config"));
-    let base = folder.join(format!("{environment}.yaml"));
-    let local = folder.join(format!("{environment}.local.yaml"));
-    let base_present = config_file_state(&base)?;
-    let local_present = config_file_state(&local)?;
-
-    if local_present {
-        if !base_present {
-            return Err(Error::Message(format!(
-                "configuration override exists without base configuration: {}",
-                local.display()
-            )));
-        }
-        return environment.load_from_folder(&folder);
-    }
-
-    if base_present {
-        return environment.load_from_folder(&folder);
-    }
-
-    tracing::info!(environment = %environment, "using embedded example configuration defaults");
-    let temp = tempfile::tempdir().map_err(|error| {
-        Error::Message(format!(
-            "could not create embedded configuration directory: {error}"
-        ))
-    })?;
-    let temp_path = temp.path();
-    let embedded = temp_path.join(format!("{environment}.yaml"));
-    fs::write(&embedded, EMBEDDED_EXAMPLE).map_err(|error| {
-        Error::Message(format!(
-            "could not materialize embedded configuration: {error}"
-        ))
-    })?;
-    environment.load_from_folder(temp_path)
-}
-
-fn config_file_state(path: &Path) -> Result<bool> {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => Ok(true),
-        Ok(_) => Err(Error::Message(format!(
-            "configuration path is not a file: {}",
-            path.display()
-        ))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(Error::Message(format!(
-            "cannot access configuration file {}: {error}",
-            path.display()
-        ))),
-    }
 }
 
 fn test_environment(environment: &Environment) -> Environment {

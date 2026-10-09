@@ -24,17 +24,15 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | `/var/lib/yorishiro/worker-wrapper.sh` | 起動時にタグを自動検出するラッパースクリプト |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
 | `/lib/systemd/system/yorishiro-worker.service` | タグ付きバックグラウンドワーカーユニット |
-| `/etc/yorishiro/example.yaml` | 既定値を含む完全な参照用設定 |
+| `/etc/yorishiro/production.yaml` | 編集可能な Loco production 設定 |
 
 EE パッケージは同じ共有パスに加えて `/etc/yorishiro/LICENSE.enterprise` をインストールします。
 CE は EE ライセンスファイルをインストールしません。
 
 ## 設定
 
-管理者が上書きしたい場合だけ `/etc/yorishiro/production.yaml` を作成します。
-パッケージはこのファイルをインストール、作成、変更、merge、chmod、削除しません。
-このファイルがなければ、アプリケーションは `example.yaml` と同じ内容を埋め込んだ既定値を使います。
-パッケージ更新では `example.yaml` だけが更新されます。
+パッケージ版サービスの設定は `/etc/yorishiro/production.yaml` を編集します。
+パッケージを更新しても、このファイルに加えた変更は保持されます。
 アプリケーションデータベースは SQLite または PostgreSQL を利用でき、キューの保存先は Loco のキュープロバイダとして独立して選択できます。
 
 ```yaml

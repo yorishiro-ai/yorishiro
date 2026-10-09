@@ -64,7 +64,7 @@ note "deb on ubuntu:24.04 — the supported case"
 # --------------------------------------------------------------------------------------------
 # Single container: install, root backup/metadata, unprivileged probes as yorishiro,
 # root verify/atomic restore, then emit all markers to the host for assertion.
-probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/example.yaml":/canonical-example.yaml:ro ubuntu:24.04 bash -c '
+probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-example.yaml:ro ubuntu:24.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }

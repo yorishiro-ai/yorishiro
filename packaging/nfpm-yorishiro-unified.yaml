@@ -91,8 +91,9 @@ contents:
     dst: /lib/systemd/system/yorishiro-worker.service
   - src: ./packaging/yorishiro-scheduler.service
     dst: /lib/systemd/system/yorishiro-scheduler.service
-  # Complete reference-only defaults. The package never manages production.yaml.
-  - src: ./config/example.yaml
+  # Install a reference copy of the production defaults.
+  # The package never owns or installs /etc/yorishiro/production.yaml.
+  - src: ./config/production.yaml
     dst: /etc/yorishiro/example.yaml
     file_info:
       mode: 0644

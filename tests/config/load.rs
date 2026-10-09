@@ -1,7 +1,6 @@
 use loco_rs::config::QueueConfig;
 use loco_rs::environment::Environment;
 use serial_test::serial;
-use tempfile::tempdir;
 
 use yorishiro::data::config::load;
 
@@ -118,75 +117,6 @@ async fn production_config_is_the_packaged_loco_config() {
         "sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc"
     );
     assert_eq!(settings["embedding"]["provider"], "local");
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn production_without_external_files_uses_embedded_example_defaults() {
-    let dir = tempdir().unwrap();
-    let guard = EnvGuard::capture(&["LOCO_CONFIG_FOLDER", "DATABASE_URL", "QUEUE_URL"]);
-    guard.set("LOCO_CONFIG_FOLDER", dir.path());
-    guard.remove("DATABASE_URL");
-    guard.remove("QUEUE_URL");
-
-    let config = load(&Environment::Production).await.unwrap();
-    assert_eq!(
-        config.database.uri,
-        "sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc"
-    );
-    assert_eq!(config.server.binding, "127.0.0.1");
-    assert!(config.settings::<serde_json::Value>().is_ok());
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn local_only_configuration_is_rejected_without_embedded_fallback() {
-    let dir = tempdir().unwrap();
-    std::fs::write(dir.path().join("production.local.yaml"), "logger: {}\n").unwrap();
-    let guard = EnvGuard::capture(&["LOCO_CONFIG_FOLDER"]);
-    guard.set("LOCO_CONFIG_FOLDER", dir.path());
-
-    let error = load(&Environment::Production)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(!error.contains("no configuration file found"));
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn malformed_external_configuration_does_not_fallback() {
-    let dir = tempdir().unwrap();
-    std::fs::write(dir.path().join("production.yaml"), "not: [valid").unwrap();
-    let guard = EnvGuard::capture(&["LOCO_CONFIG_FOLDER"]);
-    guard.set("LOCO_CONFIG_FOLDER", dir.path());
-
-    let error = load(&Environment::Production)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(!error.contains("no configuration file found"));
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn complete_external_base_and_local_files_win_and_merge_normally() {
-    let dir = tempdir().unwrap();
-    let example = include_bytes!("../../config/example.yaml");
-    std::fs::write(dir.path().join("production.yaml"), example).unwrap();
-    std::fs::write(
-        dir.path().join("production.local.yaml"),
-        "settings:\n  max_tenants: 7\n",
-    )
-    .unwrap();
-    let guard = EnvGuard::capture(&["LOCO_CONFIG_FOLDER", "DATABASE_URL", "QUEUE_URL"]);
-    guard.set("LOCO_CONFIG_FOLDER", dir.path());
-    guard.remove("DATABASE_URL");
-    guard.remove("QUEUE_URL");
-
-    let config = load(&Environment::Production).await.unwrap();
-    let settings = config.settings::<serde_json::Value>().unwrap();
-    assert_eq!(settings["max_tenants"], 7);
 }
 
 #[tokio::test]

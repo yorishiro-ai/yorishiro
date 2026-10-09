@@ -201,7 +201,7 @@ mod conflict {
         EmbeddingSyncArgs, EmbeddingSyncWorkerShared, WorkerClass,
     };
 
-    use crate::requests::{boot_request, request_with_create_sqlite};
+    use crate::requests::{boot_request, boot_request_sqlite};
 
     enum BackendObservation {
         Sqlite(sqlx::SqlitePool),
@@ -2178,7 +2178,7 @@ mod conflict {
             entered: entered.clone(),
             release: release.clone(),
         });
-        request_with_create_sqlite::<App, _, _>(db_path.clone(), |_request, ctx_a| async move {
+        boot_request_sqlite::<App, _, _>(db_path.clone(), |_request, ctx_a| async move {
             let (workspace, entity) = seed(&ctx_a).await;
             ctx_a
                 .shared_store
@@ -2239,7 +2239,7 @@ mod conflict {
                     entered: entered.clone(),
                     release: release.clone(),
                 });
-                request_with_create_sqlite::<App, _, _>(db_path, |_request, ctx_b| async move {
+                boot_request_sqlite::<App, _, _>(db_path, |_request, ctx_b| async move {
                     let (workspace_b, entity_b) = seed(&ctx_b).await;
                     ctx_b
                         .shared_store
@@ -2357,7 +2357,7 @@ mod conflict {
             "sqlite://{}?mode=rwc",
             directory.path().join("queue.sqlite3").display()
         );
-        request_with_create_sqlite::<App, _, _>(db_path, |_request, ctx| async move {
+        boot_request_sqlite::<App, _, _>(db_path, |_request, ctx| async move {
             let provider = Arc::new(GatedProvider {
                 calls: AtomicUsize::new(0),
                 active: AtomicUsize::new(0),
