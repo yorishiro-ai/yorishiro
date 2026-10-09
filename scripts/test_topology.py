@@ -47,7 +47,7 @@ def main() -> int:
         )
         marker = Path(marker_dir, database, queue, "configured-app")
         count = len(list(marker.glob("*"))) if marker.exists() else 0
-        print(f"topology {topology}: executed={count}")
+        print(f"topology {topology}: configured_app={count}")
         if result.returncode:
             return result.returncode
         if not validate_marker_layout(marker_dir, topology):
@@ -60,11 +60,15 @@ def main() -> int:
 
 
 def validate_marker_layout(root: Path, topology: str) -> bool:
+    root = Path(root)
     database, queue = topology.split("-", 1)
     expected = root / database / queue / "configured-app"
     return expected.is_dir() and not any(
         path.is_dir()
-        and not expected.relative_to(root).is_relative_to(path.relative_to(root))
+        and not (
+            path.relative_to(root).is_relative_to(expected.relative_to(root))
+            or expected.relative_to(root).is_relative_to(path.relative_to(root))
+        )
         for path in root.rglob("*")
     )
 
