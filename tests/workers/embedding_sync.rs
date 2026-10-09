@@ -1926,77 +1926,84 @@ mod conflict {
                 queue_dir.path().join("recovery-queue.sqlite3").display()
             );
             let harness = QueueHarness::sqlite(ctx, queue_uri).await;
-            // Loco's queue reaper owns Processing delivery reclamation.  This test
-            // starts the already-reclaimed payload directly in the real queue runner.
-            harness
-                .queue
-                .enqueue(
-                    EmbeddingSyncWorkerShared::class_name(),
-                    None,
-                    EmbeddingSyncArgs {
-                        lifecycle_id: Some(lifecycle_id),
-                        workspace_id,
-                        entity_id,
-                        worker_class: WorkerClass::Shared,
-                    },
-                    Some(vec![WorkerClass::Shared.tag().into()]),
-                    Some(100),
-                )
-                .await
-                .unwrap();
-            let original_queue_count = harness.observation.total_count().await;
-            assert_eq!(original_queue_count, 1);
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    let row = Entity::find_by_id(lifecycle_id)
-                        .one(&harness.ctx.db)
-                        .await
-                        .unwrap()
-                        .unwrap();
-                    if row.status == LifecycleStatus::Completed.as_db_str() {
-                        break;
+            let result = std::panic::AssertUnwindSafe(async {
+                // Loco's queue reaper owns Processing delivery reclamation.  This test
+                // starts the already-reclaimed payload directly in the real queue runner.
+                harness
+                    .queue
+                    .enqueue(
+                        EmbeddingSyncWorkerShared::class_name(),
+                        None,
+                        EmbeddingSyncArgs {
+                            lifecycle_id: Some(lifecycle_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        },
+                        Some(vec![WorkerClass::Shared.tag().into()]),
+                        Some(100),
+                    )
+                    .await
+                    .unwrap();
+                let original_queue_count = harness.observation.total_count().await;
+                assert_eq!(original_queue_count, 1);
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        let row = Entity::find_by_id(lifecycle_id)
+                            .one(&harness.ctx.db)
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        if row.status == LifecycleStatus::Completed.as_db_str() {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
                     }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-            let final_row = Entity::find_by_id(lifecycle_id)
-                .one(&harness.ctx.db)
+                })
                 .await
-                .unwrap()
                 .unwrap();
-            assert_eq!(final_row.attempt, 2);
-            assert_eq!(final_row.status, LifecycleStatus::Completed.as_db_str());
-            assert!(final_row.error.is_none());
-            assert_eq!(vector_rows(&harness.ctx, entity_id).await, 1);
-            assert!(
-                Entity::finish(
-                    &harness.ctx.db,
-                    lifecycle_id,
-                    Some(1),
-                    LifecycleStatus::Failed,
-                    Some("stale attempt")
-                )
-                .await
-                .is_err()
-            );
-            assert_eq!(
-                Entity::find_by_id(lifecycle_id)
+                let final_row = Entity::find_by_id(lifecycle_id)
                     .one(&harness.ctx.db)
                     .await
                     .unwrap()
-                    .unwrap()
-                    .status,
-                LifecycleStatus::Completed.as_db_str()
-            );
-            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
-            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
-            assert_eq!(
-                harness.observation.total_count().await,
-                original_queue_count
-            );
+                    .unwrap();
+                assert_eq!(final_row.attempt, 2);
+                assert_eq!(final_row.status, LifecycleStatus::Completed.as_db_str());
+                assert!(final_row.error.is_none());
+                assert_eq!(vector_rows(&harness.ctx, entity_id).await, 1);
+                assert!(
+                    Entity::finish(
+                        &harness.ctx.db,
+                        lifecycle_id,
+                        Some(1),
+                        LifecycleStatus::Failed,
+                        Some("stale attempt")
+                    )
+                    .await
+                    .is_err()
+                );
+                assert_eq!(
+                    Entity::find_by_id(lifecycle_id)
+                        .one(&harness.ctx.db)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .status,
+                    LifecycleStatus::Completed.as_db_str()
+                );
+                assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+                assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+                assert_eq!(
+                    harness.observation.total_count().await,
+                    original_queue_count
+                );
+            })
+            .catch_unwind()
+            .await;
             harness.shutdown().await;
+            if let Err(panic) = result {
+                std::panic::resume_unwind(panic);
+            }
         })
         .await;
     }
@@ -2189,74 +2196,15 @@ mod conflict {
                 ),
             )
             .await;
-            let id_a = Uuid::now_v7();
-            Entity::record_enqueue(
-                &harness_a.ctx.db,
-                Enqueue {
-                    id: id_a,
-                    job_name: "embedding_sync",
-                    worker_class: WorkerClass::Shared,
-                    workspace_id: Some(workspace),
-                    plan: None,
-                    concurrency_key: None,
-                    concurrency_limit: None,
-                },
-            )
-            .await
-            .unwrap();
-            harness_a
-                .queue
-                .enqueue(
-                    EmbeddingSyncWorkerShared::class_name(),
-                    None,
-                    EmbeddingSyncArgs {
-                        lifecycle_id: Some(id_a),
-                        workspace_id: workspace,
-                        entity_id: entity,
-                        worker_class: WorkerClass::Shared,
-                    },
-                    Some(vec![WorkerClass::Shared.tag().into()]),
-                    Some(100),
-                )
-                .await
-                .unwrap();
-            tokio::time::timeout(std::time::Duration::from_secs(3), entered.notified())
-                .await
-                .unwrap();
-            let provider_b = Arc::new(AggregateGatedProvider {
-                active: AtomicUsize::new(0),
-                max_active: AtomicUsize::new(0),
-                aggregate: aggregate.clone(),
-                aggregate_max: aggregate_max.clone(),
-                entered: entered.clone(),
-                release: release.clone(),
-            });
-            request_with_create_sqlite::<App, _, _>(db_path, |_request, ctx_b| async move {
-                let (workspace_b, entity_b) = seed(&ctx_b).await;
-                ctx_b
-                    .shared_store
-                    .insert(provider_b.clone() as Arc<dyn EmbeddingProvider>);
-                ctx_b
-                    .shared_store
-                    .insert(Arc::new(TestResolver(provider_b.clone()))
-                        as Arc<dyn WorkspaceEmbeddingResolver>);
-                let queue_b = tempfile::tempdir().unwrap();
-                let harness_b = QueueHarness::sqlite(
-                    ctx_b,
-                    format!(
-                        "sqlite://{}?mode=rwc",
-                        queue_b.path().join("queue.sqlite3").display()
-                    ),
-                )
-                .await;
-                let id_b = Uuid::now_v7();
+            let result = std::panic::AssertUnwindSafe(async {
+                let id_a = Uuid::now_v7();
                 Entity::record_enqueue(
-                    &harness_b.ctx.db,
+                    &harness_a.ctx.db,
                     Enqueue {
-                        id: id_b,
+                        id: id_a,
                         job_name: "embedding_sync",
                         worker_class: WorkerClass::Shared,
-                        workspace_id: Some(workspace_b),
+                        workspace_id: Some(workspace),
                         plan: None,
                         concurrency_key: None,
                         concurrency_limit: None,
@@ -2264,15 +2212,15 @@ mod conflict {
                 )
                 .await
                 .unwrap();
-                harness_b
+                harness_a
                     .queue
                     .enqueue(
                         EmbeddingSyncWorkerShared::class_name(),
                         None,
                         EmbeddingSyncArgs {
-                            lifecycle_id: Some(id_b),
-                            workspace_id: workspace_b,
-                            entity_id: entity_b,
+                            lifecycle_id: Some(id_a),
+                            workspace_id: workspace,
+                            entity_id: entity,
                             worker_class: WorkerClass::Shared,
                         },
                         Some(vec![WorkerClass::Shared.tag().into()]),
@@ -2280,17 +2228,102 @@ mod conflict {
                     )
                     .await
                     .unwrap();
-                tokio::time::timeout(std::time::Duration::from_secs(3), async {
-                    while aggregate.load(Ordering::SeqCst) < 2 {
-                        tokio::task::yield_now().await;
+                tokio::time::timeout(std::time::Duration::from_secs(3), entered.notified())
+                    .await
+                    .unwrap();
+                let provider_b = Arc::new(AggregateGatedProvider {
+                    active: AtomicUsize::new(0),
+                    max_active: AtomicUsize::new(0),
+                    aggregate: aggregate.clone(),
+                    aggregate_max: aggregate_max.clone(),
+                    entered: entered.clone(),
+                    release: release.clone(),
+                });
+                request_with_create_sqlite::<App, _, _>(db_path, |_request, ctx_b| async move {
+                    let (workspace_b, entity_b) = seed(&ctx_b).await;
+                    ctx_b
+                        .shared_store
+                        .insert(provider_b.clone() as Arc<dyn EmbeddingProvider>);
+                    ctx_b
+                        .shared_store
+                        .insert(Arc::new(TestResolver(provider_b.clone()))
+                            as Arc<dyn WorkspaceEmbeddingResolver>);
+                    let queue_b = tempfile::tempdir().unwrap();
+                    let harness_b = QueueHarness::sqlite(
+                        ctx_b,
+                        format!(
+                            "sqlite://{}?mode=rwc",
+                            queue_b.path().join("queue.sqlite3").display()
+                        ),
+                    )
+                    .await;
+                    let result_b = std::panic::AssertUnwindSafe(async {
+                        let id_b = Uuid::now_v7();
+                        Entity::record_enqueue(
+                            &harness_b.ctx.db,
+                            Enqueue {
+                                id: id_b,
+                                job_name: "embedding_sync",
+                                worker_class: WorkerClass::Shared,
+                                workspace_id: Some(workspace_b),
+                                plan: None,
+                                concurrency_key: None,
+                                concurrency_limit: None,
+                            },
+                        )
+                        .await
+                        .unwrap();
+                        harness_b
+                            .queue
+                            .enqueue(
+                                EmbeddingSyncWorkerShared::class_name(),
+                                None,
+                                EmbeddingSyncArgs {
+                                    lifecycle_id: Some(id_b),
+                                    workspace_id: workspace_b,
+                                    entity_id: entity_b,
+                                    worker_class: WorkerClass::Shared,
+                                },
+                                Some(vec![WorkerClass::Shared.tag().into()]),
+                                Some(100),
+                            )
+                            .await
+                            .unwrap();
+                        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                            while aggregate.load(Ordering::SeqCst) < 2 {
+                                tokio::task::yield_now().await;
+                            }
+                        })
+                        .await
+                        .unwrap();
+                        release.add_permits(2);
+                        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                            while Entity::find_by_id(id_b)
+                                .one(&harness_b.ctx.db)
+                                .await
+                                .unwrap()
+                                .unwrap()
+                                .status
+                                != LifecycleStatus::Completed.as_db_str()
+                            {
+                                tokio::task::yield_now().await;
+                            }
+                        })
+                        .await
+                        .unwrap();
+                        assert_eq!(provider_b.max_active.load(Ordering::SeqCst), 1);
+                    })
+                    .catch_unwind()
+                    .await;
+                    harness_b.shutdown().await;
+                    if let Err(panic) = result_b {
+                        std::panic::resume_unwind(panic);
                     }
                 })
-                .await
-                .unwrap();
-                release.add_permits(2);
+                .await;
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                    while Entity::find_by_id(id_b)
-                        .one(&harness_b.ctx.db)
+                    while Entity::find_by_id(id_a)
+                        .one(&harness_a.ctx.db)
                         .await
                         .unwrap()
                         .unwrap()
@@ -2302,27 +2335,15 @@ mod conflict {
                 })
                 .await
                 .unwrap();
-                assert_eq!(provider_b.max_active.load(Ordering::SeqCst), 1);
-                harness_b.shutdown().await;
+                assert_eq!(provider_a.max_active.load(Ordering::SeqCst), 1);
+                assert_eq!(aggregate_max.load(Ordering::SeqCst), 2);
             })
+            .catch_unwind()
             .await;
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while Entity::find_by_id(id_a)
-                    .one(&harness_a.ctx.db)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .status
-                    != LifecycleStatus::Completed.as_db_str()
-                {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-            assert_eq!(provider_a.max_active.load(Ordering::SeqCst), 1);
-            assert_eq!(aggregate_max.load(Ordering::SeqCst), 2);
             harness_a.shutdown().await;
+            if let Err(panic) = result {
+                std::panic::resume_unwind(panic);
+            }
         })
         .await;
     }
