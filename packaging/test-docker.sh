@@ -35,6 +35,7 @@ if [[ $# -gt 0 ]]; then
     shift 2
     rm -rf "$tmp/config" "$tmp/state"
     mkdir -p "$tmp/config" "$tmp/state"
+    chmod 0777 "$tmp/state"
     cp "$repo/config/example.yaml" "$tmp/config/production.yaml"
     "$@"
     set +e
@@ -66,5 +67,6 @@ if [[ $# -gt 0 ]]; then
   run_config_case external success true
   run_config_case merged success sh -c "printf 'settings:\\n  max_tenants: 1\\n' > '$tmp/config/production.local.yaml'"
   run_config_case malformed failure sh -c "printf 'not: [valid' > '$tmp/config/production.yaml'"
-  run_config_case local-only failure rm "$tmp/config/production.yaml"
+  rm -f "$tmp/config/production.local.yaml"
+  run_config_case local-only failure sh -c "rm '$tmp/config/production.yaml'; printf 'settings:\\n  max_tenants: 1\\n' > '$tmp/config/production.local.yaml'"
 fi
