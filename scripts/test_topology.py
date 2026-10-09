@@ -39,6 +39,11 @@ def main() -> int:
             YORISHIRO_TEST_TOPOLOGY=topology,
             YORISHIRO_TEST_QUEUE=queue,
         )
+        if topology == "postgres-sqlite":
+            # Loco 1.2 exposes no request-harness config override. Its PostgreSQL
+            # helper therefore shares the configured SQLite queue file, so this
+            # lane is serialized until a public override exists.
+            env["RUST_TEST_THREADS"] = "1"
         result = subprocess.run(
             ["cargo", "test", "--locked", "--workspace", *feature_args, *cargo_args],
             cwd=ROOT,

@@ -61,7 +61,9 @@ use axum_test::TestServer;
 use futures::FutureExt;
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
+use sqlx::sqlite::SqliteConnectOptions;
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 /// Close every connection pool this app opens on a PostgreSQL test database.
 ///
@@ -80,6 +82,48 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
         db.tenant.pool().close().await;
     }
     ctx.db.get_postgres_connection_pool().close().await;
+    if is_sqlite_queue() {
+        if let Some(path) = sqlite_queue_path(&ctx.config) {
+            remove_sqlite_files(&path);
+        }
+    }
+}
+
+fn sqlite_queue_path(config: &loco_rs::config::Config) -> Option<String> {
+    let loco_rs::config::QueueConfig::Sqlite(queue) = config.queue.as_ref()? else {
+        return None;
+    };
+    let filename = SqliteConnectOptions::from_str(&queue.uri)
+        .ok()?
+        .get_filename()
+        .to_string_lossy()
+        .into_owned();
+    (!filename.is_empty()).then_some(filename)
+}
+
+fn remove_sqlite_files(path: &str) {
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let _ = std::fs::remove_file(format!("{path}{suffix}"));
+    }
+}
+
+#[test]
+fn sqlite_queue_cleanup_removes_database_and_journal_siblings() {
+    let directory = tempfile::tempdir().expect("create queue cleanup directory");
+    let first = directory.path().join("first.sqlite3");
+    let second = directory.path().join("second.sqlite3");
+    for path in [&first, &second] {
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            std::fs::write(format!("{}{suffix}", path.display()), b"test")
+                .expect("create queue cleanup fixture");
+        }
+    }
+    assert_ne!(first, second);
+    remove_sqlite_files(first.to_str().expect("UTF-8 queue path"));
+    assert!(!first.exists());
+    assert!(second.exists());
+    remove_sqlite_files(second.to_str().expect("UTF-8 queue path"));
+    assert!(!second.exists());
 }
 
 /// SQLite variant of `close_app_pools`.
@@ -93,10 +137,7 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
     }
     ctx.db.get_sqlite_connection_pool().close().await;
     // Clean up the temp SQLite file and its journaling siblings.
-    let _ = std::fs::remove_file(db_path);
-    let _ = std::fs::remove_file(format!("{db_path}-wal"));
-    let _ = std::fs::remove_file(format!("{db_path}-shm"));
-    let _ = std::fs::remove_file(format!("{db_path}-journal"));
+    remove_sqlite_files(db_path);
 }
 
 /// Whether `DATABASE_URL` names a SQLite backend (file or in-memory).
