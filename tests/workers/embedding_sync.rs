@@ -200,7 +200,7 @@ mod conflict {
         EmbeddingSyncArgs, EmbeddingSyncWorkerShared, WorkerClass,
     };
 
-    use crate::requests::boot_request;
+    use crate::requests::{boot_request, request_with_create_sqlite};
 
     /// Updates the entity once, during the first document embedding.
     /// The worker has already read its snapshot by then, so the snapshot's token is stale when the vector is persisted.
@@ -231,6 +231,51 @@ mod conflict {
         entered: Notify,
         release: Semaphore,
         width: usize,
+    }
+
+    struct ContextProvider {
+        active: AtomicUsize,
+        max_active: AtomicUsize,
+        aggregate: Arc<AtomicUsize>,
+        aggregate_max: Arc<AtomicUsize>,
+        entered: Arc<Notify>,
+        release: Arc<Semaphore>,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for ContextProvider {
+        fn dimensions(&self) -> usize {
+            768
+        }
+        fn model_name(&self) -> String {
+            "two-context-provider".into()
+        }
+        async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            let total = self.aggregate.fetch_add(1, Ordering::SeqCst) + 1;
+            self.aggregate_max.fetch_max(total, Ordering::SeqCst);
+            self.entered.notify_waiters();
+            let _guard = ActiveGuard(&self.active);
+            self.release.acquire().await.unwrap().forget();
+            self.aggregate.fetch_sub(1, Ordering::SeqCst);
+            Ok(texts.iter().map(|_| vec![1.0; 768]).collect())
+        }
+        async fn embed_as(
+            &self,
+            _kind: EmbedKind,
+            _text: &str,
+        ) -> Result<Vec<f32>, YorishiroError> {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            let total = self.aggregate.fetch_add(1, Ordering::SeqCst) + 1;
+            self.aggregate_max.fetch_max(total, Ordering::SeqCst);
+            self.entered.notify_waiters();
+            let _guard = ActiveGuard(&self.active);
+            self.release.acquire().await.unwrap().forget();
+            self.aggregate.fetch_sub(1, Ordering::SeqCst);
+            Ok(vec![1.0; 768])
+        }
     }
 
     struct ErrorThenSuccessProvider {
@@ -1711,6 +1756,211 @@ mod conflict {
             );
             assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn independently_booted_contexts_have_independent_embedding_limits() {
+        let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        let directory = tempfile::tempdir().unwrap();
+        let db_path = directory
+            .path()
+            .join("shared.sqlite3")
+            .display()
+            .to_string();
+        let aggregate = Arc::new(AtomicUsize::new(0));
+        let aggregate_max = Arc::new(AtomicUsize::new(0));
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Semaphore::new(0));
+        let first_provider = Arc::new(ContextProvider {
+            active: AtomicUsize::new(0),
+            max_active: AtomicUsize::new(0),
+            aggregate: aggregate.clone(),
+            aggregate_max: aggregate_max.clone(),
+            entered: entered.clone(),
+            release: release.clone(),
+        });
+        request_with_create_sqlite::<App, _, _>(db_path.clone(), |_request, ctx_a| async move {
+            let (workspace_a, entity_a) = seed(&ctx_a).await;
+            ctx_a
+                .shared_store
+                .insert(first_provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx_a
+                .shared_store
+                .insert(Arc::new(TestResolver(first_provider.clone()))
+                    as Arc<dyn WorkspaceEmbeddingResolver>);
+            let id_a = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx_a.db,
+                Enqueue {
+                    id: id_a,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_a),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .unwrap();
+            let holder_a = tokio::spawn({
+                let ctx = ctx_a.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(id_a),
+                            workspace_id: workspace_a,
+                            entity_id: entity_a,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
+                .await
+                .unwrap();
+            let waiter_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx_a.db,
+                Enqueue {
+                    id: waiter_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_a),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .unwrap();
+            let waiter_a = tokio::spawn({
+                let ctx = ctx_a.clone();
+                async move {
+                    EmbeddingSyncWorkerShared::build(&ctx)
+                        .perform(EmbeddingSyncArgs {
+                            lifecycle_id: Some(waiter_id),
+                            workspace_id: workspace_a,
+                            entity_id: entity_a,
+                            worker_class: WorkerClass::Shared,
+                        })
+                        .await
+                }
+            });
+
+            let second_provider = Arc::new(ContextProvider {
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                aggregate: aggregate.clone(),
+                aggregate_max: aggregate_max.clone(),
+                entered: entered.clone(),
+                release: release.clone(),
+            });
+            request_with_create_sqlite::<App, _, _>(
+                db_path.clone(),
+                |_request, ctx_b| async move {
+                    let (workspace_b, entity_b) = seed(&ctx_b).await;
+                    ctx_b
+                        .shared_store
+                        .insert(second_provider.clone() as Arc<dyn EmbeddingProvider>);
+                    ctx_b
+                        .shared_store
+                        .insert(Arc::new(TestResolver(second_provider.clone()))
+                            as Arc<dyn WorkspaceEmbeddingResolver>);
+                    let id_b = Uuid::now_v7();
+                    Entity::record_enqueue(
+                        &ctx_b.db,
+                        Enqueue {
+                            id: id_b,
+                            job_name: "embedding_sync",
+                            worker_class: WorkerClass::Shared,
+                            workspace_id: Some(workspace_b),
+                            plan: None,
+                            concurrency_key: None,
+                            concurrency_limit: None,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                    let holder_b = tokio::spawn({
+                        let ctx = ctx_b.clone();
+                        async move {
+                            EmbeddingSyncWorkerShared::build(&ctx)
+                                .perform(EmbeddingSyncArgs {
+                                    lifecycle_id: Some(id_b),
+                                    workspace_id: workspace_b,
+                                    entity_id: entity_b,
+                                    worker_class: WorkerClass::Shared,
+                                })
+                                .await
+                        }
+                    });
+                    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                        while aggregate.load(Ordering::SeqCst) < 2 {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    let waiter_b_id = Uuid::now_v7();
+                    Entity::record_enqueue(
+                        &ctx_b.db,
+                        Enqueue {
+                            id: waiter_b_id,
+                            job_name: "embedding_sync",
+                            worker_class: WorkerClass::Shared,
+                            workspace_id: Some(workspace_b),
+                            plan: None,
+                            concurrency_key: None,
+                            concurrency_limit: None,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                    let waiter_b = tokio::spawn({
+                        let ctx = ctx_b.clone();
+                        async move {
+                            EmbeddingSyncWorkerShared::build(&ctx)
+                                .perform(EmbeddingSyncArgs {
+                                    lifecycle_id: Some(waiter_b_id),
+                                    workspace_id: workspace_b,
+                                    entity_id: entity_b,
+                                    worker_class: WorkerClass::Shared,
+                                })
+                                .await
+                        }
+                    });
+                    release.add_permits(4);
+                    holder_b.await.unwrap().unwrap();
+                    waiter_b.await.unwrap().unwrap();
+                    assert_eq!(second_provider.max_active.load(Ordering::SeqCst), 1);
+                    assert_eq!(
+                        Entity::find_by_id(id_b)
+                            .one(&ctx_b.db)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .status,
+                        LifecycleStatus::Completed.as_db_str()
+                    );
+                },
+            )
+            .await;
+            holder_a.await.unwrap().unwrap();
+            waiter_a.await.unwrap().unwrap();
+            assert_eq!(first_provider.max_active.load(Ordering::SeqCst), 1);
+            assert_eq!(aggregate_max.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                Entity::find_by_id(id_a)
+                    .one(&ctx_a.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                LifecycleStatus::Completed.as_db_str()
+            );
         })
         .await;
     }
