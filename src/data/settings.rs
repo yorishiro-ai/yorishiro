@@ -47,6 +47,13 @@ pub struct Embedding {
     pub(crate) send_dimensions_param: bool,
     pub(crate) local_model: String,
     pub(crate) local_max_sequence_length: usize,
+    /// Maximum concurrent provider calls in one worker process.
+    #[serde(default = "default_provider_concurrency")]
+    pub(crate) provider_concurrency: usize,
+}
+
+fn default_provider_concurrency() -> usize {
+    1
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]

@@ -49,5 +49,5 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 ## Configuration
 
 See [docs/en/configuration.md](../configuration.md) for all settings.
-The production configuration is at `/app/config/production.yaml` inside the image.
+The image owns and loads `/app/config/production.yaml` at runtime.
 Mount a replacement there or point `LOCO_CONFIG_FOLDER` at another configuration directory.

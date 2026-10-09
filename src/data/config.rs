@@ -57,9 +57,10 @@ fn validate(config: &Config) -> Result<()> {
         || settings.rate_limit.search_tokens_per_minute == 0
         || settings.db_load_guard.sustain_seconds == 0
         || settings.db_load_guard.poll_seconds == 0
+        || settings.embedding.provider_concurrency == 0
     {
         return Err(Error::Message(
-            "embedding dimensions and sequence length, rate limits, and database load guard durations must be greater than zero".into(),
+            "embedding dimensions, provider concurrency, sequence length, rate limits, and database load guard durations must be greater than zero".into(),
         ));
     }
     validate_query_embedding(&settings.query_embedding)?;

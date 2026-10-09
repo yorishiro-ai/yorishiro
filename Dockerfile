@@ -75,7 +75,7 @@ COPY packaging/yorishiro-worker-wrapper.sh /var/lib/yorishiro/worker-wrapper.sh
 RUN chmod +x /var/lib/yorishiro/worker-wrapper.sh \
     && chown root:yorishiro /var/lib/yorishiro \
     && chmod 1770 /var/lib/yorishiro
-# Keep Loco's environment-based configuration layout in the runtime image.
+# The image owns the canonical runtime configuration and loads it through LOCO_CONFIG_FOLDER.
 COPY config/production.yaml /app/config/production.yaml
 
 # Relative paths in embedding provider settings (YORISHIRO_LOCAL_MODEL_PATH defaults to

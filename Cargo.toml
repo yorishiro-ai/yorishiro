@@ -64,7 +64,7 @@ loco-rs = { workspace = true }
 migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.53.1", features = ["rt", "time", "macros"] }
+tokio = { version = "1.53.1", features = ["rt", "time", "macros", "sync"] }
 async-trait.workspace = true
 axum.workspace = true
 tracing.workspace = true
@@ -117,7 +117,7 @@ required-features = []
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
 tracing-subscriber = "0.3.23"
-# Used by tests/requests/queue.rs to give the SQLite queue a file that is removed with the test.
+# Used by queue and integration tests for isolated temporary databases.
 tempfile = { version = "3.27.0" }
 # Used by the ee/ request tests folded into tests/requests/.
 axum-test = { version = "17.3.0" }

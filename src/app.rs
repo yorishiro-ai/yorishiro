@@ -409,6 +409,11 @@ async fn install_services(ctx: AppContext) -> Result<AppContext> {
     // `ctx.db` directly, and a per-workspace assignment is not an RLS concept.
     ctx.shared_store
         .insert(crate::services::embedding::default_embedding_resolver());
+    ctx.shared_store.insert(
+        crate::services::embedding::concurrency::EmbeddingConcurrency::new(
+            settings.embedding.provider_concurrency,
+        ),
+    );
     ctx.shared_store
         .insert(crate::workers::embedding_sync::default_worker_class_resolver());
     // The per-workspace search token budget is request-scoped state, so it lives in `shared_store`

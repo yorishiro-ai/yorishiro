@@ -71,3 +71,9 @@ runs:
       run: |
         ./packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
         ./packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
+
+    - name: Test Docker configuration ownership and fallback
+      shell: bash
+      run: |
+        docker build --build-arg EDITION=ce -t yorishiro-package-test:${{ inputs.version }} .
+        make package-docker-check IMAGE=yorishiro-package-test:${{ inputs.version }}

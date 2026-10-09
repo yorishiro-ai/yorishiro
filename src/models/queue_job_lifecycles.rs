@@ -184,35 +184,6 @@ impl Entity {
         Ok(())
     }
 
-    /// Closes a row that was never admitted as `failed`, fenced to the statuses a delivery may still claim.
-    ///
-    /// # Errors
-    /// Returns `RecordNotFound` when another delivery has already claimed the row.
-    pub(crate) async fn fail_unadmitted(
-        db: &impl ConnectionTrait,
-        id: Uuid,
-        error: &str,
-    ) -> Result<(), DbErr> {
-        let result = Entity::update_many()
-            .col_expr(
-                Column::Status,
-                Expr::value(LifecycleStatus::Failed.as_db_str()),
-            )
-            .col_expr(Column::FailedAt, Expr::value(Utc::now().fixed_offset()))
-            .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
-            .filter(Column::Id.eq(id))
-            .filter(Column::Status.is_in([
-                LifecycleStatus::Queued.as_db_str(),
-                LifecycleStatus::Retrying.as_db_str(),
-            ]))
-            .exec(db)
-            .await?;
-        if result.rows_affected == 0 {
-            return Err(DbErr::RecordNotFound("unclaimed queue lifecycle".into()));
-        }
-        Ok(())
-    }
-
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -302,6 +273,13 @@ impl Entity {
         Self::start_at(db, id, Utc::now().fixed_offset()).await
     }
 
+    pub(crate) async fn start_ignoring_capacity(
+        db: &DatabaseConnection,
+        id: Uuid,
+    ) -> Result<Admission, DbErr> {
+        Self::start_at_with_capacity_policy(db, id, Utc::now().fixed_offset(), true).await
+    }
+
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -319,8 +297,31 @@ impl Entity {
         } else {
             db.begin().await?
         };
-        let admission = admit(&txn, id, now).await?;
+        let admission = admit(&txn, id, now, false).await?;
         // Only an admission wrote anything; every other outcome leaves the row as it found it.
+        match admission {
+            Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
+            _ => txn.rollback().await?,
+        }
+        Ok(admission)
+    }
+
+    async fn start_at_with_capacity_policy(
+        db: &DatabaseConnection,
+        id: Uuid,
+        now: DateTimeWithTimeZone,
+        ignore_capacity: bool,
+    ) -> Result<Admission, DbErr> {
+        let txn = if db.get_database_backend() == DatabaseBackend::Sqlite {
+            db.begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await?
+        } else {
+            db.begin().await?
+        };
+        let admission = admit(&txn, id, now, ignore_capacity).await?;
         match admission {
             Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
             _ => txn.rollback().await?,
@@ -392,6 +393,7 @@ async fn admit(
     txn: &DatabaseTransaction,
     id: Uuid,
     now: DateTimeWithTimeZone,
+    ignore_capacity: bool,
 ) -> Result<Admission, DbErr> {
     let row = Entity::find_by_id(id)
         .lock_exclusive()
@@ -420,7 +422,8 @@ async fn admit(
         }
         None => None,
     };
-    if let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)
+    if !ignore_capacity
+        && let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)
         && in_flight >= u64::try_from(limit).unwrap_or(0)
     {
         tracing::warn!(

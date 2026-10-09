@@ -22,6 +22,7 @@ impl InferFillDispatcher for LocoJobDispatcher {
             dispatch_payload: serde_json::to_value(&args)
                 .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
             route,
+            use_queue_concurrency: true,
         };
         dispatch_job(ctx, spec, |lifecycle_id, priority| {
             let args = InferFillArgs {

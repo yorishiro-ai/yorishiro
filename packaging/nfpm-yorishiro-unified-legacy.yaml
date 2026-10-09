@@ -1,6 +1,6 @@
 # Community package. It is built without the `enterprise` Cargo feature.
 # This package contains only the community build.
-name: yorishiro-ce
+name: yorishiro
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
@@ -57,8 +57,9 @@ depends:
 # bindings, it rejects any binary whose version-requirements section names a version the library
 # lacks. `objdump -p` is the one that answers the question the package manager needs.
 #
-# The binary links to the system C++ runtime, so the package declares the C++ runtime and libgcc
-# explicitly rather than relying on an incidental dependency.
+# There is no GLIBCXX floor as of the candle-based embedding provider: `readelf -V` on the real
+# The binary links to the system C++ runtime, so the retired package declares the native runtime
+# dependencies explicitly rather than relying on an incidental dependency.
 #
 # This floor is why the release build has to happen in CI rather than from a developer's
 # `target/release`: a binary linked against a newer host glibc raises the real requirement above
@@ -77,13 +78,6 @@ overrides:
       - libgcc
       - libstdc++
 
-conflicts:
-  - yorishiro
-  - yorishiro-ee
-replaces:
-  - yorishiro
-  - yorishiro-ee
-
 contents:
   - src: ./target/release/yorishiro
     dst: /usr/bin/yorishiro
@@ -97,14 +91,15 @@ contents:
     dst: /lib/systemd/system/yorishiro-worker.service
   - src: ./packaging/yorishiro-scheduler.service
     dst: /lib/systemd/system/yorishiro-scheduler.service
-  # Install a reference copy of the production defaults.
-  # The package never owns or installs /etc/yorishiro/production.yaml.
+  # The systemd unit loads this editable Loco production configuration.
+  # `config|noreplace` preserves an operator's changes during package upgrades.
   - src: ./config/production.yaml
-    dst: /etc/yorishiro/example.yaml
+    dst: /etc/yorishiro/production.yaml
+    type: config|noreplace
     file_info:
-      mode: 0644
+      mode: 0640
       owner: root
-      group: root
+      group: yorishiro
   # `copyright` rather than `LICENSE`: Debian policy names it that, and minimal images
   # (including the official ubuntu/debian containers) carry a dpkg `path-exclude` for
   # `/usr/share/doc/*` with a `path-include` for `copyright` alone -- a file called LICENSE is

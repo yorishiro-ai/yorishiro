@@ -102,15 +102,14 @@ contents:
     dst: /lib/systemd/system/yorishiro-worker.service
   - src: ./packaging/yorishiro-scheduler.service
     dst: /lib/systemd/system/yorishiro-scheduler.service
-  # The systemd unit loads this editable Loco production configuration.
-  # `config|noreplace` preserves an operator's changes during package upgrades.
+  # Install a reference copy of the production defaults.
+  # The package never owns or installs /etc/yorishiro/production.yaml.
   - src: ./config/production.yaml
-    dst: /etc/yorishiro/production.yaml
-    type: config|noreplace
+    dst: /etc/yorishiro/example.yaml
     file_info:
-      mode: 0640
+      mode: 0644
       owner: root
-      group: yorishiro
+      group: root
   # `copyright` rather than `LICENSE`: Debian policy names it that, and minimal images
   # (including the official ubuntu/debian containers) carry a dpkg `path-exclude` for
   # `/usr/share/doc/*` with a `path-include` for `copyright` alone -- a file called LICENSE is

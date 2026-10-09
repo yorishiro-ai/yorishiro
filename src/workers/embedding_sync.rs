@@ -231,50 +231,33 @@ async fn perform_embedding_with_lifecycle(
     ctx: &AppContext,
     args: &EmbeddingSyncArgs,
 ) -> loco_rs::Result<()> {
+    let concurrency = ctx
+        .shared_store
+        .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
+        .ok_or_else(|| loco_rs::Error::Message("embedding concurrency missing".into()))?;
+    let _permit = concurrency
+        .acquire()
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     let Some(id) = args.lifecycle_id else {
         return perform_embedding_sync(ctx, args)
             .await
             .map(|_| ())
             .map_err(Into::into);
     };
-    let attempt = match crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-    {
-        crate::models::queue_job_lifecycles::Admission::Started { attempt }
-        | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
-        crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
-        | crate::models::queue_job_lifecycles::Admission::Terminal => return Ok(()),
-        crate::models::queue_job_lifecycles::Admission::Saturated { attempt } => {
-            // Single-attempt policy: there is no requeue, so a capacity denial is terminal.
-            // Leaving the row unfinished would orphan it as `queued` while Loco fails the job.
-            const DIAGNOSTIC: &str = "embedding worker capacity saturated; not retried";
-            let fenced = match attempt {
-                Some(attempt) => {
-                    crate::models::queue_job_lifecycles::Entity::finish(
-                        &ctx.db,
-                        id,
-                        Some(attempt),
-                        crate::models::queue_job_lifecycles::LifecycleStatus::Failed,
-                        Some(DIAGNOSTIC),
-                    )
-                    .await
-                }
-                None => {
-                    crate::models::queue_job_lifecycles::Entity::fail_unadmitted(
-                        &ctx.db, id, DIAGNOSTIC,
-                    )
-                    .await
-                }
-            };
-            return match fenced {
-                Ok(()) => Err(loco_rs::Error::Message(DIAGNOSTIC.into())),
-                // Another delivery claimed the row first and owns its lifecycle.
-                Err(DbErr::RecordNotFound(_)) => Ok(()),
-                Err(error) => Err(loco_rs::Error::Message(error.to_string())),
-            };
-        }
-    };
+    let attempt =
+        match crate::models::queue_job_lifecycles::Entity::start_ignoring_capacity(&ctx.db, id)
+            .await
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        {
+            crate::models::queue_job_lifecycles::Admission::Started { attempt }
+            | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
+            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+            | crate::models::queue_job_lifecycles::Admission::Terminal => return Ok(()),
+            crate::models::queue_job_lifecycles::Admission::Saturated { .. } => {
+                unreachable!("capacity is non-authoritative for embedding workers")
+            }
+        };
     let result = perform_embedding_sync(ctx, args).await;
     let (status, diagnostic, error, superseded) = match result {
         Ok(EmbeddingSyncOutcome::Persisted) => (

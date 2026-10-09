@@ -17,13 +17,16 @@ x-yorishiro: &yorishiro
     context: .
     dockerfile: Dockerfile
   environment: &yorishiro-environment
-    # These override their documented counterparts in /app/config/production.yaml.
+    # These override the embedded/example defaults. Mount a complete administrator-owned
+    # /app/config/production.yaml or production.local.yaml when file configuration is needed.
     DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
     # `Redis` is Loco's provider name for Redis-compatible services such as valkey. Without it the
     # queue kind follows DATABASE_URL's scheme and lands on Postgres.
     YORISHIRO_QUEUE_KIND: Redis
     QUEUE_URL: redis://redis:6379
     HOST: http://localhost:5150
+    # The image default is loopback-safe; compose publishes the port, so opt into container access.
+    BINDING: 0.0.0.0
     LOG_LEVEL: info
     # Explicitly retain the packaged default: run the local embedding provider and fetch its
     # model into the container cache when no read-only model mount is supplied.
