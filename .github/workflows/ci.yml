@@ -431,7 +431,7 @@ jobs:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
           QUEUE_URL: ${{ matrix.queue_url }}
-          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
+          YORISHIRO_VALKEY_TEST_URL: ${{ matrix.queue_url }}
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
