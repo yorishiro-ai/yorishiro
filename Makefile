@@ -6,7 +6,7 @@
 # Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
-YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
+YORISHIRO_VALKEY_TEST_URL ?= redis://localhost:6379/15
 
 .PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
@@ -63,10 +63,10 @@ test-sqlite: build
 # Valkey DB 15 is reserved for tests. An explicit endpoint uses the caller's
 # service instead and does not start a local container.
 test-valkey:
-	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379/15" ]; then \
+	@if [ "$(YORISHIRO_VALKEY_TEST_URL)" = "redis://localhost:6379/15" ]; then \
 		docker compose up -d --wait valkey; \
 	fi
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_REDIS_TEST_URL)' YORISHIRO_TEST_TOPOLOGY=sqlite-valkey YORISHIRO_TEST_QUEUE=valkey LOCO_ENV=test_valkey uv run scripts/test_topology.py sqlite-valkey
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_VALKEY_TEST_URL)' YORISHIRO_TEST_TOPOLOGY=sqlite-valkey YORISHIRO_TEST_QUEUE=valkey LOCO_ENV=test_valkey uv run scripts/test_topology.py sqlite-valkey
 
 build: build-ce
 

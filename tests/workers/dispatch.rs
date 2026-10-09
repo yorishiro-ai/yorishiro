@@ -7,7 +7,7 @@ use yorishiro::workers::embedding_sync::{
 /// What a provider swap must not change: a worker class keeps draining its own jobs however many another class has queued.
 ///
 /// Redis filters tags client-side over the first 1000 entries of a queue, where the SQL providers filter in the query, so the production worker types have to give Redis a queue per class.
-/// Skipped unless `YORISHIRO_REDIS_TEST_URL` names a Redis-compatible server.
+/// Skipped unless `YORISHIRO_VALKEY_TEST_URL` names a Valkey server.
 mod redis_routing {
     use std::sync::Arc;
     use std::time::Duration;
@@ -54,16 +54,16 @@ mod redis_routing {
     #[serial_test::serial(queue_postgres)]
     #[serial_test::serial(process_environment)]
     async fn a_class_drains_its_own_jobs_behind_a_backlog_of_another_class() {
-        let Ok(uri) = std::env::var("YORISHIRO_REDIS_TEST_URL") else {
-            eprintln!("skipping Redis routing test: YORISHIRO_REDIS_TEST_URL is unset");
+        let Ok(uri) = std::env::var("YORISHIRO_VALKEY_TEST_URL") else {
+            eprintln!("skipping Valkey routing test: YORISHIRO_VALKEY_TEST_URL is unset");
             return;
         };
         if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {
-            eprintln!("skipping Redis routing test: explicit URL is not Redis");
+            eprintln!("skipping Valkey routing test: explicit URL is not Redis");
             return;
         }
         if reqwest::Url::parse(&uri).map_or(true, |url| url.path() != "/15") {
-            eprintln!("skipping Redis routing test: URL must select reserved test database 15");
+            eprintln!("skipping Valkey routing test: URL must select reserved test database 15");
             return;
         }
 

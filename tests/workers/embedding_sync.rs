@@ -2409,7 +2409,7 @@ mod conflict {
     #[serial(queue_postgres)]
     #[serial(process_environment)]
     async fn redis_harness_observes_real_embedding_deliveries_waiting_for_capacity() {
-        let Ok(uri) = std::env::var("YORISHIRO_REDIS_TEST_URL") else {
+        let Ok(uri) = std::env::var("YORISHIRO_VALKEY_TEST_URL") else {
             return;
         };
         if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {

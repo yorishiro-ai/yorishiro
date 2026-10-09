@@ -657,16 +657,16 @@ async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
 #[serial_test::serial(queue_postgres)]
 #[serial_test::serial(process_environment)]
 async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
-    let Ok(uri) = std::env::var("YORISHIRO_REDIS_TEST_URL") else {
-        eprintln!("skipping Redis bounded-scan test: YORISHIRO_REDIS_TEST_URL is unset");
+    let Ok(uri) = std::env::var("YORISHIRO_VALKEY_TEST_URL") else {
+        eprintln!("skipping Valkey bounded-scan test: YORISHIRO_VALKEY_TEST_URL is unset");
         return;
     };
     if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {
-        eprintln!("skipping Redis bounded-scan test: explicit URL is not Redis");
+        eprintln!("skipping Valkey bounded-scan test: explicit URL is not Redis");
         return;
     }
     if reqwest::Url::parse(&uri).map_or(true, |url| url.path() != "/15") {
-        eprintln!("skipping Redis bounded-scan test: URL must select reserved test database 15");
+        eprintln!("skipping Valkey bounded-scan test: URL must select reserved test database 15");
         return;
     }
     let config = RedisQueueConfig {
