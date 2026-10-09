@@ -60,3 +60,18 @@ fn a_sql_queue_is_left_alone() {
     yorishiro::data::config::serve_worker_queues(&mut sqlite, &["a".to_owned()]);
     assert_eq!(format!("{:?}", sqlite.queue), before);
 }
+
+#[test]
+fn cross_sql_queue_topologies_are_supported() {
+    let postgres_database = config(
+        "postgres://localhost:5432/app",
+        "sqlite://queue.sqlite3?mode=rwc",
+    );
+    assert!(validate_queue_policy(&postgres_database).is_ok());
+
+    let sqlite_database = serde_yaml::from_str::<loco_rs::config::Config>(
+        "logger: { enable: true, pretty_backtrace: false, level: info, format: compact }\nserver: { port: 5150, binding: localhost, host: http://localhost }\ndatabase: { uri: 'sqlite://app.sqlite3?mode=rwc', enable_logging: false, connect_timeout: 500, idle_timeout: 500, min_connections: 1, max_connections: 2, auto_migrate: false }\nqueue: { kind: Postgres, uri: 'postgres://localhost:5432/queue', num_workers: 1 }\nworkers: { mode: BackgroundQueue }\n",
+    )
+    .unwrap();
+    assert!(validate_queue_policy(&sqlite_database).is_ok());
+}
