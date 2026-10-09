@@ -174,6 +174,7 @@ mod conflict {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use async_trait::async_trait;
+    use futures::FutureExt;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
     use loco_rs::config::{PostgresQueueConfig, RedisQueueConfig, SqliteQueueConfig};
@@ -2000,7 +2001,10 @@ mod conflict {
         .await;
     }
 
-    async fn run_backend_admission_scenario(harness: QueueHarness, provider: Arc<GatedProvider>) {
+    async fn run_backend_admission_scenario_inner(
+        harness: &QueueHarness,
+        provider: Arc<GatedProvider>,
+    ) {
         let (workspace_id, first) = seed(&harness.ctx).await;
         let second = entity_entities::create(
             &harness.ctx.db,
@@ -2125,7 +2129,17 @@ mod conflict {
         assert_eq!(harness.observation.total_count().await, total);
         let final_rows = Entity::find().all(&harness.ctx.db).await.unwrap();
         assert_eq!(final_rows.iter().filter(|r| ids.contains(&r.id)).count(), 2);
+    }
+
+    async fn run_backend_admission_scenario(harness: QueueHarness, provider: Arc<GatedProvider>) {
+        let result =
+            std::panic::AssertUnwindSafe(run_backend_admission_scenario_inner(&harness, provider))
+                .catch_unwind()
+                .await;
         harness.shutdown().await;
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
     }
 
     #[tokio::test]
