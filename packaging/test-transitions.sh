@@ -115,6 +115,7 @@ run_rpm_transition() {
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.rpm"; fi
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro almalinux:10 bash -eu -c "
     dnf install -y -q $base
+    $legacy_config_metadata
     # Seed the legacy package-owned path before installing the new edition package.
     printf 'edited-by-transition' > /etc/yorishiro/production.yaml
     chown root:yorishiro /etc/yorishiro/production.yaml
