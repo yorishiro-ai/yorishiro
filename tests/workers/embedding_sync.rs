@@ -406,10 +406,24 @@ mod conflict {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active.fetch_max(active, Ordering::SeqCst);
+            let _active_guard = ActiveGuard(&self.active);
             self.entered.notify_waiters();
             self.release.acquire().await.unwrap().forget();
-            self.active.fetch_sub(1, Ordering::SeqCst);
             Ok(texts.iter().map(|_| vec![1.0; self.width]).collect())
+        }
+
+        async fn embed_as(
+            &self,
+            _kind: EmbedKind,
+            _text: &str,
+        ) -> Result<Vec<f32>, YorishiroError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            let _active_guard = ActiveGuard(&self.active);
+            self.entered.notify_waiters();
+            self.release.acquire().await.unwrap().forget();
+            Ok(vec![1.0; self.width])
         }
     }
 
@@ -1592,6 +1606,111 @@ mod conflict {
                     .unwrap()
                     .is_some()
             );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expired_embedding_lifecycle_is_recovered_by_actual_worker() {
+        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/recovered-worker.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/recovered-worker-queue.sqlite3?mode=rwc",
+        );
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&ctx).await;
+            let provider = Arc::new(GatedProvider {
+                calls: AtomicUsize::new(0),
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                entered: Notify::new(),
+                release: Semaphore::new(1),
+                width: 768,
+            });
+            ctx.shared_store
+                .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
+            ctx.shared_store.insert(
+                Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
+            );
+            let lifecycle_id = Uuid::now_v7();
+            Entity::record_enqueue(
+                &ctx.db,
+                Enqueue {
+                    id: lifecycle_id,
+                    job_name: "embedding_sync",
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .unwrap();
+            let first = Entity::start_at(&ctx.db, lifecycle_id, chrono::Utc::now().fixed_offset())
+                .await
+                .unwrap();
+            assert!(matches!(
+                first,
+                yorishiro::models::queue_job_lifecycles::Admission::Started { attempt: 1 }
+            ));
+            let stale = chrono::Utc::now().fixed_offset() - chrono::Duration::minutes(5);
+            let mut row = Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .into_active_model();
+            row.lease_until = sea_orm::ActiveValue::Set(Some(stale));
+            row.update(&ctx.db).await.unwrap();
+
+            // Loco's queue reaper owns Processing delivery reclamation.  The actual
+            // worker performs the recovered application admission for this redelivery.
+            let args = EmbeddingSyncArgs {
+                lifecycle_id: Some(lifecycle_id),
+                workspace_id,
+                entity_id,
+                worker_class: WorkerClass::Shared,
+            };
+            EmbeddingSyncWorkerShared::build(&ctx)
+                .perform(args)
+                .await
+                .unwrap();
+            let final_row = Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(final_row.attempt, 2);
+            assert_eq!(final_row.status, LifecycleStatus::Completed.as_db_str());
+            assert!(final_row.error.is_none());
+            assert_eq!(vector_rows(&ctx, entity_id).await, 1);
+            assert!(
+                Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    Some(1),
+                    LifecycleStatus::Failed,
+                    Some("stale attempt")
+                )
+                .await
+                .is_err()
+            );
+            assert_eq!(
+                Entity::find_by_id(lifecycle_id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                LifecycleStatus::Completed.as_db_str()
+            );
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
         })
         .await;
     }
