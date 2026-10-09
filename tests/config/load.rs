@@ -108,6 +108,56 @@ async fn test_configs_disable_external_embedding_downloads_by_default() {
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn every_supported_topology_loads_from_loco_test_environment() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    for (topology, database, queue) in [
+        (
+            "postgres-postgres",
+            "postgres://db/app",
+            "postgres://queue/app",
+        ),
+        (
+            "sqlite-sqlite",
+            "sqlite://db.sqlite3?mode=rwc",
+            "sqlite://queue.sqlite3?mode=rwc",
+        ),
+        (
+            "postgres-valkey",
+            "postgres://db/app",
+            "redis://valkey:6379/15",
+        ),
+        (
+            "sqlite-valkey",
+            "sqlite://db.sqlite3?mode=rwc",
+            "redis://valkey:6379/15",
+        ),
+        (
+            "postgres-sqlite",
+            "postgres://db/app",
+            "sqlite://queue.sqlite3?mode=rwc",
+        ),
+        (
+            "sqlite-postgres",
+            "sqlite://db.sqlite3?mode=rwc",
+            "postgres://queue/app",
+        ),
+    ] {
+        guard.set("YORISHIRO_TEST_TOPOLOGY", topology);
+        guard.set("DATABASE_URL", database);
+        guard.set("QUEUE_URL", queue);
+        let config = load(&Environment::Test).await.unwrap();
+        assert_eq!(config.database.uri, database);
+        match (topology.split('-').nth(1).unwrap(), config.queue.unwrap()) {
+            ("postgres", QueueConfig::Postgres(actual)) => assert_eq!(actual.uri, queue),
+            ("sqlite", QueueConfig::Sqlite(actual)) => assert_eq!(actual.uri, queue),
+            ("valkey", QueueConfig::Redis(actual)) => assert_eq!(actual.uri, queue),
+            (provider, actual) => panic!("{topology} resolved to {provider}: {actual:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn production_config_is_the_packaged_loco_config() {
     let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
     _guard.remove("DATABASE_URL");

@@ -18,35 +18,31 @@ mod tasks;
 mod workers;
 
 /// Records the database and queue provider selected for this test process.
-pub(crate) fn record_topology() {
-    let database = std::env::var("DATABASE_URL").unwrap_or_default();
-    let database = if database.starts_with("sqlite://") || database.starts_with("sqlite::") {
+pub(crate) fn record_configured_topology(config: &loco_rs::config::Config) {
+    let database = if config.database.uri.starts_with("sqlite://")
+        || config.database.uri.starts_with("sqlite::")
+    {
         "sqlite"
-    } else if database.starts_with("postgres://") || database.starts_with("postgresql://") {
+    } else if config.database.uri.starts_with("postgres://")
+        || config.database.uri.starts_with("postgresql://")
+    {
         "postgres"
     } else {
         "unknown"
     };
-    let queue = std::env::var("YORISHIRO_TEST_QUEUE").unwrap_or_else(|_| {
-        std::env::var("QUEUE_URL")
-            .map(|url| {
-                if url.starts_with("redis://") || url.starts_with("rediss://") {
-                    "valkey"
-                } else if url.starts_with("sqlite://") || url.starts_with("sqlite::") {
-                    "sqlite"
-                } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
-                    "postgres"
-                } else {
-                    "unknown"
-                }
-            })
-            .unwrap_or("unknown")
-            .to_owned()
-    });
+    let queue = match config.queue.as_ref() {
+        Some(loco_rs::config::QueueConfig::Postgres(_)) => "postgres",
+        Some(loco_rs::config::QueueConfig::Sqlite(_)) => "sqlite",
+        Some(loco_rs::config::QueueConfig::Redis(_)) => "valkey",
+        _ => "unknown",
+    };
     let Some(root) = std::env::var_os("YORISHIRO_TOPOLOGY_MARKER_DIR") else {
         return;
     };
-    let path = std::path::Path::new(&root).join(database).join(queue);
+    let path = std::path::Path::new(&root)
+        .join(database)
+        .join(queue)
+        .join("configured-app");
     std::fs::create_dir_all(&path).expect("create topology marker directory");
     let file = path.join(format!(
         "{}-{}",
@@ -167,9 +163,6 @@ fn require_backend(expected: &str) -> bool {
         "skipped"
     };
 
-    if actual == expected {
-        record_topology();
-    }
     let reason = if outcome == "executed" {
         format!("selected {expected}-specific test on {actual} backend")
     } else {

@@ -64,16 +64,7 @@ jobs:
         run: make check-ce
       - name: Clippy CE without enterprise code
         run: make clippy-ce
-      - name: Test CE
-        # The whole `tests/` crate built without the enterprise feature, not a name filter: a
-        # filter that stops matching still passes with zero tests, which is how the old
-        # `services::mcp::tests` filter went unnoticed. SQLite needs no service container, so the
-        # PostgreSQL-only tests skip themselves behind the backend gate.
-        env:
-          LOCO_ENV: test_sqlite
-          DATABASE_URL: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-          QUEUE_URL: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
-        run: cargo test --locked --no-default-features --features community --test mod
+      # Runtime topology tests run in the shared matrix below for both editions.
 
   check:
     name: Enterprise edition
@@ -267,6 +258,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        edition: [ce, ee]
         include:
           - db: Postgres
             backend: postgres
@@ -369,7 +361,14 @@ jobs:
         run: uv run scripts/embedding_cache.py verify
 
       - name: Build workspace
-        run: cargo build --locked --workspace
+        env:
+          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+        run: |
+          if [ "${{ matrix.edition }}" = ce ]; then
+            cargo build --locked --no-default-features --features community --workspace
+          else
+            cargo build --locked --features enterprise --workspace
+          fi
 
       # Only the entity regeneration check shells out to sea-orm-cli, and that runs on PostgreSQL.
       - if: matrix.backend == 'postgres'
@@ -435,6 +434,7 @@ jobs:
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
+          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
         run: uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }}
 
       - name: Verify topology gate rejects a mismatch

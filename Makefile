@@ -64,7 +64,7 @@ test-sqlite: build
 # service instead and does not start a local container.
 test-valkey:
 	@if [ "$(YORISHIRO_VALKEY_TEST_URL)" = "redis://localhost:6379/15" ]; then \
-		docker compose up -d --wait valkey; \
+		docker compose up -d --wait redis; \
 	fi
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_VALKEY_TEST_URL)' YORISHIRO_TEST_TOPOLOGY=sqlite-valkey YORISHIRO_TEST_QUEUE=valkey LOCO_ENV=test_valkey uv run scripts/test_topology.py sqlite-valkey
 

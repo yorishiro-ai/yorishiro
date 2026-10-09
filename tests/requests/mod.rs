@@ -82,8 +82,7 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
 /// SQLite variant of `close_app_pools`.
 /// On SQLite `after_context` builds no `DbHandle` (no RLS, no second tenant),
 /// so there is only `ctx.db` to close.
-/// `config/test_sqlite.yaml` has no `queue:` block, so the queue provider is `None` for every
-/// test that boots through `request_with_create_db`.
+/// The configured queue provider is shut down before SQLite files are removed.
 /// When a queue provider is configured, shutdown cancels its workers before file cleanup.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
     if let Some(queue) = &ctx.queue_provider {
@@ -128,7 +127,10 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    crate::record_topology();
+    let config = H::load_config(&loco_rs::environment::Environment::Test)
+        .await
+        .expect("load configured test app");
+    crate::record_configured_topology(&config);
     if is_sqlite_backend() {
         // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
         // SQLite must not open a path whose parent can disappear during concurrent test teardown.
@@ -208,20 +210,19 @@ where
 /// SQLite variant of loco's `request_with_create_db`.
 ///
 /// Instead of `CREATE DATABASE` (which SQLite has no equivalent for), this generates a
-/// unique temp file path, sets `YORISHIRO_TEST_CONFIG=test_sqlite`, overrides the database
-/// URI to the generated file, then boots via `H::boot(StartMode::ServerOnly, ...)` — the
-/// same path loco's own `boot_test_with_create_db` takes (load config, override URI, boot).
-///
+/// unique temp file path, overrides the database URI to the generated file, then boots via
+/// `H::boot(StartMode::ServerOnly, ...)`.
 #[allow(clippy::future_not_send)]
 pub(crate) async fn request_with_create_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    // Load config via the App's override, which redirects Environment::Test → test_sqlite.yaml.
+    // Load the configured test app, then override only its isolated database and queue files.
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
         .expect("load sqlite config");
+    crate::record_configured_topology(&config);
     config.database.uri = format!("sqlite://{}?mode=rwc", db_path);
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
         let queue_path = std::path::Path::new(&db_path)

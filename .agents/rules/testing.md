@@ -6,8 +6,10 @@ All commands run from the repository root. `make -C . <target>` works from any d
 
 | Command | What it does | Backend |
 |---|---|---|
-| `make test-postgres` | Full suite with Rust's default parallel execution and backend-gate verification | PostgreSQL |
-| `make test-sqlite` | Full suite with Rust's default parallel execution and backend-gate verification | SQLite |
+| `make test-postgres` | PostgreSQL DB and PostgreSQL queue topology | PostgreSQL/PostgreSQL |
+| `make test-sqlite` | SQLite DB and SQLite queue topology using separate files | SQLite/SQLite |
+| `make test-valkey` | SQLite DB and Valkey-compatible `redis://` queue topology | SQLite/Valkey |
+| `uv run scripts/test_topology.py <topology>` | Full topology suite with configured-app evidence | Any supported topology |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Clippy for every CE target, including public error and panic docs | CE |
@@ -108,7 +110,8 @@ Dedicated SQLite files use this gate:
 - `tests/requests/workspaces_sqlite.rs` — workspace CRUD
 - `tests/migration/sqlite.rs` — migration verification
 
-`uv run scripts/test_backend.py` runs the suite, reports selected, executed, and skipped gate counts with skip reasons, and fails when the expected backend has zero gate selections or when the other backend has any selections.
+`uv run scripts/test_topology.py` runs the suite with explicit CE or EE feature flags and verifies a configured-app marker emitted after `Hooks::load_config(Environment::Test)` resolves the expected database URI and `QueueConfig` variant.
+The runner rejects unexpected marker directories and fails when the expected topology has no configured-app evidence.
 
 `request_with_create_db` is not wired for SQLite (`CREATE DATABASE` has no SQLite equivalent).
 
