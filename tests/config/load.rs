@@ -36,7 +36,8 @@ async fn development_uses_loco_environment_config_and_typed_settings() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn test_environment_selects_backend_specific_loco_config() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    _guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
     _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
     _guard.set("QUEUE_URL", "redis://localhost:6379");
 
@@ -52,18 +53,21 @@ async fn test_environment_selects_backend_specific_loco_config() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn sqlite_database_queue_scheme_controls_test_queue_selection() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
     guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
 
     guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-sqlite");
     let sqlite_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(sqlite_queue.queue, Some(QueueConfig::Sqlite(_))));
 
     guard.set("QUEUE_URL", "redis://localhost:6379");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
     let redis_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(redis_queue.queue, Some(QueueConfig::Redis(_))));
 
     guard.set("QUEUE_URL", "rediss://localhost:6379");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
     let rediss_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(rediss_queue.queue, Some(QueueConfig::Redis(_))));
 }
@@ -71,7 +75,8 @@ async fn sqlite_database_queue_scheme_controls_test_queue_selection() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn redis_test_config_keeps_queue_independent_from_database() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    _guard.remove("YORISHIRO_TEST_TOPOLOGY");
     _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
     _guard.set("QUEUE_URL", "redis://queue.example:6379");
 
