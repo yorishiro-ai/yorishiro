@@ -361,6 +361,10 @@ mod conflict {
                 .expect("Redis queue"),
             );
             queue.setup().await.expect("set up Redis queue");
+            queue
+                .clear()
+                .await
+                .expect("clear reserved Redis test queue");
             let observation = BackendObservation::Redis(
                 loco_rs::bgworker::redis::RedisPool::open(uri)
                     .expect("connect Redis observation client"),
@@ -384,6 +388,12 @@ mod conflict {
         }
 
         async fn shutdown(self) {
+            if let BackendObservation::Redis(_) = &self.observation {
+                self.queue
+                    .clear()
+                    .await
+                    .expect("clear reserved Redis test queue");
+            }
             let _ = self.queue.shutdown();
             self.runner
                 .await
@@ -2004,6 +2014,7 @@ mod conflict {
         .await
         .unwrap();
         let mut ids = Vec::new();
+        let mut queue_ids = Vec::new();
         for entity_id in [first, second.id] {
             let id = Uuid::now_v7();
             ids.push(id);
@@ -2021,23 +2032,29 @@ mod conflict {
             )
             .await
             .unwrap();
-            harness
-                .queue
-                .enqueue(
-                    EmbeddingSyncWorkerShared::class_name(),
-                    None,
-                    EmbeddingSyncArgs {
-                        lifecycle_id: Some(id),
-                        workspace_id,
-                        entity_id,
-                        worker_class: WorkerClass::Shared,
-                    },
-                    Some(vec![WorkerClass::Shared.tag().into()]),
-                    Some(100),
-                )
-                .await
-                .unwrap();
+            queue_ids.push(
+                harness
+                    .queue
+                    .enqueue(
+                        EmbeddingSyncWorkerShared::class_name(),
+                        None,
+                        EmbeddingSyncArgs {
+                            lifecycle_id: Some(id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        },
+                        Some(vec![WorkerClass::Shared.tag().into()]),
+                        Some(100),
+                    )
+                    .await
+                    .unwrap()
+                    .expect("queue provider returns job id"),
+            );
         }
+        let redis = matches!(harness.observation, BackendObservation::Redis(_));
+        // Redis has no durable SQL row to inspect after completion; while gated,
+        // its native job listing must contain exactly the two returned IDs.
         let total = harness.observation.total_count().await;
         tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -2046,7 +2063,23 @@ mod conflict {
         .await
         .unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while harness.observation.processing_count().await < 2 {
+            while if redis {
+                let jobs = match &harness.observation {
+                    BackendObservation::Redis(client) => loco_rs::bgworker::redis::get_jobs(
+                        client,
+                        Some(&vec![loco_rs::bgworker::JobStatus::Processing]),
+                        None,
+                    )
+                    .await
+                    .unwrap(),
+                    _ => unreachable!(),
+                };
+                !queue_ids
+                    .iter()
+                    .all(|id| jobs.iter().any(|job| &job.id == id))
+            } else {
+                harness.observation.processing_count().await < 2
+            } {
                 tokio::task::yield_now().await;
             }
         })
