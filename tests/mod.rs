@@ -155,7 +155,7 @@ fn env_guard_restores_original_value_during_unwind() {
 /// Records whether a backend-specific test was selected for this test job.
 fn require_backend(expected: &str) -> bool {
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
-    let actual = if url.starts_with("sqlite://") || url.starts_with("sqlite::memory:") {
+    let actual = if url.starts_with("sqlite:") {
         "sqlite"
     } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
         "postgres"

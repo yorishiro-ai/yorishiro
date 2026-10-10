@@ -75,17 +75,19 @@ async fn lifecycle(
 }
 
 #[test]
-fn class_order_and_equal_input_tie_breaking_are_stable() {
+fn each_class_is_admitted_at_its_own_band_without_borrowing_another_classs_capacity() {
     assert!(priority(WorkerClass::TenantPrivate) > priority(WorkerClass::Official));
     assert!(priority(WorkerClass::Official) > priority(WorkerClass::Shared));
-    assert_eq!(decide(WorkerClass::Shared), decide(WorkerClass::Shared));
-}
-
-#[test]
-fn capacity_does_not_fallback_to_another_class() {
-    let decision = decide(WorkerClass::Official);
-    assert_eq!(decision.class, WorkerClass::Official);
-    assert!(!decision.fallback);
+    for class in [
+        WorkerClass::TenantPrivate,
+        WorkerClass::Official,
+        WorkerClass::Shared,
+    ] {
+        let decision = decide(class);
+        assert_eq!(decision.class, class);
+        assert_eq!(decision.priority, priority(class));
+        assert!(!decision.fallback);
+    }
 }
 
 #[tokio::test]

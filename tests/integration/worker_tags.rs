@@ -8,6 +8,7 @@ use yorishiro::workers::embedding_sync::WorkerClass;
 
 /// Invokes the compiled binary and asserts `worker-tags` output format.
 #[test]
+#[serial_test::serial(process_environment)]
 fn worker_tags_command_output_is_single_comma_separated_line() {
     let bin = env!("CARGO_BIN_EXE_yorishiro");
     let output = Command::new(bin)
@@ -36,6 +37,7 @@ fn worker_tags_command_output_is_single_comma_separated_line() {
 
 /// Every expected tag must appear exactly once in the `worker-tags` output.
 #[test]
+#[serial_test::serial(process_environment)]
 fn worker_tags_command_includes_all_expected_tags() {
     let bin = env!("CARGO_BIN_EXE_yorishiro");
     let output = Command::new(bin)
@@ -71,6 +73,7 @@ fn worker_tags_command_includes_all_expected_tags() {
 
 /// Base worker-class tags must all be present.
 #[test]
+#[serial_test::serial(process_environment)]
 fn worker_tags_command_contains_base_worker_class_tags() {
     let bin = env!("CARGO_BIN_EXE_yorishiro");
     let output = Command::new(bin)
@@ -93,6 +96,7 @@ fn worker_tags_command_contains_base_worker_class_tags() {
 /// Enterprise `infer-fill` tag must be present when compiled in.
 #[cfg(feature = "enterprise")]
 #[test]
+#[serial_test::serial(process_environment)]
 fn worker_tags_command_contains_infer_fill() {
     let bin = env!("CARGO_BIN_EXE_yorishiro");
     let output = Command::new(bin)
@@ -110,6 +114,7 @@ fn worker_tags_command_contains_infer_fill() {
 
 /// The binary prints exactly the baseline in a community build and the baseline plus the edition's worker in an enterprise one, independent of the library function the other tests compare against.
 #[test]
+#[serial_test::serial(process_environment)]
 fn worker_tags_command_prints_the_edition_exact_list() {
     let bin = env!("CARGO_BIN_EXE_yorishiro");
     let output = Command::new(bin)

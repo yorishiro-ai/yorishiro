@@ -47,14 +47,16 @@ fn sign_state(payload: &str) -> String {
     format!("{payload}.{signature}")
 }
 
+const OAUTH_VARS: [&str; 3] = [
+    "YORISHIRO_OAUTH_ISSUER_URL",
+    "YORISHIRO_OAUTH_CLIENT_ID",
+    "YORISHIRO_OAUTH_CLIENT_SECRET",
+];
+
 /// `OAuthConfig::from_env` reads process env vars directly on every request, with no DI seam for it (see `controllers::oauth`'s module doc comment), so tests configure OAuth the same way production does: by setting the vars for the duration of the request.
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_OAUTH_ISSUER_URL",
-        "YORISHIRO_OAUTH_CLIENT_ID",
-        "YORISHIRO_OAUTH_CLIENT_SECRET",
-    ]);
+    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
     guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
     guard.set("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
     guard.set("YORISHIRO_OAUTH_CLIENT_SECRET", CLIENT_SECRET);
@@ -65,6 +67,10 @@ async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
 #[tokio::test]
 #[serial(process_environment)]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
+    let ambient = crate::EnvGuard::capture(&OAUTH_VARS);
+    for variable in OAUTH_VARS {
+        ambient.remove(variable);
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let disabled = request.get("/auth/oauth/status").await;
@@ -93,7 +99,9 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 async fn status_errors_loudly_when_partially_configured() {
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
-        let guard = crate::EnvGuard::capture(&["YORISHIRO_OAUTH_ISSUER_URL"]);
+        let guard = crate::EnvGuard::capture(&OAUTH_VARS);
+        guard.remove("YORISHIRO_OAUTH_CLIENT_ID");
+        guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
         guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
         let response = request.get("/auth/oauth/status").await;
 

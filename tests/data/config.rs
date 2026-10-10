@@ -133,3 +133,32 @@ fn only_topologies_that_cannot_use_the_setting_are_flagged() {
         1
     );
 }
+
+fn with_queue(num_workers: u32) -> loco_rs::config::Config {
+    serde_yaml::from_str(&format!(
+        "logger: {{ enable: true, pretty_backtrace: false, level: info, format: compact }}\nserver: {{ port: 5150, binding: localhost, host: http://localhost }}\ndatabase: {{ uri: 'postgres://localhost/app', enable_logging: false, connect_timeout: 500, idle_timeout: 500, min_connections: 1, max_connections: 2, auto_migrate: false }}\nqueue: {{ kind: Redis, uri: 'redis://localhost:6379', num_workers: {num_workers} }}\nworkers: {{ mode: BackgroundQueue }}\n"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_queue_with_no_workers_is_refused() {
+    assert!(validate_queue_policy(&with_queue(1)).is_ok());
+    let error = validate_queue_policy(&with_queue(0))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("num_workers"), "{error}");
+}
+
+#[test]
+fn only_the_built_in_queue_mode_is_accepted() {
+    let mut inline = with_queue(1);
+    inline.workers.mode = loco_rs::config::WorkerMode::ForegroundBlocking;
+    let error = validate_queue_policy(&inline).unwrap_err().to_string();
+    assert!(error.contains("worker mode"), "{error}");
+
+    let mut no_queue = with_queue(1);
+    no_queue.queue = None;
+    let error = validate_queue_policy(&no_queue).unwrap_err().to_string();
+    assert!(error.contains("queue provider"), "{error}");
+}

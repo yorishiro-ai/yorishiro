@@ -150,7 +150,7 @@ pub(crate) fn is_sqlite_queue() -> bool {
 /// test code runs against either backend.
 fn is_sqlite_backend() -> bool {
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
-    url.starts_with("sqlite://") || url.starts_with("sqlite::memory:")
+    url.starts_with("sqlite:")
 }
 
 /// Unified entry point for request tests across PostgreSQL and SQLite backends.

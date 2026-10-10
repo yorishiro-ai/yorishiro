@@ -35,24 +35,7 @@ async fn development_uses_loco_environment_config_and_typed_settings() {
 
 #[tokio::test]
 #[serial(process_environment)]
-async fn test_environment_selects_backend_specific_loco_config() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
-    _guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
-    _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
-    _guard.set("QUEUE_URL", "redis://localhost:6379");
-
-    let config = load(&Environment::Test).await.unwrap();
-
-    assert!(config.database.uri.starts_with("sqlite://"));
-    assert!(matches!(
-        config.queue,
-        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://localhost:6379"
-    ));
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn sqlite_database_queue_scheme_controls_test_queue_selection() {
+async fn the_topology_picks_the_queue_provider_for_one_database() {
     let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
     guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
 
@@ -70,6 +53,26 @@ async fn sqlite_database_queue_scheme_controls_test_queue_selection() {
     guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
     let rediss_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(rediss_queue.queue, Some(QueueConfig::Redis(_))));
+}
+
+/// Without a topology, the test environment follows `DATABASE_URL`'s scheme and the queue follows the database.
+#[tokio::test]
+#[serial(process_environment)]
+async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    guard.remove("YORISHIRO_TEST_TOPOLOGY");
+    guard.remove("QUEUE_URL");
+
+    guard.set("DATABASE_URL", "sqlite:///tmp/scheme.sqlite3?mode=rwc");
+    let sqlite = load(&Environment::Test).await.unwrap();
+    assert!(matches!(sqlite.queue, Some(QueueConfig::Sqlite(_))));
+
+    guard.set("DATABASE_URL", "postgres://db/app");
+    let postgres = load(&Environment::Test).await.unwrap();
+    assert!(matches!(
+        postgres.queue,
+        Some(QueueConfig::Postgres(queue)) if queue.uri == "postgres://db/app"
+    ));
 }
 
 #[tokio::test]

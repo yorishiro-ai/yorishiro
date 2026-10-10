@@ -76,9 +76,10 @@ async fn migration_sqlite_max_connections_10_five_times() {
     let dir = tempfile::tempdir().expect("create tempdir");
     for _ in 0..5 {
         let path = sqlite_path(dir.path());
-        let db = Database::connect(&format!("sqlite://{}?mode=rwc", path.display()))
-            .await
-            .expect("connect sqlite");
+        let mut options =
+            sea_orm::ConnectOptions::new(format!("sqlite://{}?mode=rwc", path.display()));
+        options.max_connections(10).min_connections(2);
+        let db = Database::connect(options).await.expect("connect sqlite");
 
         Migrator::up(&db, None).await.expect("migration failed");
 
