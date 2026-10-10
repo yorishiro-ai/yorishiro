@@ -150,6 +150,13 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
             "mid must keep its shortest hop_distance, not the diamond's longer one"
         );
 
+        let bounded = recall::recall_context(
+            &ctx.db, workspace.id, root.id,
+            recall::RecallQuery { limit: 1, full: true, depth: 2 },
+        ).await.expect("per-pivot bounded recall");
+        assert!(bounded.truncated, "the mid pivot has more than one relation");
+        assert_eq!(bounded.relations.len(), 2, "each hop retains its own limit, not a shared batch limit");
+
     })
     .await;
 }

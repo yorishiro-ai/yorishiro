@@ -493,8 +493,10 @@ async fn sqlite_neighbor_rows(
     pivot_ids: &[Uuid],
     limit: i64,
 ) -> Result<Vec<BatchNeighborRow>, YorishiroError> {
-    let pivots = (4..4 + pivot_ids.len())
-        .map(|index| format!("?{index}"))
+    // Depth three can reach 40,000 pivots, beyond SQLite's bind limit; typed UUID blob literals preserve index lookup without interpolating user text.
+    let pivots = pivot_ids
+        .iter()
+        .map(|id| format!("X'{}'", id.simple()))
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
@@ -521,8 +523,7 @@ async fn sqlite_neighbor_rows(
           ORDER BY pivot_id, relation_created_at DESC"
     );
     let active = RelationStatus::Active.as_db_str();
-    let mut values = vec![workspace_id.into(), active.into(), limit.into()];
-    values.extend(pivot_ids.iter().map(|pivot| (*pivot).into()));
+    let values = [workspace_id.into(), active.into(), limit.into()];
     BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Sqlite,
         sql,
