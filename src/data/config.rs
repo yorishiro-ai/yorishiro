@@ -155,6 +155,16 @@ pub fn topology_advisories(config: &Config) -> Vec<String> {
             config.database.max_connections
         ));
     }
+    if is_sqlite_uri(&config.database.uri)
+        && matches!(
+            config.queue.as_ref(),
+            Some(QueueConfig::Postgres(_) | QueueConfig::Redis(_))
+        )
+    {
+        advisories.push(
+            "the database is SQLite but the queue is not: a networked queue invites workers on other hosts, which cannot open the SQLite file, and SQLite's named locks are no-ops, so jobs that rely on them run unserialised; keep every worker on the database's host, or use PostgreSQL".into(),
+        );
+    }
     advisories
 }
 

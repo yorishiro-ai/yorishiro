@@ -1069,3 +1069,62 @@ async fn upgrade_000019_converts_template_tags_in_place_and_down_restores_them()
     }))
     .await;
 }
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn upgrade_000020_resolves_running_duplicates_and_allows_one_running_job_per_workspace() {
+    with_database("upgrade_000020", |db| Box::pin(async move {
+        Migrator::up(db, Some(migrations_through("m20261009_000019_template_tags_json")))
+            .await
+            .expect("migrations before the exclusion");
+        seed_initial_rows(db).await;
+        let workspace = id(db, WORKSPACE);
+        let jobs = [
+            id(db, "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d0d0"),
+            id(db, "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1"),
+            id(db, "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2"),
+        ];
+        // Two jobs already running in one workspace, as the old code allowed, and one queued.
+        for (job, status) in jobs.iter().zip(["running", "running", "queued"]) {
+            execute(
+                db,
+                format!(
+                    "INSERT INTO inference_jobs (id, workspace_id, schema_name, status) VALUES ({job}, {workspace}, 'upgrade schema', '{status}')"
+                ),
+            )
+            .await;
+        }
+
+        Migrator::up(db, Some(1)).await.expect("exclusion migration");
+
+        assert_eq!(
+            value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'").await,
+            1,
+            "one running job per workspace is kept"
+        );
+        assert_eq!(
+            value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'failed'").await,
+            1,
+            "the other is failed, not deleted"
+        );
+        assert_index_exists(db, "inference_jobs_one_running_per_workspace_idx").await;
+        let queued = &jobs[2];
+        assert!(
+            db.execute_unprepared(&format!(
+                "UPDATE inference_jobs SET status = 'running' WHERE id = {queued}"
+            ))
+            .await
+            .is_err(),
+            "a second running job in the workspace is refused"
+        );
+
+        Migrator::down(db, Some(1)).await.expect("exclusion rolled back");
+        execute(
+            db,
+            format!("UPDATE inference_jobs SET status = 'running' WHERE id = {queued}"),
+        )
+        .await;
+    }))
+    .await;
+}

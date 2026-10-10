@@ -23,6 +23,7 @@ mod m20261005_000016_add_entity_embedding_sync_token;
 mod m20261005_000017_embedding_tables_tenant_read;
 mod m20261006_000018_embedding_queue_state;
 mod m20261009_000019_template_tags_json;
+mod m20261011_000020_inference_one_running_job_per_workspace;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -49,6 +50,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261005_000017_embedding_tables_tenant_read::Migration),
             Box::new(m20261006_000018_embedding_queue_state::Migration),
             Box::new(m20261009_000019_template_tags_json::Migration),
+            Box::new(m20261011_000020_inference_one_running_job_per_workspace::Migration),
             // inject-above (do not remove this comment)
         ]
     }

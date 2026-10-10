@@ -12,7 +12,7 @@ mod entity_columns;
 mod fixtures;
 mod import;
 #[cfg(feature = "enterprise")]
-mod inference;
+pub(crate) mod inference;
 #[cfg(feature = "enterprise")]
 mod licence_gate;
 #[cfg(feature = "enterprise")]

@@ -22,6 +22,7 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 - **Content filtering.** The `filter` query parameter (JSONB containment) returns an error on SQLite.
 - **The marketplace** (enterprise). It lists and publishes across tenants, so its endpoints answer `501` with the `backend_unsupported` code on SQLite.
 - **Features that depend on advisory locks.** SQLite has one writer and no named locks, so the lock is a no-op there.
+  Infer-fill still runs one job per workspace at a time on SQLite: a unique index on running jobs refuses a second claim, and the worker puts that job back on the queue.
 - **SQLite snapshots.** Creating snapshots is not supported on SQLite. A snapshot created on PostgreSQL can be restored on SQLite.
 
 ## Configuration

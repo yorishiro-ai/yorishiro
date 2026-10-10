@@ -122,10 +122,12 @@ fn only_topologies_that_cannot_use_the_setting_are_flagged() {
         .len(),
         2
     );
-    assert!(
-        topology_advisories(&topology(sqlite, SQLITE_POOL_ADVISORY_LIMIT, &valkey(8))).is_empty()
-    );
-    assert!(topology_advisories(&topology(sqlite, 10, &postgres(8))).is_empty());
+    // A networked queue over a SQLite file: workers elsewhere cannot reach the file, and its named locks are no-ops.
+    for queue in [valkey(8), postgres(8)] {
+        let advisories = topology_advisories(&topology(sqlite, SQLITE_POOL_ADVISORY_LIMIT, &queue));
+        assert_eq!(advisories.len(), 1);
+        assert!(advisories[0].contains("SQLite"), "{advisories:?}");
+    }
     assert!(topology_advisories(&topology(pg, 100, &valkey(8))).is_empty());
     assert!(topology_advisories(&topology(pg, 100, &postgres(8))).is_empty());
     assert_eq!(

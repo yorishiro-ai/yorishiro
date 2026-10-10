@@ -208,6 +208,7 @@ With SQLite, dequeueing is serialized, while durable queue recovery still works.
 It defaults to 1 for a SQLite queue and 2 for PostgreSQL and Redis-compatible queues.
 SQLite has a single writer, so more workers on a SQLite queue add contention, not throughput, and boot logs a warning when you set them.
 `DB_MAX_CONNECTIONS` defaults to 10 for a SQLite database and 100 for PostgreSQL, and boot warns when a SQLite pool exceeds 16.
+Boot also warns when a SQLite database is paired with a PostgreSQL or Redis-compatible queue: workers on other hosts cannot open the SQLite file, and SQLite's named locks do nothing.
 Throughput scales most with PostgreSQL for application data and a Redis-compatible queue (Valkey), then with PostgreSQL for both, and least with SQLite for both.
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` controls how long a job may remain processing before the reaper recovers it.
 

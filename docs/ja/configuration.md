@@ -223,6 +223,7 @@ SQLite では取り出し処理は直列ですが、永続キューによる障�
 既定値は SQLite キューで 1、PostgreSQL と Redis 互換キューで 2 です。
 SQLite は書き込み側が 1 つのため、SQLite キューでワーカーを増やしても競合が増えるだけでスループットは上がらず、起動時に警告を記録します。
 `DB_MAX_CONNECTIONS` の既定値は SQLite データベースで 10、PostgreSQL で 100 です。SQLite のプールが 16 を超えると起動時に警告します。
+SQLite データベースを PostgreSQL や Redis 互換のキューと組み合わせた場合も警告します。他ホストの worker は SQLite ファイルを開けず、SQLite の名前付きロックは何もしないためです。
 スループットは、アプリケーションデータを PostgreSQL、キューを Redis 互換 (Valkey) にした構成が最も伸びます。次に両方 PostgreSQL、最も伸びないのが両方 SQLite です。
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` は、reaper が処理中ジョブを回復するまでの時間を設定します。
 

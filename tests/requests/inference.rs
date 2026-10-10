@@ -17,7 +17,7 @@ use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the enterprise-edition state the test process booted with.
 /// See `marketplace.rs`'s own copy of this helper.
-fn licence(ctx: &loco_rs::app::AppContext) {
+pub(crate) fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
         .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
             sub: "acme-corp".into(),
@@ -26,13 +26,13 @@ fn licence(ctx: &loco_rs::app::AppContext) {
         })) as std::sync::Arc<LicenceState>);
 }
 
-struct Setup {
-    key: String,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
+pub(crate) struct Setup {
+    pub(crate) key: String,
+    pub(crate) tenant_id: Uuid,
+    pub(crate) workspace_id: Uuid,
 }
 
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
+pub(crate) async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     setup_named(ctx, "acme", "main", "owner@example.com").await
 }
 
@@ -256,7 +256,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 }
 
 /// Creates one schema and one entity for the infer-fill request tests.
-async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
+pub(crate) async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
     let create_schema = request
         .post("/api/schemas")
         .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -707,6 +707,10 @@ async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
             queued.text()
         );
 
+        // A workspace runs one job at a time, so the first one has to stop before another can start.
+        inference_jobs::fail(&ctx.db, queued_job, "stopped")
+            .await
+            .expect("stop the first job");
         let failed_job = Uuid::new_v4();
         create_pending_proposal(&ctx, &setup, entity, failed_job).await;
         inference_jobs::fail(&ctx.db, failed_job, "provider failed")
@@ -967,13 +971,6 @@ async fn inference_status_polling_preserves_all_wire_values() {
             .expect("create queued job");
         jobs.push((queued, InferenceJobStatus::Queued));
 
-        let running = Uuid::new_v4();
-        inference_jobs::create(&ctx.db, running, setup.workspace_id, "notes")
-            .await
-            .expect("create running job");
-        assert!(inference_jobs::claim(&ctx.db, running).await.unwrap());
-        jobs.push((running, InferenceJobStatus::Running));
-
         let completed = Uuid::new_v4();
         inference_jobs::create(&ctx.db, completed, setup.workspace_id, "notes")
             .await
@@ -983,6 +980,14 @@ async fn inference_status_polling_preserves_all_wire_values() {
             .await
             .expect("complete job");
         jobs.push((completed, InferenceJobStatus::Completed));
+
+        // Last of the claims: a workspace holds one running job at a time.
+        let running = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, running, setup.workspace_id, "notes")
+            .await
+            .expect("create running job");
+        assert!(inference_jobs::claim(&ctx.db, running).await.unwrap());
+        jobs.push((running, InferenceJobStatus::Running));
 
         let failed = Uuid::new_v4();
         inference_jobs::create(&ctx.db, failed, setup.workspace_id, "notes")

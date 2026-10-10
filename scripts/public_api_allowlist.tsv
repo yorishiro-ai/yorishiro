@@ -754,6 +754,7 @@ ee/tasks/reindex_scheduler.rs	fn	scheduler_failure_message	integration-test: tes
 ee/workers/infer_fill.rs	field	InferFillArgs::lifecycle_id	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
 ee/workers/infer_fill.rs	fn	enqueue_infer_fill_with_dispatcher	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
 ee/workers/infer_fill.rs	fn	open_workspace_scope	integration-test: tests/requests/inference.rs asserts the tenant the worker's scope carries.
+ee/models/inference_jobs.rs	fn	is_workspace_busy	integration-test: tests/ee/workers/infer_fill.rs exercises the busy-workspace refusal through the worker.
 src/controllers/extractors.rs	fn	authenticator	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
 src/controllers/extractors.rs	fn	db_handle	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
 src/controllers/mcp/entities.rs	struct	CreateEntityArgs	integration-test: the integration tests exercises it now that the unit tests moved out of src/.

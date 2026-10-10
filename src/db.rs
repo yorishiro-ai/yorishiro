@@ -321,7 +321,7 @@ pub fn require_min_sqlite_connections(max_connections: u32) -> Result<(), String
 /// The lock is transaction-scoped, so it releases on commit or rollback without an unlock call to forget.
 /// Takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice), since every caller already holds one via `Authorized::txn()`.
 ///
-/// A no-op on SQLite, which has no named-lock primitive to substitute.
+/// A no-op on SQLite, which has no named-lock primitive to substitute: it excludes nothing there, so a caller that needs mutual exclusion on SQLite must get it from a conditional write of its own.
 ///
 /// That is sound rather than merely convenient, because every caller here locks, reads a count or existence check, then writes within the same transaction gated on that read.
 /// SQLite allows one write transaction at a time, so a transaction committing after another has written gets `SQLITE_BUSY` and fails whole; the TOCTOU this lock closes on Postgres surfaces as a retryable error rather than a silently-accepted inconsistent write.
