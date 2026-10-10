@@ -31,7 +31,7 @@ fn test_environment(environment: &Environment) -> Environment {
             }
             let url = env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());
-            if url.starts_with("sqlite://") || url.starts_with("sqlite::") {
+            if url.starts_with("sqlite:") {
                 Environment::Any("test_sqlite".into())
             } else {
                 Environment::Any("test_postgres".into())
@@ -208,7 +208,7 @@ fn reject_shared_sqlite_file(config: &Config, queue: &QueueConfig) -> Result<()>
 }
 
 fn is_sqlite_uri(uri: &str) -> bool {
-    uri.starts_with("sqlite://") || uri.starts_with("sqlite::")
+    uri.starts_with("sqlite:")
 }
 
 fn sqlite_file_identity(uri: &str) -> Result<Option<PathBuf>> {

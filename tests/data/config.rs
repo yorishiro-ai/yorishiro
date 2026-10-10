@@ -14,6 +14,11 @@ fn equivalent_sqlite_paths_are_rejected_but_memory_is_not() {
         "sqlite://./app.sqlite3?mode=ro",
     );
     assert!(validate_queue_policy(&shared).is_err());
+    let shared = config(
+        "sqlite:/tmp/app.sqlite3?mode=rwc",
+        "sqlite:///tmp/app.sqlite3",
+    );
+    assert!(validate_queue_policy(&shared).is_err());
 
     let memory = config("sqlite::memory:", "sqlite://?mode=memory&cache=shared");
     assert!(validate_queue_policy(&memory).is_ok());

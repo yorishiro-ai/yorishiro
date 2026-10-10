@@ -83,7 +83,9 @@ async fn redis_test_config_keeps_queue_independent_from_database() {
     _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
     _guard.set("QUEUE_URL", "redis://queue.example:6379");
 
-    let config = load(&Environment::Any("test_valkey".into())).await.unwrap();
+    let config = load(&Environment::Any("test_sqlite_valkey".into()))
+        .await
+        .unwrap();
 
     assert_eq!(
         config.database.uri,
@@ -228,6 +230,8 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
     guard.remove("DB_MAX_CONNECTIONS");
     for (database, kind, queue, pool, workers) in [
         ("sqlite:///var/lib/y/a.sqlite3?mode=rwc", None, None, 10, 1),
+        ("sqlite:/var/lib/y/a.sqlite3?mode=rwc", None, None, 10, 1),
+        ("sqlite::memory:", None, None, 10, 1),
         (
             "sqlite:///var/lib/y/a.sqlite3?mode=rwc",
             Some("Redis"),

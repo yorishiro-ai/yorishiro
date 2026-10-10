@@ -85,7 +85,7 @@ scheduler:
 # `Redis` is Loco's provider variant name for Redis-compatible queue services.
 # QUEUE_URL takes no default when an external backend is required (Redis, or explicit
 # non-SQLite queue), matching this file's own no-silent-fallback convention.
-<% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
+<% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
 queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL") %>
@@ -94,7 +94,7 @@ queue:
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
-<% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
+<% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
 queue:
   kind: Sqlite
   uri: <%= get_env(name="QUEUE_URL", default="sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc") %>
@@ -188,7 +188,7 @@ database:
   # Database connection URI.
   # Defaults to a local SQLite file for an unconfigured trial instance.
   # Point at PostgreSQL when you need RLS, multi-tenancy, or vector search.
-  uri: <%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>
+  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>'
   # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   # Set the timeout duration when acquiring a connection.
@@ -200,7 +200,7 @@ database:
   # Maximum number of connections for a pool. SQLite has a single writer, so it defaults to 10 rather than 100.
   # Serving real traffic on the
   # development default of 1 serializes every request behind one connection.
-<% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first) == "sqlite" %>
+<% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
   max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
 <% else %>
   max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="100") %>

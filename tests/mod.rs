@@ -24,9 +24,7 @@ pub(crate) fn record_configured_topology(ctx: &loco_rs::app::AppContext) {
         ctx.queue_provider.is_some(),
         "booted app has no queue provider"
     );
-    let database = if config.database.uri.starts_with("sqlite://")
-        || config.database.uri.starts_with("sqlite::")
-    {
+    let database = if config.database.uri.starts_with("sqlite:") {
         "sqlite"
     } else if config.database.uri.starts_with("postgres://")
         || config.database.uri.starts_with("postgresql://")

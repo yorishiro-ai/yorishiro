@@ -140,8 +140,7 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
 }
 
 pub(crate) fn is_sqlite_queue() -> bool {
-    std::env::var("QUEUE_URL")
-        .is_ok_and(|url| url.starts_with("sqlite://") || url.starts_with("sqlite::"))
+    std::env::var("QUEUE_URL").is_ok_and(|url| url.starts_with("sqlite:"))
 }
 
 /// Whether `DATABASE_URL` names a SQLite backend (file or in-memory).

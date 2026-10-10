@@ -30,6 +30,7 @@ PostgreSQL のテンプレートタグの移行は、小規模なテンプレー
 ロールバックでは元のインデックスを復元し、配列以外の JSON タグを空配列に変換します。
 
 Yorishiro はデータベース URL のスキームで SQLite を検出します。
+`sqlite:/path` や `sqlite::memory:` を含め、`sqlite:` で始まる URL は SQLite のデフォルト設定を選びます。
 
 ```sh
 export DATABASE_URL='sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc'

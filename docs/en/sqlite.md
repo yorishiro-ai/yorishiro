@@ -29,7 +29,7 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 The PostgreSQL template-tags upgrade rewrites the small template table under an exclusive lock and removes the unused tags GIN index.
 Rollback restores the original index and converts non-array JSON tags to empty arrays.
 
-Yorishiro uses the database URL scheme to detect SQLite:
+All `sqlite:` URL forms, including `sqlite:/path` and `sqlite::memory:`, select SQLite defaults:
 
 ```sh
 export DATABASE_URL='sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc'
