@@ -269,6 +269,8 @@ async fn callback_rejects_an_expired_state() {
 }
 
 /// `find_or_create` must not be a backdoor around `YORISHIRO_MAX_TENANTS`: with the cap already met, a brand-new identity (one `find_by_oauth_identity` finds nothing for) is refused rather than silently given a fresh tenant.
+/// The migration's user_users_oauth_identity_idx is partial (oauth_provider IS NOT NULL).
+/// Generated unique_key metadata omits that predicate; no application/test path uses Schema::create_table_from_entity or other entity-based schema creation, so migrations remain authoritative.
 /// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
 #[tokio::test]
 #[serial(process_environment)]

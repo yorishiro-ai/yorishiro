@@ -749,6 +749,8 @@ async fn queue_starvation_index_matches_admission_predicate() {
 #[tokio::test]
 #[serial(postgres_cluster)]
 #[serial(process_environment)]
+/// The migration owns a partial unique index on active startup-reindex jobs only.
+/// Generated unique_key metadata omits its predicate, but no application/test path creates schemas from entities (including Schema::create_table_from_entity); schema creation uses migrations.
 async fn startup_admission_upgrade_preserves_ordinary_active_duplicates() {
     with_database("startup_admission_upgrade", |db| Box::pin(async move {
         let through_requests = migrations_through("m20261005_000017_embedding_tables_tenant_read");
