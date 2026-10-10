@@ -154,7 +154,7 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
             &ctx.db, workspace.id, root.id,
             recall::RecallQuery { limit: 1, full: true, depth: 2 },
         ).await.expect("per-pivot bounded recall");
-        assert!(bounded.truncated, "the mid pivot has more than one relation");
+        assert_eq!(serde_json::to_value(&bounded).unwrap()["truncated"], true, "the mid pivot has more than one relation");
         assert_eq!(bounded.relations.len(), 2, "each hop retains its own limit, not a shared batch limit");
 
     })
