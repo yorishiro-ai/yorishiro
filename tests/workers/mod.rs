@@ -18,6 +18,7 @@ use yorishiro::App;
 
 /// An application context over an in-memory SQLite database, for tests that need `AppContext` but no HTTP server or queue.
 pub(crate) async fn test_context() -> AppContext {
+    let _environment = crate::EnvironmentRead::enter();
     let config = App::load_config(&Environment::Any("test_sqlite".into()))
         .await
         .expect("load test configuration");

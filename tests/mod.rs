@@ -66,6 +66,68 @@ use serial_test::serial;
 
 static BACKEND_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// Orders every test that boots the application (readers) against every test that rewrites the process environment (writers).
+///
+/// `serial_test` keys only exclude tests that carry the same key, so a test with no key still reads `DATABASE_URL`, `QUEUE_URL` and the rest while it boots.
+/// A writer therefore waits for the booting tests in flight and holds the others off until its [`EnvGuard`] is dropped.
+/// The scope is per thread: a test already inside one scope (a writer that boots, or a booted test that captures a guard) does not take the lock a second time, since it cannot upgrade a read to a write and would wait on itself.
+static ENVIRONMENT: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+thread_local! {
+    static SCOPES: std::cell::Cell<(u32, u32)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Held for as long as a test reads the process environment while it runs.
+pub(crate) struct EnvironmentRead {
+    _lock: Option<std::sync::RwLockReadGuard<'static, ()>>,
+}
+
+impl EnvironmentRead {
+    pub(crate) fn enter() -> Self {
+        let nested = SCOPES.with(|scopes| scopes.get() != (0, 0));
+        let lock = (!nested).then(|| ENVIRONMENT.read().unwrap_or_else(|e| e.into_inner()));
+        SCOPES.with(|scopes| {
+            let (readers, writers) = scopes.get();
+            scopes.set((readers + 1, writers));
+        });
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for EnvironmentRead {
+    fn drop(&mut self) {
+        SCOPES.with(|scopes| {
+            let (readers, writers) = scopes.get();
+            scopes.set((readers - 1, writers));
+        });
+    }
+}
+
+struct EnvironmentWrite {
+    _lock: Option<std::sync::RwLockWriteGuard<'static, ()>>,
+}
+
+impl EnvironmentWrite {
+    fn enter() -> Self {
+        let nested = SCOPES.with(|scopes| scopes.get() != (0, 0));
+        let lock = (!nested).then(|| ENVIRONMENT.write().unwrap_or_else(|e| e.into_inner()));
+        SCOPES.with(|scopes| {
+            let (readers, writers) = scopes.get();
+            scopes.set((readers, writers + 1));
+        });
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for EnvironmentWrite {
+    fn drop(&mut self) {
+        SCOPES.with(|scopes| {
+            let (readers, writers) = scopes.get();
+            scopes.set((readers, writers - 1));
+        });
+    }
+}
+
 /// Captures process environment values and restores them when the test exits.
 ///
 /// The guard is intentionally Drop-based so restoration also runs while a test unwinds from a
@@ -73,11 +135,15 @@ static BACKEND_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// Named `serial_test` locks and process environments are local to each test executable.
 pub(crate) struct EnvGuard {
     values: Vec<(&'static str, Option<OsString>)>,
+    // Dropped after `Drop::drop` has restored the values, so the environment is whole again before readers resume.
+    _scope: EnvironmentWrite,
 }
 
 impl EnvGuard {
     pub(crate) fn capture(variables: &[&'static str]) -> Self {
+        let scope = EnvironmentWrite::enter();
         Self {
+            _scope: scope,
             values: variables
                 .iter()
                 .map(|variable| (*variable, env::var_os(variable)))

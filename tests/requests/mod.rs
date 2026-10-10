@@ -168,6 +168,7 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let _environment = crate::EnvironmentRead::enter();
     if is_sqlite_backend() {
         // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
         // SQLite must not open a path whose parent can disappear during concurrent test teardown.
@@ -229,6 +230,7 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let _environment = crate::EnvironmentRead::enter();
     request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
         let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
         async move {
