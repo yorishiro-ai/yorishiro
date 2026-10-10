@@ -1013,3 +1013,59 @@ async fn embedding_tables_tenant_read_grant_is_applied_and_rolled_back() {
     }))
     .await;
 }
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn upgrade_000019_converts_template_tags_in_place_and_down_restores_them() {
+    with_database("upgrade_000019", |db| Box::pin(async move {
+        Migrator::up(db, Some(migrations_through("m20261006_000018_embedding_queue_state")))
+            .await
+            .expect("migrations before the tag conversion");
+        seed_initial_rows(db).await;
+        let tenant = id(db, TENANT);
+        let template = id(db, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+        let (tags, definition) = match db.get_database_backend() {
+            DbBackend::Postgres => ("ARRAY['beta','alpha','gamma']", "'{}'::jsonb"),
+            DbBackend::Sqlite => ("'[\"beta\",\"alpha\",\"gamma\"]'", "'{}'"),
+            backend => panic!("unsupported migration test backend: {backend:?}"),
+        };
+        execute(
+            db,
+            format!(
+                "INSERT INTO template_templates (id, tenant_id, name, definition, visibility, tags) \
+                 VALUES ({template}, {tenant}, 'tagged', {definition}, 'tenant', {tags})"
+            ),
+        )
+        .await;
+
+        Migrator::up(db, Some(1)).await.expect("tag conversion");
+
+        let stored: String = match db.get_database_backend() {
+            DbBackend::Postgres => value(db, format!("SELECT tags::text FROM template_templates WHERE id = {template}")).await,
+            _ => value(db, format!("SELECT tags FROM template_templates WHERE id = {template}")).await,
+        };
+        let stored: Vec<String> = serde_json::from_str(&stored).unwrap_or_else(|e| panic!("tags are a JSON array: {stored:?} {e}"));
+        assert_eq!(stored, ["beta", "alpha", "gamma"], "order is kept");
+
+        if db.get_database_backend() == DbBackend::Postgres {
+            let kind: String = value(
+                db,
+                "SELECT data_type FROM information_schema.columns WHERE table_name = 'template_templates' AND column_name = 'tags'",
+            )
+            .await;
+            assert_eq!(kind, "jsonb");
+            assert_index_exists(db, "templates_tags_idx").await;
+
+            Migrator::down(db, Some(1)).await.expect("tag conversion rolled back");
+            let restored: String = value(
+                db,
+                format!("SELECT array_to_string(tags, ',') FROM template_templates WHERE id = {template}"),
+            )
+            .await;
+            assert_eq!(restored, "beta,alpha,gamma");
+            assert_index_exists(db, "templates_tags_idx").await;
+        }
+    }))
+    .await;
+}

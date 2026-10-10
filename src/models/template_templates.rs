@@ -55,6 +55,24 @@ pub struct TemplateRecord {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// A template's tags as the JSON array the `tags` column holds on both backends.
+pub(crate) fn tags_to_json(tags: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(
+        tags.iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect(),
+    )
+}
+
+/// The tag list a `tags` column value holds.
+///
+/// # Errors
+/// Returns an error if the stored value is not an array of strings.
+pub(crate) fn tags_from_json(value: serde_json::Value) -> Result<Vec<String>, YorishiroError> {
+    serde_json::from_value(value).internal()
+}
+
 impl TryFrom<Model> for TemplateRecord {
     type Error = YorishiroError;
 
@@ -71,7 +89,7 @@ impl TryFrom<Model> for TemplateRecord {
             name: model.name,
             description: model.description,
             definition: serde_json::from_value(model.definition).internal()?,
-            tags: model.tags,
+            tags: tags_from_json(model.tags)?,
             locale: model.locale,
             visibility,
             author: model.author,
@@ -215,7 +233,7 @@ pub(crate) async fn create_template(
         name: ActiveValue::Set(input.name),
         description: ActiveValue::Set(input.description),
         definition: ActiveValue::Set(definition),
-        tags: ActiveValue::Set(input.tags),
+        tags: ActiveValue::Set(tags_to_json(&input.tags)),
         locale: ActiveValue::Set(input.locale),
         author: ActiveValue::Set(input.author),
         visibility: ActiveValue::Set(TemplateVisibility::Tenant.as_db_str().to_string()),
@@ -291,7 +309,7 @@ pub async fn update_template(
         active.definition = ActiveValue::Set(serde_json::to_value(&definition).internal()?);
     }
     if let Some(tags) = input.tags {
-        active.tags = ActiveValue::Set(tags);
+        active.tags = ActiveValue::Set(tags_to_json(&tags));
     }
     if let Some(locale) = input.locale {
         active.locale = ActiveValue::Set(Some(locale));
@@ -348,7 +366,7 @@ pub(crate) async fn fork_template(
         name: ActiveValue::Set(new_name),
         description: ActiveValue::Set(source.description),
         definition: ActiveValue::Set(definition),
-        tags: ActiveValue::Set(source.tags),
+        tags: ActiveValue::Set(tags_to_json(&source.tags)),
         locale: ActiveValue::Set(source.locale),
         author: ActiveValue::Set(source.author),
         visibility: ActiveValue::Set(TemplateVisibility::Tenant.as_db_str().to_string()),

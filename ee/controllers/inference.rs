@@ -5,7 +5,6 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
-use crate::db::AppContextBackend;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use axum::Json;
@@ -13,7 +12,6 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::TransactionTrait;
 
 use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::inference::{
@@ -219,18 +217,7 @@ async fn proposal_transaction(
     ctx: &AppContext,
     auth_ctx: &AuthContext,
 ) -> Result<sea_orm::DatabaseTransaction, ApiError> {
-    if ctx.is_sqlite() {
-        return Ok(ctx.db.begin().await.internal()?);
-    }
-    let db = ctx
-        .shared_store
-        .get::<crate::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    Ok(db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?)
+    Ok(crate::db::begin_workspace(ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?)
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::ProposalConfirmResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]

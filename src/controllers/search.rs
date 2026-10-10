@@ -2,14 +2,11 @@ use axum::Json;
 use axum::extract::{Query, State};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::TransactionTrait;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{ReadScope, Verified, db_handle, search_token_limiter};
+use crate::controllers::extractors::{ReadScope, Verified, search_token_limiter};
 use crate::controllers::middleware::rate_limit::charge_search_tokens;
-use crate::db::AppContextBackend;
 use crate::dtos::search::SearchEntitiesParams;
-use crate::error::ResultExt;
 use crate::models::search::{self, SearchHit};
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/search", params(("query_text" = String, Query, description = "Text to embed and search for"), ("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query, description = "JSON-encoded containment filter"), ("limit" = Option<i64>, Query)), responses((status = 200, body = [crate::models::search::SearchHit]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
@@ -48,15 +45,7 @@ pub(crate) async fn search_entities(
     let embed_table = search::resolve_query_table(&ctx.db, workspace_id, vector.len()).await?;
 
     // A read-only transaction: dropped without committing when this returns, a no-op since nothing was written.
-    let txn = if ctx.is_sqlite() {
-        ctx.db.begin().await.internal()?
-    } else {
-        let db = db_handle(&ctx)?;
-        db.tenant
-            .begin_for_workspace(verified.ctx.tenant_id, workspace_id)
-            .await
-            .internal()?
-    };
+    let txn = crate::db::begin_workspace(&ctx, verified.ctx.tenant_id, workspace_id).await?;
 
     let hits = search::search_in_table(
         &txn,

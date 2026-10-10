@@ -306,16 +306,11 @@ async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
-    // The handler resolves the PostgreSQL-only DbHandle.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
-        let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
             .await
@@ -324,11 +319,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             .await
             .expect("claim proposal job");
         {
-            let txn = db
-                .tenant
-                .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-                .await
-                .expect("begin tenant txn");
+            let txn = super::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
             let schema = yorishiro::models::schema_schemas::get_active_schema(
                 &txn,
                 setup.workspace_id,
@@ -413,16 +404,11 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 /// Invalid proposals are marked invalid and do not leave a snapshot behind.
 #[tokio::test]
 async fn invalid_proposals_do_not_leave_a_snapshot() {
-    // The handler resolves the PostgreSQL-only DbHandle.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
-        let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
             .await
@@ -430,11 +416,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         inference_jobs::claim(&ctx.db, job_id)
             .await
             .expect("claim proposal job");
-        let txn = db
-            .tenant
-            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-            .await
-            .expect("begin tenant txn");
+        let txn = super::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
         let schema =
             yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
                 .await
@@ -486,18 +468,13 @@ async fn create_completed_proposal(
     job_id: Uuid,
     value: serde_json::Value,
 ) {
-    let db = ctx.shared_store.get::<DbHandle>().unwrap();
     inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
         .await
         .expect("create proposal job");
     inference_jobs::claim(&ctx.db, job_id)
         .await
         .expect("claim proposal job");
-    let txn = db
-        .tenant
-        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-        .await
-        .expect("begin tenant txn");
+    let txn = super::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
     let schema =
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
@@ -520,10 +497,6 @@ async fn create_completed_proposal(
 
 #[tokio::test]
 async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace() {
-    // The handler resolves the PostgreSQL-only DbHandle.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -605,7 +578,7 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
 /// writing the entity. This uses two real PostgreSQL transactions rather than a sequential replay.
 #[tokio::test]
 async fn terminal_proposal_actions_serialize_against_confirmation() {
-    // The handler resolves the PostgreSQL-only DbHandle.
+    // It holds an advisory lock across two transactions, which SQLite has no equivalent of.
     if !crate::require_postgres_backend() {
         return;
     }
@@ -717,10 +690,6 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
 
 #[tokio::test]
 async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
-    // The handler resolves the PostgreSQL-only DbHandle.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -770,18 +739,13 @@ async fn create_pending_proposal(
     entity: Uuid,
     job_id: Uuid,
 ) {
-    let db = ctx.shared_store.get::<DbHandle>().unwrap();
     inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
         .await
         .expect("create proposal job");
     inference_jobs::claim(&ctx.db, job_id)
         .await
         .expect("claim proposal job");
-    let txn = db
-        .tenant
-        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-        .await
-        .expect("begin tenant txn");
+    let txn = super::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
     let schema =
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await

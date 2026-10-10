@@ -59,10 +59,6 @@ fn note_definition() -> serde_json::Value {
 
 #[tokio::test]
 async fn owner_can_create_update_and_delete_a_template() {
-    // Template_templates.tags is a PostgreSQL TEXT[] column.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { owner_key, .. } = setup(&ctx, "acme").await;
 
@@ -133,10 +129,6 @@ async fn member_role_cannot_manage_the_template_library() {
 /// Community visibility makes a template *readable* across tenants, not writable: only the owning tenant may update or delete it (fork creates a new row owned by the caller, so it doesn't need this guard, but update/delete do).
 #[tokio::test]
 async fn another_tenant_cannot_update_or_delete_a_community_template() {
-    // Template_templates.tags is a PostgreSQL TEXT[] column.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
@@ -146,7 +138,7 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
             name: sea_orm::ActiveValue::Set("shared-note".into()),
             definition: sea_orm::ActiveValue::Set(note_definition()),
             visibility: sea_orm::ActiveValue::Set("community".into()),
-            tags: sea_orm::ActiveValue::Set(vec![]),
+            tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
             ..Default::default()
         };
         let community = sea_orm::ActiveModelTrait::insert(community, &ctx.db)
@@ -193,10 +185,6 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
 
 #[tokio::test]
 async fn fork_copies_a_community_template_into_the_forking_tenants_own_library() {
-    // Template_templates.tags is a PostgreSQL TEXT[] column.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
@@ -206,7 +194,7 @@ async fn fork_copies_a_community_template_into_the_forking_tenants_own_library()
             name: sea_orm::ActiveValue::Set("shared-note".into()),
             definition: sea_orm::ActiveValue::Set(note_definition()),
             visibility: sea_orm::ActiveValue::Set("community".into()),
-            tags: sea_orm::ActiveValue::Set(vec![]),
+            tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
             ..Default::default()
         };
         let community = sea_orm::ActiveModelTrait::insert(community, &ctx.db)

@@ -217,6 +217,34 @@ impl TenantDb {
     }
 }
 
+/// Begins the transaction one workspace's request work runs in.
+///
+/// PostgreSQL scopes it to the tenant and workspace through the tenant pool, so row-level security applies.
+/// SQLite has no row-level security and one tenant, so the transaction runs on the application connection.
+///
+/// # Errors
+/// Returns an error if the transaction cannot be started, or if a PostgreSQL deployment has no tenant pool.
+pub(crate) async fn begin_workspace(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<DatabaseTransaction, crate::YorishiroError> {
+    use crate::error::ResultExt;
+
+    if ctx.is_sqlite() {
+        return ctx.db.begin().await.internal();
+    }
+    let handle = ctx
+        .shared_store
+        .get::<DbHandle>()
+        .ok_or_else(|| crate::YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+    handle
+        .tenant
+        .begin_for_workspace(tenant_id, workspace_id)
+        .await
+        .internal()
+}
+
 /// Which pools this deployment holds for control-plane vs. tenant-scoped access.
 ///
 /// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`user_users`/`tenant_memberships`/`workspace_invites`) that have no tenant/workspace context yet to scope by.

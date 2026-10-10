@@ -7,7 +7,7 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::ResultExt;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
@@ -50,16 +50,9 @@ async fn merge_preview(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
 
-    let db = ctx
-        .shared_store
-        .get::<crate::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
     // The schema is workspace content and comes off the RLS-scoped connection; the template is control-plane data the request role holds no grant on, hence both `schema_txn` and `ctx`.
-    let schema_txn = db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?;
+    let schema_txn =
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
     let plan = origin::merge_preview(
         &schema_txn,
         &ctx,
@@ -82,15 +75,8 @@ async fn merge_apply(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
-    let db = ctx
-        .shared_store
-        .get::<crate::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    let schema_txn = db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?;
+    let schema_txn =
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
     let (schema, diff, summary) = origin::merge_apply(
         &schema_txn,
         &ctx,

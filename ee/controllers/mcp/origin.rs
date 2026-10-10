@@ -87,14 +87,14 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let db = crate::controllers::extractors::db_handle(self.app_context())
-            .map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
         let auth_ctx = authorized.auth_context();
-        let schema_txn = db
-            .tenant
-            .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-            .await
-            .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+        let schema_txn = crate::db::begin_workspace(
+            self.app_context(),
+            auth_ctx.tenant_id,
+            auth_ctx.workspace_id,
+        )
+        .await
+        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
 
         let plan = match crate::edition::ee::models::schema_schemas::merge_preview(
             &schema_txn,
@@ -128,14 +128,14 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let db = crate::controllers::extractors::db_handle(self.app_context())
-            .map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
         let auth_ctx = authorized.auth_context();
-        let schema_txn = db
-            .tenant
-            .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-            .await
-            .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+        let schema_txn = crate::db::begin_workspace(
+            self.app_context(),
+            auth_ctx.tenant_id,
+            auth_ctx.workspace_id,
+        )
+        .await
+        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
 
         let (schema, diff, summary) = match crate::edition::ee::models::schema_schemas::merge_apply(
             &schema_txn,

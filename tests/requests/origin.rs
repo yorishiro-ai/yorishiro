@@ -77,7 +77,7 @@ async fn insert_template(
         name: sea_orm::ActiveValue::Set("library-note".into()),
         definition: sea_orm::ActiveValue::Set(definition),
         visibility: sea_orm::ActiveValue::Set("tenant".into()),
-        tags: sea_orm::ActiveValue::Set(vec![]),
+        tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
         ..Default::default()
     };
     sea_orm::ActiveModelTrait::insert(template, &ctx.db)

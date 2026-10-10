@@ -158,7 +158,14 @@ async fn query_embedding_requests_migration_is_reversible_on_sqlite() {
 
     Migrator::up(&db, None).await.expect("up");
     assert!(exists(&db).await);
-    Migrator::down(&db, Some(1)).await.expect("down one step");
+    let position = Migrator::migrations()
+        .iter()
+        .position(|migration| migration.name() == "m20261006_000018_embedding_queue_state")
+        .expect("migration 000018 is registered");
+    let later = Migrator::migrations().len() - position;
+    Migrator::down(&db, Some(later as u32))
+        .await
+        .expect("roll back to before the query embedding table");
     assert!(!exists(&db).await);
     Migrator::up(&db, None).await.expect("up again");
     assert!(exists(&db).await);

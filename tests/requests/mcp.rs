@@ -175,10 +175,6 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
 /// RLS-scoped transaction, enforce read/schema scopes, and explicitly commit a successful merge.
 #[tokio::test]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
-    // Template_templates.tags is a PostgreSQL TEXT[] column.
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         install_licence(&ctx, true);
         let (tenant_id, workspace_id, owner_id, schema_key) =
@@ -203,7 +199,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             name: ActiveValue::Set("library-note".into()),
             definition: ActiveValue::Set(original),
             visibility: ActiveValue::Set("tenant".into()),
-            tags: ActiveValue::Set(vec![]),
+            tags: ActiveValue::Set(serde_json::json!([])),
             ..Default::default()
         }
         .insert(&ctx.db)

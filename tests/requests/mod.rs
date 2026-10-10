@@ -338,3 +338,24 @@ async fn postgres_sqlite_queue_boots_clean_up_before_the_next_boot() {
         assert!(!std::path::Path::new(&format!("{path}-journal")).exists());
     }
 }
+
+/// The transaction a workspace-scoped model call runs in, the way the handlers open it: scoped through the tenant pool on PostgreSQL, on the application connection on SQLite.
+pub(crate) async fn workspace_txn(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: uuid::Uuid,
+    workspace_id: uuid::Uuid,
+) -> sea_orm::DatabaseTransaction {
+    use sea_orm::TransactionTrait;
+    use yorishiro::db::{AppContextBackend, DbHandle};
+
+    if ctx.is_sqlite() {
+        return ctx.db.begin().await.expect("begin workspace transaction");
+    }
+    ctx.shared_store
+        .get::<DbHandle>()
+        .expect("tenant pool")
+        .tenant
+        .begin_for_workspace(tenant_id, workspace_id)
+        .await
+        .expect("begin workspace transaction")
+}
