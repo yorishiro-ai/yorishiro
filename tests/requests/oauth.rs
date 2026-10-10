@@ -97,12 +97,12 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 #[tokio::test]
 #[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {
+    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
+    guard.remove("YORISHIRO_OAUTH_CLIENT_ID");
+    guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
+    guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
-        let guard = crate::EnvGuard::capture(&OAUTH_VARS);
-        guard.remove("YORISHIRO_OAUTH_CLIENT_ID");
-        guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
-        guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
         let response = request.get("/auth/oauth/status").await;
 
         assert_eq!(

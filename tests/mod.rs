@@ -70,7 +70,10 @@ static BACKEND_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 ///
 /// `serial_test` keys only exclude tests that carry the same key, so a test with no key still reads `DATABASE_URL`, `QUEUE_URL` and the rest while it boots.
 /// A writer therefore waits for the booting tests in flight and holds the others off until its [`EnvGuard`] is dropped.
-/// The scope is per thread: a test already inside one scope (a writer that boots, or a booted test that captures a guard) does not take the lock a second time, since it cannot upgrade a read to a write and would wait on itself.
+///
+/// The scope is per thread, and only two nestings are allowed: a read inside a write or another read (the thread already holds the lock and reading under it is safe).
+/// A write inside a read is a bug in the test: it would wait on itself, so it is refused loudly.
+/// Capture the [`EnvGuard`] before the call that boots the application.
 static ENVIRONMENT: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 thread_local! {
@@ -84,8 +87,8 @@ pub(crate) struct EnvironmentRead {
 
 impl EnvironmentRead {
     pub(crate) fn enter() -> Self {
-        let nested = SCOPES.with(|scopes| scopes.get() != (0, 0));
-        let lock = (!nested).then(|| ENVIRONMENT.read().unwrap_or_else(|e| e.into_inner()));
+        let held = SCOPES.with(|scopes| scopes.get() != (0, 0));
+        let lock = (!held).then(|| ENVIRONMENT.read().unwrap_or_else(|e| e.into_inner()));
         SCOPES.with(|scopes| {
             let (readers, writers) = scopes.get();
             scopes.set((readers + 1, writers));
@@ -109,12 +112,14 @@ struct EnvironmentWrite {
 
 impl EnvironmentWrite {
     fn enter() -> Self {
-        let nested = SCOPES.with(|scopes| scopes.get() != (0, 0));
-        let lock = (!nested).then(|| ENVIRONMENT.write().unwrap_or_else(|e| e.into_inner()));
-        SCOPES.with(|scopes| {
-            let (readers, writers) = scopes.get();
-            scopes.set((readers, writers + 1));
-        });
+        let (readers, writers) = SCOPES.with(std::cell::Cell::get);
+        debug_assert!(
+            readers == 0 || writers > 0,
+            "an EnvGuard was captured inside a booted test's scope: capture it before boot_request"
+        );
+        let lock = (readers == 0 && writers == 0)
+            .then(|| ENVIRONMENT.write().unwrap_or_else(|e| e.into_inner()));
+        SCOPES.with(|scopes| scopes.set((readers, writers + 1)));
         Self { _lock: lock }
     }
 }
