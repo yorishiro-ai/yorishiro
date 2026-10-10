@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use loco_rs::bgworker::BackgroundWorker;
 use loco_rs::prelude::*;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -84,4 +85,10 @@ async fn rejects_a_missing_queue_before_creating_a_job() {
         error.to_string(),
         "infer-fill requires a queue provider (configure queue: in the server config)"
     );
+}
+
+#[test]
+fn infer_fill_worker_keeps_its_routing_tag_and_class_name() {
+    assert_eq!(InferFillWorker::tags(), vec!["infer-fill".to_string()]);
+    assert_eq!(InferFillWorker::class_name(), "InferFillWorker");
 }

@@ -173,7 +173,7 @@ async fn a_non_http_base_url_is_refused() {
     .await;
 }
 
-/// Assigning a provider whose `dimensions` does not match a workspace's own stamped `embedding_dimensions` is refused at configuration time, not discovered only on the next entity write (`sync_embedding`'s own write-time guard, `services/embedding/sync.rs`, is the backstop this is in front of, not a replacement for it).
+/// Assigning a provider whose `dimensions` does not match a workspace's own stamped `embedding_dimensions` is stored, and the key change schedules a reindex of the workspace, rather than being discovered only on the next entity write (`sync_embedding`'s own write-time guard is the backstop behind it).
 #[tokio::test]
 async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_reindex() {
     boot_request::<App, _, _>(|request, ctx| async move {

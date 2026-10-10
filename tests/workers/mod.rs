@@ -3,8 +3,6 @@ mod lifecycle;
 mod queue;
 
 mod embedding_sync;
-#[cfg(feature = "enterprise")]
-mod infer_fill;
 mod query_embedding;
 mod queue_routing;
 mod reindex;
