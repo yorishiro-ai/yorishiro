@@ -271,7 +271,31 @@ mod conflict {
     }
 
     impl QueueHarness {
-        async fn sqlite(ctx: AppContext, queue_uri: String) -> Self {
+        /// Builds the harness for whichever queue the lane configured, so a scenario runs on SQLite, PostgreSQL and Redis alike.
+        /// Each call gets its own SQLite file; the PostgreSQL and Redis queues are shared, so callers take `serial(queue_postgres)`.
+        async fn lane(ctx: AppContext, workers: u32) -> Self {
+            match ctx.config.queue.clone().expect("lane queue") {
+                loco_rs::config::QueueConfig::Sqlite(_) => {
+                    let path = std::env::temp_dir()
+                        .join(format!("yorishiro-embedding-{}.sqlite3", Uuid::now_v7()));
+                    Self::sqlite(
+                        ctx,
+                        format!("sqlite://{}?mode=rwc", path.display()),
+                        workers,
+                    )
+                    .await
+                }
+                loco_rs::config::QueueConfig::Postgres(queue) => {
+                    Self::postgres(ctx, queue.uri, workers).await
+                }
+                loco_rs::config::QueueConfig::Redis(queue) => {
+                    Self::redis(ctx, queue.uri, workers).await
+                }
+                other => panic!("unsupported lane queue {other:?}"),
+            }
+        }
+
+        async fn sqlite(ctx: AppContext, queue_uri: String, workers: u32) -> Self {
             let queue = Arc::new(
                 bgworker::sqlt::create_provider(&SqliteQueueConfig {
                     uri: queue_uri.clone(),
@@ -282,7 +306,7 @@ mod conflict {
                     connect_timeout: 5_000,
                     idle_timeout: 5_000,
                     poll_interval_sec: 1,
-                    num_workers: 2,
+                    num_workers: workers,
                     reaper: None,
                 })
                 .await
@@ -312,24 +336,28 @@ mod conflict {
             }
         }
 
-        async fn postgres(ctx: AppContext, uri: String) -> Self {
+        async fn postgres(ctx: AppContext, uri: String, workers: u32) -> Self {
             let queue = Arc::new(
                 bgworker::pg::create_provider(&PostgresQueueConfig {
                     uri: uri.clone(),
-                    dangerously_flush: false,
+                    dangerously_flush: true,
                     enable_logging: false,
                     max_connections: 2,
                     min_connections: 1,
                     connect_timeout: 5_000,
                     idle_timeout: 5_000,
                     poll_interval_sec: 1,
-                    num_workers: 2,
+                    num_workers: workers,
                     reaper: None,
                 })
                 .await
                 .expect("PostgreSQL queue"),
             );
             queue.setup().await.expect("set up PostgreSQL queue");
+            queue
+                .clear()
+                .await
+                .expect("clear reserved PostgreSQL test queue");
             let observation = BackendObservation::Postgres(
                 sqlx::PgPool::connect(&uri)
                     .await
@@ -353,7 +381,7 @@ mod conflict {
             }
         }
 
-        async fn redis(ctx: AppContext, uri: String) -> Self {
+        async fn redis(ctx: AppContext, uri: String, workers: u32) -> Self {
             let queue = Arc::new(
                 bgworker::redis::create_provider(&RedisQueueConfig {
                     uri: uri.clone(),
@@ -361,7 +389,7 @@ mod conflict {
                     queues: Some(
                         yorishiro::workers::registry::WorkerRegistry::community().queues(),
                     ),
-                    num_workers: 2,
+                    num_workers: workers,
                     reaper: None,
                 })
                 .await
@@ -1025,19 +1053,8 @@ mod conflict {
     }
 
     #[tokio::test]
+    #[serial(queue_postgres)]
     async fn three_document_worker_entries_share_the_installed_limiter() {
-        if !sqlite_lane() {
-            return;
-        }
-        let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        _guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/embedding-concurrency.sqlite3?mode=rwc",
-        );
-        _guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/embedding-concurrency-queue.sqlite3?mode=rwc",
-        );
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, first) = seed(&ctx).await;
             let second = entity_entities::create(
@@ -1079,36 +1096,8 @@ mod conflict {
             ctx.shared_store.insert(
                 Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
             );
-            let directory = tempfile::tempdir().expect("queue tempdir");
-            let queue_uri = format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("queue.sqlite3").display()
-            );
-            let queue = Arc::new(
-                bgworker::sqlt::create_provider(&SqliteQueueConfig {
-                    uri: queue_uri.clone(),
-                    dangerously_flush: false,
-                    enable_logging: false,
-                    max_connections: 2,
-                    min_connections: 1,
-                    connect_timeout: 5_000,
-                    idle_timeout: 5_000,
-                    poll_interval_sec: 1,
-                    num_workers: 3,
-                    reaper: None,
-                })
-                .await
-                .expect("SQLite queue"),
-            );
-            queue.setup().await.expect("set up queue");
-            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
-                .await
-                .expect("queue pool");
-            let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
-            queue
-                .register(EmbeddingSyncWorkerShared::build(&ctx))
-                .await
-                .expect("register worker");
+            let harness = QueueHarness::lane(ctx, 3).await;
+            let ctx = harness.ctx.clone();
             let ids = [first, second, third];
             let mut lifecycle_ids = Vec::new();
             for entity_id in ids {
@@ -1128,86 +1117,49 @@ mod conflict {
                 )
                 .await
                 .unwrap();
-                queue
-                    .enqueue(
-                        EmbeddingSyncWorkerShared::class_name(),
-                        None,
-                        serde_json::to_value(EmbeddingSyncArgs {
-                            lifecycle_id: Some(lifecycle_id),
-                            workspace_id,
-                            entity_id,
-                            worker_class: WorkerClass::Shared,
-                        })
-                        .unwrap(),
-                        Some(vec![WorkerClass::Shared.tag().into()]),
-                        Some(100),
-                    )
-                    .await
-                    .expect("enqueue document job");
-            }
-            let initial_jobs = sqlt::get_jobs(&queue_pool, None, None)
+                EmbeddingSyncWorkerShared::perform_later_with_priority(
+                    &ctx,
+                    EmbeddingSyncArgs {
+                        lifecycle_id: Some(lifecycle_id),
+                        workspace_id,
+                        entity_id,
+                        worker_class: WorkerClass::Shared,
+                    },
+                    Some(100),
+                )
                 .await
-                .expect("count jobs")
-                .len();
-            assert_eq!(initial_jobs, 3);
-            let running = queue.clone();
-            let runner =
-                tokio::spawn(
-                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
-                );
-            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                .expect("enqueue document job");
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 while provider.calls.load(Ordering::SeqCst) == 0 {
                     tokio::task::yield_now().await;
                 }
             })
             .await
             .expect("first provider call entered");
-            tokio::task::yield_now().await;
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while harness.observation.processing_count().await < 3 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("all consumers must have dequeued a job");
             assert_eq!(provider.active.load(Ordering::SeqCst), 1);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             let rows = Entity::find().all(&ctx.db).await.expect("read lifecycles");
-            assert_eq!(
+            let in_status = |status: LifecycleStatus| {
                 rows.iter()
-                    .filter(|row| lifecycle_ids.contains(&row.id)
-                        && row.status == LifecycleStatus::Running.as_db_str())
-                    .count(),
-                1
-            );
-            assert_eq!(
-                rows.iter()
-                    .filter(|row| lifecycle_ids.contains(&row.id)
-                        && row.status == LifecycleStatus::Queued.as_db_str())
-                    .count(),
-                2
-            );
-            assert_eq!(
-                rows.iter()
-                    .filter(|row| lifecycle_ids.contains(&row.id)
-                        && row.status == LifecycleStatus::Failed.as_db_str())
-                    .count(),
-                0
-            );
-            assert_eq!(
-                sqlt::get_jobs(&queue_pool, None, None)
-                    .await
-                    .expect("count blocked jobs")
-                    .len(),
-                initial_jobs
-            );
-            let processing = sqlt::get_jobs(
-                &queue_pool,
-                Some(&vec![loco_rs::bgworker::JobStatus::Processing]),
-                None,
-            )
-            .await
-            .expect("read dispatched jobs");
-            assert_eq!(
-                processing.len(),
-                3,
-                "all consumers must have dequeued a job"
-            );
+                    .filter(|row| {
+                        lifecycle_ids.contains(&row.id) && row.status == status.as_db_str()
+                    })
+                    .count()
+            };
+            assert_eq!(in_status(LifecycleStatus::Running), 1);
+            assert_eq!(in_status(LifecycleStatus::Queued), 2);
+            assert_eq!(in_status(LifecycleStatus::Failed), 0);
+            assert_eq!(harness.observation.total_count().await, 3);
             provider.release.add_permits(3);
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 loop {
                     let done = Entity::find()
                         .all(&ctx.db)
@@ -1227,38 +1179,18 @@ mod conflict {
             })
             .await
             .expect("all queued jobs complete");
-            let _ = queue.shutdown();
-            runner.await.unwrap().unwrap();
-            assert_eq!(
-                sqlt::get_jobs(&queue_pool, None, None)
-                    .await
-                    .expect("final queue")
-                    .len(),
-                3
-            );
             assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             assert_eq!(vector_rows(&ctx, first).await, 1);
             assert_eq!(vector_rows(&ctx, second).await, 1);
             assert_eq!(vector_rows(&ctx, third).await, 1);
+            harness.shutdown().await;
         })
         .await;
     }
 
     #[tokio::test]
     async fn document_and_query_workers_share_fifo_embedding_admission() {
-        if !sqlite_lane() {
-            return;
-        }
-        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/mixed-worker.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/mixed-worker-queue.sqlite3?mode=rwc",
-        );
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
             let provider = Arc::new(MixedProvider {
@@ -1362,18 +1294,6 @@ mod conflict {
 
     #[tokio::test]
     async fn real_workers_release_embedding_permits_after_success_error_abort_and_panic() {
-        if !sqlite_lane() {
-            return;
-        }
-        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/outcome-worker.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/outcome-worker-queue.sqlite3?mode=rwc",
-        );
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
             let provider = Arc::new(MixedProvider {
@@ -1499,18 +1419,6 @@ mod conflict {
 
     #[tokio::test]
     async fn provider_error_releases_real_worker_permit_without_replacement() {
-        if !sqlite_lane() {
-            return;
-        }
-        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/error-release.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/error-release-queue.sqlite3?mode=rwc",
-        );
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
             let provider = Arc::new(ErrorThenSuccessProvider {
@@ -1607,18 +1515,6 @@ mod conflict {
 
     #[tokio::test]
     async fn cancelled_real_worker_releases_permit_and_is_reconciled() {
-        if !sqlite_lane() {
-            return;
-        }
-        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/cancel-release.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/cancel-release-queue.sqlite3?mode=rwc",
-        );
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
             let provider = Arc::new(MixedProvider {
@@ -1760,18 +1656,6 @@ mod conflict {
 
     #[tokio::test]
     async fn panicked_real_worker_releases_permit_and_is_reconciled() {
-        if !sqlite_lane() {
-            return;
-        }
-        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/panic-release.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/panic-release-queue.sqlite3?mode=rwc",
-        );
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
             let provider = Arc::new(PanicProvider {
@@ -1887,19 +1771,8 @@ mod conflict {
     }
 
     #[tokio::test]
+    #[serial(queue_postgres)]
     async fn expired_embedding_lifecycle_is_recovered_by_actual_worker() {
-        if !sqlite_lane() {
-            return;
-        }
-        let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/recovered-worker.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/recovered-worker-queue.sqlite3?mode=rwc",
-        );
         boot_request::<App, _, _>(|_request, ctx| async move {
             let (workspace_id, entity_id) = seed(&ctx).await;
             let provider = Arc::new(GatedProvider {
@@ -1947,31 +1820,22 @@ mod conflict {
             row.lease_until = sea_orm::ActiveValue::Set(Some(stale));
             row.update(&ctx.db).await.unwrap();
 
-            let queue_dir = tempfile::tempdir().unwrap();
-            let queue_uri = format!(
-                "sqlite://{}?mode=rwc",
-                queue_dir.path().join("recovery-queue.sqlite3").display()
-            );
-            let harness = QueueHarness::sqlite(ctx, queue_uri).await;
+            let harness = QueueHarness::lane(ctx, 2).await;
             let result = std::panic::AssertUnwindSafe(async {
                 // Loco's queue reaper owns Processing delivery reclamation.  This test
                 // starts the already-reclaimed payload directly in the real queue runner.
-                harness
-                    .queue
-                    .enqueue(
-                        EmbeddingSyncWorkerShared::class_name(),
-                        None,
-                        EmbeddingSyncArgs {
-                            lifecycle_id: Some(lifecycle_id),
-                            workspace_id,
-                            entity_id,
-                            worker_class: WorkerClass::Shared,
-                        },
-                        Some(vec![WorkerClass::Shared.tag().into()]),
-                        Some(100),
-                    )
-                    .await
-                    .unwrap();
+                EmbeddingSyncWorkerShared::perform_later_with_priority(
+                    &harness.ctx,
+                    EmbeddingSyncArgs {
+                        lifecycle_id: Some(lifecycle_id),
+                        workspace_id,
+                        entity_id,
+                        worker_class: WorkerClass::Shared,
+                    },
+                    Some(100),
+                )
+                .await
+                .unwrap();
                 let original_queue_count = harness.observation.total_count().await;
                 assert_eq!(original_queue_count, 1);
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -2224,6 +2088,7 @@ mod conflict {
                     "sqlite://{}?mode=rwc",
                     queue_a.path().join("queue.sqlite3").display()
                 ),
+                2,
             )
             .await;
             let result = std::panic::AssertUnwindSafe(async {
@@ -2285,6 +2150,7 @@ mod conflict {
                             "sqlite://{}?mode=rwc",
                             queue_b.path().join("queue.sqlite3").display()
                         ),
+                        2,
                     )
                     .await;
                     let result_b = std::panic::AssertUnwindSafe(async {
@@ -2404,7 +2270,7 @@ mod conflict {
             ctx.shared_store.insert(
                 Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
             );
-            run_backend_admission_scenario(QueueHarness::sqlite(ctx, queue_uri).await, provider)
+            run_backend_admission_scenario(QueueHarness::sqlite(ctx, queue_uri, 2).await, provider)
                 .await;
         })
         .await;
@@ -2433,7 +2299,8 @@ mod conflict {
             ctx.shared_store.insert(
                 Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
             );
-            run_backend_admission_scenario(QueueHarness::postgres(ctx, uri).await, provider).await;
+            run_backend_admission_scenario(QueueHarness::postgres(ctx, uri, 2).await, provider)
+                .await;
         })
         .await;
     }
@@ -2466,7 +2333,7 @@ mod conflict {
             ctx.shared_store.insert(
                 Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
             );
-            run_backend_admission_scenario(QueueHarness::redis(ctx, uri).await, provider).await;
+            run_backend_admission_scenario(QueueHarness::redis(ctx, uri, 2).await, provider).await;
         })
         .await;
     }
