@@ -77,7 +77,10 @@ if [[ $# -gt 0 ]]; then
       log=$(cat "/tmp/yorishiro-docker-$name.log")
       case "$name" in
         malformed) [[ "$log" == *"YAMLFile"*"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
-        missing|local-only|incomplete|unreadable) [[ "$log" == *"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
+        missing) [[ "$log" == *"no configuration file found in folder: /app/config"* ]] || { echo "$log" >&2; return 1; };;
+        local-only) [[ "$log" == *"production.local.yaml"* ]] || { echo "$log" >&2; return 1; };;
+        incomplete) [[ "$log" == *"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
+        unreadable) [[ "$log" == *"PermissionDenied"* ]] || { echo "$log" >&2; return 1; };;
       esac
     fi
     after_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
