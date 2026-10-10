@@ -229,7 +229,8 @@ Infer-fill uses the same narrow seam in the Enterprise edition, while its durabl
 You can configure a deployment to automatically reindex every workspace under a tenant on a regular interval. The schedule runs through the normal reindex flow (same as the manual `reindex_embeddings` task), so it respects the same workspace provider and model version checks.
 
 Configure the schedule through the API endpoint (`POST /api/identity/tenants/schedule` or the equivalent route), which takes an ISO 8601 duration (`P1D` for daily, `P1W` for weekly) and an optional IANA timezone name (default: UTC).
-The five-minute interval sets the next `scheduled_for` time.
+The interval accepts weeks, days, hours, minutes and seconds (for example `P1D`, `P1W`, `PT6H`) and must be at least `PT5M`; years and months are rejected.
+The first `scheduled_for` is one interval after the schedule is set, and each scheduler tick that runs it sets the next one an interval after that tick.
 On each scheduler tick, any overdue `scheduled_for` runs, with no missed-run grace cutoff.
 
 To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to the selected `config/<environment>.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.

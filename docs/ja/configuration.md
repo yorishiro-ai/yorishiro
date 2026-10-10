@@ -231,7 +231,8 @@ SQLite は書き込み側が 1 つのため、SQLite キューでワーカーを
 テナント単位で定期的にすべてのワークスペースの再インデックスを実行するスケジュールを設定できます。スケジュールは手動の `reindex_embeddings` タスクと同じフローをたどり、ワークスペースごとのプロバイダとモデルバージョンのチェックを尊重します。
 
 API エンドポイント（`POST /api/identity/tenants/schedule` など）で ISO 8601 形式の期間（`P1D` で毎日、`P1W` で毎週）と任意の IANA タイムゾーン名（デフォルト：UTC）を指定します。
-5 分の間隔で次の `scheduled_for` 時刻を設定します。
+間隔には週・日・時・分・秒を使えます(例: `P1D`、`P1W`、`PT6H`)。最短は `PT5M` で、年と月は受け付けません。
+最初の `scheduled_for` はスケジュール設定の 1 間隔後になり、実行した scheduler tick は次の `scheduled_for` をその tick の 1 間隔後に設定します。
 各 scheduler tick では、期限を過ぎた `scheduled_for` を実行し、未実行分の猶予時間による打ち切りはありません。
 
 選択した `config/<environment>.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。
