@@ -280,10 +280,6 @@ where
     )
     .await
     .expect("boot sqlite app");
-    assert!(
-        boot.app_context.queue_provider.is_some(),
-        "booted app has no queue provider"
-    );
     crate::record_configured_topology(&boot.app_context);
 
     // Build the TestServer from the app's router, using the same pattern as

@@ -1104,6 +1104,7 @@ async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
         let workspace: String = row.try_get("", "workspace").unwrap();
         assert_eq!(tenant, setup.tenant_id.to_string());
         assert_eq!(workspace, setup.workspace_id.to_string());
+        txn.rollback().await.expect("release the worker scope");
 
         let unknown = open_workspace_scope(&ctx, Uuid::new_v4()).await;
         assert!(unknown.is_err(), "a workspace that does not exist has no scope");
