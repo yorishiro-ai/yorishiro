@@ -59,7 +59,8 @@ fn note_definition() -> serde_json::Value {
 
 #[tokio::test]
 async fn owner_can_create_update_and_delete_a_template() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -113,9 +114,6 @@ async fn owner_can_create_update_and_delete_a_template() {
 
 #[tokio::test]
 async fn member_role_cannot_manage_the_template_library() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { member_key, .. } = setup(&ctx, "acme").await;
 
@@ -135,7 +133,8 @@ async fn member_role_cannot_manage_the_template_library() {
 /// Community visibility makes a template *readable* across tenants, not writable: only the owning tenant may update or delete it (fork creates a new row owned by the caller, so it doesn't need this guard, but update/delete do).
 #[tokio::test]
 async fn another_tenant_cannot_update_or_delete_a_community_template() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -194,7 +193,8 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
 
 #[tokio::test]
 async fn fork_copies_a_community_template_into_the_forking_tenants_own_library() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

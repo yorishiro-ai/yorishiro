@@ -67,9 +67,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// Setting, reading and clearing a workspace's own worker-class assignment over REST, matching `embedding_key_set_get_and_clear_round_trip`.
 #[tokio::test]
 async fn worker_class_set_get_and_clear_round_trip() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -132,9 +129,6 @@ async fn worker_class_set_get_and_clear_round_trip() {
 /// Re-`PUT`ting a different class replaces the assignment rather than erroring or adding a second row, matching the `ON CONFLICT` upsert `workspace_embedding_keys::set`/`workspace_llm_keys::set` both use.
 #[tokio::test]
 async fn setting_a_new_class_replaces_the_old_one() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -178,9 +172,6 @@ async fn setting_a_new_class_replaces_the_old_one() {
 /// The `WorkerClassResolver` seam returns the workspace's own assignment when one exists, and `None` (falling back to `WorkerClass::Shared`) when it does not, matching `resolver_returns_the_workspace_assignment_when_set_and_none_otherwise`.
 #[tokio::test]
 async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let setup = setup(&ctx).await;
         let resolver = WorkerClassAssignmentResolver;

@@ -115,9 +115,6 @@ fn checkout_completed_body(event_id: &str, created: i64, tenant_id: Uuid) -> Vec
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_duplicate_event_id_is_not_reapplied() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -183,9 +180,6 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_cancellation_returns_the_tenant_to_free() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -252,9 +246,6 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
@@ -277,9 +268,6 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_tampered_payload_is_rejected() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -310,9 +298,6 @@ async fn a_tampered_payload_is_rejected() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn malformed_signature_headers_have_exact_plain_text_rejections() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -368,9 +353,6 @@ async fn malformed_signature_headers_have_exact_plain_text_rejections() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn malformed_json_is_rejected_after_signature_verification() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -406,9 +388,6 @@ async fn malformed_json_is_rejected_after_signature_verification() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_stale_subscription_event_is_not_reapplied() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -457,9 +436,6 @@ async fn a_stale_subscription_event_is_not_reapplied() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn checkout_completion_links_the_stripe_customer() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);

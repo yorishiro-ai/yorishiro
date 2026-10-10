@@ -12,7 +12,8 @@ use yorishiro::models::_entities::{template_versions, tenant_tenants};
 /// A first run publishes every built-in template and creates the official tenant; a second run republishes nothing.
 #[tokio::test]
 async fn seeding_is_idempotent_and_creates_the_official_tenant() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {

@@ -53,9 +53,6 @@ fn note_definition() -> serde_json::Value {
 /// An unlicensed deployment answers 404, matching an unconfigured setup wizard: the deployment genuinely does not serve this, not 401/403, which would confirm the route exists.
 #[tokio::test]
 async fn without_a_licence_the_marketplace_is_not_served() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
@@ -76,9 +73,6 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 /// The gate runs before authentication: an unlicensed deployment answers the same 404 whether or not the caller holds a valid key, so an anonymous prober cannot tell the route exists.
 #[tokio::test]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .get("/api/marketplace")
@@ -97,9 +91,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 /// A licensed deployment still authenticates: without this, "gated" and "open to anyone" would look the same as the previous test.
 #[tokio::test]
 async fn a_licence_does_not_replace_authentication() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
 
@@ -120,7 +111,8 @@ async fn a_licence_does_not_replace_authentication() {
 /// The full publish -> list -> fork -> review round trip, and the decisions along the way: a draft never appears in the public listing, version numbers are assigned server-side, and a fork is a private ('tenant') copy of a forker's own, distinct from the original.
 #[tokio::test]
 async fn publish_list_fork_and_review_round_trip() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -385,7 +377,8 @@ async fn publish_list_fork_and_review_round_trip() {
 /// A tenant may not set another tenant's template's visibility, or publish a version onto it: ownership is enforced by the service, not the role, and is reported as 404 rather than 403 so a caller that cannot act on a template does not learn it exists from the difference.
 #[tokio::test]
 async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -434,7 +427,8 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
 /// A rating outside 1-5 is rejected before it ever reaches the database.
 #[tokio::test]
 async fn a_rating_outside_the_range_is_rejected() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

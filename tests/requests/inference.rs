@@ -94,9 +94,6 @@ async fn setup_named(
 /// The key itself never comes back from GET, only what it configured.
 #[tokio::test]
 async fn llm_key_set_get_and_clear_round_trip() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -172,9 +169,6 @@ async fn llm_key_set_get_and_clear_round_trip() {
 /// A scheme that could never be a chat-completions endpoint is refused before anything is stored, and a URL with no scheme at all is refused too rather than becoming a relative path.
 #[tokio::test]
 async fn a_non_http_base_url_is_refused() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -207,9 +201,6 @@ async fn a_non_http_base_url_is_refused() {
 /// A workspace with no credentials configured is refused with one clear error before any entity is scanned, rather than reporting zero applied in a way that reads as "nothing to infer".
 #[tokio::test]
 async fn infer_fill_without_a_configured_key_is_refused() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -249,9 +240,6 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 /// Matches `marketplace`'s and `dashboard`'s own tests for the same gate.
 #[tokio::test]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -318,7 +306,8 @@ async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
-    if !super::super::require_postgres_backend() {
+    // The handler resolves the PostgreSQL-only DbHandle.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -424,7 +413,8 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 /// Invalid proposals are marked invalid and do not leave a snapshot behind.
 #[tokio::test]
 async fn invalid_proposals_do_not_leave_a_snapshot() {
-    if !super::super::require_postgres_backend() {
+    // The handler resolves the PostgreSQL-only DbHandle.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -530,7 +520,8 @@ async fn create_completed_proposal(
 
 #[tokio::test]
 async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace() {
-    if !super::super::require_postgres_backend() {
+    // The handler resolves the PostgreSQL-only DbHandle.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -614,7 +605,8 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
 /// writing the entity. This uses two real PostgreSQL transactions rather than a sequential replay.
 #[tokio::test]
 async fn terminal_proposal_actions_serialize_against_confirmation() {
-    if !super::super::require_postgres_backend() {
+    // The handler resolves the PostgreSQL-only DbHandle.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -725,7 +717,8 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
 
 #[tokio::test]
 async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
-    if !super::super::require_postgres_backend() {
+    // The handler resolves the PostgreSQL-only DbHandle.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -816,9 +809,6 @@ async fn create_pending_proposal(
 /// response.
 #[tokio::test]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -953,9 +943,6 @@ impl InferFillDispatcher for FailingInferFillDispatcher {
 /// A dispatch failure leaves the durable infer-fill row failed rather than queued forever.
 #[tokio::test]
 async fn infer_fill_dispatch_failure_persists_failed_job() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -1005,9 +992,6 @@ async fn infer_fill_dispatch_failure_persists_failed_job() {
 
 #[tokio::test]
 async fn inference_status_polling_preserves_all_wire_values() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;

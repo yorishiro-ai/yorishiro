@@ -128,9 +128,6 @@ fn tool_result_json(response: &Value) -> Value {
 /// Licence changes must therefore gate discovery and dispatch dynamically, not only at construction.
 #[tokio::test]
 async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         install_licence(&ctx, true);
         let (_tenant_id, workspace_id, owner_id, _schema_key) =
@@ -178,7 +175,8 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
 /// RLS-scoped transaction, enforce read/schema scopes, and explicitly commit a successful merge.
 #[tokio::test]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
-    if !super::super::require_postgres_backend() {
+    // Template_templates.tags is a PostgreSQL TEXT[] column.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -342,9 +340,6 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// and cannot change the entity.
 #[tokio::test]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, owner_id, migration_key) =
             fixtures::create_tenant_workspace_owner(
@@ -662,9 +657,6 @@ async fn community_mcp_entities_relations_and_schema_tools_execute_over_protocol
 
 #[tokio::test]
 async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, _owner_id, schema_key) =
             fixtures::create_tenant_workspace_owner(
@@ -797,9 +789,6 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use yorishiro::error::YorishiroError;
     use yorishiro::models::entity_embeddings;
 
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     let provider = Arc::new(KeywordProvider::new(768));
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
         let (tenant_id, workspace_id, owner_id, _schema_key) =
