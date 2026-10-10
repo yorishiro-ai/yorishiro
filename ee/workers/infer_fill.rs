@@ -12,7 +12,7 @@ use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::db::{self, DbHandle};
+use crate::db;
 use crate::edition::ee::models::entity_entities::infer_fill;
 use crate::edition::ee::models::inference_jobs;
 use crate::edition::ee::models::inference_proposals;
@@ -48,6 +48,30 @@ pub trait InferFillDispatcher: Send + Sync {
     async fn dispatch(&self, ctx: &AppContext, args: InferFillArgs) -> loco_rs::Result<String>;
 }
 
+/// Opens the transaction an infer-fill run reads and writes in, scoped the way a request for this workspace would be.
+///
+/// The queued arguments carry the workspace only, so the tenant is not known to the worker until it is read from the workspace row.
+///
+/// # Errors
+/// Returns an error if the workspace does not exist or the transaction cannot be started.
+pub async fn open_workspace_scope(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+) -> loco_rs::Result<sea_orm::DatabaseTransaction> {
+    // `ctx.db` is the identity connection, which reads the workspace row without a tenant scope.
+    let workspace =
+        crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .internal()?
+            .ok_or_else(|| {
+                loco_rs::Error::Message(format!("workspace {workspace_id} not found"))
+            })?;
+    db::begin_workspace(ctx, workspace.tenant_id, workspace_id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))
+}
+
 /// Shared implementation of the infer-fill worker's perform body.
 async fn perform_infer_fill(
     ctx: &AppContext,
@@ -62,16 +86,7 @@ async fn perform_infer_fill(
             loco_rs::Error::Message("workspace has no LLM credentials configured".into())
         })?;
 
-    let db_handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-        loco_rs::Error::Message(
-            "infer-fill requires the tenant pool, which this deployment did not build".into(),
-        )
-    })?;
-    let schema_txn = db_handle
-        .tenant
-        .begin_for_workspace(args.workspace_id, args.workspace_id)
-        .await
-        .internal()?;
+    let schema_txn = open_workspace_scope(ctx, args.workspace_id).await?;
 
     // Serialize one infer-fill per workspace via transaction-scoped advisory lock.
     db::lock_for_update(&schema_txn, &format!("infer-fill:{}", args.workspace_id))

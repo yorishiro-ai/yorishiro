@@ -1021,3 +1021,87 @@ async fn inference_status_polling_preserves_all_wire_values() {
     })
     .await;
 }
+
+/// The worker runs outside any request and the queued job names only the workspace, so it finds the tenant itself; the two ids differ here.
+#[tokio::test]
+async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
+    use loco_rs::bgworker::BackgroundWorker;
+    use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        assert_ne!(setup.tenant_id, setup.workspace_id);
+        create_entity(&request, &setup).await;
+        let key = request
+            .put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "base_url": "https://api.example.com/v1/",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-secret-value"
+            }))
+            .await;
+        assert_eq!(key.status_code(), StatusCode::NO_CONTENT);
+
+        // Every entity is already on the active schema, so the run reaches the schema read and needs no LLM call.
+        let job_id = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+            .await
+            .expect("create job");
+
+        InferFillWorker::build(&ctx)
+            .perform(InferFillArgs {
+                lifecycle_id: None,
+                job_id,
+                workspace_id: setup.workspace_id,
+                schema_name: "note".into(),
+            })
+            .await
+            .expect("the worker reads the schema under the workspace's own tenant");
+
+        let job = inference_jobs::get(&ctx.db, job_id)
+            .await
+            .expect("read job")
+            .expect("job exists");
+        assert_eq!(job.status, InferenceJobStatus::Completed, "{job:?}");
+        assert_eq!(job.error, None);
+    })
+    .await;
+}
+
+/// The queued job names only the workspace, so the scope the worker opens has to carry the workspace's real tenant, not the workspace id in both places.
+#[tokio::test]
+async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
+    use sea_orm::{ConnectionTrait, Statement};
+    use yorishiro::edition::ee::workers::infer_fill::open_workspace_scope;
+
+    // The settings are PostgreSQL session settings that row-level security reads.
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let setup = setup(&ctx).await;
+        assert_ne!(setup.tenant_id, setup.workspace_id);
+
+        let txn = open_workspace_scope(&ctx, setup.workspace_id)
+            .await
+            .expect("open the scope");
+        let row = txn
+            .query_one_raw(Statement::from_string(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT current_setting('app.current_tenant') AS tenant, current_setting('app.current_workspace') AS workspace",
+            ))
+            .await
+            .expect("read the settings")
+            .expect("one row");
+        let tenant: String = row.try_get("", "tenant").unwrap();
+        let workspace: String = row.try_get("", "workspace").unwrap();
+        assert_eq!(tenant, setup.tenant_id.to_string());
+        assert_eq!(workspace, setup.workspace_id.to_string());
+
+        let unknown = open_workspace_scope(&ctx, Uuid::new_v4()).await;
+        assert!(unknown.is_err(), "a workspace that does not exist has no scope");
+    })
+    .await;
+}
