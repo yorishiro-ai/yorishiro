@@ -264,6 +264,7 @@ jobs:
             backend: postgres
             queue: Postgres
             queue_key: postgres
+            # Used by non-harness steps; test_topology.py selects its own config via Environment::Test.
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
