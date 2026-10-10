@@ -69,7 +69,8 @@ static BACKEND_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// `serial_test` keys only exclude tests that carry the same key, so a test with no key still reads `DATABASE_URL`, `QUEUE_URL` and the rest while it boots.
 /// A writer therefore waits for the booting tests in flight and holds the others off until its [`EnvGuard`] is dropped.
 ///
-/// The scope is per thread, and only two nestings are allowed: a read inside a write or another read (the thread already holds the lock and reading under it is safe).
+/// A read skips lock acquisition only inside a write scope on the same thread.
+/// Nested environment guards share that write lock until the outer guard exits.
 /// A write inside a read is a bug in the test: it would wait on itself, so it is refused loudly.
 /// Capture the [`EnvGuard`] before the call that boots the application.
 static ENVIRONMENT: std::sync::RwLock<()> = std::sync::RwLock::new(());
@@ -85,7 +86,7 @@ pub(crate) struct EnvironmentRead {
 
 impl EnvironmentRead {
     pub(crate) fn enter() -> Self {
-        let held = SCOPES.with(|scopes| scopes.get() != (0, 0));
+        let held = SCOPES.with(|scopes| scopes.get().1 > 0);
         let lock = (!held).then(|| ENVIRONMENT.read().unwrap_or_else(|e| e.into_inner()));
         SCOPES.with(|scopes| {
             let (readers, writers) = scopes.get();
@@ -106,6 +107,21 @@ impl Drop for EnvironmentRead {
 
 struct EnvironmentWrite {
     _lock: Option<std::sync::RwLockWriteGuard<'static, ()>>,
+}
+
+#[test]
+fn an_environment_reader_can_nest_inside_a_writer() {
+    let _write = EnvironmentWrite::enter();
+    let read = EnvironmentRead::enter();
+    assert!(read._lock.is_none(), "the writer already owns the lock");
+}
+
+#[test]
+fn an_environment_write_inside_a_reader_is_refused() {
+    let _read = EnvironmentRead::enter();
+    let result = std::panic::catch_unwind(EnvironmentWrite::enter);
+    assert!(result.is_err(), "a write cannot bypass a held read lock");
+    assert_eq!(SCOPES.with(std::cell::Cell::get), (1, 0));
 }
 
 impl EnvironmentWrite {
