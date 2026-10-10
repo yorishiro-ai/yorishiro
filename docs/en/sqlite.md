@@ -11,7 +11,7 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 - **Full-text search.** Text search with character-n-gram fuzzy matching via FTS5 `tokenize='trigram'`.
 - **API key authentication.** Create and use API keys.
 - **Embedding sync.** Generate and store vectors the same way as PostgreSQL.
-- **Template library and schema origin.** Templates (their tags are stored as a JSON array on both backends), creating a schema from a library template, and merging upstream template changes.
+- **Template library and schema origin.** Templates (their tags are stored as a JSON array on both backends), creating a schema from a library template, listing upstream changes, and merging upstream template changes.
 - **Recall.** `recall_context` traverses relations hop by hop; SQLite runs one query per entity where PostgreSQL batches them.
 - **Column preferences and inference proposals** (enterprise).
 - **Snapshots and undo.** Restore entities from a snapshot (requires a prior snapshot created on PostgreSQL).
