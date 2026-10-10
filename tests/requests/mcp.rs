@@ -789,8 +789,8 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
 
 /// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 #[serial_test::serial(queue_postgres)]
+#[serial_test::serial(process_environment)]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use super::query_worker::{FailingProvider, KeywordProvider, boot_with_query_worker};
     use std::sync::Arc;
