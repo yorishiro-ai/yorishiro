@@ -203,6 +203,12 @@ mod conflict {
 
     use crate::requests::{boot_request, boot_request_sqlite};
 
+    /// These tests pin `DATABASE_URL` and `QUEUE_URL` to SQLite for themselves, so only the SQLite lane runs them.
+    /// Elsewhere the override would leak into every concurrently booting test.
+    fn sqlite_lane() -> bool {
+        crate::require_sqlite_backend() && crate::requests::is_sqlite_queue()
+    }
+
     enum BackendObservation {
         Sqlite(sqlx::SqlitePool),
         Postgres(sqlx::PgPool),
@@ -1020,6 +1026,9 @@ mod conflict {
 
     #[tokio::test]
     async fn three_document_worker_entries_share_the_installed_limiter() {
+        if !sqlite_lane() {
+            return;
+        }
         let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         _guard.set(
             "DATABASE_URL",
@@ -1238,6 +1247,9 @@ mod conflict {
 
     #[tokio::test]
     async fn document_and_query_workers_share_fifo_embedding_admission() {
+        if !sqlite_lane() {
+            return;
+        }
         let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         guard.set(
             "DATABASE_URL",
@@ -1350,6 +1362,9 @@ mod conflict {
 
     #[tokio::test]
     async fn real_workers_release_embedding_permits_after_success_error_abort_and_panic() {
+        if !sqlite_lane() {
+            return;
+        }
         let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         guard.set(
             "DATABASE_URL",
@@ -1484,6 +1499,9 @@ mod conflict {
 
     #[tokio::test]
     async fn provider_error_releases_real_worker_permit_without_replacement() {
+        if !sqlite_lane() {
+            return;
+        }
         let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         guard.set(
             "DATABASE_URL",
@@ -1589,6 +1607,9 @@ mod conflict {
 
     #[tokio::test]
     async fn cancelled_real_worker_releases_permit_and_is_reconciled() {
+        if !sqlite_lane() {
+            return;
+        }
         let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         guard.set(
             "DATABASE_URL",
@@ -1739,6 +1760,9 @@ mod conflict {
 
     #[tokio::test]
     async fn panicked_real_worker_releases_permit_and_is_reconciled() {
+        if !sqlite_lane() {
+            return;
+        }
         let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         guard.set(
             "DATABASE_URL",
@@ -1864,6 +1888,9 @@ mod conflict {
 
     #[tokio::test]
     async fn expired_embedding_lifecycle_is_recovered_by_actual_worker() {
+        if !sqlite_lane() {
+            return;
+        }
         let guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         guard.set(
             "DATABASE_URL",
@@ -2151,6 +2178,9 @@ mod conflict {
 
     #[tokio::test]
     async fn independently_booted_contexts_keep_independent_embedding_limits() {
+        if !sqlite_lane() {
+            return;
+        }
         let _env = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         _env.set(
             "DATABASE_URL",
@@ -2350,6 +2380,9 @@ mod conflict {
 
     #[tokio::test]
     async fn sqlite_harness_observes_real_embedding_deliveries_waiting_for_capacity() {
+        if !sqlite_lane() {
+            return;
+        }
         let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         let directory = tempfile::tempdir().unwrap();
         let db_path = directory.path().join("app.sqlite3").display().to_string();
