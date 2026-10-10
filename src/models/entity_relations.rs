@@ -407,6 +407,7 @@ impl BatchNeighborRow {
 ///
 /// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from the map rather than present with an empty vec.
 /// A duplicate id in `pivot_ids` contributes only once (deduped before querying).
+/// Raw SQL preserves the per-pivot bound: PostgreSQL uses LATERAL/unnest, which SQLite lacks, so SQLite uses IN and row_number() partitioned by pivot.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub(crate) async fn neighbors_batch(
@@ -429,7 +430,7 @@ pub(crate) async fn neighbors_batch(
     // The lateral's own ORDER BY/LIMIT already picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY guarantees those rows come back to Rust in per-pivot, most-recent-first order too.
     // `CROSS JOIN LATERAL` doesn't otherwise promise the driving join order is preserved across pivots, and `recall_context`'s truncation check relies on it.
     let rows = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        neighbor_rows_per_pivot(conn, workspace_id, &pivot_ids, limit).await?
+        sqlite_neighbor_rows(conn, workspace_id, &pivot_ids, limit).await?
     } else {
         BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
@@ -485,16 +486,21 @@ pub(crate) async fn neighbors_batch(
     Ok(by_pivot)
 }
 
-/// SQLite has neither `unnest` nor `LATERAL`, so each pivot gets its own `limit`-bounded query, which is the same per-pivot bound the PostgreSQL statement gives in one round trip.
-/// The rows come back grouped by pivot in the caller's order, each pivot most-recent-first, which is all the caller reads.
-async fn neighbor_rows_per_pivot(
+/// Recall's frontier can grow beyond twenty pivots, so SQLite must also fetch a hop in one query.
+async fn sqlite_neighbor_rows(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     pivot_ids: &[Uuid],
     limit: i64,
 ) -> Result<Vec<BatchNeighborRow>, YorishiroError> {
-    const SQL: &str = "SELECT ? AS pivot_id, n.* FROM ( \
-             SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
+    let pivots = (4..4 + pivot_ids.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT * FROM ( \
+          SELECT n.*, row_number() OVER (PARTITION BY pivot_id ORDER BY relation_created_at DESC) AS position FROM ( \
+              SELECT r.source_id AS pivot_id, r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
                     r.created_at AS relation_created_at, \
                     e.id AS entity_id, e.workspace_id AS entity_workspace_id, \
                     e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
@@ -503,39 +509,26 @@ async fn neighbor_rows_per_pivot(
                     e.updated_by AS entity_updated_by \
              FROM entity_relations r \
              JOIN entity_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = ? AND r.source_id = ? AND r.status = ? \
+              WHERE r.workspace_id = ?1 AND r.source_id IN ({pivots}) AND r.status = ?2 \
              UNION ALL \
-             SELECT r.id, r.relation_type, 'in', r.properties, r.created_at, \
+              SELECT r.target_id, r.id, r.relation_type, 'in', r.properties, r.created_at, \
                     e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
                     e.created_at, e.updated_at, e.created_by, e.updated_by \
              FROM entity_relations r \
              JOIN entity_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = ? AND r.target_id = ? AND r.status = ? \
-             ORDER BY relation_created_at DESC \
-             LIMIT ? \
-         ) AS n \
-         ORDER BY n.relation_created_at DESC";
+              WHERE r.workspace_id = ?1 AND r.target_id IN ({pivots}) AND r.status = ?2 \
+          ) AS n) AS ranked WHERE position <= ?3 \
+          ORDER BY pivot_id, relation_created_at DESC"
+    );
     let active = RelationStatus::Active.as_db_str();
-    let mut rows = Vec::new();
-    for pivot in pivot_ids {
-        let found = BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Sqlite,
-            SQL,
-            [
-                (*pivot).into(),
-                workspace_id.into(),
-                (*pivot).into(),
-                active.into(),
-                workspace_id.into(),
-                (*pivot).into(),
-                active.into(),
-                limit.into(),
-            ],
-        ))
-        .all(conn)
-        .await
-        .internal()?;
-        rows.extend(found);
-    }
-    Ok(rows)
+    let mut values = vec![workspace_id.into(), active.into(), limit.into()];
+    values.extend(pivot_ids.iter().map(|pivot| (*pivot).into()));
+    BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Sqlite,
+        sql,
+        values,
+    ))
+    .all(conn)
+    .await
+    .internal()
 }
