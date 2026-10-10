@@ -300,7 +300,7 @@ where
 #[tokio::test]
 #[serial(postgres_sqlite_queue)]
 async fn postgres_sqlite_queue_boots_clean_up_before_the_next_boot() {
-    if !crate::require_postgres_backend() {
+    if !crate::require_postgres_backend() || !is_sqlite_queue() {
         return;
     }
 
