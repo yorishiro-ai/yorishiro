@@ -428,46 +428,50 @@ pub(crate) async fn neighbors_batch(
 
     // The lateral's own ORDER BY/LIMIT already picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY guarantees those rows come back to Rust in per-pivot, most-recent-first order too.
     // `CROSS JOIN LATERAL` doesn't otherwise promise the driving join order is preserved across pivots, and `recall_context`'s truncation check relies on it.
-    let rows = BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT pivot.id AS pivot_id, n.relation_id, n.relation_type, n.direction, \
-                n.properties, n.relation_created_at, n.entity_id, n.entity_workspace_id, \
-                n.entity_schema_id, n.entity_schema_version, n.entity_type, n.entity_data, \
-                n.entity_created_at, n.entity_updated_at, n.entity_created_by, \
-                n.entity_updated_by \
-         FROM unnest($2::uuid[]) AS pivot(id) \
-         CROSS JOIN LATERAL ( \
-             SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
-                    r.created_at AS relation_created_at, \
-                    e.id AS entity_id, e.workspace_id AS entity_workspace_id, \
-                    e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
-                    e.entity_type, e.data AS entity_data, e.created_at AS entity_created_at, \
-                    e.updated_at AS entity_updated_at, e.created_by AS entity_created_by, \
-                    e.updated_by AS entity_updated_by \
-             FROM entity_relations r \
-             JOIN entity_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = $1 AND r.source_id = pivot.id AND r.status = $4 \
-             UNION ALL \
-             SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
-                    e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
-                    e.created_at, e.updated_at, e.created_by, e.updated_by \
-             FROM entity_relations r \
-             JOIN entity_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = $1 AND r.target_id = pivot.id AND r.status = $4 \
-             ORDER BY relation_created_at DESC \
-             LIMIT $3 \
-         ) AS n \
-         ORDER BY pivot.id, n.relation_created_at DESC",
-        [
-            workspace_id.into(),
-            pivot_ids.into(),
-            limit.into(),
-            RelationStatus::Active.as_db_str().into(),
-        ],
-    ))
-    .all(conn)
-    .await
-    .internal()?;
+    let rows = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        neighbor_rows_per_pivot(conn, workspace_id, &pivot_ids, limit).await?
+    } else {
+        BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT pivot.id AS pivot_id, n.relation_id, n.relation_type, n.direction, \
+                    n.properties, n.relation_created_at, n.entity_id, n.entity_workspace_id, \
+                    n.entity_schema_id, n.entity_schema_version, n.entity_type, n.entity_data, \
+                    n.entity_created_at, n.entity_updated_at, n.entity_created_by, \
+                    n.entity_updated_by \
+             FROM unnest($2::uuid[]) AS pivot(id) \
+             CROSS JOIN LATERAL ( \
+                 SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
+                        r.created_at AS relation_created_at, \
+                        e.id AS entity_id, e.workspace_id AS entity_workspace_id, \
+                        e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
+                        e.entity_type, e.data AS entity_data, e.created_at AS entity_created_at, \
+                        e.updated_at AS entity_updated_at, e.created_by AS entity_created_by, \
+                        e.updated_by AS entity_updated_by \
+                 FROM entity_relations r \
+                 JOIN entity_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
+                 WHERE r.workspace_id = $1 AND r.source_id = pivot.id AND r.status = $4 \
+                 UNION ALL \
+                 SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
+                        e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
+                        e.created_at, e.updated_at, e.created_by, e.updated_by \
+                 FROM entity_relations r \
+                 JOIN entity_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
+                 WHERE r.workspace_id = $1 AND r.target_id = pivot.id AND r.status = $4 \
+                 ORDER BY relation_created_at DESC \
+                 LIMIT $3 \
+             ) AS n \
+             ORDER BY pivot.id, n.relation_created_at DESC",
+            [
+                workspace_id.into(),
+                pivot_ids.into(),
+                limit.into(),
+                RelationStatus::Active.as_db_str().into(),
+            ],
+        ))
+        .all(conn)
+        .await
+        .internal()?
+    };
 
     let mut by_pivot: std::collections::HashMap<Uuid, Vec<Neighbor>> =
         std::collections::HashMap::new();
@@ -479,4 +483,59 @@ pub(crate) async fn neighbors_batch(
     }
 
     Ok(by_pivot)
+}
+
+/// SQLite has neither `unnest` nor `LATERAL`, so each pivot gets its own `limit`-bounded query, which is the same per-pivot bound the PostgreSQL statement gives in one round trip.
+/// The rows come back grouped by pivot in the caller's order, each pivot most-recent-first, which is all the caller reads.
+async fn neighbor_rows_per_pivot(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    pivot_ids: &[Uuid],
+    limit: i64,
+) -> Result<Vec<BatchNeighborRow>, YorishiroError> {
+    const SQL: &str = "SELECT ? AS pivot_id, n.* FROM ( \
+             SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
+                    r.created_at AS relation_created_at, \
+                    e.id AS entity_id, e.workspace_id AS entity_workspace_id, \
+                    e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
+                    e.entity_type, e.data AS entity_data, e.created_at AS entity_created_at, \
+                    e.updated_at AS entity_updated_at, e.created_by AS entity_created_by, \
+                    e.updated_by AS entity_updated_by \
+             FROM entity_relations r \
+             JOIN entity_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
+             WHERE r.workspace_id = ? AND r.source_id = ? AND r.status = ? \
+             UNION ALL \
+             SELECT r.id, r.relation_type, 'in', r.properties, r.created_at, \
+                    e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
+                    e.created_at, e.updated_at, e.created_by, e.updated_by \
+             FROM entity_relations r \
+             JOIN entity_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
+             WHERE r.workspace_id = ? AND r.target_id = ? AND r.status = ? \
+             ORDER BY relation_created_at DESC \
+             LIMIT ? \
+         ) AS n \
+         ORDER BY n.relation_created_at DESC";
+    let active = RelationStatus::Active.as_db_str();
+    let mut rows = Vec::new();
+    for pivot in pivot_ids {
+        let found = BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            SQL,
+            [
+                (*pivot).into(),
+                workspace_id.into(),
+                (*pivot).into(),
+                active.into(),
+                workspace_id.into(),
+                (*pivot).into(),
+                active.into(),
+                limit.into(),
+            ],
+        ))
+        .all(conn)
+        .await
+        .internal()?;
+        rows.extend(found);
+    }
+    Ok(rows)
 }
