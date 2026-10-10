@@ -75,3 +75,61 @@ fn cross_sql_queue_topologies_are_supported() {
     .unwrap();
     assert!(validate_queue_policy(&sqlite_database).is_ok());
 }
+
+fn topology(database: &str, max_connections: u32, queue: &str) -> loco_rs::config::Config {
+    serde_yaml::from_str(&format!(
+        "logger: {{ enable: true, pretty_backtrace: false, level: info, format: compact }}\nserver: {{ port: 5150, binding: localhost, host: http://localhost }}\ndatabase: {{ uri: '{database}', enable_logging: false, connect_timeout: 500, idle_timeout: 500, min_connections: 1, max_connections: {max_connections}, auto_migrate: false }}\nqueue: {queue}\nworkers: {{ mode: BackgroundQueue }}\n"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn only_topologies_that_cannot_use_the_setting_are_flagged() {
+    use yorishiro::data::config::{SQLITE_POOL_ADVISORY_LIMIT, topology_advisories};
+
+    let sqlite_queue = |workers: u32| {
+        format!("{{ kind: Sqlite, uri: 'sqlite://q.sqlite3?mode=rwc', num_workers: {workers} }}")
+    };
+    let valkey = |workers: u32| {
+        format!("{{ kind: Redis, uri: 'redis://localhost:6379', num_workers: {workers} }}")
+    };
+    let postgres = |workers: u32| {
+        format!("{{ kind: Postgres, uri: 'postgres://localhost/q', num_workers: {workers} }}")
+    };
+    let sqlite = "sqlite://app.sqlite3?mode=rwc";
+    let pg = "postgres://localhost/app";
+
+    assert!(topology_advisories(&topology(sqlite, 10, &sqlite_queue(1))).is_empty());
+    assert_eq!(
+        topology_advisories(&topology(sqlite, 10, &sqlite_queue(4))).len(),
+        1
+    );
+    assert_eq!(
+        topology_advisories(&topology(
+            sqlite,
+            SQLITE_POOL_ADVISORY_LIMIT + 1,
+            &sqlite_queue(1)
+        ))
+        .len(),
+        1
+    );
+    assert_eq!(
+        topology_advisories(&topology(
+            sqlite,
+            SQLITE_POOL_ADVISORY_LIMIT + 1,
+            &sqlite_queue(4)
+        ))
+        .len(),
+        2
+    );
+    assert!(
+        topology_advisories(&topology(sqlite, SQLITE_POOL_ADVISORY_LIMIT, &valkey(8))).is_empty()
+    );
+    assert!(topology_advisories(&topology(sqlite, 10, &postgres(8))).is_empty());
+    assert!(topology_advisories(&topology(pg, 100, &valkey(8))).is_empty());
+    assert!(topology_advisories(&topology(pg, 100, &postgres(8))).is_empty());
+    assert_eq!(
+        topology_advisories(&topology(pg, 100, &sqlite_queue(2))).len(),
+        1
+    );
+}

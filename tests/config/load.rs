@@ -208,6 +208,67 @@ async fn production_selects_queue_provider_independently_from_database() {
     ));
 }
 
+/// Production defaults follow the database and queue pair: a SQLite writer or queue gains nothing from a wide pool or several workers, while PostgreSQL and Redis-compatible queues do.
+#[tokio::test]
+#[serial(process_environment)]
+async fn production_defaults_follow_the_database_and_queue_topology() {
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
+        "YORISHIRO_QUEUE_WORKERS",
+        "DB_MAX_CONNECTIONS",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    ]);
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    guard.remove("YORISHIRO_QUEUE_WORKERS");
+    guard.remove("DB_MAX_CONNECTIONS");
+    for (database, kind, queue, pool, workers) in [
+        ("sqlite:///var/lib/y/a.sqlite3?mode=rwc", None, None, 10, 1),
+        (
+            "sqlite:///var/lib/y/a.sqlite3?mode=rwc",
+            Some("Redis"),
+            Some("redis://valkey:6379/0"),
+            10,
+            2,
+        ),
+        ("postgres://db/app", None, None, 100, 2),
+        (
+            "postgres://db/app",
+            Some("Redis"),
+            Some("redis://valkey:6379/0"),
+            100,
+            2,
+        ),
+        (
+            "postgres://db/app",
+            Some("Sqlite"),
+            Some("sqlite:///var/lib/y/q.sqlite3?mode=rwc"),
+            100,
+            1,
+        ),
+    ] {
+        guard.set("DATABASE_URL", database);
+        match kind {
+            Some(kind) => guard.set("YORISHIRO_QUEUE_KIND", kind),
+            None => guard.remove("YORISHIRO_QUEUE_KIND"),
+        }
+        match queue {
+            Some(queue) => guard.set("QUEUE_URL", queue),
+            None => guard.remove("QUEUE_URL"),
+        }
+        let config = load(&Environment::Production).await.unwrap();
+        assert_eq!(config.database.max_connections, pool, "{database} pool");
+        let actual = match config.queue.unwrap() {
+            QueueConfig::Sqlite(queue) => queue.num_workers,
+            QueueConfig::Redis(queue) => queue.num_workers,
+            QueueConfig::Postgres(queue) => queue.num_workers,
+            other => panic!("unexpected queue {other:?}"),
+        };
+        assert_eq!(actual, workers, "{database} {kind:?} workers");
+    }
+}
+
 /// Each bad value is reported by name, so an operator is not left guessing which setting a failed boot objected to.
 #[tokio::test]
 #[serial(process_environment)]

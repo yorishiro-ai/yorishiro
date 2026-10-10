@@ -205,6 +205,10 @@ With PostgreSQL, multiple worker processes can dequeue in parallel.
 With SQLite, dequeueing is serialized, while durable queue recovery still works.
 
 `YORISHIRO_QUEUE_WORKERS` controls the number of concurrent dequeue loops in one worker process.
+It defaults to 1 for a SQLite queue and 2 for PostgreSQL and Redis-compatible queues.
+SQLite has a single writer, so more workers on a SQLite queue add contention, not throughput, and boot logs a warning when you set them.
+`DB_MAX_CONNECTIONS` defaults to 10 for a SQLite database and 100 for PostgreSQL, and boot warns when a SQLite pool exceeds 16.
+Throughput scales most with PostgreSQL for application data and a Redis-compatible queue (Valkey), then with PostgreSQL for both, and least with SQLite for both.
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` controls how long a job may remain processing before the reaper recovers it.
 
 ### Dispatch seam inventory
