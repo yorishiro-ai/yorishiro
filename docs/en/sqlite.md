@@ -28,6 +28,10 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 ## Configuration
 The PostgreSQL template-tags upgrade rewrites the small template table under an exclusive lock and removes the unused tags GIN index.
 Rollback restores the original index and converts non-array JSON tags to empty arrays.
+Migration 000020 adds a partial unique index for running infer-fill jobs on both backends.
+If a workspace already has multiple running jobs, the migration aborts without changing them and reports the workspace and count.
+Drain workers, resolve the duplicates, and retry the migration; do not mark jobs stopped while their workers are still running.
+Validation and index creation share a transaction and hold a database write lock, so claims cannot race the index installation.
 
 All `sqlite:` URL forms, including `sqlite:/path` and `sqlite::memory:`, select SQLite defaults:
 

@@ -1084,7 +1084,7 @@ async fn upgrade_000019_converts_template_tags_in_place_and_down_restores_them()
 #[tokio::test]
 #[serial(postgres_cluster)]
 #[serial(process_environment)]
-async fn upgrade_000020_resolves_running_duplicates_and_allows_one_running_job_per_workspace() {
+async fn upgrade_000020_refuses_duplicates_without_changing_jobs_and_allows_one_running_job() {
     with_database("upgrade_000020", |db| Box::pin(async move {
         Migrator::up(db, Some(migrations_through("m20261009_000019_template_tags_json")))
             .await
@@ -1107,18 +1107,25 @@ async fn upgrade_000020_resolves_running_duplicates_and_allows_one_running_job_p
             .await;
         }
 
-        Migrator::up(db, Some(1)).await.expect("exclusion migration");
+        let error = Migrator::up(db, Some(1)).await.expect_err("duplicates must abort the migration");
+        assert!(error.to_string().contains("2 running jobs"), "{error}");
+        assert!(error.to_string().contains("drain workers"), "{error}");
 
         assert_eq!(
             value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'").await,
-            1,
-            "one running job per workspace is kept"
+            2,
+            "both running jobs remain untouched"
         );
         assert_eq!(
             value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'failed'").await,
-            1,
-            "the other is failed, not deleted"
+            0,
+            "no job is failed by the migration"
         );
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE error IS NOT NULL OR attempt <> 0").await, 0);
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs").await, 3);
+        // Operators drain the workers and resolve the duplicate before retrying.
+        execute(db, format!("UPDATE inference_jobs SET status = 'completed' WHERE id = {}", jobs[0])).await;
+        Migrator::up(db, Some(1)).await.expect("exclusion migration after resolution");
         assert_index_exists(db, "inference_jobs_one_running_per_workspace_idx").await;
         let queued = &jobs[2];
         assert!(
@@ -1129,6 +1136,16 @@ async fn upgrade_000020_resolves_running_duplicates_and_allows_one_running_job_p
             .is_err(),
             "a second running job in the workspace is refused"
         );
+
+        execute(db, "UPDATE inference_jobs SET status = 'queued'").await;
+        let first_claim = format!("UPDATE inference_jobs SET status = 'running' WHERE id = {}", jobs[0]);
+        let second_claim = format!("UPDATE inference_jobs SET status = 'running' WHERE id = {}", jobs[1]);
+        let (first, second) = tokio::join!(
+            db.execute_unprepared(&first_claim),
+            db.execute_unprepared(&second_claim)
+        );
+        assert!(first.is_ok() != second.is_ok(), "only one concurrent claim succeeds: {first:?} / {second:?}");
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'").await, 1);
 
         Migrator::down(db, Some(1)).await.expect("exclusion rolled back");
         execute(
