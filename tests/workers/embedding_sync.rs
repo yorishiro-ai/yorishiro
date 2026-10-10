@@ -289,7 +289,12 @@ mod conflict {
                     Self::postgres(ctx, queue.uri, workers).await
                 }
                 loco_rs::config::QueueConfig::Redis(queue) => {
-                    Self::redis(ctx, queue.uri, workers).await
+                    Self::redis(
+                        ctx,
+                        crate::requests::query_worker::isolated_redis_url(&queue.uri),
+                        workers,
+                    )
+                    .await
                 }
                 other => panic!("unsupported lane queue {other:?}"),
             }
@@ -2309,15 +2314,9 @@ mod conflict {
     #[serial(queue_postgres)]
     #[serial(process_environment)]
     async fn redis_harness_observes_real_embedding_deliveries_waiting_for_capacity() {
-        let Ok(uri) = std::env::var("YORISHIRO_VALKEY_TEST_URL") else {
+        let Some(uri) = crate::valkey_test_url() else {
             return;
         };
-        if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {
-            return;
-        }
-        if reqwest::Url::parse(&uri).map_or(true, |url| url.path() != "/15") {
-            return;
-        }
         let _guard = crate::EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
         boot_request::<App, _, _>(|_request, ctx| async move {
             let provider = Arc::new(GatedProvider {
@@ -2430,6 +2429,7 @@ mod conflict {
     /// The old delivery is terminally superseded; the REST update dispatches the fresh job.
     /// SQLite-only: the live queue it drives is a test-local SQLite file, so the test returns early when `DATABASE_URL` names another backend.
     #[tokio::test]
+    #[serial(queue_postgres)]
     #[serial(process_environment)]
     async fn a_write_during_embedding_supersedes_the_old_delivery() {
         if !std::env::var("DATABASE_URL")

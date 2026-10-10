@@ -195,3 +195,15 @@ pub(crate) fn require_sqlite_backend() -> bool {
 pub(crate) fn require_postgres_backend() -> bool {
     require_backend("postgres")
 }
+
+/// The reserved Valkey test database (`/15`) this lane's queue points at, or `None` when the lane has no Valkey queue.
+///
+/// `YORISHIRO_VALKEY_TEST_URL` names it explicitly; otherwise a Redis `QUEUE_URL` is the lane's own.
+pub(crate) fn valkey_test_url() -> Option<String> {
+    let uri = std::env::var("YORISHIRO_VALKEY_TEST_URL")
+        .or_else(|_| std::env::var("QUEUE_URL"))
+        .ok()?;
+    let reserved = (uri.starts_with("redis://") || uri.starts_with("rediss://"))
+        && reqwest::Url::parse(&uri).is_ok_and(|url| url.path() == "/15");
+    reserved.then_some(uri)
+}
