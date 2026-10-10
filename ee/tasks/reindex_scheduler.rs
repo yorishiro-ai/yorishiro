@@ -56,12 +56,17 @@ fn parse_interval(value: &str) -> Option<chrono::Duration> {
     fn seconds_in(part: &str, units: &[(char, i64)]) -> Option<(i64, usize)> {
         let (mut total, mut components) = (0_i64, 0);
         let mut number = String::new();
+        let mut seen = Vec::new();
         for ch in part.chars() {
             if ch.is_ascii_digit() {
                 number.push(ch);
                 continue;
             }
             let factor = units.iter().find(|(unit, _)| *unit == ch)?.1;
+            if seen.contains(&ch) {
+                return None;
+            }
+            seen.push(ch);
             total = total.checked_add(number.parse::<i64>().ok()?.checked_mul(factor)?)?;
             number.clear();
             components += 1;
@@ -75,7 +80,7 @@ fn parse_interval(value: &str) -> Option<chrono::Duration> {
     let (time_seconds, time_components) = seconds_in(time, &TIME_UNITS)?;
     let seconds = date_seconds.checked_add(time_seconds)?;
     (date_components + time_components > 0 && seconds > 0)
-        .then(|| chrono::Duration::seconds(seconds))
+        .then(|| chrono::Duration::try_seconds(seconds))?
 }
 
 /// Stores or replaces a tenant's reindex schedule.
@@ -376,8 +381,11 @@ impl TenantReindexScheduler {
                 );
                 chrono::Duration::seconds(DEFAULT_INTERVAL_SECONDS)
             });
-            let new_sched: chrono::DateTime<chrono::FixedOffset> =
-                tick.checked_add_signed(every).unwrap_or(tick).into();
+            let every = every.max(chrono::Duration::seconds(MIN_INTERVAL_SECONDS));
+            let new_sched: chrono::DateTime<chrono::FixedOffset> = tick
+                .checked_add_signed(every)
+                .unwrap_or_else(|| tick + chrono::Duration::seconds(DEFAULT_INTERVAL_SECONDS))
+                .into();
             active.scheduled_for = ActiveValue::Set(Some(new_sched));
             active.updated_at = ActiveValue::Set(tick.into());
             if let Err(err) = active.update(&txn).await {

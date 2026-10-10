@@ -216,7 +216,20 @@ async fn intervals_that_cannot_be_scheduled_are_refused() {
 
     let (ctx, tenant_id, _dir) = scheduler_context().await;
     for bad in [
-        "", "abc", "1D", "P", "PT", "P1Y", "P1M", "P0D", "P1.5D", "PT1M", "PT299S",
+        "",
+        "abc",
+        "1D",
+        "P",
+        "PT",
+        "P1Y",
+        "P1M",
+        "P0D",
+        "P1.5D",
+        "PT1M",
+        "PT299S",
+        "P1D1D",
+        "PT1H1H",
+        "PT9223372036854775807S",
     ] {
         assert!(
             set(&ctx.db, tenant_id, bad, None).await.is_err(),
@@ -269,4 +282,49 @@ async fn a_schedule_advances_by_its_own_interval() {
         .scheduled_for
         .unwrap();
     assert!(weekly >= before + chrono::Duration::weeks(1));
+}
+
+/// Legacy intervals cannot create a tight loop or leave the next run at the current tick.
+#[tokio::test]
+async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
+    use sea_orm::ConnectionTrait;
+    use yorishiro::edition::ee::tasks::reindex_scheduler::{TenantReindexScheduler, get, set};
+
+    let (ctx, tenant_id, _dir) = scheduler_context().await;
+    for (interval, seconds) in [
+        ("PT1S", 300),
+        ("P1D1D", 86_400),
+        ("PT9223372036854775S", 86_400),
+    ] {
+        set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
+        ctx.db
+            .execute_unprepared(&format!(
+                "UPDATE tenant_reindex_schedules SET interval = '{interval}'"
+            ))
+            .await
+            .unwrap();
+        let tick = get(&ctx.db, tenant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .scheduled_for
+            .unwrap()
+            .to_utc();
+        TenantReindexScheduler
+            .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
+            .await
+            .unwrap();
+        let next = get(&ctx.db, tenant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .scheduled_for
+            .unwrap()
+            .to_utc();
+        assert_eq!(
+            next,
+            tick + chrono::Duration::seconds(seconds),
+            "{interval}"
+        );
+    }
 }

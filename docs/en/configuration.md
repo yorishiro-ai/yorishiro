@@ -231,6 +231,8 @@ You can configure a deployment to automatically reindex every workspace under a 
 
 Configure the schedule through the API endpoint (`POST /api/identity/tenants/schedule` or the equivalent route), which takes an ISO 8601 duration (`P1D` for daily, `P1W` for weekly) and an optional IANA timezone name (default: UTC).
 The interval accepts weeks, days, hours, minutes and seconds (for example `P1D`, `P1W`, `PT6H`) and must be at least `PT5M`; years and months are rejected.
+Repeated units such as `P1D1D` are rejected.
+The ticker clamps legacy intervals to five minutes and falls back to one day when the interval is unreadable or its next timestamp overflows.
 The first `scheduled_for` is one interval after the schedule is set, and each scheduler tick that runs it sets the next one an interval after that tick.
 On each scheduler tick, any overdue `scheduled_for` runs, with no missed-run grace cutoff.
 

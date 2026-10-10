@@ -233,6 +233,8 @@ SQLite データベースを PostgreSQL や Redis 互換のキューと組み合
 
 API エンドポイント（`POST /api/identity/tenants/schedule` など）で ISO 8601 形式の期間（`P1D` で毎日、`P1W` で毎週）と任意の IANA タイムゾーン名（デフォルト：UTC）を指定します。
 間隔には週・日・時・分・秒を使えます(例: `P1D`、`P1W`、`PT6H`)。最短は `PT5M` で、年と月は受け付けません。
+`P1D1D` のように単位が重複する指定は受け付けません。
+ティッカーは既存の短すぎる間隔を 5 分に補正し、読めない間隔や次回日時がオーバーフローする間隔では 1 日後を使います。
 最初の `scheduled_for` はスケジュール設定の 1 間隔後になり、実行した scheduler tick は次の `scheduled_for` をその tick の 1 間隔後に設定します。
 各 scheduler tick では、期限を過ぎた `scheduled_for` を実行し、未実行分の猶予時間による打ち切りはありません。
 
