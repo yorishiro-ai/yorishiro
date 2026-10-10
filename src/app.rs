@@ -49,6 +49,9 @@ pub(crate) async fn boot<H: Hooks>(
     workers: &WorkerRegistry,
 ) -> Result<BootResult> {
     crate::data::config::validate_queue_policy(&config)?;
+    for advisory in crate::data::config::topology_advisories(&config) {
+        tracing::warn!("{advisory}");
+    }
     crate::data::config::serve_worker_queues(&mut config, &workers.queues());
     // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
     // The call site in main.rs already covers all CLI subcommands.

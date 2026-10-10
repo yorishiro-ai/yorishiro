@@ -34,7 +34,7 @@ queue:
   dangerously_flush: false
 
   # Workers dequeuing in parallel, tunable per deployment.
-  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="1") %>
 
   # Requeues jobs left in `processing` by a worker that died before completing or failing them.
   reaper:

@@ -55,7 +55,7 @@ queue:
 
   # Workers dequeuing in parallel, tunable per deployment.
   # Postgres claims rows with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism, and a `--worker` process on another host adds more.
-  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="1") %>
 
   # Requeues jobs left in `processing` by a worker that died before completing or failing them.
   # Off by default in Loco, which leaves such a job stuck forever: nothing else moves it, since `fail_job` only runs when `perform` actually returns an error.

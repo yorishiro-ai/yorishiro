@@ -788,6 +788,8 @@ src/controllers/swagger.rs	fn	implementation::validate_schema_refs	integration-t
 src/controllers/swagger.rs	mod	implementation	integration-test: tests/controllers/swagger.rs exercises it now that the unit tests moved out of src/.
 src/data/config.rs	fn	serve_worker_queues	integration-test: tests/data/config.rs exercises it now that the unit tests moved out of src/.
 src/data/config.rs	fn	validate_queue_policy	integration-test: tests/data/config.rs exercises it now that the unit tests moved out of src/.
+src/data/config.rs	const	SQLITE_POOL_ADVISORY_LIMIT	integration-test: tests/data/config.rs exercises it now that the unit tests moved out of src/.
+src/data/config.rs	fn	topology_advisories	integration-test: tests/data/config.rs exercises it now that the unit tests moved out of src/.
 src/data/mod.rs	mod	settings	integration-test: tests/data/mod.rs exercises it now that the unit tests moved out of src/.
 src/data/settings.rs	enum	EmbeddingProvider	integration-test: tests/data/settings.rs exercises it now that the unit tests moved out of src/.
 src/data/settings.rs	field	Embedding::provider	integration-test: tests/data/settings.rs exercises it now that the unit tests moved out of src/.
