@@ -26,6 +26,8 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 - **SQLite snapshots.** Creating snapshots is not supported on SQLite. A snapshot created on PostgreSQL can be restored on SQLite.
 
 ## Configuration
+The PostgreSQL template-tags upgrade rewrites the small template table under an exclusive lock and removes the unused tags GIN index.
+Rollback restores the original index and converts non-array JSON tags to empty arrays.
 
 Yorishiro uses the database URL scheme to detect SQLite:
 

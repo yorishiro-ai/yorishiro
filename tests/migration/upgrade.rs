@@ -1055,7 +1055,15 @@ async fn upgrade_000019_converts_template_tags_in_place_and_down_restores_them()
             )
             .await;
             assert_eq!(kind, "jsonb");
-            assert_index_exists(db, "templates_tags_idx").await;
+            assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'templates_tags_idx'").await, 0);
+
+            // Non-array JSON from a legacy/manual writer rolls back to an empty SQL array.
+            for (suffix, tags) in [("object", "{}"), ("scalar", "42"), ("null", "null")] {
+                execute(db, format!(
+                    "INSERT INTO template_templates (tenant_id, name, definition, visibility, tags) \
+                     VALUES ({tenant}, 'tagged-{suffix}', '{{}}'::jsonb, 'tenant', '{tags}'::jsonb)"
+                )).await;
+            }
 
             Migrator::down(db, Some(1)).await.expect("tag conversion rolled back");
             let restored: String = value(
@@ -1064,6 +1072,7 @@ async fn upgrade_000019_converts_template_tags_in_place_and_down_restores_them()
             )
             .await;
             assert_eq!(restored, "beta,alpha,gamma");
+            assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM template_templates WHERE name LIKE 'tagged-%' AND cardinality(tags) = 0").await, 3);
             assert_index_exists(db, "templates_tags_idx").await;
         }
     }))
