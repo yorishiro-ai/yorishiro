@@ -339,6 +339,7 @@ async fn postgres_sqlite_queue_boots_clean_up_before_the_next_boot() {
     }
 }
 
+#[cfg(feature = "enterprise")]
 /// The transaction a workspace-scoped model call runs in, the way the handlers open it: scoped through the tenant pool on PostgreSQL, on the application connection on SQLite.
 pub(crate) async fn workspace_txn(
     ctx: &loco_rs::app::AppContext,
