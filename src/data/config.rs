@@ -50,6 +50,14 @@ fn validate(config: &Config) -> Result<()> {
             "settings.max_tenants must not be negative".into(),
         ));
     }
+    if settings.worker_class_limits.shared < 1
+        || settings.worker_class_limits.tenant_private < 1
+        || settings.worker_class_limits.official < 1
+    {
+        return Err(Error::Message(
+            "settings.worker_class_limits values must be greater than zero".into(),
+        ));
+    }
     if settings
         .mcp
         .allowed_hosts

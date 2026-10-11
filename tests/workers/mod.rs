@@ -19,5 +19,11 @@ pub(crate) async fn test_context() -> AppContext {
     let db = Database::connect("sqlite::memory:")
         .await
         .expect("connect test database");
-    AppContext::builder(Environment::Test, db, config).build()
+    let ctx = AppContext::builder(Environment::Test, db, config.clone()).build();
+    ctx.shared_store.insert(
+        config
+            .settings::<yorishiro::data::settings::Settings>()
+            .expect("test settings"),
+    );
+    ctx
 }

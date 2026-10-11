@@ -128,6 +128,10 @@ workers:
   mode: BackgroundQueue
 
 settings:
+  worker_class_limits:
+    shared: <%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="1") %>
+    tenant_private: <%= get_env(name="YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", default="1") %>
+    official: <%= get_env(name="YORISHIRO_WORKER_OFFICIAL_LIMIT", default="1") %>
   max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="1") %>
   mcp:
     allowed_hosts: "<%= get_env(name="YORISHIRO_MCP_ALLOWED_HOSTS", default="") %>"

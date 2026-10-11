@@ -501,6 +501,14 @@ async fn enterprise_billing_plan_uses_team_queue_policy() {
     if !crate::require_sqlite_backend() {
         return;
     }
+    let guard = crate::EnvGuard::capture(&[
+        "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
+        "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
+        "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+    ]);
+    guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "2");
+    guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "3");
+    guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "9");
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {
         let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
             .one(&ctx.db)
@@ -534,7 +542,7 @@ async fn enterprise_billing_plan_uses_team_queue_policy() {
             .expect("queue lifecycle");
         assert_eq!(row.plan.as_deref(), Some("team"));
         assert_eq!(row.concurrency_key.as_deref(), Some("official:team"));
-        assert_eq!(row.concurrency_limit, Some(8));
+        assert_eq!(row.concurrency_limit, Some(9));
     })
     .await;
 }
