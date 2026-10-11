@@ -12,7 +12,7 @@ use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::db::{self, DbHandle};
+use crate::db;
 use crate::edition::ee::models::entity_entities::infer_fill;
 use crate::edition::ee::models::inference_jobs;
 use crate::edition::ee::models::inference_proposals;
@@ -48,6 +48,30 @@ pub trait InferFillDispatcher: Send + Sync {
     async fn dispatch(&self, ctx: &AppContext, args: InferFillArgs) -> loco_rs::Result<String>;
 }
 
+/// Opens the transaction an infer-fill run reads and writes in, scoped the way a request for this workspace would be.
+///
+/// The queued arguments carry the workspace only, so the tenant is not known to the worker until it is read from the workspace row.
+///
+/// # Errors
+/// Returns an error if the workspace does not exist or the transaction cannot be started.
+pub async fn open_workspace_scope(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+) -> loco_rs::Result<sea_orm::DatabaseTransaction> {
+    // `ctx.db` is the identity connection, which reads the workspace row without a tenant scope.
+    let workspace =
+        crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .internal()?
+            .ok_or_else(|| {
+                loco_rs::Error::Message(format!("workspace {workspace_id} not found"))
+            })?;
+    db::begin_workspace(ctx, workspace.tenant_id, workspace_id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))
+}
+
 /// Shared implementation of the infer-fill worker's perform body.
 async fn perform_infer_fill(
     ctx: &AppContext,
@@ -62,18 +86,10 @@ async fn perform_infer_fill(
             loco_rs::Error::Message("workspace has no LLM credentials configured".into())
         })?;
 
-    let db_handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-        loco_rs::Error::Message(
-            "infer-fill requires the tenant pool, which this deployment did not build".into(),
-        )
-    })?;
-    let schema_txn = db_handle
-        .tenant
-        .begin_for_workspace(args.workspace_id, args.workspace_id)
-        .await
-        .internal()?;
+    let schema_txn = open_workspace_scope(ctx, args.workspace_id).await?;
 
     // Serialize one infer-fill per workspace via transaction-scoped advisory lock.
+    // This excludes nothing on SQLite, where the lock is a no-op: there the exclusion is the one-running-job-per-workspace index checked when the job is claimed (`inference_jobs::is_workspace_busy`).
     db::lock_for_update(&schema_txn, &format!("infer-fill:{}", args.workspace_id))
         .await
         .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
@@ -169,6 +185,39 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
+        self.perform_job(args).await
+    }
+}
+
+impl InferFillWorker {
+    /// Hands a job back to the queue because another job of its workspace is running.
+    ///
+    /// Without a lifecycle row the job is left queued and the run fails, so the queue's own retry redelivers it.
+    /// With one, the admitted attempt is released and the job is enqueued again at once, so a busy workspace costs one poll interval per redelivery until the running job ends.
+    async fn defer_for_busy_workspace(
+        &self,
+        args: &InferFillArgs,
+        attempt: Option<i32>,
+    ) -> loco_rs::Result<()> {
+        const DIAGNOSTIC: &str = "workspace has a running infer-fill job";
+        let Some(id) = args.lifecycle_id else {
+            return Err(loco_rs::Error::Message(DIAGNOSTIC.into()));
+        };
+        crate::models::queue_job_lifecycles::Entity::defer(&self.ctx.db, id, attempt, DIAGNOSTIC)
+            .await
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        let scheduling =
+            crate::workers::queue::decide(crate::workers::embedding_sync::WorkerClass::Shared);
+        <Self as BackgroundWorker<InferFillArgs>>::perform_later_with_priority(
+            &self.ctx,
+            args.clone(),
+            Some(scheduling.priority),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn perform_job(&self, args: InferFillArgs) -> loco_rs::Result<()> {
         let mut already_reconciled = false;
         let has_lifecycle = args.lifecycle_id.is_some();
         let admission = if let Some(id) = args.lifecycle_id {
@@ -240,15 +289,21 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
         };
         let admitted = attempt.is_some();
         let job_id = args.job_id;
-        let claimed = if already_reconciled {
+        let claim = if already_reconciled {
             Ok(true)
         } else if has_lifecycle {
             let attempt = attempt.expect("lifecycle admission has an attempt");
             inference_jobs::reconcile_attempt(&self.ctx.db, job_id, attempt).await
         } else {
             inference_jobs::claim(&self.ctx.db, job_id).await
-        }
-        .internal()?;
+        };
+        let claimed = match claim {
+            Ok(claimed) => claimed,
+            Err(error) if inference_jobs::is_workspace_busy(&error) => {
+                return self.defer_for_busy_workspace(&args, attempt).await;
+            }
+            Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+        };
         if !claimed {
             // A duplicate delivery is harmless after the first worker claims the row.
             // This also makes a reaped delivery harmless while the original worker may

@@ -21,12 +21,10 @@ pub(crate) fn compose_context(ctx: &AppContext) {
     ctx.shared_store.insert(licence);
 
     if ctx.is_sqlite() {
-        // These features use PostgreSQL-only SQL and report their limitation at boot.
+        // These marketplace operations return backend_unsupported (501) on SQLite.
         tracing::warn!(
-            "some enterprise features are unavailable on SQLite: browsing the marketplace, publishing \
-             a template version, and listing template-origin updates each run a PostgreSQL-only \
-             query and will fail when reached. Point DATABASE_URL at PostgreSQL to use them; \
-             vector search and everything else works on this backend"
+            "browsing the marketplace and publishing a template version are unavailable on SQLite \
+             and return backend_unsupported (501). Point DATABASE_URL at PostgreSQL to use them"
         );
     } else {
         // Replaces the default authenticator installed by the base context builder.

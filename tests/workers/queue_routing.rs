@@ -1,7 +1,7 @@
 //! Regression coverage for Loco queue tag routing through its public `Queue` API.
 //!
 //! A worker started with `worker-class:shared` must dequeue a tagged job.
-//! The tests exercise both SQL providers without copying their dequeue SQL.
+//! The tests exercise all three providers (SQLite, PostgreSQL and Redis-compatible) without copying their dequeue logic; PostgreSQL and Redis run in the lanes whose queue they are.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use futures::FutureExt;
 use loco_rs::bgworker::{self, BackgroundWorker};
-use loco_rs::config::{PostgresQueueConfig, SqliteQueueConfig};
+use loco_rs::config::{PostgresQueueConfig, RedisQueueConfig, SqliteQueueConfig};
 use loco_rs::prelude::*;
 use serial_test::serial;
 
@@ -77,11 +77,15 @@ async fn shared_tag_dequeues_the_probe(queue: Arc<bgworker::Queue>) {
 #[serial(queue_postgres)]
 #[serial(process_environment)]
 async fn postgres_queue_routes_tagged_jobs_to_matching_workers() {
-    if !crate::require_postgres_backend() {
+    let is_postgres =
+        |url: &String| url.starts_with("postgres://") || url.starts_with("postgresql://");
+    let Some(uri) = std::env::var("QUEUE_URL")
+        .ok()
+        .filter(is_postgres)
+        .or_else(|| std::env::var("DATABASE_URL").ok().filter(is_postgres))
+    else {
         return;
-    }
-
-    let uri = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
+    };
     let config = PostgresQueueConfig {
         uri,
         dangerously_flush: true,
@@ -143,6 +147,42 @@ async fn sqlite_queue_routes_tagged_jobs_to_matching_workers() {
     })
     .catch_unwind()
     .await;
+    let _ = queue.shutdown();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+#[tokio::test]
+#[serial(queue_postgres)]
+#[serial(process_environment)]
+async fn redis_queue_routes_tagged_jobs_to_matching_workers() {
+    let Some(uri) = crate::valkey_test_url() else {
+        return;
+    };
+    let config = RedisQueueConfig {
+        uri,
+        dangerously_flush: true,
+        queues: None,
+        num_workers: 1,
+        reaper: None,
+    };
+    let queue = Arc::new(
+        bgworker::redis::create_provider(&config)
+            .await
+            .expect("Redis queue"),
+    );
+    let result = std::panic::AssertUnwindSafe(async {
+        queue.setup().await.expect("set up Redis queue");
+        queue
+            .clear()
+            .await
+            .expect("clear the reserved Redis database");
+        shared_tag_dequeues_the_probe(queue.clone()).await;
+    })
+    .catch_unwind()
+    .await;
+    let _ = queue.clear().await;
     let _ = queue.shutdown();
     if let Err(panic) = result {
         std::panic::resume_unwind(panic);

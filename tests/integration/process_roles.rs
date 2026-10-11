@@ -23,6 +23,7 @@ fn yorishiro(dir: &std::path::Path, args: &[&str]) -> Output {
 
 /// A CLI command runs in a process of its own and holds no model.
 #[test]
+#[serial_test::serial(process_environment)]
 fn a_cli_command_runs_without_building_the_embedding_provider() {
     let dir = tempfile::tempdir().unwrap();
     let output = yorishiro(dir.path(), &["routes"]);
@@ -36,6 +37,7 @@ fn a_cli_command_runs_without_building_the_embedding_provider() {
 
 /// The same environment stops a worker at start, which shows the environment really would have failed the command above if it had built a provider.
 #[test]
+#[serial_test::serial(process_environment)]
 fn a_worker_process_builds_the_embedding_provider_and_fails_at_start() {
     let dir = tempfile::tempdir().unwrap();
     let output = yorishiro(dir.path(), &["start", "--worker=query-embedding"]);

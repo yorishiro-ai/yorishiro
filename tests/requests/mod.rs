@@ -12,7 +12,7 @@ mod entity_columns;
 mod fixtures;
 mod import;
 #[cfg(feature = "enterprise")]
-mod inference;
+pub(crate) mod inference;
 #[cfg(feature = "enterprise")]
 mod licence_gate;
 #[cfg(feature = "enterprise")]
@@ -61,7 +61,10 @@ use axum_test::TestServer;
 use futures::FutureExt;
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
+use serial_test::serial;
+use sqlx::sqlite::SqliteConnectOptions;
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 /// Close every connection pool this app opens on a PostgreSQL test database.
 ///
@@ -72,18 +75,60 @@ use std::net::SocketAddr;
 /// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
+    if let Some(queue) = &ctx.queue_provider {
+        queue.shutdown().expect("shutdown test queue");
+    }
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
         db.tenant.pool().close().await;
     }
     ctx.db.get_postgres_connection_pool().close().await;
+    if let Some(path) = sqlite_queue_path(&ctx.config) {
+        remove_sqlite_files(&path);
+    }
+}
+
+fn sqlite_queue_path(config: &loco_rs::config::Config) -> Option<String> {
+    let loco_rs::config::QueueConfig::Sqlite(queue) = config.queue.as_ref()? else {
+        return None;
+    };
+    let filename = SqliteConnectOptions::from_str(&queue.uri)
+        .ok()?
+        .get_filename()
+        .to_string_lossy()
+        .into_owned();
+    (!filename.is_empty()).then_some(filename)
+}
+
+fn remove_sqlite_files(path: &str) {
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let _ = std::fs::remove_file(format!("{path}{suffix}"));
+    }
+}
+
+#[test]
+fn sqlite_queue_cleanup_removes_database_and_journal_siblings() {
+    let directory = tempfile::tempdir().expect("create queue cleanup directory");
+    let first = directory.path().join("first.sqlite3");
+    let second = directory.path().join("second.sqlite3");
+    for path in [&first, &second] {
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            std::fs::write(format!("{}{suffix}", path.display()), b"test")
+                .expect("create queue cleanup fixture");
+        }
+    }
+    assert_ne!(first, second);
+    remove_sqlite_files(first.to_str().expect("UTF-8 queue path"));
+    assert!(!first.exists());
+    assert!(second.exists());
+    remove_sqlite_files(second.to_str().expect("UTF-8 queue path"));
+    assert!(!second.exists());
 }
 
 /// SQLite variant of `close_app_pools`.
 /// On SQLite `after_context` builds no `DbHandle` (no RLS, no second tenant),
 /// so there is only `ctx.db` to close.
-/// `config/test_sqlite.yaml` has no `queue:` block, so the queue provider is `None` for every
-/// test that boots through `request_with_create_db`.
+/// The configured queue provider is shut down before SQLite files are removed.
 /// When a queue provider is configured, shutdown cancels its workers before file cleanup.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
     if let Some(queue) = &ctx.queue_provider {
@@ -91,10 +136,11 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
     }
     ctx.db.get_sqlite_connection_pool().close().await;
     // Clean up the temp SQLite file and its journaling siblings.
-    let _ = std::fs::remove_file(db_path);
-    let _ = std::fs::remove_file(format!("{db_path}-wal"));
-    let _ = std::fs::remove_file(format!("{db_path}-shm"));
-    let _ = std::fs::remove_file(format!("{db_path}-journal"));
+    remove_sqlite_files(db_path);
+}
+
+pub(crate) fn is_sqlite_queue() -> bool {
+    std::env::var("QUEUE_URL").is_ok_and(|url| url.starts_with("sqlite:"))
 }
 
 /// Whether `DATABASE_URL` names a SQLite backend (file or in-memory).
@@ -103,14 +149,7 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
 /// test code runs against either backend.
 fn is_sqlite_backend() -> bool {
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
-    url.starts_with("sqlite://") || url.starts_with("sqlite::memory:")
-}
-
-pub(crate) fn is_sqlite_queue() -> bool {
-    match std::env::var("QUEUE_URL") {
-        Ok(url) => url.starts_with("sqlite://") || url.starts_with("sqlite::"),
-        Err(_) => is_sqlite_backend(),
-    }
+    url.starts_with("sqlite:")
 }
 
 /// Unified entry point for request tests across PostgreSQL and SQLite backends.
@@ -128,6 +167,7 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let _environment = crate::EnvironmentRead::enter();
     if is_sqlite_backend() {
         // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
         // SQLite must not open a path whose parent can disappear during concurrent test teardown.
@@ -155,6 +195,7 @@ where
         drop(directory);
     } else {
         request_with_create_db::<H, _, _>(|request, ctx| {
+            crate::record_configured_topology(&ctx);
             let result =
                 std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
             async move {
@@ -188,6 +229,7 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let _environment = crate::EnvironmentRead::enter();
     request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
         let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
         async move {
@@ -207,17 +249,15 @@ where
 /// SQLite variant of loco's `request_with_create_db`.
 ///
 /// Instead of `CREATE DATABASE` (which SQLite has no equivalent for), this generates a
-/// unique temp file path, sets `YORISHIRO_TEST_CONFIG=test_sqlite`, overrides the database
-/// URI to the generated file, then boots via `H::boot(StartMode::ServerOnly, ...)` — the
-/// same path loco's own `boot_test_with_create_db` takes (load config, override URI, boot).
-///
+/// unique temp file path, overrides the database URI to the generated file, then boots via
+/// `H::boot(StartMode::ServerOnly, ...)`.
 #[allow(clippy::future_not_send)]
 pub(crate) async fn request_with_create_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    // Load config via the App's override, which redirects Environment::Test → test_sqlite.yaml.
+    // Load the configured test app, then override only its isolated database and queue files.
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
         .expect("load sqlite config");
@@ -240,6 +280,7 @@ where
     )
     .await
     .expect("boot sqlite app");
+    crate::record_configured_topology(&boot.app_context);
 
     // Build the TestServer from the app's router, using the same pattern as
     // loco's own `request_internal`.
@@ -251,4 +292,66 @@ where
         .expect("build TestServer");
 
     callback(server, boot.app_context.clone()).await;
+}
+
+#[tokio::test]
+#[serial(postgres_sqlite_queue)]
+async fn postgres_sqlite_queue_boots_clean_up_before_the_next_boot() {
+    if !crate::require_postgres_backend() || !is_sqlite_queue() {
+        return;
+    }
+
+    let queue_path = std::sync::Arc::new(std::sync::Mutex::new(None));
+    for _ in 0..2 {
+        let prior = queue_path.clone();
+        boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+            let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = ctx.config.queue.as_ref()
+            else {
+                return;
+            };
+            let path = sqlite_queue_path(&ctx.config).expect("SQLite queue path");
+            if let Some(previous) = prior.lock().expect("queue path lock").as_ref() {
+                assert_eq!(previous, &path, "the configured regression queue is stable");
+            }
+            assert!(ctx.queue_provider.is_some(), "SQLite queue did not boot");
+            std::fs::write(&path, format!("queue={}", queue.uri)).expect("write queue artifact");
+            *prior.lock().expect("queue path lock") = Some(path);
+        })
+        .await;
+
+        let path = queue_path
+            .lock()
+            .expect("queue path lock")
+            .clone()
+            .expect("queue path after boot");
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "queue file leaked after shutdown"
+        );
+        assert!(!std::path::Path::new(&format!("{path}-wal")).exists());
+        assert!(!std::path::Path::new(&format!("{path}-shm")).exists());
+        assert!(!std::path::Path::new(&format!("{path}-journal")).exists());
+    }
+}
+
+#[cfg(feature = "enterprise")]
+/// The transaction a workspace-scoped model call runs in, the way the handlers open it: scoped through the tenant pool on PostgreSQL, on the application connection on SQLite.
+pub(crate) async fn workspace_txn(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: uuid::Uuid,
+    workspace_id: uuid::Uuid,
+) -> sea_orm::DatabaseTransaction {
+    use sea_orm::TransactionTrait;
+    use yorishiro::db::{AppContextBackend, DbHandle};
+
+    if ctx.is_sqlite() {
+        return ctx.db.begin().await.expect("begin workspace transaction");
+    }
+    ctx.shared_store
+        .get::<DbHandle>()
+        .expect("tenant pool")
+        .tenant
+        .begin_for_workspace(tenant_id, workspace_id)
+        .await
+        .expect("begin workspace transaction")
 }

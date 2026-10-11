@@ -19,11 +19,18 @@ Linux のビルドはリポジトリの `.cargo/config.toml` を使うため、`
 ローカルで Cargo を実行する前に両方をインストールしてください。
 
 テストスイートは Rust の既定の並列実行で起動してください。
-`make test-postgres` または `make test-sqlite` を使うと、共通テストを含むスイートを実行し、選択したバックエンド専用テストが 1 件以上実行されたことも検証できます。
-最後に、バックエンド専用ゲートの選択数、実行数、スキップ数とスキップ理由が表示されます。
-バックエンドゲートのラッパーは `uv run scripts/test_backend.py` です。
-Valkey のキューと設定を専用エンドポイントで検証する場合は `make test-redis` を使います。
-Redis のテスト URL にはデータベース 15 を指定してください。Loco はキューの後処理で、このテスト専用データベースを消去します。
+ローカルの一般的なトポロジーには `make test-postgres`、`make test-sqlite`、`make test-valkey` を使います。
+`postgres-postgres`、`sqlite-sqlite`、`postgres-valkey`、`sqlite-valkey` の検証には `uv run scripts/test_topology.py <topology>` を使います。
+このラッパーは CE または EE の Cargo feature を明示して実行し、環境変数のラベルではなく Loco が解決したテスト設定の証拠を検証します。
+トポロジーゲートのラッパーは `uv run scripts/test_topology.py` です。
+テストコマンドが成功してもトポロジーの証拠が不正な場合は、stderr に `YORISHIRO_TOPOLOGY_REJECTED` を出して非 0 で終了します。
+CI は両方を確認し、ビルドやテストの失敗を mismatch 自己テストの成功として扱いません。
+CI は正式な 4 トポロジーを CE と EE の両方で検証し、版・DB・キューを含む固有名の 8 ジョブを実行します。
+`make entities` は CI と同じ `Cargo.lock` に固定された `sea-orm-cli` を要求し、移行だけからの生成を確認するには fresh な PostgreSQL DB を使います。
+固定した生成器は部分一意インデックスをエンティティに含めないため、インデックスの所有者は移行だけです。
+両方の `check-all` ターゲットにも含まれる `make python-lint` は、各組み合わせが一度ずつ存在することを静的に確認し、交差 SQL 構成や余分な軸を拒否します。
+Valkey のトポロジーを専用エンドポイントで検証する場合は `make test-valkey` を使います。
+Valkey-compatible な `redis://` エンドポイントにはデータベース 15 を指定してください。Loco はキューの後処理で、このテスト専用データベースを消去します。
 リポジトリのその他の補助スクリプトも uv プロジェクトから実行し、Python 標準ライブラリだけを使います。
 すべてのテストは `tests/` に置きます。
 `src/`、`ee/`、`edition/` には `#[test]` も `#[cfg(test)]` も置けず、CI が両方を拒否します。

@@ -5,7 +5,7 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::ResultExt;
 use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -26,15 +26,8 @@ async fn list_columns(
 ) -> Result<Json<Vec<ColumnPreference>>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let db = ctx
-        .shared_store
-        .get::<crate::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    let schema_txn = db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?;
+    let schema_txn =
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
     let stored =
         entity_column_preferences::list(&schema_txn, auth_ctx.workspace_id, page.into()).await?;
     Ok(Json(stored))
@@ -50,15 +43,8 @@ async fn set_columns(
 ) -> Result<Json<ColumnPreference>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Write)?;
-    let db = ctx
-        .shared_store
-        .get::<crate::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    let schema_txn = db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?;
+    let schema_txn =
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
     let stored = entity_column_preferences::set(
         &schema_txn,
         auth_ctx.workspace_id,
@@ -79,15 +65,8 @@ async fn reset_columns(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Write)?;
-    let db = ctx
-        .shared_store
-        .get::<crate::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    let schema_txn = db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?;
+    let schema_txn =
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
     entity_column_preferences::clear(&schema_txn, auth_ctx.workspace_id, &entity_type).await?;
     schema_txn.commit().await.internal()?;
     Ok(StatusCode::NO_CONTENT)

@@ -10,7 +10,7 @@
 | `ee/controllers/stripe.rs` | Stripe 署名の timestamp 許容範囲 | 既存の `verify_at` が受信検証時刻を受け取り、300 秒の両端を含む境界と範囲外の両方をテストします。 |
 | `ee/controllers/middleware/edition.rs` | リクエストごとのライセンス期限 | 既存の `is_active_at` が Unix 秒を受け取り、`exp > now` の排他的な境界をテストします。 |
 | `src/models/workspace_invites/operations.rs` | 招待の発行と redemption の期限 | 公開された `create_invite_at` と `redeem_invite_at` が 1 つの UTC 値を受け取るため、統合テストに feature フラグは要りません。backend テストで `expires_at == now` は期限切れ、期限直前は有効、期限直後は期限切れとなることと TTL 計算を確認します。 |
-| `ee/tasks/reindex_scheduler.rs` | リインデックス予定時刻の到来判定 | `run_at` が tick を受け取り、`is_due` は `scheduled_for <= tick` を使います。-301、0、+1、+300、+301 秒をテストします。5 分の値は次回実行までの間隔であり、未実行分の猶予ではありません。 |
+| `ee/tasks/reindex_scheduler.rs` | リインデックス予定時刻の到来判定 | `run_at` が tick を受け取り、`is_due` は `scheduled_for <= tick` を使います。-301、0、+1、+300、+301 秒をテストします。スケジュール自身の間隔が次回実行までの間隔であり、未実行分の猶予ではありません。 |
 
 本番の wrapper は `chrono::Utc::now()` を使います。既存の時間幅、レスポンス、ログ、ライセンスゲート、キュー処理、永続化処理は変更しません。
 

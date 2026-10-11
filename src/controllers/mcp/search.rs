@@ -6,14 +6,12 @@ use rmcp::model::CallToolResult;
 use rmcp::tool;
 use rmcp::tool_router;
 use schemars::JsonSchema;
-use sea_orm::TransactionTrait;
 use serde::Deserialize;
 use serde_json::Value;
 
 use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::controllers::extractors::{db_handle, search_token_limiter};
+use crate::controllers::extractors::search_token_limiter;
 use crate::controllers::middleware::rate_limit::charge_search_tokens;
-use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::search;
 
@@ -85,28 +83,13 @@ impl YorishiroMcpServer {
             };
 
         // A read-only transaction, same as `Authorized`'s: dropped without committing when this returns, which is a no-op since nothing was written.
-        let txn = if self.app_context().db.get_database_backend()
-            == sea_orm::DatabaseBackend::Sqlite
-        {
-            match self.app_context().db.begin().await {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(YorishiroError::Internal(err.into()))),
-            }
-        } else {
-            let db = match db_handle(self.app_context()).map_err(|err| err.0) {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
-            match db
-                .tenant
-                .begin_for_workspace(auth_ctx.tenant_id, workspace_id)
+        let txn =
+            match crate::db::begin_workspace(self.app_context(), auth_ctx.tenant_id, workspace_id)
                 .await
-                .map_err(|err| crate::error::YorishiroError::Internal(err.into()))
             {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(err)),
-            }
-        };
+            };
 
         let hits = match search::search_in_table(
             &txn,

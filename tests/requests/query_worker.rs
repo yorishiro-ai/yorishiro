@@ -21,8 +21,9 @@ use yorishiro::workers::query_embedding::QueryEmbeddingWorker;
 
 use super::{boot_request, is_sqlite_queue};
 
-fn isolated_redis_url(url: &str) -> String {
-    let database = uuid::Uuid::now_v7().as_u128() % 16;
+/// The same server on a random database other than the reserved `/15`, which tests that flush it rely on.
+pub(crate) fn isolated_redis_url(url: &str) -> String {
+    let database = uuid::Uuid::now_v7().as_u128() % 15;
     let (base, query) = url.split_once('?').unwrap_or((url, ""));
     let base = base
         .rsplit_once('/')

@@ -10,7 +10,7 @@ This inventory records wall-clock calls in the application and why only selected
 | `ee/controllers/stripe.rs` | Stripe signature timestamp tolerance | The existing `verify_at` seam accepts the inbound verification time; tests pin both inclusive 300-second edges and both outside cases. |
 | `ee/controllers/middleware/edition.rs` | Per-request licence expiry | The existing `is_active_at` fold accepts Unix seconds; tests pin exclusive `exp > now` behavior. |
 | `src/models/workspace_invites/operations.rs` | Invitation issuance and redemption expiry | The public `create_invite_at` and `redeem_invite_at` variants accept one injected UTC value, so integration tests need no feature flag; backend tests pin `expires_at == now` as expired, just-before-expiry as valid, just-after-expiry as expired, and the TTL calculation. |
-| `ee/tasks/reindex_scheduler.rs` | Reindex schedule due-time decision | `run_at` receives the tick and `is_due` uses `scheduled_for <= tick`; tests cover offsets -301, 0, +1, +300, and +301 seconds. The five-minute value schedules the next run and is not a missed-run grace window. |
+| `ee/tasks/reindex_scheduler.rs` | Reindex schedule due-time decision | `run_at` receives the tick and `is_due` uses `scheduled_for <= tick`; tests cover offsets -301, 0, +1, +300, and +301 seconds. The schedule's own interval sets the next run and is not a missed-run grace window. |
 
 Production wrappers use `chrono::Utc::now()` and retain the existing windows, response behavior, logs, gates, queue flow, and persistence operations.
 

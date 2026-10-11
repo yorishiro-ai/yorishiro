@@ -19,6 +19,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+/// The marketplace spans tenants, and SQLite holds one, so its cross-tenant queries are written for PostgreSQL only.
+/// Refusing here answers with `501` instead of a query failure.
+fn require_postgres(conn: &impl ConnectionTrait, what: &str) -> Result<(), YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        return Ok(());
+    }
+    Err(YorishiroError::BackendUnsupported {
+        message: format!("{what} requires PostgreSQL"),
+    })
+}
+
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
 #[derive(Debug, Serialize, FromQueryResult)]
 pub struct MarketplaceListing {
@@ -249,7 +260,7 @@ pub(crate) struct ForkSource {
 struct ForkSourceDbRecord {
     name: String,
     description: Option<String>,
-    tags: Vec<String>,
+    tags: Value,
     author: Option<String>,
     template_visibility: String,
 }
@@ -267,7 +278,7 @@ impl TryFrom<ForkSourceDbRecord> for ForkSource {
         Ok(Self {
             name: row.name,
             description: row.description,
-            tags: row.tags,
+            tags: crate::models::template_templates::tags_from_json(row.tags)?,
             author: row.author,
         })
     }
@@ -291,12 +302,16 @@ pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
+    require_postgres(conn, "listing the marketplace")?;
     let limit = page.limit();
     let offset = page.offset();
 
     MarketplaceListing::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT t.id AS template_id, t.name, t.description, t.tags, t.author, t.tenant_id, \
+        "SELECT t.id AS template_id, t.name, t.description, \
+         ARRAY(SELECT e FROM jsonb_array_elements_text(t.tags) WITH ORDINALITY AS a(e, n) \
+                ORDER BY n) AS tags, \
+         t.author, t.tenant_id, \
          (SELECT max(v.version) FROM template_versions v \
            WHERE v.template_id = t.id AND v.status = 'stable') AS latest_stable_version, \
          (SELECT count(*) FROM template_reviews r \
@@ -389,6 +404,7 @@ pub(crate) async fn insert_next_version(
     request: &PublishVersionRequest,
     user_id: Option<Uuid>,
 ) -> Result<TemplateVersionRecord, YorishiroError> {
+    require_postgres(conn, "publishing a template version")?;
     TemplateVersionDbRecord::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "INSERT INTO template_versions \
@@ -631,7 +647,9 @@ pub(crate) async fn insert_fork(
         name: sea_orm::ActiveValue::Set(source.name.clone()),
         description: sea_orm::ActiveValue::Set(source.description.clone()),
         definition: sea_orm::ActiveValue::Set(definition.clone()),
-        tags: sea_orm::ActiveValue::Set(source.tags.clone()),
+        tags: sea_orm::ActiveValue::Set(crate::models::template_templates::tags_to_json(
+            &source.tags,
+        )),
         author: sea_orm::ActiveValue::Set(source.author.clone()),
         visibility: sea_orm::ActiveValue::Set(TemplateVisibility::Tenant.as_db_str().to_string()),
         fork_of: sea_orm::ActiveValue::Set(Some(fork_of)),

@@ -77,7 +77,7 @@ async fn insert_template(
         name: sea_orm::ActiveValue::Set("library-note".into()),
         definition: sea_orm::ActiveValue::Set(definition),
         visibility: sea_orm::ActiveValue::Set("tenant".into()),
-        tags: sea_orm::ActiveValue::Set(vec![]),
+        tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
         ..Default::default()
     };
     sea_orm::ActiveModelTrait::insert(template, &ctx.db)
@@ -97,9 +97,6 @@ fn note_definition() -> serde_json::Value {
 /// A schema with no origin template reports nothing to follow, and merge-preview/merge both refuse it: the whole point of the origin/merge chain only applies to a schema copied from a template.
 #[tokio::test]
 async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -145,11 +142,9 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
 }
 
 /// The full round trip: a schema copied from a template, the template edited afterward, the change surfacing in the upstream-changes listing and the merge preview, and merge writing a new version that both takes upstream's addition and keeps the workspace's own field.
+/// SQLite and PostgreSQL both return the upstream listing and support preview and merge.
 #[tokio::test]
 async fn upstream_changes_preview_and_merge_round_trip() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let template = insert_template(&ctx, setup.tenant_id, note_definition()).await;
@@ -351,7 +346,8 @@ async fn upstream_changes_preview_and_merge_round_trip() {
 /// A publication racing with merge cannot be acknowledged by the merge that read the older revision.
 #[tokio::test]
 async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
-    if !super::super::require_postgres_backend() {
+    // SQLite has no advisory lock to block publication behind the merge revision lock.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -504,9 +500,6 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
 /// Merging a schema whose two sides conflict on the same field is refused rather than picking one side silently.
 #[tokio::test]
 async fn merging_a_conflicting_field_is_refused() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let base_def = json!({

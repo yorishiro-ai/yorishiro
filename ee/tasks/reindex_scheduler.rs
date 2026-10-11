@@ -40,6 +40,49 @@ pub struct ScheduleDescription {
     pub scheduled_for: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// The shortest interval a schedule may name, so a typo cannot make every workspace of a tenant reindex every few seconds.
+const MIN_INTERVAL_SECONDS: i64 = 5 * 60;
+
+/// What the ticker uses for a stored interval it cannot read, which only a row written before intervals were validated can hold.
+const DEFAULT_INTERVAL_SECONDS: i64 = 24 * 60 * 60;
+
+/// Reads an ISO 8601 duration made of weeks, days, hours, minutes and seconds, such as `P1D`, `P1W` or `PT6H`.
+///
+/// Years and months are refused: they have no fixed length, and a schedule that drifts with the calendar is not what an interval promises.
+fn parse_interval(value: &str) -> Option<chrono::Duration> {
+    const DATE_UNITS: [(char, i64); 2] = [('W', 604_800), ('D', 86_400)];
+    const TIME_UNITS: [(char, i64); 3] = [('H', 3_600), ('M', 60), ('S', 1)];
+
+    fn seconds_in(part: &str, units: &[(char, i64)]) -> Option<(i64, usize)> {
+        let (mut total, mut components) = (0_i64, 0);
+        let mut number = String::new();
+        let mut seen = Vec::new();
+        for ch in part.chars() {
+            if ch.is_ascii_digit() {
+                number.push(ch);
+                continue;
+            }
+            let factor = units.iter().find(|(unit, _)| *unit == ch)?.1;
+            if seen.contains(&ch) {
+                return None;
+            }
+            seen.push(ch);
+            total = total.checked_add(number.parse::<i64>().ok()?.checked_mul(factor)?)?;
+            number.clear();
+            components += 1;
+        }
+        number.is_empty().then_some((total, components))
+    }
+
+    let rest = value.trim().strip_prefix('P')?;
+    let (date, time) = rest.split_once('T').unwrap_or((rest, ""));
+    let (date_seconds, date_components) = seconds_in(date, &DATE_UNITS)?;
+    let (time_seconds, time_components) = seconds_in(time, &TIME_UNITS)?;
+    let seconds = date_seconds.checked_add(time_seconds)?;
+    (date_components + time_components > 0 && seconds > 0)
+        .then(|| chrono::Duration::try_seconds(seconds))?
+}
+
 /// Stores or replaces a tenant's reindex schedule.
 #[allow(clippy::too_many_arguments)]
 ///
@@ -81,12 +124,29 @@ pub async fn set(
         }
     }
 
-    // Compute the next scheduled time: now + 5 minutes.
-    // This is the interval until the next run, not a grace period for a missed run.
-    //
+    let Some(every) = parse_interval(interval) else {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!("interval {interval:?} is not a supported ISO 8601 duration"),
+            details: vec![],
+            hint: "Use weeks, days, hours, minutes or seconds, e.g. P1D for daily, P1W for weekly or PT6H. Years and months are not supported.".into(),
+        });
+    };
+    if every < chrono::Duration::seconds(MIN_INTERVAL_SECONDS) {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!("interval {interval:?} is shorter than 5 minutes"),
+            details: vec![],
+            hint: "The shortest supported interval is PT5M.".into(),
+        });
+    }
+
+    // The first run is one interval from now, and each tick schedules the next one interval after itself.
     let expected: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::minutes(5))
-        .unwrap()
+        .checked_add_signed(every)
+        .ok_or_else(|| YorishiroError::ValidationFailed {
+            message: format!("interval {interval:?} is too long"),
+            details: vec![],
+            hint: "Use an interval of at most a few years.".into(),
+        })?
         .into();
 
     let active = ActiveModel {
@@ -313,9 +373,18 @@ impl TenantReindexScheduler {
             // Advance before dispatch for the deliberate at-most-once policy. A crash or queue
             // failure after this commit loses the current interval until the next one.
             let mut active = schedule.clone().into_active_model();
+            let every = parse_interval(&schedule.interval).unwrap_or_else(|| {
+                tracing::warn!(
+                    tenant_id = %schedule.tenant_id,
+                    interval = %schedule.interval,
+                    "reindex scheduler: unreadable interval, using P1D"
+                );
+                chrono::Duration::seconds(DEFAULT_INTERVAL_SECONDS)
+            });
+            let every = every.max(chrono::Duration::seconds(MIN_INTERVAL_SECONDS));
             let new_sched: chrono::DateTime<chrono::FixedOffset> = tick
-                .checked_add_signed(chrono::Duration::minutes(5))
-                .unwrap()
+                .checked_add_signed(every)
+                .unwrap_or_else(|| tick + chrono::Duration::seconds(DEFAULT_INTERVAL_SECONDS))
                 .into();
             active.scheduled_for = ActiveValue::Set(Some(new_sched));
             active.updated_at = ActiveValue::Set(tick.into());

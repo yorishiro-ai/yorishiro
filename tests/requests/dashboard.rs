@@ -7,9 +7,6 @@ use yorishiro::App;
 #[tokio::test]
 #[serial(process_environment)]
 async fn tenant_overview_returns_usage_and_members_for_the_owner() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, _ctx| async move {
             let setup = request
@@ -56,9 +53,6 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn tenant_overview_requires_authentication() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/tenant/overview").await;
         assert_eq!(

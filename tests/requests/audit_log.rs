@@ -44,9 +44,6 @@ async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
 /// all) can read the row back; the acting key's own scope never had to be raised for this.
 #[tokio::test]
 async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
@@ -95,9 +92,6 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
 /// `undo_migration_job` is recorded on the same transaction as the undo itself.
 #[tokio::test]
 async fn undo_migration_job_is_recorded() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
@@ -205,9 +199,6 @@ impl ReindexDispatcher for AuditBeforeDispatch {
 /// The response still exposes the queue job ID returned by the dispatcher.
 #[tokio::test]
 async fn reindex_audit_detail_is_workspace_id_and_is_committed_before_dispatch() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "reindex-audit").await;
         let dispatcher = Arc::new(AuditBeforeDispatch {
@@ -270,9 +261,6 @@ async fn reindex_audit_detail_is_workspace_id_and_is_committed_before_dispatch()
 /// If `audit` had been added as a fifth rung above `Migration` instead, this would 200.
 #[tokio::test]
 async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
@@ -296,9 +284,6 @@ async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
 /// same table.
 #[tokio::test]
 async fn an_audit_key_cannot_read_another_tenants_audit_log() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant_a = setup(&ctx, "acme").await;
         let tenant_b = setup(&ctx, "beta").await;

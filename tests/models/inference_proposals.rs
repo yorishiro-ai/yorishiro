@@ -263,6 +263,10 @@ async fn incomplete_and_failed_jobs_cannot_change_proposals() {
                 .await
                 .is_err()
         );
+        // A workspace holds one running job at a time, so the incomplete job stops before the next pass starts another.
+        if !failed {
+            inference_jobs::fail(&db, job_id, "stopped").await.unwrap();
+        }
     }
 }
 

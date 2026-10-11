@@ -298,6 +298,7 @@ async fn the_database_accepts_every_status_the_enum_defines_and_rejects_others()
 /// PostgreSQL scopes the table by `app.current_workspace`, so the tenant-scoped role sees and changes only its own workspace's rows.
 #[tokio::test]
 async fn postgres_row_level_security_scopes_requests_to_the_current_workspace() {
+    // Row-level security exists only on PostgreSQL.
     if !crate::require_postgres_backend() {
         return;
     }

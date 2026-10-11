@@ -217,6 +217,34 @@ impl TenantDb {
     }
 }
 
+/// Begins the transaction one workspace's request work runs in.
+///
+/// PostgreSQL scopes it to the tenant and workspace through the tenant pool, so row-level security applies.
+/// SQLite has no row-level security and one tenant, so the transaction runs on the application connection.
+///
+/// # Errors
+/// Returns an error if the transaction cannot be started, or if a PostgreSQL deployment has no tenant pool.
+pub(crate) async fn begin_workspace(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<DatabaseTransaction, crate::YorishiroError> {
+    use crate::error::ResultExt;
+
+    if ctx.is_sqlite() {
+        return ctx.db.begin().await.internal();
+    }
+    let handle = ctx
+        .shared_store
+        .get::<DbHandle>()
+        .ok_or_else(|| crate::YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+    handle
+        .tenant
+        .begin_for_workspace(tenant_id, workspace_id)
+        .await
+        .internal()
+}
+
 /// Which pools this deployment holds for control-plane vs. tenant-scoped access.
 ///
 /// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`user_users`/`tenant_memberships`/`workspace_invites`) that have no tenant/workspace context yet to scope by.
@@ -293,7 +321,7 @@ pub fn require_min_sqlite_connections(max_connections: u32) -> Result<(), String
 /// The lock is transaction-scoped, so it releases on commit or rollback without an unlock call to forget.
 /// Takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice), since every caller already holds one via `Authorized::txn()`.
 ///
-/// A no-op on SQLite, which has no named-lock primitive to substitute.
+/// A no-op on SQLite, which has no named-lock primitive to substitute: it excludes nothing there, so a caller that needs mutual exclusion on SQLite must get it from a conditional write of its own.
 ///
 /// That is sound rather than merely convenient, because every caller here locks, reads a count or existence check, then writes within the same transaction gated on that read.
 /// SQLite allows one write transaction at a time, so a transaction committing after another has written gets `SQLITE_BUSY` and fails whole; the TOCTOU this lock closes on Postgres surfaces as a retryable error rather than a silently-accepted inconsistent write.

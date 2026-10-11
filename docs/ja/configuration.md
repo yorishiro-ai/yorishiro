@@ -164,7 +164,11 @@ development と production の未設定時は両方に SQLite を使うため、
 既存インストールの移行や保存場所の変更には `QUEUE_URL` を明示してください。
 PostgreSQL と Redis 互換キューには SQLite の同一ファイル制約はありません。
 
-アプリケーションデータベースとキュープロバイダは同じバックエンドを使う必要はありません。
+サポート・CI 検証対象は、SQLite DB と SQLite キュー、PostgreSQL DB と PostgreSQL キュー、および各 DB と Redis 互換 (Valkey) キューです。
+SQLite DB と PostgreSQL キュー、または PostgreSQL DB と SQLite キューの交差構成は利用できず、起動前に `ValidationFailed` (`validation_failed`) として拒否します。
+エラーメッセージは不正な組み合わせを英日で説明し、DB と同じ種類の SQL キューまたは Valkey の指定を案内します。
+キューを指定しない場合は、SQLite DB では SQLite キュー、PostgreSQL DB では PostgreSQL キューを選びます。
+RabbitMQ と SQS は未実装で、将来の対応も PostgreSQL DB を使うエンタープライズ版に限り、SQLite DB やコミュニティ版では利用できません。
 たとえば PostgreSQL のアプリケーションデータベースと Redis 互換キューサービスを組み合わせる場合は、`YORISHIRO_QUEUE_KIND=Redis` と適切な `QUEUE_URL` を設定します。
 今後キュープロバイダが増えても、アプリケーションデータベースの設定は変わりません。
 
@@ -220,6 +224,12 @@ PostgreSQL では複数のワーカープロセスが並列にジョブを取り
 SQLite では取り出し処理は直列ですが、永続キューによる障害回復は利用できます。
 
 `YORISHIRO_QUEUE_WORKERS` は 1 ワーカープロセス内の並列取り出しループ数を設定します。
+既定値は SQLite キューで 1、PostgreSQL と Redis 互換キューで 2 です。
+SQLite は書き込み側が 1 つのため、SQLite キューでワーカーを増やしても競合が増えるだけでスループットは上がらず、起動時に警告を記録します。
+`DB_MAX_CONNECTIONS` の既定値は SQLite データベースで 10、PostgreSQL で 100 です。SQLite のプールが 16 を超えると起動時に警告します。
+SQL DB とキューの交差構成は、助言ではなく設定検証で拒否します。
+SQLite DB と Redis 互換キューは引き続きサポートしますが、他ホストの worker は SQLite ファイルを開けず、名前付きロックもないため、worker を DB と同じホストに置くよう助言します。
+スループットは、アプリケーションデータを PostgreSQL、キューを Redis 互換 (Valkey) にした構成が最も伸びます。次に両方 PostgreSQL、最も伸びないのが両方 SQLite です。
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` は、reaper が処理中ジョブを回復するまでの時間を設定します。
 
 ## テナント再インデックススケジュール
@@ -227,7 +237,10 @@ SQLite では取り出し処理は直列ですが、永続キューによる障�
 テナント単位で定期的にすべてのワークスペースの再インデックスを実行するスケジュールを設定できます。スケジュールは手動の `reindex_embeddings` タスクと同じフローをたどり、ワークスペースごとのプロバイダとモデルバージョンのチェックを尊重します。
 
 API エンドポイント（`POST /api/identity/tenants/schedule` など）で ISO 8601 形式の期間（`P1D` で毎日、`P1W` で毎週）と任意の IANA タイムゾーン名（デフォルト：UTC）を指定します。
-5 分の間隔で次の `scheduled_for` 時刻を設定します。
+間隔には週・日・時・分・秒を使えます(例: `P1D`、`P1W`、`PT6H`)。最短は `PT5M` で、年と月は受け付けません。
+`P1D1D` のように単位が重複する指定は受け付けません。
+ティッカーは既存の短すぎる間隔を 5 分に補正し、読めない間隔や次回日時がオーバーフローする間隔では 1 日後を使います。
+最初の `scheduled_for` はスケジュール設定の 1 間隔後になり、実行した scheduler tick は次の `scheduled_for` をその tick の 1 間隔後に設定します。
 各 scheduler tick では、期限を過ぎた `scheduled_for` を実行し、未実行分の猶予時間による打ち切りはありません。
 
 選択した `config/<environment>.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。

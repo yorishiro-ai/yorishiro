@@ -8,6 +8,12 @@ edition = "2024"
 rust-version = "1.94"
 publish = false
 default-run = "yorishiro"
+# `tests/` is one integration binary rooted at `tests/mod.rs`; without this Cargo also builds `tests/db.rs`, `tests/db_enum.rs` and `tests/licence.rs` as separate binaries that repeat tests the root already includes.
+autotests = false
+
+[[test]]
+name = "mod"
+path = "tests/mod.rs"
 
 [features]
 default = ["enterprise"]

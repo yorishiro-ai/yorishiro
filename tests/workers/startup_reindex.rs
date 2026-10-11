@@ -225,10 +225,14 @@ async fn concurrent_sqlite_scans_admit_only_one_reindex() {
 
 /// The automatic request harness must keep each SQLite parent directory alive while parallel boots open their databases.
 #[tokio::test]
+#[serial_test::serial(process_environment)]
 async fn parallel_sqlite_boots_keep_their_database_parents_alive() {
     if !crate::require_sqlite_backend() {
         return;
     }
+
+    // Hold one writer scope for the boot group so overlapping same-thread readers cannot deadlock behind a waiting environment writer; this also bounds competing queue pools on Valkey.
+    let _environment = crate::EnvGuard::capture(&["QUEUE_URL"]);
 
     let boots = (0..8).map(|_| async {
         crate::requests::boot_request::<App, _, _>(|_request, ctx| async move {

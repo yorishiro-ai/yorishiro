@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use yorishiro::data::config::validate_queue_policy;
 
 fn config(database: &str, queue: &str) -> loco_rs::config::Config {
@@ -12,6 +13,11 @@ fn equivalent_sqlite_paths_are_rejected_but_memory_is_not() {
     let shared = config(
         "sqlite://app.sqlite3?mode=rwc",
         "sqlite://./app.sqlite3?mode=ro",
+    );
+    assert!(validate_queue_policy(&shared).is_err());
+    let shared = config(
+        "sqlite:/tmp/app.sqlite3?mode=rwc",
+        "sqlite:///tmp/app.sqlite3",
     );
     assert!(validate_queue_policy(&shared).is_err());
 
@@ -59,4 +65,113 @@ fn a_sql_queue_is_left_alone() {
     let before = format!("{:?}", sqlite.queue);
     yorishiro::data::config::serve_worker_queues(&mut sqlite, &["a".to_owned()]);
     assert_eq!(format!("{:?}", sqlite.queue), before);
+}
+
+#[test]
+fn cross_sql_queue_topologies_fail_validation_with_bilingual_errors() {
+    let postgres_database = config(
+        "postgres://localhost:5432/app",
+        "sqlite://queue.sqlite3?mode=rwc",
+    );
+
+    let sqlite_database = serde_yaml::from_str::<loco_rs::config::Config>(
+        "logger: { enable: true, pretty_backtrace: false, level: info, format: compact }\nserver: { port: 5150, binding: localhost, host: http://localhost }\ndatabase: { uri: 'sqlite://app.sqlite3?mode=rwc', enable_logging: false, connect_timeout: 500, idle_timeout: 500, min_connections: 1, max_connections: 2, auto_migrate: false }\nqueue: { kind: Postgres, uri: 'postgres://localhost:5432/queue', num_workers: 1 }\nworkers: { mode: BackgroundQueue }\n",
+    )
+    .unwrap();
+    for config in [postgres_database, sqlite_database] {
+        let loco_rs::Error::CustomError(status, detail) =
+            validate_queue_policy(&config).expect_err("crossed SQL queues are forbidden")
+        else {
+            panic!("expected ValidationFailed");
+        };
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let body = detail.errors.unwrap();
+        assert_eq!(body["error"]["code"], "validation_failed");
+        let message = body["error"]["message"].as_str().unwrap();
+        assert!(message.contains("not allowed"), "{body}");
+        assert!(message.contains("利用できません"), "{body}");
+    }
+}
+
+fn topology(database: &str, max_connections: u32, queue: &str) -> loco_rs::config::Config {
+    serde_yaml::from_str(&format!(
+        "logger: {{ enable: true, pretty_backtrace: false, level: info, format: compact }}\nserver: {{ port: 5150, binding: localhost, host: http://localhost }}\ndatabase: {{ uri: '{database}', enable_logging: false, connect_timeout: 500, idle_timeout: 500, min_connections: 1, max_connections: {max_connections}, auto_migrate: false }}\nqueue: {queue}\nworkers: {{ mode: BackgroundQueue }}\n"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn topology_advisories_cover_contention_and_support_boundaries() {
+    use yorishiro::data::config::{SQLITE_POOL_ADVISORY_LIMIT, topology_advisories};
+
+    let sqlite_queue = |workers: u32| {
+        format!("{{ kind: Sqlite, uri: 'sqlite://q.sqlite3?mode=rwc', num_workers: {workers} }}")
+    };
+    let valkey = |workers: u32| {
+        format!("{{ kind: Redis, uri: 'redis://localhost:6379', num_workers: {workers} }}")
+    };
+    let postgres = |workers: u32| {
+        format!("{{ kind: Postgres, uri: 'postgres://localhost/q', num_workers: {workers} }}")
+    };
+    let sqlite = "sqlite://app.sqlite3?mode=rwc";
+    let pg = "postgres://localhost/app";
+
+    assert!(topology_advisories(&topology(sqlite, 10, &sqlite_queue(1))).is_empty());
+    assert_eq!(
+        topology_advisories(&topology(sqlite, 10, &sqlite_queue(4))).len(),
+        1
+    );
+    assert_eq!(
+        topology_advisories(&topology(
+            sqlite,
+            SQLITE_POOL_ADVISORY_LIMIT + 1,
+            &sqlite_queue(1)
+        ))
+        .len(),
+        1
+    );
+    assert_eq!(
+        topology_advisories(&topology(
+            sqlite,
+            SQLITE_POOL_ADVISORY_LIMIT + 1,
+            &sqlite_queue(4)
+        ))
+        .len(),
+        2
+    );
+    let advisories = topology_advisories(&topology(sqlite, SQLITE_POOL_ADVISORY_LIMIT, &valkey(8)));
+    assert_eq!(advisories.len(), 1);
+    assert!(advisories[0].contains("supported"), "{advisories:?}");
+    assert!(advisories[0].contains("database's host"), "{advisories:?}");
+    assert!(topology_advisories(&topology(pg, 100, &valkey(8))).is_empty());
+    assert!(topology_advisories(&topology(pg, 100, &postgres(8))).is_empty());
+}
+
+fn with_queue(num_workers: u32) -> loco_rs::config::Config {
+    serde_yaml::from_str(&format!(
+        "logger: {{ enable: true, pretty_backtrace: false, level: info, format: compact }}\nserver: {{ port: 5150, binding: localhost, host: http://localhost }}\ndatabase: {{ uri: 'postgres://localhost/app', enable_logging: false, connect_timeout: 500, idle_timeout: 500, min_connections: 1, max_connections: 2, auto_migrate: false }}\nqueue: {{ kind: Redis, uri: 'redis://localhost:6379', num_workers: {num_workers} }}\nworkers: {{ mode: BackgroundQueue }}\n"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_queue_with_no_workers_is_refused() {
+    assert!(validate_queue_policy(&with_queue(1)).is_ok());
+    let error = validate_queue_policy(&with_queue(0))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("num_workers"), "{error}");
+}
+
+#[test]
+fn only_the_built_in_queue_mode_is_accepted() {
+    let mut inline = with_queue(1);
+    inline.workers.mode = loco_rs::config::WorkerMode::ForegroundBlocking;
+    let error = validate_queue_policy(&inline).unwrap_err().to_string();
+    assert!(error.contains("worker mode"), "{error}");
+
+    let mut no_queue = with_queue(1);
+    no_queue.queue = None;
+    let error = validate_queue_policy(&no_queue).unwrap_err().to_string();
+    assert!(error.contains("queue provider"), "{error}");
 }
