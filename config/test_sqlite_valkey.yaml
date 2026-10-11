@@ -51,6 +51,8 @@ workers:
   mode: BackgroundQueue
 
 settings:
+  mcp:
+    allowed_hosts: "<%= get_env(name="YORISHIRO_MCP_ALLOWED_HOSTS", default="") %>"
   max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="0") %>
   embedding:
     provider: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER", default="none") %>

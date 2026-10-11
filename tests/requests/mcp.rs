@@ -12,6 +12,7 @@ use yorishiro::models::{entity_entities, schema_schemas, template_templates as t
 
 use super::boot_request;
 use super::fixtures::{self, TenantArgs, issue_api_key};
+use crate::EnvGuard;
 
 fn rpc_body(response: &TestResponse) -> Value {
     let text = response.text();
@@ -122,6 +123,63 @@ fn tool_result_json(response: &Value) -> Value {
             .expect("tool result text"),
     )
     .expect("JSON tool result")
+}
+
+/// Transport compatibility regressions from the MCP HTTP issues.
+#[tokio::test]
+async fn mcp_transport_rejects_unconfigured_host_by_default() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+    if std::env::var("DATABASE_URL").is_err() {
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/mcp-transport.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/mcp-transport-queue.sqlite3?mode=rwc",
+        );
+    }
+    boot_request::<App, _, _>(|request, _ctx| async move {
+        let response = request
+            .post("/mcp")
+            .add_header("Host", "mcp.remote.test")
+            .add_header("Accept", "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
+        assert!(response.text().contains("Host header is not allowed"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn mcp_transport_allows_configured_host_and_common_accept_headers() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_MCP_ALLOWED_HOSTS"]);
+    if std::env::var("DATABASE_URL").is_err() {
+        guard.set(
+            "DATABASE_URL",
+            "sqlite:///tmp/mcp-transport-allowed.sqlite3?mode=rwc",
+        );
+        guard.set(
+            "QUEUE_URL",
+            "sqlite:///tmp/mcp-transport-allowed-queue.sqlite3?mode=rwc",
+        );
+    }
+    guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "mcp.remote.test");
+    boot_request::<App, _, _>(|request, _ctx| async move {
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
+        for accept in [None, Some("*/*"), Some("application/json")] {
+            let mut call = request.post("/mcp").add_header("Host", "mcp.remote.test");
+            if let Some(accept) = accept {
+                call = call.add_header("Accept", accept);
+            }
+            let response = call.json(&body).await;
+            assert_ne!(response.status_code(), StatusCode::FORBIDDEN);
+            assert_ne!(response.status_code(), StatusCode::NOT_ACCEPTABLE);
+        }
+    })
+    .await;
 }
 
 /// A server instance is retained by rmcp for the whole session.

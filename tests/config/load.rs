@@ -336,3 +336,34 @@ async fn query_embedding_settings_are_validated() {
         );
     }
 }
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn mcp_allowed_hosts_load_and_reject_wildcards() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_MCP_ALLOWED_HOSTS"]);
+    guard.set("DATABASE_URL", "sqlite:///tmp/mcp-config.sqlite3?mode=rwc");
+    guard.set(
+        "QUEUE_URL",
+        "sqlite:///tmp/mcp-config-queue.sqlite3?mode=rwc",
+    );
+    guard.set(
+        "YORISHIRO_MCP_ALLOWED_HOSTS",
+        "mcp.example.test,10.0.0.4:5150",
+    );
+    let config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
+    let settings = config.settings::<serde_json::Value>().unwrap();
+    assert_eq!(
+        settings["mcp"]["allowed_hosts"],
+        "mcp.example.test,10.0.0.4:5150"
+    );
+
+    guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "*");
+    let error = load(&Environment::Any("test_sqlite".into()))
+        .await
+        .expect_err("wildcard MCP hosts must be rejected");
+    assert!(
+        error.to_string().contains("wildcard hosts")
+            || error.to_string().contains("wildcard MCP hosts"),
+        "unexpected validation error: {error}"
+    );
+}
