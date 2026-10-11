@@ -13,13 +13,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
-use sea_orm::{DatabaseTransaction, TransactionTrait};
+use sea_orm::DatabaseTransaction;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::data::settings::{QueryEmbedding, Settings};
-use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
 use crate::models::search;
@@ -238,19 +237,7 @@ struct Scope<'a> {
 
 impl Scope<'_> {
     async fn begin(&self) -> Result<DatabaseTransaction, YorishiroError> {
-        if self.ctx.is_sqlite() {
-            return self
-                .ctx
-                .db
-                .begin()
-                .await
-                .map_err(|error| YorishiroError::Internal(error.into()));
-        }
-        let db = crate::controllers::extractors::db_handle(self.ctx).map_err(|error| error.0)?;
-        db.tenant
-            .begin_for_workspace(self.tenant_id, self.workspace_id)
-            .await
-            .map_err(|error| YorishiroError::Internal(error.into()))
+        crate::db::begin_workspace(self.ctx, self.tenant_id, self.workspace_id).await
     }
 
     async fn open(&self, query_text: &str, retention_seconds: u64) -> Result<Uuid, YorishiroError> {

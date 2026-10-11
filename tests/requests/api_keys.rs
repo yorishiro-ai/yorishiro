@@ -93,9 +93,6 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
 
 #[tokio::test]
 async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, _, owner_key) =
             fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;

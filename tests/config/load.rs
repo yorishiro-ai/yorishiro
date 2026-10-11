@@ -35,47 +35,57 @@ async fn development_uses_loco_environment_config_and_typed_settings() {
 
 #[tokio::test]
 #[serial(process_environment)]
-async fn test_environment_selects_backend_specific_loco_config() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-    _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
-    _guard.set("QUEUE_URL", "redis://localhost:6379");
+async fn the_topology_picks_the_queue_provider_for_one_database() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
 
-    let config = load(&Environment::Test).await.unwrap();
+    guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-sqlite");
+    let sqlite_queue = load(&Environment::Test).await.unwrap();
+    assert!(matches!(sqlite_queue.queue, Some(QueueConfig::Sqlite(_))));
 
-    assert!(config.database.uri.starts_with("sqlite://"));
+    guard.set("QUEUE_URL", "redis://localhost:6379");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
+    let redis_queue = load(&Environment::Test).await.unwrap();
+    assert!(matches!(redis_queue.queue, Some(QueueConfig::Redis(_))));
+
+    guard.set("QUEUE_URL", "rediss://localhost:6379");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
+    let rediss_queue = load(&Environment::Test).await.unwrap();
+    assert!(matches!(rediss_queue.queue, Some(QueueConfig::Redis(_))));
+}
+
+/// Without a topology, the test environment follows `DATABASE_URL`'s scheme and the queue follows the database.
+#[tokio::test]
+#[serial(process_environment)]
+async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    guard.remove("YORISHIRO_TEST_TOPOLOGY");
+    guard.remove("QUEUE_URL");
+
+    guard.set("DATABASE_URL", "sqlite:///tmp/scheme.sqlite3?mode=rwc");
+    let sqlite = load(&Environment::Test).await.unwrap();
+    assert!(matches!(sqlite.queue, Some(QueueConfig::Sqlite(_))));
+
+    guard.set("DATABASE_URL", "postgres://db/app");
+    let postgres = load(&Environment::Test).await.unwrap();
     assert!(matches!(
-        config.queue,
-        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://localhost:6379"
+        postgres.queue,
+        Some(QueueConfig::Postgres(queue)) if queue.uri == "postgres://db/app"
     ));
 }
 
 #[tokio::test]
 #[serial(process_environment)]
-async fn sqlite_database_queue_scheme_controls_test_queue_selection() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-    guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
-
-    guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
-    let sqlite_queue = load(&Environment::Test).await.unwrap();
-    assert!(matches!(sqlite_queue.queue, Some(QueueConfig::Sqlite(_))));
-
-    guard.set("QUEUE_URL", "redis://localhost:6379");
-    let redis_queue = load(&Environment::Test).await.unwrap();
-    assert!(matches!(redis_queue.queue, Some(QueueConfig::Redis(_))));
-
-    guard.set("QUEUE_URL", "rediss://localhost:6379");
-    let rediss_queue = load(&Environment::Test).await.unwrap();
-    assert!(matches!(rediss_queue.queue, Some(QueueConfig::Redis(_))));
-}
-
-#[tokio::test]
-#[serial(process_environment)]
 async fn redis_test_config_keeps_queue_independent_from_database() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    _guard.remove("YORISHIRO_TEST_TOPOLOGY");
     _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
     _guard.set("QUEUE_URL", "redis://queue.example:6379");
 
-    let config = load(&Environment::Any("test_redis".into())).await.unwrap();
+    let config = load(&Environment::Any("test_sqlite_valkey".into()))
+        .await
+        .unwrap();
 
     assert_eq!(
         config.database.uri,
@@ -99,6 +109,56 @@ async fn test_configs_disable_external_embedding_downloads_by_default() {
     let settings = config.settings::<serde_json::Value>().unwrap();
 
     assert_eq!(settings["embedding"]["provider"], "none");
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn every_supported_topology_loads_from_loco_test_environment() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    for (topology, database, queue) in [
+        (
+            "postgres-postgres",
+            "postgres://db/app",
+            "postgres://queue/app",
+        ),
+        (
+            "sqlite-sqlite",
+            "sqlite://db.sqlite3?mode=rwc",
+            "sqlite://queue.sqlite3?mode=rwc",
+        ),
+        (
+            "postgres-valkey",
+            "postgres://db/app",
+            "redis://valkey:6379/15",
+        ),
+        (
+            "sqlite-valkey",
+            "sqlite://db.sqlite3?mode=rwc",
+            "redis://valkey:6379/15",
+        ),
+        (
+            "postgres-sqlite",
+            "postgres://db/app",
+            "sqlite://queue.sqlite3?mode=rwc",
+        ),
+        (
+            "sqlite-postgres",
+            "sqlite://db.sqlite3?mode=rwc",
+            "postgres://queue/app",
+        ),
+    ] {
+        guard.set("YORISHIRO_TEST_TOPOLOGY", topology);
+        guard.set("DATABASE_URL", database);
+        guard.set("QUEUE_URL", queue);
+        let config = load(&Environment::Test).await.unwrap();
+        assert_eq!(config.database.uri, database);
+        match (topology.split('-').nth(1).unwrap(), config.queue.unwrap()) {
+            ("postgres", QueueConfig::Postgres(actual)) => assert_eq!(actual.uri, queue),
+            ("sqlite", QueueConfig::Sqlite(actual)) => assert_eq!(actual.uri, queue),
+            ("valkey", QueueConfig::Redis(actual)) => assert_eq!(actual.uri, queue),
+            (provider, actual) => panic!("{topology} resolved to {provider}: {actual:?}"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -151,6 +211,69 @@ async fn production_selects_queue_provider_independently_from_database() {
         redis_queue.queue,
         Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example:6379"
     ));
+}
+
+/// Production defaults follow the database and queue pair: a SQLite writer or queue gains nothing from a wide pool or several workers, while PostgreSQL and Redis-compatible queues do.
+#[tokio::test]
+#[serial(process_environment)]
+async fn production_defaults_follow_the_database_and_queue_topology() {
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
+        "YORISHIRO_QUEUE_WORKERS",
+        "DB_MAX_CONNECTIONS",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    ]);
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    guard.remove("YORISHIRO_QUEUE_WORKERS");
+    guard.remove("DB_MAX_CONNECTIONS");
+    for (database, kind, queue, pool, workers) in [
+        ("sqlite:///var/lib/y/a.sqlite3?mode=rwc", None, None, 10, 1),
+        ("sqlite:/var/lib/y/a.sqlite3?mode=rwc", None, None, 10, 1),
+        ("sqlite::memory:", None, None, 10, 1),
+        (
+            "sqlite:///var/lib/y/a.sqlite3?mode=rwc",
+            Some("Redis"),
+            Some("redis://valkey:6379/0"),
+            10,
+            2,
+        ),
+        ("postgres://db/app", None, None, 100, 2),
+        (
+            "postgres://db/app",
+            Some("Redis"),
+            Some("redis://valkey:6379/0"),
+            100,
+            2,
+        ),
+        (
+            "postgres://db/app",
+            Some("Sqlite"),
+            Some("sqlite:///var/lib/y/q.sqlite3?mode=rwc"),
+            100,
+            1,
+        ),
+    ] {
+        guard.set("DATABASE_URL", database);
+        match kind {
+            Some(kind) => guard.set("YORISHIRO_QUEUE_KIND", kind),
+            None => guard.remove("YORISHIRO_QUEUE_KIND"),
+        }
+        match queue {
+            Some(queue) => guard.set("QUEUE_URL", queue),
+            None => guard.remove("QUEUE_URL"),
+        }
+        let config = load(&Environment::Production).await.unwrap();
+        assert_eq!(config.database.max_connections, pool, "{database} pool");
+        let actual = match config.queue.unwrap() {
+            QueueConfig::Sqlite(queue) => queue.num_workers,
+            QueueConfig::Redis(queue) => queue.num_workers,
+            QueueConfig::Postgres(queue) => queue.num_workers,
+            other => panic!("unexpected queue {other:?}"),
+        };
+        assert_eq!(actual, workers, "{database} {kind:?} workers");
+    }
 }
 
 /// Each bad value is reported by name, so an operator is not left guessing which setting a failed boot objected to.

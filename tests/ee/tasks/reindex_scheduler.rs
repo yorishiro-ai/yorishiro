@@ -159,7 +159,7 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
             .await
             .unwrap()
             .unwrap();
-    let expected: chrono::DateTime<chrono::FixedOffset> = at(300).into();
+    let expected: chrono::DateTime<chrono::FixedOffset> = at(86_400).into();
     assert_eq!(schedule.scheduled_for.unwrap(), expected);
 
     let second = task
@@ -175,4 +175,156 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     .unwrap()
     .unwrap();
     ownership.release().await.unwrap();
+}
+
+/// A migrated SQLite database with one tenant, which is all `set` and the ticker need.
+async fn scheduler_context() -> (loco_rs::app::AppContext, Uuid, tempfile::TempDir) {
+    use loco_rs::app::Hooks;
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::{ActiveModelTrait, ActiveValue, Database};
+
+    let dir = tempfile::tempdir().unwrap();
+    let uri = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("scheduler.sqlite").display()
+    );
+    yorishiro::db::register_sqlite_extensions();
+    let db = Database::connect(&uri).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let mut config = yorishiro::App::load_config(&loco_rs::environment::Environment::Any(
+        "test_sqlite".into(),
+    ))
+    .await
+    .unwrap();
+    config.database.uri = uri;
+    let ctx =
+        loco_rs::app::AppContext::builder(loco_rs::environment::Environment::Test, db, config)
+            .build();
+    let tenant = yorishiro::models::_entities::tenant_tenants::ActiveModel {
+        name: ActiveValue::Set("interval-test".into()),
+        ..Default::default()
+    }
+    .insert(&ctx.db)
+    .await
+    .unwrap();
+    (ctx, tenant.id, dir)
+}
+
+#[tokio::test]
+async fn intervals_that_cannot_be_scheduled_are_refused() {
+    use yorishiro::edition::ee::tasks::reindex_scheduler::set;
+
+    let (ctx, tenant_id, _dir) = scheduler_context().await;
+    for bad in [
+        "",
+        "abc",
+        "1D",
+        "P",
+        "PT",
+        "P1Y",
+        "P1M",
+        "P0D",
+        "P1.5D",
+        "PT1M",
+        "PT299S",
+        "P1D1D",
+        "PT1H1H",
+        "PT9223372036854775807S",
+    ] {
+        assert!(
+            set(&ctx.db, tenant_id, bad, None).await.is_err(),
+            "{bad:?} must be refused"
+        );
+    }
+    for good in ["P1D", "P1W", "PT6H", "P1DT12H", "PT5M", "PT300S"] {
+        set(&ctx.db, tenant_id, good, None)
+            .await
+            .unwrap_or_else(|error| panic!("{good:?} must be accepted: {error:?}"));
+    }
+}
+
+/// The first run is one interval after the schedule is set, and every tick schedules the next run one interval after itself.
+#[tokio::test]
+async fn a_schedule_advances_by_its_own_interval() {
+    use yorishiro::edition::ee::tasks::reindex_scheduler::{TenantReindexScheduler, get, set};
+
+    let (ctx, tenant_id, _dir) = scheduler_context().await;
+    let before = Utc::now();
+    set(&ctx.db, tenant_id, "PT6H", None).await.unwrap();
+    let first = get(&ctx.db, tenant_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .scheduled_for
+        .unwrap();
+    let six_hours = chrono::Duration::hours(6);
+    assert!(first >= before + six_hours);
+    assert!(first <= Utc::now() + six_hours);
+
+    let tick = first.to_utc();
+    TenantReindexScheduler
+        .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
+        .await
+        .unwrap();
+    let next = get(&ctx.db, tenant_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .scheduled_for
+        .unwrap();
+    assert_eq!(next.to_utc(), tick + six_hours);
+
+    set(&ctx.db, tenant_id, "P1W", None).await.unwrap();
+    let weekly = get(&ctx.db, tenant_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .scheduled_for
+        .unwrap();
+    assert!(weekly >= before + chrono::Duration::weeks(1));
+}
+
+/// Legacy intervals cannot create a tight loop or leave the next run at the current tick.
+#[tokio::test]
+async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
+    use sea_orm::ConnectionTrait;
+    use yorishiro::edition::ee::tasks::reindex_scheduler::{TenantReindexScheduler, get, set};
+
+    let (ctx, tenant_id, _dir) = scheduler_context().await;
+    for (interval, seconds) in [
+        ("PT1S", 300),
+        ("P1D1D", 86_400),
+        ("PT9223372036854775S", 86_400),
+    ] {
+        set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
+        ctx.db
+            .execute_unprepared(&format!(
+                "UPDATE tenant_reindex_schedules SET interval = '{interval}'"
+            ))
+            .await
+            .unwrap();
+        let tick = get(&ctx.db, tenant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .scheduled_for
+            .unwrap()
+            .to_utc();
+        TenantReindexScheduler
+            .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
+            .await
+            .unwrap();
+        let next = get(&ctx.db, tenant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .scheduled_for
+            .unwrap()
+            .to_utc();
+        assert_eq!(
+            next,
+            tick + chrono::Duration::seconds(seconds),
+            "{interval}"
+        );
+    }
 }

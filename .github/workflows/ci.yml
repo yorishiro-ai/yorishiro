@@ -64,16 +64,7 @@ jobs:
         run: make check-ce
       - name: Clippy CE without enterprise code
         run: make clippy-ce
-      - name: Test CE
-        # The whole `tests/` crate built without the enterprise feature, not a name filter: a
-        # filter that stops matching still passes with zero tests, which is how the old
-        # `services::mcp::tests` filter went unnoticed. SQLite needs no service container, so the
-        # PostgreSQL-only tests skip themselves behind the backend gate.
-        env:
-          LOCO_ENV: test_sqlite
-          DATABASE_URL: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-          QUEUE_URL: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
-        run: cargo test --locked --no-default-features --features community --test mod
+      # Runtime topology tests run in the shared matrix below for both editions.
 
   check:
     name: Enterprise edition
@@ -267,31 +258,51 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        edition: [ce, ee]
         include:
           - db: Postgres
             backend: postgres
             queue: Postgres
+            queue_key: postgres
+            # Used by non-harness steps; test_topology.py selects its own config via Environment::Test.
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           - db: SQLite
             backend: sqlite
             queue: SQLite
+            queue_key: sqlite
             loco_env: test_sqlite
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
           - db: Postgres
             backend: postgres
-            queue: Redis-compatible
-            loco_env: test_redis
+            queue: Valkey
+            queue_key: valkey
+            loco_env: test_postgres_valkey
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379/15
           - db: SQLite
             backend: sqlite
-            queue: Redis-compatible
-            loco_env: test_redis
+            queue: Valkey
+            queue_key: valkey
+            loco_env: test_sqlite_valkey
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379/15
+          - db: Postgres
+            backend: postgres
+            queue: SQLite
+            queue_key: sqlite
+            loco_env: test_postgres_sqlite
+            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+            queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
+          - db: SQLite
+            backend: sqlite
+            queue: Postgres
+            queue_key: postgres
+            loco_env: test_sqlite_postgres
+            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+            queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -351,7 +362,14 @@ jobs:
         run: uv run scripts/embedding_cache.py verify
 
       - name: Build workspace
-        run: cargo build --locked --workspace
+        env:
+          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+        run: |
+          if [ "${{ matrix.edition }}" = ce ]; then
+            cargo build --locked --no-default-features --features community --workspace
+          else
+            cargo build --locked --features enterprise --workspace
+          fi
 
       # Only the entity regeneration check shells out to sea-orm-cli, and that runs on PostgreSQL.
       - if: matrix.backend == 'postgres'
@@ -413,24 +431,25 @@ jobs:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
           QUEUE_URL: ${{ matrix.queue_url }}
-          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
+          YORISHIRO_VALKEY_TEST_URL: ${{ matrix.queue_url }}
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
-        run: uv run scripts/test_backend.py ${{ matrix.backend }}
+          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+        run: uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }}
 
-      - name: Verify backend gate rejects a mismatch
+      - name: Verify topology gate rejects a mismatch
         env:
           DATABASE_URL: sqlite:///tmp/yorishiro-gate-check.sqlite3?mode=rwc
           LOCO_ENV: test_sqlite
         run: |
           set +e
-          output=$(uv run scripts/test_backend.py postgres models::maintenance:: 2>&1)
+          output=$(uv run scripts/test_topology.py postgres-valkey models::maintenance:: 2>&1)
           status=$?
           set -e
           echo "$output"
-          if [ "$status" -eq 0 ] || ! grep -q "zero postgres-specific tests" <<<"$output"; then
-            echo "ERROR: backend wrapper accepted a SQLite run as PostgreSQL"
+          if [ "$status" -eq 0 ] || ! grep -q "zero topology-specific tests" <<<"$output"; then
+            echo "ERROR: topology wrapper accepted a mismatched lane"
             exit 1
           fi
 

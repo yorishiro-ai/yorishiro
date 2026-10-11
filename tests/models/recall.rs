@@ -19,9 +19,6 @@ fn chain_definition() -> serde_json::Value {
 /// `recall_context` at `depth: 2` must reach a neighbor-of-neighbor (root -> mid -> leaf) but not go further, and a diamond back to an already-visited node must not be reported twice or re-expanded.
 #[tokio::test]
 async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-test".into()),
@@ -153,6 +150,13 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
             "mid must keep its shortest hop_distance, not the diamond's longer one"
         );
 
+        let bounded = recall::recall_context(
+            &ctx.db, workspace.id, root.id,
+            recall::RecallQuery { limit: 1, full: true, depth: 2 },
+        ).await.expect("per-pivot bounded recall");
+        assert_eq!(serde_json::to_value(&bounded).unwrap()["truncated"], true, "the mid pivot has more than one relation");
+        assert_eq!(bounded.relations.len(), 2, "each hop retains its own limit, not a shared batch limit");
+
     })
     .await;
 }
@@ -160,9 +164,6 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
 /// `full: false` (the default) must reduce a neighbor's `data` to only its `x-embed` fields.
 #[tokio::test]
 async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-shallow-test".into()),

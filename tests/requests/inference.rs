@@ -17,7 +17,7 @@ use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the enterprise-edition state the test process booted with.
 /// See `marketplace.rs`'s own copy of this helper.
-fn licence(ctx: &loco_rs::app::AppContext) {
+pub(crate) fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
         .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
             sub: "acme-corp".into(),
@@ -26,13 +26,13 @@ fn licence(ctx: &loco_rs::app::AppContext) {
         })) as std::sync::Arc<LicenceState>);
 }
 
-struct Setup {
-    key: String,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
+pub(crate) struct Setup {
+    pub(crate) key: String,
+    pub(crate) tenant_id: Uuid,
+    pub(crate) workspace_id: Uuid,
 }
 
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
+pub(crate) async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     setup_named(ctx, "acme", "main", "owner@example.com").await
 }
 
@@ -94,9 +94,6 @@ async fn setup_named(
 /// The key itself never comes back from GET, only what it configured.
 #[tokio::test]
 async fn llm_key_set_get_and_clear_round_trip() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -172,9 +169,6 @@ async fn llm_key_set_get_and_clear_round_trip() {
 /// A scheme that could never be a chat-completions endpoint is refused before anything is stored, and a URL with no scheme at all is refused too rather than becoming a relative path.
 #[tokio::test]
 async fn a_non_http_base_url_is_refused() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -207,9 +201,6 @@ async fn a_non_http_base_url_is_refused() {
 /// A workspace with no credentials configured is refused with one clear error before any entity is scanned, rather than reporting zero applied in a way that reads as "nothing to infer".
 #[tokio::test]
 async fn infer_fill_without_a_configured_key_is_refused() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -249,9 +240,6 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 /// Matches `marketplace`'s and `dashboard`'s own tests for the same gate.
 #[tokio::test]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -268,7 +256,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 }
 
 /// Creates one schema and one entity for the infer-fill request tests.
-async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
+pub(crate) async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
     let create_schema = request
         .post("/api/schemas")
         .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -318,15 +306,11 @@ async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
-        let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
             .await
@@ -335,11 +319,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             .await
             .expect("claim proposal job");
         {
-            let txn = db
-                .tenant
-                .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-                .await
-                .expect("begin tenant txn");
+            let txn = super::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
             let schema = yorishiro::models::schema_schemas::get_active_schema(
                 &txn,
                 setup.workspace_id,
@@ -424,15 +404,11 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 /// Invalid proposals are marked invalid and do not leave a snapshot behind.
 #[tokio::test]
 async fn invalid_proposals_do_not_leave_a_snapshot() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
-        let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
             .await
@@ -440,11 +416,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         inference_jobs::claim(&ctx.db, job_id)
             .await
             .expect("claim proposal job");
-        let txn = db
-            .tenant
-            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-            .await
-            .expect("begin tenant txn");
+        let txn = super::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
         let schema =
             yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
                 .await
@@ -496,18 +468,13 @@ async fn create_completed_proposal(
     job_id: Uuid,
     value: serde_json::Value,
 ) {
-    let db = ctx.shared_store.get::<DbHandle>().unwrap();
     inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
         .await
         .expect("create proposal job");
     inference_jobs::claim(&ctx.db, job_id)
         .await
         .expect("claim proposal job");
-    let txn = db
-        .tenant
-        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-        .await
-        .expect("begin tenant txn");
+    let txn = super::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
     let schema =
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
@@ -530,9 +497,6 @@ async fn create_completed_proposal(
 
 #[tokio::test]
 async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -614,7 +578,8 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
 /// writing the entity. This uses two real PostgreSQL transactions rather than a sequential replay.
 #[tokio::test]
 async fn terminal_proposal_actions_serialize_against_confirmation() {
-    if !super::super::require_postgres_backend() {
+    // It holds an advisory lock across two transactions, which SQLite has no equivalent of.
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -725,9 +690,6 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
 
 #[tokio::test]
 async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -745,6 +707,10 @@ async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
             queued.text()
         );
 
+        // A workspace runs one job at a time, so the first one has to stop before another can start.
+        inference_jobs::fail(&ctx.db, queued_job, "stopped")
+            .await
+            .expect("stop the first job");
         let failed_job = Uuid::new_v4();
         create_pending_proposal(&ctx, &setup, entity, failed_job).await;
         inference_jobs::fail(&ctx.db, failed_job, "provider failed")
@@ -777,18 +743,13 @@ async fn create_pending_proposal(
     entity: Uuid,
     job_id: Uuid,
 ) {
-    let db = ctx.shared_store.get::<DbHandle>().unwrap();
     inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
         .await
         .expect("create proposal job");
     inference_jobs::claim(&ctx.db, job_id)
         .await
         .expect("claim proposal job");
-    let txn = db
-        .tenant
-        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-        .await
-        .expect("begin tenant txn");
+    let txn = super::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
     let schema =
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
@@ -816,9 +777,6 @@ async fn create_pending_proposal(
 /// response.
 #[tokio::test]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -953,9 +911,6 @@ impl InferFillDispatcher for FailingInferFillDispatcher {
 /// A dispatch failure leaves the durable infer-fill row failed rather than queued forever.
 #[tokio::test]
 async fn infer_fill_dispatch_failure_persists_failed_job() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -1005,9 +960,6 @@ async fn infer_fill_dispatch_failure_persists_failed_job() {
 
 #[tokio::test]
 async fn inference_status_polling_preserves_all_wire_values() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -1019,13 +971,6 @@ async fn inference_status_polling_preserves_all_wire_values() {
             .expect("create queued job");
         jobs.push((queued, InferenceJobStatus::Queued));
 
-        let running = Uuid::new_v4();
-        inference_jobs::create(&ctx.db, running, setup.workspace_id, "notes")
-            .await
-            .expect("create running job");
-        assert!(inference_jobs::claim(&ctx.db, running).await.unwrap());
-        jobs.push((running, InferenceJobStatus::Running));
-
         let completed = Uuid::new_v4();
         inference_jobs::create(&ctx.db, completed, setup.workspace_id, "notes")
             .await
@@ -1035,6 +980,14 @@ async fn inference_status_polling_preserves_all_wire_values() {
             .await
             .expect("complete job");
         jobs.push((completed, InferenceJobStatus::Completed));
+
+        // Last of the claims: a workspace holds one running job at a time.
+        let running = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, running, setup.workspace_id, "notes")
+            .await
+            .expect("create running job");
+        assert!(inference_jobs::claim(&ctx.db, running).await.unwrap());
+        jobs.push((running, InferenceJobStatus::Running));
 
         let failed = Uuid::new_v4();
         inference_jobs::create(&ctx.db, failed, setup.workspace_id, "notes")
@@ -1070,6 +1023,91 @@ async fn inference_status_polling_preserves_all_wire_values() {
                 assert!(body["skipped"].is_null());
             }
         }
+    })
+    .await;
+}
+
+/// The worker runs outside any request and the queued job names only the workspace, so it finds the tenant itself; the two ids differ here.
+#[tokio::test]
+async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
+    use loco_rs::bgworker::BackgroundWorker;
+    use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        assert_ne!(setup.tenant_id, setup.workspace_id);
+        create_entity(&request, &setup).await;
+        let key = request
+            .put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "base_url": "https://api.example.com/v1/",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-secret-value"
+            }))
+            .await;
+        assert_eq!(key.status_code(), StatusCode::NO_CONTENT);
+
+        // Every entity is already on the active schema, so the run reaches the schema read and needs no LLM call.
+        let job_id = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+            .await
+            .expect("create job");
+
+        InferFillWorker::build(&ctx)
+            .perform(InferFillArgs {
+                lifecycle_id: None,
+                job_id,
+                workspace_id: setup.workspace_id,
+                schema_name: "note".into(),
+            })
+            .await
+            .expect("the worker reads the schema under the workspace's own tenant");
+
+        let job = inference_jobs::get(&ctx.db, job_id)
+            .await
+            .expect("read job")
+            .expect("job exists");
+        assert_eq!(job.status, InferenceJobStatus::Completed, "{job:?}");
+        assert_eq!(job.error, None);
+    })
+    .await;
+}
+
+/// The queued job names only the workspace, so the scope the worker opens has to carry the workspace's real tenant, not the workspace id in both places.
+#[tokio::test]
+async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
+    use sea_orm::{ConnectionTrait, Statement};
+    use yorishiro::edition::ee::workers::infer_fill::open_workspace_scope;
+
+    // The settings are PostgreSQL session settings that row-level security reads.
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let setup = setup(&ctx).await;
+        assert_ne!(setup.tenant_id, setup.workspace_id);
+
+        let txn = open_workspace_scope(&ctx, setup.workspace_id)
+            .await
+            .expect("open the scope");
+        let row = txn
+            .query_one_raw(Statement::from_string(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT current_setting('app.current_tenant') AS tenant, current_setting('app.current_workspace') AS workspace",
+            ))
+            .await
+            .expect("read the settings")
+            .expect("one row");
+        let tenant: String = row.try_get("", "tenant").unwrap();
+        let workspace: String = row.try_get("", "workspace").unwrap();
+        assert_eq!(tenant, setup.tenant_id.to_string());
+        assert_eq!(workspace, setup.workspace_id.to_string());
+        txn.rollback().await.expect("release the worker scope");
+
+        let unknown = open_workspace_scope(&ctx, Uuid::new_v4()).await;
+        assert!(unknown.is_err(), "a workspace that does not exist has no scope");
     })
     .await;
 }

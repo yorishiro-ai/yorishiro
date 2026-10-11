@@ -749,6 +749,8 @@ async fn queue_starvation_index_matches_admission_predicate() {
 #[tokio::test]
 #[serial(postgres_cluster)]
 #[serial(process_environment)]
+/// The migration owns a partial unique index on active startup-reindex jobs only.
+/// Generated unique_key metadata omits its predicate, but no application/test path creates schemas from entities (including Schema::create_table_from_entity); schema creation uses migrations.
 async fn startup_admission_upgrade_preserves_ordinary_active_duplicates() {
     with_database("startup_admission_upgrade", |db| Box::pin(async move {
         let through_requests = migrations_through("m20261005_000017_embedding_tables_tenant_read");
@@ -1010,6 +1012,147 @@ async fn embedding_tables_tenant_read_grant_is_applied_and_rolled_back() {
             .await
             .expect("roll back the grant migration");
         assert_eq!(value::<i64>(db, can_select).await, 0, "grant revoked on rollback");
+    }))
+    .await;
+}
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn upgrade_000019_converts_template_tags_in_place_and_down_restores_them() {
+    with_database("upgrade_000019", |db| Box::pin(async move {
+        Migrator::up(db, Some(migrations_through("m20261006_000018_embedding_queue_state")))
+            .await
+            .expect("migrations before the tag conversion");
+        seed_initial_rows(db).await;
+        let tenant = id(db, TENANT);
+        let template = id(db, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+        let (tags, definition) = match db.get_database_backend() {
+            DbBackend::Postgres => ("ARRAY['beta','alpha','gamma']", "'{}'::jsonb"),
+            DbBackend::Sqlite => ("'[\"beta\",\"alpha\",\"gamma\"]'", "'{}'"),
+            backend => panic!("unsupported migration test backend: {backend:?}"),
+        };
+        execute(
+            db,
+            format!(
+                "INSERT INTO template_templates (id, tenant_id, name, definition, visibility, tags) \
+                 VALUES ({template}, {tenant}, 'tagged', {definition}, 'tenant', {tags})"
+            ),
+        )
+        .await;
+
+        Migrator::up(db, Some(1)).await.expect("tag conversion");
+
+        let stored: String = match db.get_database_backend() {
+            DbBackend::Postgres => value(db, format!("SELECT tags::text FROM template_templates WHERE id = {template}")).await,
+            _ => value(db, format!("SELECT tags FROM template_templates WHERE id = {template}")).await,
+        };
+        let stored: Vec<String> = serde_json::from_str(&stored).unwrap_or_else(|e| panic!("tags are a JSON array: {stored:?} {e}"));
+        assert_eq!(stored, ["beta", "alpha", "gamma"], "order is kept");
+
+        if db.get_database_backend() == DbBackend::Postgres {
+            let kind: String = value(
+                db,
+                "SELECT data_type FROM information_schema.columns WHERE table_name = 'template_templates' AND column_name = 'tags'",
+            )
+            .await;
+            assert_eq!(kind, "jsonb");
+            assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'templates_tags_idx'").await, 0);
+
+            // Non-array JSON from a legacy/manual writer rolls back to an empty SQL array.
+            for (suffix, tags) in [("object", "{}"), ("scalar", "42"), ("null", "null")] {
+                execute(db, format!(
+                    "INSERT INTO template_templates (tenant_id, name, definition, visibility, tags) \
+                     VALUES ({tenant}, 'tagged-{suffix}', '{{}}'::jsonb, 'tenant', '{tags}'::jsonb)"
+                )).await;
+            }
+
+            Migrator::down(db, Some(1)).await.expect("tag conversion rolled back");
+            let restored: String = value(
+                db,
+                format!("SELECT array_to_string(tags, ',') FROM template_templates WHERE id = {template}"),
+            )
+            .await;
+            assert_eq!(restored, "beta,alpha,gamma");
+            assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM template_templates WHERE name LIKE 'tagged-%' AND cardinality(tags) = 0").await, 3);
+            assert_index_exists(db, "templates_tags_idx").await;
+        }
+    }))
+    .await;
+}
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn upgrade_000020_refuses_duplicates_without_changing_jobs_and_allows_one_running_job() {
+    with_database("upgrade_000020", |db| Box::pin(async move {
+        Migrator::up(db, Some(migrations_through("m20261009_000019_template_tags_json")))
+            .await
+            .expect("migrations before the exclusion");
+        seed_initial_rows(db).await;
+        let workspace = id(db, WORKSPACE);
+        let jobs = [
+            id(db, "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d0d0"),
+            id(db, "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1"),
+            id(db, "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2"),
+        ];
+        // Two jobs already running in one workspace, as the old code allowed, and one queued.
+        for (job, status) in jobs.iter().zip(["running", "running", "queued"]) {
+            execute(
+                db,
+                format!(
+                    "INSERT INTO inference_jobs (id, workspace_id, schema_name, status) VALUES ({job}, {workspace}, 'upgrade schema', '{status}')"
+                ),
+            )
+            .await;
+        }
+
+        let error = Migrator::up(db, Some(1)).await.expect_err("duplicates must abort the migration");
+        assert!(error.to_string().contains("2 running jobs"), "{error}");
+        assert!(error.to_string().contains("drain workers"), "{error}");
+
+        assert_eq!(
+            value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'").await,
+            2,
+            "both running jobs remain untouched"
+        );
+        assert_eq!(
+            value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'failed'").await,
+            0,
+            "no job is failed by the migration"
+        );
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE error IS NOT NULL OR attempt <> 0").await, 0);
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs").await, 3);
+        // Operators drain the workers and resolve the duplicate before retrying.
+        execute(db, format!("UPDATE inference_jobs SET status = 'completed' WHERE id = {}", jobs[0])).await;
+        Migrator::up(db, Some(1)).await.expect("exclusion migration after resolution");
+        assert_index_exists(db, "inference_jobs_one_running_per_workspace_idx").await;
+        let queued = &jobs[2];
+        assert!(
+            db.execute_unprepared(&format!(
+                "UPDATE inference_jobs SET status = 'running' WHERE id = {queued}"
+            ))
+            .await
+            .is_err(),
+            "a second running job in the workspace is refused"
+        );
+
+        execute(db, "UPDATE inference_jobs SET status = 'queued'").await;
+        let first_claim = format!("UPDATE inference_jobs SET status = 'running' WHERE id = {}", jobs[0]);
+        let second_claim = format!("UPDATE inference_jobs SET status = 'running' WHERE id = {}", jobs[1]);
+        let (first, second) = tokio::join!(
+            db.execute_unprepared(&first_claim),
+            db.execute_unprepared(&second_claim)
+        );
+        assert!(first.is_ok() != second.is_ok(), "only one concurrent claim succeeds: {first:?} / {second:?}");
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'").await, 1);
+
+        Migrator::down(db, Some(1)).await.expect("exclusion rolled back");
+        execute(
+            db,
+            format!("UPDATE inference_jobs SET status = 'running' WHERE id = {queued}"),
+        )
+        .await;
     }))
     .await;
 }

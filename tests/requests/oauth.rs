@@ -47,14 +47,16 @@ fn sign_state(payload: &str) -> String {
     format!("{payload}.{signature}")
 }
 
+const OAUTH_VARS: [&str; 3] = [
+    "YORISHIRO_OAUTH_ISSUER_URL",
+    "YORISHIRO_OAUTH_CLIENT_ID",
+    "YORISHIRO_OAUTH_CLIENT_SECRET",
+];
+
 /// `OAuthConfig::from_env` reads process env vars directly on every request, with no DI seam for it (see `controllers::oauth`'s module doc comment), so tests configure OAuth the same way production does: by setting the vars for the duration of the request.
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_OAUTH_ISSUER_URL",
-        "YORISHIRO_OAUTH_CLIENT_ID",
-        "YORISHIRO_OAUTH_CLIENT_SECRET",
-    ]);
+    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
     guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
     guard.set("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
     guard.set("YORISHIRO_OAUTH_CLIENT_SECRET", CLIENT_SECRET);
@@ -65,8 +67,9 @@ async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
 #[tokio::test]
 #[serial(process_environment)]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
-    if !super::super::require_postgres_backend() {
-        return;
+    let ambient = crate::EnvGuard::capture(&OAUTH_VARS);
+    for variable in OAUTH_VARS {
+        ambient.remove(variable);
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
@@ -94,13 +97,12 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 #[tokio::test]
 #[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
+    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
+    guard.remove("YORISHIRO_OAUTH_CLIENT_ID");
+    guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
+    guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
-        let guard = crate::EnvGuard::capture(&["YORISHIRO_OAUTH_ISSUER_URL"]);
-        guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
         let response = request.get("/auth/oauth/status").await;
 
         assert_eq!(
@@ -118,9 +120,6 @@ async fn status_errors_loudly_when_partially_configured() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn authorize_and_callback_404_when_unconfigured() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let authorize = request.get("/auth/oauth/authorize").await;
@@ -147,9 +146,6 @@ async fn authorize_and_callback_404_when_unconfigured() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -170,9 +166,6 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -208,9 +201,6 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 #[tokio::test]
 #[serial(process_environment)]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -237,9 +227,6 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn callback_rejects_a_state_with_a_bad_signature() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
@@ -259,9 +246,6 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn callback_rejects_an_expired_state() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -285,13 +269,12 @@ async fn callback_rejects_an_expired_state() {
 }
 
 /// `find_or_create` must not be a backdoor around `YORISHIRO_MAX_TENANTS`: with the cap already met, a brand-new identity (one `find_by_oauth_identity` finds nothing for) is refused rather than silently given a fresh tenant.
+/// The migration's user_users_oauth_identity_idx is partial (oauth_provider IS NOT NULL).
+/// Generated unique_key metadata omits that predicate; no application/test path uses Schema::create_table_from_entity or other entity-based schema creation, so migrations remain authoritative.
 /// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
 #[tokio::test]
 #[serial(process_environment)]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         licence(&ctx);
         let existing_tenant = tenant_tenants::ActiveModel {
@@ -337,9 +320,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
@@ -388,9 +368,6 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 /// `status` is mounted beside them and deliberately left out, so polling it never exhausts a client's budget.
 #[tokio::test]
 async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         for path in ["/auth/oauth/authorize", "/auth/oauth/callback"] {

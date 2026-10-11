@@ -59,9 +59,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// A workspace that never chose reads as absent (an empty list, not a 404, since `list` is "every stored preference" and there being none is not an error); setting, then resetting, round-trips through the exact stored order and back to absence.
 #[tokio::test]
 async fn set_get_and_reset_round_trip_in_display_order() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -152,9 +149,6 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 /// Neither refusal leaves a row behind.
 #[tokio::test]
 async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -201,9 +195,6 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
 /// An explicit empty selection is a choice ("show nothing") and is stored as a row, distinct from having never chosen at all.
 #[tokio::test]
 async fn an_empty_selection_is_stored_as_a_choice() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 

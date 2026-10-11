@@ -7,7 +7,7 @@
 //!
 //! `tests/workers/queue_routing.rs` covers tag filtering through the public
 //! `Queue::run(tags)` API for both SQL providers.  The Valkey provider is covered
-//! by `uv run scripts/test_redis.py` against a real Valkey service.
+//! by `uv run scripts/test_topology.py sqlite-valkey` against a real Valkey service.
 
 use futures::FutureExt;
 use std::collections::HashMap;
@@ -657,18 +657,12 @@ async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
 #[serial_test::serial(queue_postgres)]
 #[serial_test::serial(process_environment)]
 async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
-    let Ok(uri) = std::env::var("YORISHIRO_REDIS_TEST_URL") else {
-        eprintln!("skipping Redis bounded-scan test: YORISHIRO_REDIS_TEST_URL is unset");
+    let Some(uri) = crate::valkey_test_url() else {
+        eprintln!(
+            "skipping Valkey bounded-scan test: the lane's queue is not reserved database 15"
+        );
         return;
     };
-    if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {
-        eprintln!("skipping Redis bounded-scan test: explicit URL is not Redis");
-        return;
-    }
-    if reqwest::Url::parse(&uri).map_or(true, |url| url.path() != "/15") {
-        eprintln!("skipping Redis bounded-scan test: URL must select reserved test database 15");
-        return;
-    }
     let config = RedisQueueConfig {
         uri,
         dangerously_flush: true,

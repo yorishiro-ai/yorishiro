@@ -89,9 +89,6 @@ const UNGATED: &[&str] = &[
 
 #[tokio::test]
 async fn gated_routes_are_absent_without_a_licence() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         // No licence installed: the process booted with whatever `from_env` found, which in a test
         // environment is nothing.
@@ -132,9 +129,6 @@ async fn gated_routes_are_absent_without_a_licence() {
 
 #[tokio::test]
 async fn gated_routes_are_served_with_a_licence() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         install_licence(&ctx, 60 * 60);
 
@@ -166,9 +160,6 @@ async fn gated_routes_are_served_with_a_licence() {
 /// `ee::controllers::middleware::edition::licence_gate` is a per-request layer to keep.
 #[tokio::test]
 async fn an_expired_licence_closes_the_gate_again() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         // Unlicensed first, so the 404 below is known to be reachable on this path at all. Without
         // this the test would pass against a gate that never opens.
@@ -209,9 +200,6 @@ async fn an_expired_licence_closes_the_gate_again() {
 /// where a weaker `assert_ne!(.., 404)` would also hold if the route stopped existing.
 #[tokio::test]
 async fn stripe_webhook_is_gated() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let unlicensed = request.post("/api/stripe/webhook").await.status_code();
         assert_eq!(
@@ -242,9 +230,6 @@ async fn stripe_webhook_is_gated() {
 /// enterprise route would still pass the unlicensed assertions.
 #[tokio::test]
 async fn oauth_login_is_gated() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let unlicensed = request.get("/auth/oauth/status").await.status_code();
         assert_eq!(

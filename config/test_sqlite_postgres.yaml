@@ -27,14 +27,16 @@ scheduler:
 
 # Queue Configuration
 queue:
-  kind: Sqlite
+  kind: Postgres
+  # Parallel SQLite boots also establish networked queue pools; Loco's 500ms default is too short under migration load.
+  connect_timeout: 5000
 
-  uri: <%= get_env(name="QUEUE_URL", default="sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc") %>
+  uri: <%= get_env(name="QUEUE_URL", default="postgres://localhost:5432/yorishiro") %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
 
   # Workers dequeuing in parallel, tunable per deployment.
-  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="1") %>
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
 
   # Requeues jobs left in `processing` by a worker that died before completing or failing them.
   reaper:

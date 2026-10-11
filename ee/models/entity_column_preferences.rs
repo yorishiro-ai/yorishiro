@@ -87,6 +87,7 @@ pub(crate) async fn set(
     let encoded = serde_json::to_value(columns).internal()?;
 
     let active = ActiveModel {
+        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
         workspace_id: ActiveValue::Set(workspace_id),
         entity_type: ActiveValue::Set(entity_type.to_string()),
         columns: ActiveValue::Set(encoded),

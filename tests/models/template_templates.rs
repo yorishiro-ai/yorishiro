@@ -43,7 +43,7 @@ fn visibility_round_trips_db_and_json_values() {
             created_by: None,
             created_at: Utc::now().fixed_offset(),
             updated_at: Utc::now().fixed_offset(),
-            tags: vec![],
+            tags: serde_json::json!([]),
         })
         .unwrap();
         assert_eq!(record.visibility, visibility);
@@ -65,7 +65,7 @@ fn unknown_persisted_visibility_is_internal_and_input_is_validation_failed() {
         created_by: None,
         created_at: Utc::now().fixed_offset(),
         updated_at: Utc::now().fixed_offset(),
-        tags: vec![],
+        tags: serde_json::json!([]),
     };
     assert!(matches!(
         templates::TemplateRecord::try_from(row),
@@ -107,7 +107,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
             name: sea_orm::ActiveValue::Set("a-private".into()),
             definition: sea_orm::ActiveValue::Set(note_definition("a-private")),
             visibility: sea_orm::ActiveValue::Set("tenant".into()),
-            tags: sea_orm::ActiveValue::Set(vec![]),
+            tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
             ..Default::default()
         };
         let private = sea_orm::ActiveModelTrait::insert(private, &ctx.db)
@@ -120,7 +120,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
             name: sea_orm::ActiveValue::Set("b-community".into()),
             definition: sea_orm::ActiveValue::Set(note_definition("b-community")),
             visibility: sea_orm::ActiveValue::Set("community".into()),
-            tags: sea_orm::ActiveValue::Set(vec![]),
+            tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
             ..Default::default()
         };
         let community = sea_orm::ActiveModelTrait::insert(community, &ctx.db)
@@ -133,7 +133,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
             name: sea_orm::ActiveValue::Set("b-private".into()),
             definition: sea_orm::ActiveValue::Set(note_definition("b-private")),
             visibility: sea_orm::ActiveValue::Set("tenant".into()),
-            tags: sea_orm::ActiveValue::Set(vec![]),
+            tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
             ..Default::default()
         };
         let hidden = sea_orm::ActiveModelTrait::insert(hidden, &ctx.db)

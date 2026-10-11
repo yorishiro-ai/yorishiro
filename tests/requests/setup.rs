@@ -14,6 +14,8 @@ use super::with_max_tenants;
 #[tokio::test]
 #[serial(process_environment)]
 async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
+    let ambient = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
+    ambient.remove("YORISHIRO_MAX_TENANTS");
     boot_request::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), StatusCode::OK);

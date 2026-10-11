@@ -100,11 +100,35 @@ pub async fn get(
         .transpose()
 }
 
+/// What a refused claim reports when the workspace already has a running job.
+const WORKSPACE_BUSY: &str = "the workspace already has a running infer-fill job";
+
+/// Whether `error` is a claim refused because another job of the same workspace is running.
+///
+/// The partial unique index `inference_jobs_one_running_per_workspace_idx` is the exclusion: moving a second job to `running` violates it, on SQLite as well as PostgreSQL.
+/// The caller defers such a job rather than dropping it.
+#[must_use]
+pub fn is_workspace_busy(error: &YorishiroError) -> bool {
+    matches!(error, YorishiroError::Conflict { message } if message == WORKSPACE_BUSY)
+}
+
+fn busy_or_internal(error: sea_orm::DbErr) -> YorishiroError {
+    if matches!(
+        error.sql_err(),
+        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+    ) {
+        return YorishiroError::Conflict {
+            message: WORKSPACE_BUSY.into(),
+        };
+    }
+    YorishiroError::Internal(error.into())
+}
+
 /// Claims a queued job exactly once.
 /// A running job is never reclaimed because its worker may still be executing an inference.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the operation cannot be completed, or the workspace-busy conflict ([`is_workspace_busy`]) when another job of the workspace is running.
 pub async fn claim(conn: &impl ConnectionTrait, id: Uuid) -> Result<bool, YorishiroError> {
     claim_attempt(conn, id, None).await
 }
@@ -126,7 +150,7 @@ pub(crate) async fn claim_attempt(
     if let Some(attempt) = expected_attempt {
         update = update.filter(Column::Attempt.eq(attempt));
     }
-    let result = update.exec(conn).await.internal()?;
+    let result = update.exec(conn).await.map_err(busy_or_internal)?;
     if result.rows_affected == 1 {
         return Ok(true);
     }
@@ -177,7 +201,7 @@ pub async fn reconcile_attempt(
             .filter(Column::Attempt.eq(target_attempt))
             .exec(&txn)
             .await
-            .internal()?;
+            .map_err(busy_or_internal)?;
         txn.commit().await.internal()?;
         return Ok(result.rows_affected == 1);
     }
@@ -202,7 +226,7 @@ pub async fn reconcile_attempt(
         ]))
         .exec(&txn)
         .await
-        .internal()?;
+        .map_err(busy_or_internal)?;
     txn.commit().await.internal()?;
     Ok(result.rows_affected == 1)
 }

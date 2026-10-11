@@ -220,6 +220,11 @@ PostgreSQL では複数のワーカープロセスが並列にジョブを取り
 SQLite では取り出し処理は直列ですが、永続キューによる障害回復は利用できます。
 
 `YORISHIRO_QUEUE_WORKERS` は 1 ワーカープロセス内の並列取り出しループ数を設定します。
+既定値は SQLite キューで 1、PostgreSQL と Redis 互換キューで 2 です。
+SQLite は書き込み側が 1 つのため、SQLite キューでワーカーを増やしても競合が増えるだけでスループットは上がらず、起動時に警告を記録します。
+`DB_MAX_CONNECTIONS` の既定値は SQLite データベースで 10、PostgreSQL で 100 です。SQLite のプールが 16 を超えると起動時に警告します。
+SQLite データベースを PostgreSQL や Redis 互換のキューと組み合わせた場合も警告します。他ホストの worker は SQLite ファイルを開けず、SQLite の名前付きロックは何もしないためです。
+スループットは、アプリケーションデータを PostgreSQL、キューを Redis 互換 (Valkey) にした構成が最も伸びます。次に両方 PostgreSQL、最も伸びないのが両方 SQLite です。
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` は、reaper が処理中ジョブを回復するまでの時間を設定します。
 
 ## テナント再インデックススケジュール
@@ -227,7 +232,10 @@ SQLite では取り出し処理は直列ですが、永続キューによる障�
 テナント単位で定期的にすべてのワークスペースの再インデックスを実行するスケジュールを設定できます。スケジュールは手動の `reindex_embeddings` タスクと同じフローをたどり、ワークスペースごとのプロバイダとモデルバージョンのチェックを尊重します。
 
 API エンドポイント（`POST /api/identity/tenants/schedule` など）で ISO 8601 形式の期間（`P1D` で毎日、`P1W` で毎週）と任意の IANA タイムゾーン名（デフォルト：UTC）を指定します。
-5 分の間隔で次の `scheduled_for` 時刻を設定します。
+間隔には週・日・時・分・秒を使えます(例: `P1D`、`P1W`、`PT6H`)。最短は `PT5M` で、年と月は受け付けません。
+`P1D1D` のように単位が重複する指定は受け付けません。
+ティッカーは既存の短すぎる間隔を 5 分に補正し、読めない間隔や次回日時がオーバーフローする間隔では 1 日後を使います。
+最初の `scheduled_for` はスケジュール設定の 1 間隔後になり、実行した scheduler tick は次の `scheduled_for` をその tick の 1 間隔後に設定します。
 各 scheduler tick では、期限を過ぎた `scheduled_for` を実行し、未実行分の猶予時間による打ち切りはありません。
 
 選択した `config/<environment>.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。

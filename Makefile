@@ -6,9 +6,9 @@
 # Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
-YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
+YORISHIRO_VALKEY_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check coverage test-postgres test-sqlite test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -55,19 +55,18 @@ test-postgres: build
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		docker compose up -d --wait testdb; \
 	fi
-	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/test_backend.py postgres
+	DATABASE_URL='$(DATABASE_URL)' QUEUE_URL='$(DATABASE_URL)' YORISHIRO_TEST_TOPOLOGY=postgres-postgres YORISHIRO_TEST_QUEUE=postgres RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/test_topology.py postgres-postgres
 
 test-sqlite: build
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_backend.py sqlite
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' YORISHIRO_TEST_TOPOLOGY=sqlite-sqlite YORISHIRO_TEST_QUEUE=sqlite RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite
 
-# Redis DB 15 is reserved for tests because Loco clears the selected DB.
-# The default endpoint is provisioned locally by Compose. An explicit endpoint
-# uses the caller's service instead and does not start a local container.
-test-redis:
-	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379/15" ]; then \
+# Valkey DB 15 is reserved for tests. An explicit endpoint uses the caller's
+# service instead and does not start a local container.
+test-valkey:
+	@if [ "$(YORISHIRO_VALKEY_TEST_URL)" = "redis://localhost:6379/15" ]; then \
 		docker compose up -d --wait redis; \
 	fi
-	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' uv run scripts/test_redis.py
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_VALKEY_TEST_URL)' YORISHIRO_TEST_TOPOLOGY=sqlite-valkey YORISHIRO_TEST_QUEUE=valkey LOCO_ENV=test_sqlite_valkey uv run scripts/test_topology.py sqlite-valkey
 
 build: build-ce
 

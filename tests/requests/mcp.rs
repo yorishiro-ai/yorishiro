@@ -128,9 +128,6 @@ fn tool_result_json(response: &Value) -> Value {
 /// Licence changes must therefore gate discovery and dispatch dynamically, not only at construction.
 #[tokio::test]
 async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         install_licence(&ctx, true);
         let (_tenant_id, workspace_id, owner_id, _schema_key) =
@@ -178,9 +175,6 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
 /// RLS-scoped transaction, enforce read/schema scopes, and explicitly commit a successful merge.
 #[tokio::test]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         install_licence(&ctx, true);
         let (tenant_id, workspace_id, owner_id, schema_key) =
@@ -205,7 +199,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             name: ActiveValue::Set("library-note".into()),
             definition: ActiveValue::Set(original),
             visibility: ActiveValue::Set("tenant".into()),
-            tags: ActiveValue::Set(vec![]),
+            tags: ActiveValue::Set(serde_json::json!([])),
             ..Default::default()
         }
         .insert(&ctx.db)
@@ -342,9 +336,6 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// and cannot change the entity.
 #[tokio::test]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, owner_id, migration_key) =
             fixtures::create_tenant_workspace_owner(
@@ -662,9 +653,6 @@ async fn community_mcp_entities_relations_and_schema_tools_execute_over_protocol
 
 #[tokio::test]
 async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, _owner_id, schema_key) =
             fixtures::create_tenant_workspace_owner(
@@ -789,17 +777,14 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
 
 /// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 #[serial_test::serial(queue_postgres)]
+#[serial_test::serial(process_environment)]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use super::query_worker::{FailingProvider, KeywordProvider, boot_with_query_worker};
     use std::sync::Arc;
     use yorishiro::error::YorishiroError;
     use yorishiro::models::entity_embeddings;
 
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     let provider = Arc::new(KeywordProvider::new(768));
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
         let (tenant_id, workspace_id, owner_id, _schema_key) =

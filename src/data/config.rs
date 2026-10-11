@@ -26,14 +26,12 @@ pub async fn load(environment: &Environment) -> Result<Config> {
 fn test_environment(environment: &Environment) -> Environment {
     match environment {
         Environment::Test => {
-            if env::var("QUEUE_URL")
-                .is_ok_and(|url| url.starts_with("redis://") || url.starts_with("rediss://"))
-            {
-                return Environment::Any("test_redis".into());
+            if let Ok(topology) = env::var("YORISHIRO_TEST_TOPOLOGY") {
+                return Environment::Any(format!("test_{}", topology.replace('-', "_")));
             }
             let url = env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());
-            if url.starts_with("sqlite://") || url.starts_with("sqlite::") {
+            if url.starts_with("sqlite:") {
                 Environment::Any("test_sqlite".into())
             } else {
                 Environment::Any("test_postgres".into())
@@ -128,6 +126,48 @@ pub fn validate_queue_policy(config: &Config) -> Result<()> {
     Ok(())
 }
 
+/// The most connections a SQLite database pool is expected to need.
+///
+/// SQLite admits one writer at a time, so connections beyond a small pool only queue behind its write lock and surface as `SQLITE_BUSY` waits.
+pub const SQLITE_POOL_ADVISORY_LIMIT: u32 = 16;
+
+/// Settings that are valid but cannot add throughput on the configured database and queue pair.
+///
+/// A SQLite queue dequeues under `BEGIN IMMEDIATE`, so its workers serialize on one write lock, and a SQLite database has the same single writer.
+/// PostgreSQL claims queue rows with `FOR UPDATE SKIP LOCKED` and Redis-compatible queues need no database lock, so they are the topologies where `num_workers` scales.
+/// PostgreSQL with a Redis-compatible queue additionally keeps queue polling off the database.
+#[must_use]
+pub fn topology_advisories(config: &Config) -> Vec<String> {
+    let mut advisories = Vec::new();
+    if let Some(QueueConfig::Sqlite(queue)) = config.queue.as_ref()
+        && queue.num_workers > 1
+    {
+        advisories.push(format!(
+            "queue.num_workers is {} on a SQLite queue, whose dequeue serializes behind one write lock: extra workers add contention, not throughput; use 1, or a PostgreSQL or Redis-compatible queue",
+            queue.num_workers
+        ));
+    }
+    if is_sqlite_uri(&config.database.uri)
+        && config.database.max_connections > SQLITE_POOL_ADVISORY_LIMIT
+    {
+        advisories.push(format!(
+            "database.max_connections is {} on SQLite, which has a single writer: connections beyond {SQLITE_POOL_ADVISORY_LIMIT} only wait on its write lock",
+            config.database.max_connections
+        ));
+    }
+    if is_sqlite_uri(&config.database.uri)
+        && matches!(
+            config.queue.as_ref(),
+            Some(QueueConfig::Postgres(_) | QueueConfig::Redis(_))
+        )
+    {
+        advisories.push(
+            "the database is SQLite but the queue is not: a networked queue invites workers on other hosts, which cannot open the SQLite file, and SQLite's named locks are no-ops, so jobs that rely on them run unserialised; keep every worker on the database's host, or use PostgreSQL".into(),
+        );
+    }
+    advisories
+}
+
 /// Makes a Redis queue poll every named queue the workers enqueue to.
 ///
 /// Redis workers poll only the queues the configuration names, so a job sent to any other would sit there with nothing ever dequeuing it.
@@ -168,7 +208,7 @@ fn reject_shared_sqlite_file(config: &Config, queue: &QueueConfig) -> Result<()>
 }
 
 fn is_sqlite_uri(uri: &str) -> bool {
-    uri.starts_with("sqlite://") || uri.starts_with("sqlite::")
+    uri.starts_with("sqlite:")
 }
 
 fn sqlite_file_identity(uri: &str) -> Result<Option<PathBuf>> {
