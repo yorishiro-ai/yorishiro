@@ -289,20 +289,6 @@ jobs:
             loco_env: test_sqlite_valkey
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379/15
-          - db: Postgres
-            backend: postgres
-            queue: SQLite
-            queue_key: sqlite
-            loco_env: test_postgres_sqlite
-            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-            queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
-          - db: SQLite
-            backend: sqlite
-            queue: Postgres
-            queue_key: postgres
-            loco_env: test_sqlite_postgres
-            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-            queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
     services:
       db:
         image: pgvector/pgvector:pg18

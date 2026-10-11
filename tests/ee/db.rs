@@ -176,6 +176,7 @@ fn sqlite_scheduler_lock_subprocess_aliases_contend_and_release() {
     let alias_uri = format!("sqlite://{}?mode=rwc", alias.display());
 
     for contender_uri in [absolute_uri, alias_uri] {
+        // Keep readiness on its own line even when a caller runs the supported suite with RUST_TEST_THREADS=1.
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",

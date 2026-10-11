@@ -231,7 +231,7 @@ async fn parallel_sqlite_boots_keep_their_database_parents_alive() {
         return;
     }
 
-    // Reserve the boot group against other booting tests: eight networked queue pools must not compete with the rest of the suite, and nested read scopes share this writer lock.
+    // Hold one writer scope for the boot group so overlapping same-thread readers cannot deadlock behind a waiting environment writer; this also bounds competing queue pools on Valkey.
     let _environment = crate::EnvGuard::capture(&["QUEUE_URL"]);
 
     let boots = (0..8).map(|_| async {

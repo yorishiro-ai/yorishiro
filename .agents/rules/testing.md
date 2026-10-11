@@ -30,6 +30,9 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
 | `LOCO_ENV` | `test_postgres` or `test_sqlite` | Selects the test configuration |
 
+Supported topologies are `postgres-postgres`, `sqlite-sqlite`, `postgres-valkey`, and `sqlite-valkey`.
+Crossed SQLite/PostgreSQL SQL queues are forbidden by config validation and are not full-suite or CI targets.
+
 Custom PostgreSQL:
 
 ```sh
