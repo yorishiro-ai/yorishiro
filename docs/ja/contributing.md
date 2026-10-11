@@ -20,9 +20,11 @@ Linux のビルドはリポジトリの `.cargo/config.toml` を使うため、`
 
 テストスイートは Rust の既定の並列実行で起動してください。
 ローカルの一般的なトポロジーには `make test-postgres`、`make test-sqlite`、`make test-valkey` を使います。
-6 通りのデータベースとキューの組み合わせには `uv run scripts/test_topology.py <topology>` を使います。
+`postgres-postgres`、`sqlite-sqlite`、`postgres-valkey`、`sqlite-valkey` の検証には `uv run scripts/test_topology.py <topology>` を使います。
 このラッパーは CE または EE の Cargo feature を明示して実行し、環境変数のラベルではなく Loco が解決したテスト設定の証拠を検証します。
 トポロジーゲートのラッパーは `uv run scripts/test_topology.py` です。
+テストコマンドが成功してもトポロジーの証拠が不正な場合は、stderr に `YORISHIRO_TOPOLOGY_REJECTED` を出して非 0 で終了します。
+CI は両方を確認し、ビルドやテストの失敗を mismatch 自己テストの成功として扱いません。
 Valkey のトポロジーを専用エンドポイントで検証する場合は `make test-valkey` を使います。
 Valkey-compatible な `redis://` エンドポイントにはデータベース 15 を指定してください。Loco はキューの後処理で、このテスト専用データベースを消去します。
 リポジトリのその他の補助スクリプトも uv プロジェクトから実行し、Python 標準ライブラリだけを使います。

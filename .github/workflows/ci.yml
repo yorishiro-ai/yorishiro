@@ -430,12 +430,14 @@ jobs:
           LOCO_ENV: test_sqlite
         run: |
           set +e
-          output=$(uv run scripts/test_topology.py postgres-valkey models::maintenance:: 2>&1)
+          stderr="$RUNNER_TEMP/topology-mismatch.stderr"
+          output=$(uv run scripts/test_topology.py postgres-valkey models::maintenance:: 2>"$stderr")
           status=$?
           set -e
           echo "$output"
-          if [ "$status" -eq 0 ] || ! grep -q "zero topology-specific tests" <<<"$output"; then
-            echo "ERROR: topology wrapper accepted a mismatched lane"
+          cat "$stderr"
+          if [ "$status" -eq 0 ] || ! grep -Fxq "YORISHIRO_TOPOLOGY_REJECTED" "$stderr"; then
+            echo "ERROR: expected the topology wrapper's mismatch rejection, not success or an unrelated failure"
             exit 1
           fi
 

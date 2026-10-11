@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+MISMATCH_TOKEN = "YORISHIRO_TOPOLOGY_REJECTED"
 TOPOLOGIES = {
     "postgres-postgres",
     "sqlite-sqlite",
@@ -49,9 +50,11 @@ def main() -> int:
         if result.returncode:
             return result.returncode
         if not validate_marker_layout(marker_dir, topology):
+            print(MISMATCH_TOKEN, file=sys.stderr)
             print("ERROR: unexpected topology marker directories", file=sys.stderr)
             return 1
         if count == 0:
+            print(MISMATCH_TOKEN, file=sys.stderr)
             print(f"ERROR: topology {topology} executed zero topology-specific tests", file=sys.stderr)
             return 1
         return 0
