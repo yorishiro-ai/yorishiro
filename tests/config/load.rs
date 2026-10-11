@@ -136,16 +136,6 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
             "sqlite://db.sqlite3?mode=rwc",
             "redis://valkey:6379/15",
         ),
-        (
-            "postgres-sqlite",
-            "postgres://db/app",
-            "sqlite://queue.sqlite3?mode=rwc",
-        ),
-        (
-            "sqlite-postgres",
-            "sqlite://db.sqlite3?mode=rwc",
-            "postgres://queue/app",
-        ),
     ] {
         guard.set("YORISHIRO_TEST_TOPOLOGY", topology);
         guard.set("DATABASE_URL", database);
@@ -247,13 +237,6 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
             100,
             2,
         ),
-        (
-            "postgres://db/app",
-            Some("Sqlite"),
-            Some("sqlite:///var/lib/y/q.sqlite3?mode=rwc"),
-            100,
-            1,
-        ),
     ] {
         guard.set("DATABASE_URL", database);
         match kind {
@@ -273,6 +256,42 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
             other => panic!("unexpected queue {other:?}"),
         };
         assert_eq!(actual, workers, "{database} {kind:?} workers");
+    }
+}
+
+/// Invalid SQL pairs fail during config loading, before any database or queue connection is opened.
+#[tokio::test]
+#[serial(process_environment)]
+async fn production_refuses_crossed_sql_queue_backends() {
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    ]);
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    for (database, kind, queue) in [
+        (
+            "postgres://db/app",
+            "Sqlite",
+            "sqlite:///var/lib/y/q.sqlite3?mode=rwc",
+        ),
+        (
+            "sqlite:///var/lib/y/a.sqlite3?mode=rwc",
+            "Postgres",
+            "postgres://queue/app",
+        ),
+    ] {
+        guard.set("DATABASE_URL", database);
+        guard.set("YORISHIRO_QUEUE_KIND", kind);
+        guard.set("QUEUE_URL", queue);
+        let loco_rs::Error::CustomError(_, detail) = load(&Environment::Production)
+            .await
+            .expect_err("invalid pair must not boot")
+        else {
+            panic!("expected ValidationFailed");
+        };
+        assert_eq!(detail.errors.unwrap()["error"]["code"], "validation_failed");
     }
 }
 

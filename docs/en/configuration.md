@@ -151,7 +151,11 @@ Boot rejects equivalent shared-file URIs after normalizing SQLite paths and igno
 Set `QUEUE_URL` explicitly when moving an existing installation or choosing a custom location.
 PostgreSQL and Redis-compatible queues do not share the SQLite file restriction.
 
-The application database and queue provider do not have to use the same backend.
+Supported and CI-tested configurations are SQLite with a SQLite queue, PostgreSQL with a PostgreSQL queue, and either database with a Redis-compatible (Valkey) queue.
+Crossed SQL configurations (SQLite database with PostgreSQL queue, or PostgreSQL database with SQLite queue) are forbidden and rejected before boot with `ValidationFailed` (`validation_failed`).
+The error message explains the invalid pair in English and Japanese and asks for a matching SQL queue or Valkey.
+Without a queue override, SQLite defaults to a SQLite queue and PostgreSQL defaults to a PostgreSQL queue.
+RabbitMQ and SQS are not implemented; future support is restricted to the enterprise edition with a PostgreSQL database, never SQLite or the community edition.
 For example, a PostgreSQL application database can use a Redis-compatible queue service by setting `YORISHIRO_QUEUE_KIND=Redis` and an appropriate `QUEUE_URL`.
 Additional queue providers can be added without changing the application database configuration.
 
@@ -208,7 +212,8 @@ With SQLite, dequeueing is serialized, while durable queue recovery still works.
 It defaults to 1 for a SQLite queue and 2 for PostgreSQL and Redis-compatible queues.
 SQLite has a single writer, so more workers on a SQLite queue add contention, not throughput, and boot logs a warning when you set them.
 `DB_MAX_CONNECTIONS` defaults to 10 for a SQLite database and 100 for PostgreSQL, and boot warns when a SQLite pool exceeds 16.
-Boot also warns when a SQLite database is paired with a PostgreSQL or Redis-compatible queue: workers on other hosts cannot open the SQLite file, and SQLite's named locks do nothing.
+Crossed SQL configurations fail validation rather than emitting an advisory.
+SQLite with a Redis-compatible queue remains supported, but boot advises keeping workers on the database's host because remote workers cannot open the SQLite file and SQLite has no named locks.
 Throughput scales most with PostgreSQL for application data and a Redis-compatible queue (Valkey), then with PostgreSQL for both, and least with SQLite for both.
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` controls how long a job may remain processing before the reaper recovers it.
 

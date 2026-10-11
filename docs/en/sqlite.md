@@ -26,6 +26,9 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 - **SQLite snapshots.** Creating snapshots is not supported on SQLite. A snapshot created on PostgreSQL can be restored on SQLite.
 
 ## Configuration
+Supported queue configurations for SQLite are a separate SQLite queue file or a Redis-compatible (Valkey) queue.
+A PostgreSQL queue with a SQLite database is forbidden and rejected before boot with `ValidationFailed`.
+Future enterprise-only RabbitMQ/SQS queues will require a PostgreSQL database and will not be available on SQLite.
 The PostgreSQL template-tags upgrade rewrites the small template table under an exclusive lock and removes the unused tags GIN index.
 Rollback restores the original index and converts non-array JSON tags to empty arrays.
 Migration 000020 adds a partial unique index for running infer-fill jobs on both backends.

@@ -13,6 +13,8 @@ use loco_rs::{
 };
 use sqlx::sqlite::SqliteConnectOptions;
 
+use crate::error::YorishiroError;
+
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -107,6 +109,24 @@ pub fn validate_queue_policy(config: &Config) -> Result<()> {
             "BackgroundQueue requires a configured queue provider".into(),
         ));
     };
+    // Restrict the existing SQL providers only; future providers validate their own backend requirements.
+    let sqlite_database = is_sqlite_uri(&config.database.uri);
+    let mismatch = match queue {
+        QueueConfig::Postgres(_) if sqlite_database => Some(
+            "a PostgreSQL queue is not allowed with a SQLite database / SQLite DB では PostgreSQL キューを利用できません",
+        ),
+        QueueConfig::Sqlite(_) if !sqlite_database => Some(
+            "a SQLite queue is not allowed with a PostgreSQL database / PostgreSQL DB では SQLite キューを利用できません",
+        ),
+        _ => None,
+    };
+    if let Some(message) = mismatch {
+        return Err(YorishiroError::ValidationFailed {
+            message: message.into(),
+            details: vec![],
+            hint: "Use a SQL queue matching the database, or a Redis-compatible (Valkey) queue / DB と同じ種類の SQL キュー、または Redis 互換 (Valkey) キューを指定してください".into(),
+        }.into());
+    }
     let workers = match queue {
         QueueConfig::Postgres(queue) => queue.num_workers,
         QueueConfig::Redis(queue) => queue.num_workers,
@@ -131,7 +151,7 @@ pub fn validate_queue_policy(config: &Config) -> Result<()> {
 /// SQLite admits one writer at a time, so connections beyond a small pool only queue behind its write lock and surface as `SQLITE_BUSY` waits.
 pub const SQLITE_POOL_ADVISORY_LIMIT: u32 = 16;
 
-/// Settings that are valid but cannot add throughput on the configured database and queue pair.
+/// Valid settings that cannot add throughput on the configured database and queue pair.
 ///
 /// A SQLite queue dequeues under `BEGIN IMMEDIATE`, so its workers serialize on one write lock, and a SQLite database has the same single writer.
 /// PostgreSQL claims queue rows with `FOR UPDATE SKIP LOCKED` and Redis-compatible queues need no database lock, so they are the topologies where `num_workers` scales.
@@ -143,7 +163,7 @@ pub fn topology_advisories(config: &Config) -> Vec<String> {
         && queue.num_workers > 1
     {
         advisories.push(format!(
-            "queue.num_workers is {} on a SQLite queue, whose dequeue serializes behind one write lock: extra workers add contention, not throughput; use 1, or a PostgreSQL or Redis-compatible queue",
+            "queue.num_workers is {} on a SQLite queue, whose dequeue serializes behind one write lock: extra workers add contention, not throughput; use 1, or a Redis-compatible queue (a PostgreSQL queue is supported only with a PostgreSQL database)",
             queue.num_workers
         ));
     }
@@ -155,14 +175,10 @@ pub fn topology_advisories(config: &Config) -> Vec<String> {
             config.database.max_connections
         ));
     }
-    if is_sqlite_uri(&config.database.uri)
-        && matches!(
-            config.queue.as_ref(),
-            Some(QueueConfig::Postgres(_) | QueueConfig::Redis(_))
-        )
-    {
+    let sqlite_database = is_sqlite_uri(&config.database.uri);
+    if sqlite_database && matches!(config.queue.as_ref(), Some(QueueConfig::Redis(_))) {
         advisories.push(
-            "the database is SQLite but the queue is not: a networked queue invites workers on other hosts, which cannot open the SQLite file, and SQLite's named locks are no-ops, so jobs that rely on them run unserialised; keep every worker on the database's host, or use PostgreSQL".into(),
+            "SQLite with a Redis-compatible queue is supported, but keep every worker on the database's host: remote workers cannot open its SQLite file, and SQLite's named locks are no-ops".into(),
         );
     }
     advisories

@@ -26,6 +26,9 @@ Yorishiro は PostgreSQL の代わりに SQLite で動作できます。ロー�
 - **SQLite 用スナップショット**。スナップショットの作成はサポートしていません。PostgreSQL で作成されたスナップショットなら SQLite で復元できます。
 
 ## 設定
+SQLite DB でサポートするキュー構成は、別ファイルの SQLite キュー、または Redis 互換 (Valkey) キューです。
+SQLite DB と PostgreSQL キューの組み合わせは利用できず、起動前に `ValidationFailed` として拒否します。
+将来のエンタープライズ専用 RabbitMQ/SQS キューも PostgreSQL DB が必須で、SQLite DB では利用できません。
 PostgreSQL のテンプレートタグの移行は、小規模なテンプレートテーブルを排他ロック下で書き換え、未使用のタグ GIN インデックスを削除します。
 ロールバックでは元のインデックスを復元し、配列以外の JSON タグを空配列に変換します。
 移行 000020 は、両バックエンドで実行中の infer-fill ジョブに部分一意インデックスを追加します。

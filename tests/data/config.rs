@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use yorishiro::data::config::validate_queue_policy;
 
 fn config(database: &str, queue: &str) -> loco_rs::config::Config {
@@ -67,18 +68,29 @@ fn a_sql_queue_is_left_alone() {
 }
 
 #[test]
-fn cross_sql_queue_topologies_are_supported() {
+fn cross_sql_queue_topologies_fail_validation_with_bilingual_errors() {
     let postgres_database = config(
         "postgres://localhost:5432/app",
         "sqlite://queue.sqlite3?mode=rwc",
     );
-    assert!(validate_queue_policy(&postgres_database).is_ok());
 
     let sqlite_database = serde_yaml::from_str::<loco_rs::config::Config>(
         "logger: { enable: true, pretty_backtrace: false, level: info, format: compact }\nserver: { port: 5150, binding: localhost, host: http://localhost }\ndatabase: { uri: 'sqlite://app.sqlite3?mode=rwc', enable_logging: false, connect_timeout: 500, idle_timeout: 500, min_connections: 1, max_connections: 2, auto_migrate: false }\nqueue: { kind: Postgres, uri: 'postgres://localhost:5432/queue', num_workers: 1 }\nworkers: { mode: BackgroundQueue }\n",
     )
     .unwrap();
-    assert!(validate_queue_policy(&sqlite_database).is_ok());
+    for config in [postgres_database, sqlite_database] {
+        let loco_rs::Error::CustomError(status, detail) =
+            validate_queue_policy(&config).expect_err("crossed SQL queues are forbidden")
+        else {
+            panic!("expected ValidationFailed");
+        };
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let body = detail.errors.unwrap();
+        assert_eq!(body["error"]["code"], "validation_failed");
+        let message = body["error"]["message"].as_str().unwrap();
+        assert!(message.contains("not allowed"), "{body}");
+        assert!(message.contains("利用できません"), "{body}");
+    }
 }
 
 fn topology(database: &str, max_connections: u32, queue: &str) -> loco_rs::config::Config {
@@ -89,7 +101,7 @@ fn topology(database: &str, max_connections: u32, queue: &str) -> loco_rs::confi
 }
 
 #[test]
-fn only_topologies_that_cannot_use_the_setting_are_flagged() {
+fn topology_advisories_cover_contention_and_support_boundaries() {
     use yorishiro::data::config::{SQLITE_POOL_ADVISORY_LIMIT, topology_advisories};
 
     let sqlite_queue = |workers: u32| {
@@ -127,18 +139,12 @@ fn only_topologies_that_cannot_use_the_setting_are_flagged() {
         .len(),
         2
     );
-    // A networked queue over a SQLite file: workers elsewhere cannot reach the file, and its named locks are no-ops.
-    for queue in [valkey(8), postgres(8)] {
-        let advisories = topology_advisories(&topology(sqlite, SQLITE_POOL_ADVISORY_LIMIT, &queue));
-        assert_eq!(advisories.len(), 1);
-        assert!(advisories[0].contains("SQLite"), "{advisories:?}");
-    }
+    let advisories = topology_advisories(&topology(sqlite, SQLITE_POOL_ADVISORY_LIMIT, &valkey(8)));
+    assert_eq!(advisories.len(), 1);
+    assert!(advisories[0].contains("supported"), "{advisories:?}");
+    assert!(advisories[0].contains("database's host"), "{advisories:?}");
     assert!(topology_advisories(&topology(pg, 100, &valkey(8))).is_empty());
     assert!(topology_advisories(&topology(pg, 100, &postgres(8))).is_empty());
-    assert_eq!(
-        topology_advisories(&topology(pg, 100, &sqlite_queue(2))).len(),
-        1
-    );
 }
 
 fn with_queue(num_workers: u32) -> loco_rs::config::Config {
