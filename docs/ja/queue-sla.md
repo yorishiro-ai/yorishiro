@@ -60,6 +60,8 @@ Yorishiroは`tenant_private`に300、`official`に200、`shared`に100のpriorit
 
 ライフサイクルのadmission lockは`worker_class:plan`単位でcapacityを予約するため、capacityが埋まったクラスが別のクラスのcapacityを消費することはありません。
 
+JWTのplan claim `enterprise` はTeamの上限にマッピングされます。
+
 capacityが埋まった場合の決定的なfallbackは、ジョブを優先されたクラスのtagのままretryingに記録し、クラスのpriorityで再enqueueすることです。別のクラスへ暗黙にrerouteしません。
 
 予約capacityとstarvation protectionが必要な場合は、クラスごとにworker processを起動します。使用するtagは`--worker=worker-class:tenant-private`、`--worker=worker-class:official`、`--worker=worker-class:shared`です。

@@ -497,6 +497,50 @@ async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
 
 #[tokio::test]
 #[serial_test::serial(process_environment)]
+async fn enterprise_billing_plan_uses_team_queue_policy() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+    with_sqlite_queue(|ctx, _pool, workspace_id| async move {
+        let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .expect("find workspace")
+            .expect("workspace");
+        tenant_billing::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(workspace.tenant_id),
+            plan: sea_orm::ActiveValue::Set(Some("enterprise".into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("insert enterprise billing");
+
+        reindex::enqueue_for_class(
+            &ctx,
+            ReindexArgs {
+                lifecycle_id: None,
+                workspace_id,
+                worker_class: WorkerClass::Official,
+                startup: false,
+            },
+        )
+        .await
+        .expect("reindex enqueue with enterprise billing");
+        let row = queue_job_lifecycles::Entity::find()
+            .one(&ctx.db)
+            .await
+            .expect("read queue lifecycle")
+            .expect("queue lifecycle");
+        assert_eq!(row.plan.as_deref(), Some("team"));
+        assert_eq!(row.concurrency_key.as_deref(), Some("official:team"));
+        assert_eq!(row.concurrency_limit, Some(8));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial(process_environment)]
 async fn present_invalid_billing_plan_remains_diagnostic() {
     if !crate::require_sqlite_backend() {
         return;

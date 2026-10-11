@@ -13,11 +13,12 @@ fn active_licence_plan_is_safe_and_expires_into_fallback() {
 }
 
 #[test]
-fn active_licence_with_unknown_plan_falls_back() {
+fn active_enterprise_licence_uses_team_policy() {
     let licensed = LicenceState::licensed(LicenceClaims {
         sub: "test-customer".into(),
         plan: "enterprise".into(),
         exp: 1000,
     });
-    assert_eq!(licensed.active_plan_at(999), None);
+    assert_eq!(licensed.active_plan_at(999), Some(Plan::Team));
+    assert_eq!(Plan::Team.compute_policy().base_official_concurrency, 8);
 }

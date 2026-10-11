@@ -101,6 +101,7 @@ impl Plan {
             "free" => Ok(Self::Free),
             "pro" => Ok(Self::Pro),
             "team" => Ok(Self::Team),
+            "enterprise" => Ok(Self::Team),
             other => Err(crate::YorishiroError::Internal(anyhow::anyhow!(
                 "unknown plan value: {other:?}"
             ))),

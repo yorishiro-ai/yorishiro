@@ -58,6 +58,8 @@ Yorishiro assigns `tenant_private` priority 300, `official` priority 200, and `s
 
 The lifecycle admission lock reserves capacity by `worker_class:plan`, so a saturated class cannot consume another class's capacity.
 
+The JWT plan claim `enterprise` maps to the Team limits.
+
 Capacity saturation is a deterministic fallback: the job remains tagged for its preferred class, is recorded as retrying, and is re-enqueued with its class priority rather than being silently rerouted.
 
 Run class-specific worker processes when reserved capacity and starvation protection are required: `--worker=worker-class:tenant-private`, `--worker=worker-class:official`, and `--worker=worker-class:shared`.
