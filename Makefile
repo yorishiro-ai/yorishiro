@@ -97,6 +97,11 @@ migrate: build
 # Starts a disposable pgvector/pgvector:pg18 container on port 15432,
 # runs migrations, generates entities, tears everything down.
 entities: build
+	@expected=$$(awk '/^name = "sea-orm-cli"$$/ { getline; gsub(/[^0-9.]/, ""); print; exit }' Cargo.lock); \
+	actual=$$(sea-orm-cli --version | awk '{print $$2}'); \
+	if [ "$$actual" != "$$expected" ]; then \
+		echo "ERROR: make entities requires sea-orm-cli $$expected from Cargo.lock, found $$actual; install the pinned CLI before regenerating" >&2; exit 1; \
+	fi
 	docker compose up -d --wait testdb
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
