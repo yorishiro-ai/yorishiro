@@ -101,10 +101,25 @@ impl Plan {
             "free" => Ok(Self::Free),
             "pro" => Ok(Self::Pro),
             "team" => Ok(Self::Team),
+            "enterprise" => Ok(Self::Team),
             other => Err(crate::YorishiroError::Internal(anyhow::anyhow!(
                 "unknown plan value: {other:?}"
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Plan;
+
+    #[test]
+    fn db_plan_aliases_preserve_existing_values() {
+        assert_eq!(Plan::from_db_str("enterprise").unwrap(), Plan::Team);
+        assert_eq!(Plan::from_db_str("free").unwrap(), Plan::Free);
+        assert_eq!(Plan::from_db_str("pro").unwrap(), Plan::Pro);
+        assert_eq!(Plan::from_db_str("team").unwrap(), Plan::Team);
+        assert!(Plan::from_db_str("unknown").is_err());
     }
 }
 
