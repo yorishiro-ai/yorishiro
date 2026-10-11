@@ -8,6 +8,8 @@ The runner passes explicit CE or EE Cargo features and verifies evidence from Lo
 The topology gate wrapper is `uv run scripts/test_topology.py`.
 After a successful test command, rejected topology evidence emits `YORISHIRO_TOPOLOGY_REJECTED` on stderr and exits nonzero.
 CI checks both conditions so build or test failures cannot masquerade as a successful mismatch self-test.
+CI runs all four permitted topologies for both CE and EE, with eight distinct edition/database/queue job names.
+`make python-lint` (also in both `check-all` targets) statically verifies every matrix pair appears exactly once and rejects crossed SQL pairs or extra axes.
 Use `make test-valkey` to run the Valkey topology tests against a local or explicitly configured endpoint.
 The Valkey-compatible `redis://` endpoint must select database 15 because Loco clears that reserved database during queue cleanup.
 The remaining repository helper scripts also run through the uv project and use only Python's standard library.

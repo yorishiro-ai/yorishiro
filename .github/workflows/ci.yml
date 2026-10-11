@@ -251,16 +251,16 @@ jobs:
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
   test:
-    name: "Test (DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})"
+    name: "Test (Edition: ${{ matrix.edition }}, DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})"
     needs: prepare-embedding
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        edition: [ce, ee]
         include:
-          - db: Postgres
+          - edition: ce
+            db: Postgres
             backend: postgres
             queue: Postgres
             queue_key: postgres
@@ -268,21 +268,57 @@ jobs:
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          - db: SQLite
+          - edition: ce
+            db: SQLite
             backend: sqlite
             queue: SQLite
             queue_key: sqlite
             loco_env: test_sqlite
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
-          - db: Postgres
+          - edition: ce
+            db: Postgres
             backend: postgres
             queue: Valkey
             queue_key: valkey
             loco_env: test_postgres_valkey
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379/15
-          - db: SQLite
+          - edition: ce
+            db: SQLite
+            backend: sqlite
+            queue: Valkey
+            queue_key: valkey
+            loco_env: test_sqlite_valkey
+            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+            queue_url: redis://localhost:6379/15
+          - edition: ee
+            db: Postgres
+            backend: postgres
+            queue: Postgres
+            queue_key: postgres
+            # Used by non-harness steps; test_topology.py selects its own config via Environment::Test.
+            loco_env: test_postgres
+            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+            queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          - edition: ee
+            db: SQLite
+            backend: sqlite
+            queue: SQLite
+            queue_key: sqlite
+            loco_env: test_sqlite
+            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+            queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
+          - edition: ee
+            db: Postgres
+            backend: postgres
+            queue: Valkey
+            queue_key: valkey
+            loco_env: test_postgres_valkey
+            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+            queue_url: redis://localhost:6379/15
+          - edition: ee
+            db: SQLite
             backend: sqlite
             queue: Valkey
             queue_key: valkey

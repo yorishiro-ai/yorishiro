@@ -34,6 +34,8 @@ fmt-check:
 
 python-lint:
 	uv run ruff check scripts
+	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_ci_matrix.py
+	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_ci_matrix.py
 
 public-api-check:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_public_api.py
