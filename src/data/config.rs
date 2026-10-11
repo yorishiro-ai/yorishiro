@@ -50,6 +50,16 @@ fn validate(config: &Config) -> Result<()> {
             "settings.max_tenants must not be negative".into(),
         ));
     }
+    if settings
+        .mcp
+        .allowed_hosts
+        .as_deref()
+        .is_some_and(|hosts| hosts.split(',').any(|host| host.trim() == "*"))
+    {
+        return Err(Error::Message(
+            "settings.mcp.allowed_hosts must not contain wildcard hosts".into(),
+        ));
+    }
     if settings.embedding.dimensions == 0
         || settings.embedding.local_max_sequence_length == 0
         || settings.rate_limit.auth_max_requests == 0

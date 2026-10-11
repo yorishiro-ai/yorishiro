@@ -139,6 +139,7 @@ An unconfigured development or production environment uses SQLite for both roles
 | `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
 | `HOST` | `http://localhost` | Your server's hostname or address |
 | `YORISHIRO_MAX_TENANTS` | `1` | Tenant cap; `0` allows unlimited tenants and disables the first-run setup wizard |
+| `YORISHIRO_MCP_ALLOWED_HOSTS` | Unset | Comma-separated exact `Host` values allowed by `/mcp` in addition to `localhost`, `127.0.0.1`, and `::1`. Wildcards are rejected. |
 | `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` | Loco queue provider: `Sqlite`, `Postgres`, or `Redis` in this release |
 | `QUEUE_URL` | Provider default | Queue provider URI, including `redis://` or `rediss://` for the Redis-compatible provider |
 | `YORISHIRO_EMBEDDING_BASE_URL` | Unset | Embeddings endpoint URL |

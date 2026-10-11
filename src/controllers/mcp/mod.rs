@@ -10,7 +10,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::Router;
+use axum::http::Request;
 use axum::http::request::Parts;
+use axum::middleware::{self, Next};
 use loco_rs::app::AppContext;
 use rmcp::ErrorData;
 use rmcp::RoleServer;
@@ -20,8 +22,8 @@ use rmcp::model::{
     PaginatedRequestParams, ResultType, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
-use rmcp::transport::streamable_http_server::StreamableHttpService;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ServerHandler, tool_handler};
 use sea_orm::DatabaseTransaction;
 
@@ -374,11 +376,46 @@ where
     F: Fn(AppContext) -> YorishiroMcpServer + Clone + Send + Sync + 'static,
 {
     let ctx = ctx.clone();
+    let settings = ctx
+        .shared_store
+        .get::<crate::data::settings::Settings>()
+        .expect("application settings missing");
+    let mut transport_config = StreamableHttpServerConfig::default();
+    if let Some(allowed_hosts) = settings.mcp.allowed_hosts.as_deref() {
+        let mut hosts = transport_config.allowed_hosts.clone();
+        hosts.extend(
+            allowed_hosts
+                .split(',')
+                .map(str::trim)
+                .filter(|host| !host.is_empty())
+                .map(str::to_owned),
+        );
+        transport_config = transport_config.with_allowed_hosts(hosts);
+    }
     let mcp_service = StreamableHttpService::new(
         move || Ok(server_factory(ctx.clone())),
         LocalSessionManager::default().into(),
-        Default::default(),
+        transport_config,
     );
 
-    router.nest_service("/mcp", mcp_service)
+    router.nest(
+        "/mcp",
+        Router::new()
+            .fallback_service(mcp_service)
+            .layer(middleware::from_fn(accept_compatibility)),
+    )
+}
+
+async fn accept_compatibility(
+    mut request: Request<axum::body::Body>,
+    next: Next,
+) -> axum::response::Response {
+    let accept = request.headers().get(axum::http::header::ACCEPT);
+    if accept.is_none() || accept.is_some_and(|value| value == "*/*") {
+        request.headers_mut().insert(
+            axum::http::header::ACCEPT,
+            axum::http::HeaderValue::from_static("application/json, text/event-stream"),
+        );
+    }
+    next.run(request).await
 }

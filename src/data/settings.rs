@@ -4,11 +4,20 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     pub(crate) max_tenants: i32,
+    #[serde(default)]
+    pub(crate) mcp: Mcp,
     pub embedding: Embedding,
     pub(crate) rate_limit: RateLimit,
     pub(crate) db_load_guard: DbLoadGuard,
     #[serde(default)]
     pub query_embedding: QueryEmbedding,
+}
+
+#[derive(Clone, Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Mcp {
+    /// Comma-separated exact Host values accepted in addition to loopback.
+    pub(crate) allowed_hosts: Option<String>,
 }
 
 /// How the API and MCP server waits for a worker to embed a search query.
