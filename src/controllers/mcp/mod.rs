@@ -371,6 +371,9 @@ pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
 /// Mounts the MCP server under `/mcp`.
 ///
 /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not a Loco `Routes`/axum handler function, so it can't go through `Hooks::routes()`/`AppRoutes` like the REST controllers: it's mounted via `Router::nest_service` in `Hooks::after_routes` instead.
+///
+/// # Panics
+/// Panics if application settings were not installed before routes are mounted.
 pub fn mount<F>(router: Router, ctx: &AppContext, server_factory: F) -> Router
 where
     F: Fn(AppContext) -> YorishiroMcpServer + Clone + Send + Sync + 'static,
@@ -411,7 +414,14 @@ async fn accept_compatibility(
     next: Next,
 ) -> axum::response::Response {
     let accept = request.headers().get(axum::http::header::ACCEPT);
-    if accept.is_none() || accept.is_some_and(|value| value == "*/*") {
+    if accept.is_none()
+        || accept.is_some_and(|value| {
+            value == "*/*"
+                || value
+                    .to_str()
+                    .is_ok_and(|value| value.contains("application/json"))
+        })
+    {
         request.headers_mut().insert(
             axum::http::header::ACCEPT,
             axum::http::HeaderValue::from_static("application/json, text/event-stream"),
