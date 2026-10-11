@@ -57,7 +57,10 @@ impl QueuePolicy for CommunityQueuePolicy {
         let limit = match class {
             WorkerClass::Shared => settings.worker_class_limits.shared,
             WorkerClass::TenantPrivate => settings.worker_class_limits.tenant_private,
-            WorkerClass::Official => settings.worker_class_limits.official,
+            WorkerClass::Official => settings
+                .worker_class_limits
+                .official
+                .unwrap_or(SINGLE_JOB_LIMIT),
         };
         Ok(ConcurrencyPolicy {
             plan: COMMUNITY_PLAN.to_owned(),

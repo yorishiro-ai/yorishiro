@@ -13,7 +13,7 @@ workspace ごとの上限ではありません。
 |---|---|
 | `YORISHIRO_WORKER_CLASS_SHARED_LIMIT` | shared class の同時実行上限（default: `1`、`1`以上） |
 | `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | tenant-private class の同時実行上限（default: `1`、`1`以上） |
-| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | official class の同時実行上限（default: `1`、`1`以上） |
+| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | official class の任意の同時実行上限。未設定時は Community が `1`、Enterprise が plan 値の Free `1`、Pro `4`、Team `8` を使用します。設定時は両 edition を上書きし、`1`以上が必要です |
 
 ## 埋め込み（自動検索）
 

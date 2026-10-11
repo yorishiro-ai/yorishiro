@@ -52,7 +52,10 @@ fn validate(config: &Config) -> Result<()> {
     }
     if settings.worker_class_limits.shared < 1
         || settings.worker_class_limits.tenant_private < 1
-        || settings.worker_class_limits.official < 1
+        || settings
+            .worker_class_limits
+            .official
+            .is_some_and(|limit| limit < 1)
     {
         return Err(Error::Message(
             "settings.worker_class_limits values must be greater than zero".into(),

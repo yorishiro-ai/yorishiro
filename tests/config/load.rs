@@ -361,7 +361,7 @@ async fn worker_class_limits_default_override_and_validation() {
     let settings = defaults.settings::<serde_json::Value>().unwrap();
     assert_eq!(settings["worker_class_limits"]["shared"], 1);
     assert_eq!(settings["worker_class_limits"]["tenant_private"], 1);
-    assert_eq!(settings["worker_class_limits"]["official"], 1);
+    assert!(settings["worker_class_limits"]["official"].is_null());
 
     for (name, value) in [
         ("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "2"),

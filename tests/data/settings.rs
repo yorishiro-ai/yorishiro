@@ -6,7 +6,7 @@ fn settings() -> serde_json::Value {
         "worker_class_limits": {
             "shared": 1,
             "tenant_private": 1,
-            "official": 1
+            "official": null
         },
         "embedding": {
             "provider": "local",

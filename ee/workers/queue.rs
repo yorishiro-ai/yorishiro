@@ -35,7 +35,10 @@ impl QueuePolicy for PlanQueuePolicy {
         let limit = match class {
             WorkerClass::Shared => settings.worker_class_limits.shared,
             WorkerClass::TenantPrivate => settings.worker_class_limits.tenant_private,
-            WorkerClass::Official => settings.worker_class_limits.official,
+            WorkerClass::Official => settings
+                .worker_class_limits
+                .official
+                .unwrap_or(plan.compute_policy().base_official_concurrency as i32),
         };
         Ok(ConcurrencyPolicy {
             plan: plan.as_str().to_owned(),

@@ -20,7 +20,7 @@ pub struct Settings {
 pub(crate) struct WorkerClassLimits {
     pub(crate) shared: i32,
     pub(crate) tenant_private: i32,
-    pub(crate) official: i32,
+    pub(crate) official: Option<i32>,
 }
 
 impl Default for WorkerClassLimits {
@@ -28,7 +28,7 @@ impl Default for WorkerClassLimits {
         Self {
             shared: 1,
             tenant_private: 1,
-            official: 1,
+            official: None,
         }
     }
 }
