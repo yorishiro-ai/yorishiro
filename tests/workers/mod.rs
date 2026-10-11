@@ -9,17 +9,13 @@ mod reindex;
 mod startup_reindex;
 mod tag_discovery;
 
-use loco_rs::app::{AppContext, Hooks};
+use loco_rs::app::AppContext;
 use loco_rs::environment::Environment;
 use sea_orm::Database;
-use yorishiro::App;
 
 /// An application context over an in-memory SQLite database, for tests that need `AppContext` but no HTTP server or queue.
 pub(crate) async fn test_context() -> AppContext {
-    let _environment = crate::EnvironmentRead::enter();
-    let config = App::load_config(&Environment::Any("test_sqlite".into()))
-        .await
-        .expect("load test configuration");
+    let config = crate::sqlite_fixture_config("sqlite::memory:");
     let db = Database::connect("sqlite::memory:")
         .await
         .expect("connect test database");

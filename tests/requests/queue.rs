@@ -1,9 +1,6 @@
 //! Covers queue enqueue, priority ordering, worker tags, and provider boundaries.
 //!
-//! The isolated SQL-provider cases deliberately use a temporary SQLite queue while
-//! the application database remains PostgreSQL.  Loco constructs the queue
-//! provider from its own URI and does not couple that pool to `ctx.db`, so this
-//! setup tests the provider boundary without changing the request harness.
+//! The isolated SQLite-provider cases use separate temporary application and queue files, preserving the permitted SQLite/SQLite pair.
 //!
 //! `tests/workers/queue_routing.rs` covers tag filtering through the public
 //! `Queue::run(tags)` API for both SQL providers.  The Valkey provider is covered
@@ -31,7 +28,7 @@ use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
 use yorishiro::workers::reindex::{self, ReindexArgs};
 
-use crate::requests::close_app_pools;
+use crate::requests::close_app_pools_sqlite;
 
 const COMPETING_TAG: &str = "queue-test:competing";
 static COMPETING_ORDER: std::sync::OnceLock<Mutex<Vec<(String, String)>>> =
@@ -167,12 +164,7 @@ where
     }
 }
 
-/// Boots the app against a throwaway PostgreSQL database with `BackgroundQueue` and a SQLite queue file, and hands the test both the context and a pool onto that same queue file.
-///
-/// The request harness loads the PostgreSQL test configuration, then this helper
-/// replaces only the queue configuration on the owned `Config` value.  This
-/// keeps the provider test isolated without changing process-wide configuration
-/// for the other request tests.
+/// Boots a permitted SQLite/SQLite pair with separate temporary files and returns a pool onto the queue file.
 async fn with_sqlite_queue<F, Fut>(test: F)
 where
     F: FnOnce(AppContext, sqlx::SqlitePool, Uuid) -> Fut,
@@ -183,25 +175,15 @@ where
     let queue_uri = format!("sqlite://{}?mode=rwc", queue_path.display());
 
     // Use Option so we can explicitly clean up even on panic.
-    let mut test_db: Option<Box<dyn loco_rs::testing::db::TestSupport>> = None;
     let mut boot: Option<BootResult> = None;
     let mut queue_pool: Option<sqlx::SqlitePool> = None;
 
     let result = std::panic::AssertUnwindSafe(async {
-        let mut config = App::load_config(&Environment::Test)
-            .await
-            .expect("load test config");
-        // The queue provider's workers need PG connections during boot, so the
-        // pool must be large enough.  Bump the connect timeout so the queue
-        // workers don't block the migration phase.
-        config.database.connect_timeout = 30_000;
-        test_db = Some(
-            loco_rs::testing::db::init_test_db_creation(&config.database.uri)
-                .expect("init test db"),
+        let database_uri = format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("app.sqlite3").display()
         );
-        let db = test_db.as_ref().expect("test db");
-        db.init_db().await;
-        config.database.uri = db.get_connection_str().to_string();
+        let mut config = crate::sqlite_fixture_config(&database_uri);
         config.queue = Some(QueueConfig::Sqlite(SqliteQueueConfig {
             uri: queue_uri.clone(),
             dangerously_flush: false,
@@ -247,21 +229,19 @@ where
     .catch_unwind()
     .await;
 
-    // Close the queue before the application pools so its worker connections
-    // are gone before the throwaway database is dropped.
+    // Close connections before the temporary database and queue directory is removed.
     if let Some(b) = &boot {
         if let Some(ref queue) = b.app_context.queue_provider {
             let _ = queue.shutdown();
         }
-        // close_app_pools closes identity, tenant, and ctx.db pools so
-        // DROP DATABASE does not fail on teardown.
-        close_app_pools(&b.app_context).await;
+        close_app_pools_sqlite(
+            &b.app_context,
+            dir.path().join("app.sqlite3").to_str().unwrap(),
+        )
+        .await;
     }
     if let Some(pool) = queue_pool {
         pool.close().await;
-    }
-    if let Some(d) = test_db.take() {
-        d.cleanup_db();
     }
     if let Err(panic) = result {
         std::panic::resume_unwind(panic);
@@ -281,7 +261,7 @@ fn args_for(class: WorkerClass, workspace_id: Uuid) -> EmbeddingSyncArgs {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn enqueue_for_class_puts_a_row_in_the_queue() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, pool, workspace_id| async move {
@@ -303,7 +283,7 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn each_worker_class_carries_its_own_tag() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, pool, workspace_id| async move {
@@ -359,7 +339,7 @@ async fn each_worker_class_carries_its_own_tag() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn each_reindex_worker_class_carries_its_own_tag() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, pool, workspace_id| async move {
@@ -424,7 +404,7 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn missing_billing_uses_free_policy_for_reindex_but_not_embedding() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {
@@ -467,7 +447,7 @@ async fn missing_billing_uses_free_policy_for_reindex_but_not_embedding() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {
@@ -518,7 +498,7 @@ async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn present_invalid_billing_plan_remains_diagnostic() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {
@@ -555,7 +535,7 @@ async fn present_invalid_billing_plan_remains_diagnostic() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn invalid_billing_does_not_affect_embedding_process_local_admission() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {

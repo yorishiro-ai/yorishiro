@@ -91,7 +91,6 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
 #[tokio::test]
 async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     use loco_rs::app::AppContext;
-    use loco_rs::app::Hooks;
     use migration::{Migrator, MigratorTrait};
     use sea_orm::{ActiveModelTrait, ActiveValue, Database, EntityTrait};
     use tempfile::tempdir;
@@ -102,12 +101,7 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     yorishiro::db::register_sqlite_extensions();
     let db = Database::connect(&uri).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    let mut config = yorishiro::App::load_config(&loco_rs::environment::Environment::Any(
-        "test_sqlite".into(),
-    ))
-    .await
-    .unwrap();
-    config.database.uri = uri;
+    let config = crate::sqlite_fixture_config(&uri);
     let ctx = AppContext::builder(loco_rs::environment::Environment::Test, db, config).build();
 
     let tenant = yorishiro::models::_entities::tenant_tenants::ActiveModel {
@@ -179,7 +173,6 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
 
 /// A migrated SQLite database with one tenant, which is all `set` and the ticker need.
 async fn scheduler_context() -> (loco_rs::app::AppContext, Uuid, tempfile::TempDir) {
-    use loco_rs::app::Hooks;
     use migration::{Migrator, MigratorTrait};
     use sea_orm::{ActiveModelTrait, ActiveValue, Database};
 
@@ -191,12 +184,7 @@ async fn scheduler_context() -> (loco_rs::app::AppContext, Uuid, tempfile::TempD
     yorishiro::db::register_sqlite_extensions();
     let db = Database::connect(&uri).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    let mut config = yorishiro::App::load_config(&loco_rs::environment::Environment::Any(
-        "test_sqlite".into(),
-    ))
-    .await
-    .unwrap();
-    config.database.uri = uri;
+    let config = crate::sqlite_fixture_config(&uri);
     let ctx =
         loco_rs::app::AppContext::builder(loco_rs::environment::Environment::Test, db, config)
             .build();

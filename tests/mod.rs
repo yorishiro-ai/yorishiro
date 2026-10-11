@@ -55,6 +55,21 @@ pub(crate) fn record_configured_topology(ctx: &loco_rs::app::AppContext) {
     std::fs::write(file, b"executed\n").expect("write topology marker");
 }
 
+/// Isolated SQLite fixtures must not inherit a PostgreSQL DATABASE_URL from the selected full-suite lane.
+/// Render first, replace owned URIs, then validate the final SQLite/SQLite pair without mutating process environment.
+pub(crate) fn sqlite_fixture_config(uri: &str) -> loco_rs::config::Config {
+    let _environment = EnvironmentRead::enter();
+    let mut config = loco_rs::environment::Environment::Any("test_sqlite".into())
+        .load()
+        .expect("render SQLite fixture configuration");
+    config.database.uri = uri.into();
+    if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
+        queue.uri = "sqlite::memory:".into();
+    }
+    yorishiro::data::config::validate_queue_policy(&config).expect("validate SQLite fixture pair");
+    config
+}
+
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
