@@ -137,6 +137,16 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             "response: {:?}",
             preview.text()
         );
+        let body: serde_json::Value = preview.json();
+        assert_eq!(body["error"]["code"], "validation_failed");
+        assert_eq!(
+            body["error"]["message"],
+            format!("schema '{schema_id}' does not follow a template")
+        );
+        assert_eq!(
+            body["error"]["hint"],
+            "only a schema created from a template library entry can be merged; create one with POST /api/schemas and a template_id"
+        );
     })
     .await;
 }

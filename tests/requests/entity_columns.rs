@@ -90,6 +90,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             body["columns"],
             serde_json::json!(["priority", "title", "done"])
         );
+        assert_eq!(body["entity_type"], "task");
 
         let after = request
             .get("/api/workspace/entity-columns")
@@ -102,6 +103,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             stored[0]["columns"],
             serde_json::json!(["priority", "title", "done"])
         );
+        assert_eq!(stored[0]["entity_type"], "task");
 
         // Saving again replaces rather than appending: one row, the new order.
         let put_again = request
