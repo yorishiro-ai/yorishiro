@@ -1,8 +1,73 @@
+use std::time::Duration;
+
 use crate::requests::boot_request;
 use yorishiro::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{entity_entities, entity_relations, recall, schema_schemas};
+
+/// A relation-free entity at depth two must return its own body and no relations promptly on both backends.
+#[tokio::test]
+async fn recall_context_depth_two_no_relations_returns_empty_without_hanging() {
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let tenant = tenant_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("recall-empty-test".into()),
+            ..Default::default()
+        };
+        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            .await
+            .expect("insert tenant");
+        let workspace = workspace_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            ..Default::default()
+        };
+        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            .await
+            .expect("insert workspace");
+        let def = serde_json::from_value(chain_definition()).expect("parse definition");
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            .await
+            .expect("create schema");
+        let entity = entity_entities::create(
+            &ctx.db,
+            workspace.id,
+            entity_entities::CreateEntityInput {
+                schema_name: "chain".into(),
+                entity_type: "node".into(),
+                data: serde_json::json!({ "title": "isolated" }),
+            },
+            None,
+        )
+        .await
+        .expect("create relation-free entity");
+
+        let context = tokio::time::timeout(
+            Duration::from_secs(5),
+            recall::recall_context(
+                &ctx.db,
+                workspace.id,
+                entity.id,
+                recall::RecallQuery {
+                    limit: 20,
+                    full: true,
+                    depth: 2,
+                },
+            ),
+        )
+        .await
+        .expect("depth-two recall of relation-free entity timed out")
+        .expect("recall_context");
+
+        assert_eq!(context.entity.id, entity.id);
+        assert!(
+            context.relations.is_empty(),
+            "relation-free recall must be empty"
+        );
+    })
+    .await;
+}
 
 fn chain_definition() -> serde_json::Value {
     serde_json::json!({
