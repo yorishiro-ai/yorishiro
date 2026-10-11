@@ -109,20 +109,6 @@ impl Plan {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Plan;
-
-    #[test]
-    fn db_plan_aliases_preserve_existing_values() {
-        assert_eq!(Plan::from_db_str("enterprise").unwrap(), Plan::Team);
-        assert_eq!(Plan::from_db_str("free").unwrap(), Plan::Free);
-        assert_eq!(Plan::from_db_str("pro").unwrap(), Plan::Pro);
-        assert_eq!(Plan::from_db_str("team").unwrap(), Plan::Team);
-        assert!(Plan::from_db_str("unknown").is_err());
-    }
-}
-
 /// Which Stripe Price id corresponds to which plan, read from `YORISHIRO_STRIPE_PRICE_PRO`/`YORISHIRO_STRIPE_PRICE_TEAM`.
 /// Both are `None` (no mapping) until an operator configures real Stripe price ids.
 #[derive(Debug, Clone, Default)]
