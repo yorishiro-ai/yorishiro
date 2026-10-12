@@ -1,7 +1,7 @@
 {
   "id": "worldbuilding",
   "name": "worldbuilding",
-  "description": "Characters, locations, factions, and items for creative writing and TRPG worldbuilding",
+  "description": "Deprecated: use creative-writing, trpg-campaign, or game-dev-lore instead. Characters, locations, factions, and items for creative writing and TRPG worldbuilding.",
   "entity_types": {
     "character": {
       "description": "A person or creature in the world",

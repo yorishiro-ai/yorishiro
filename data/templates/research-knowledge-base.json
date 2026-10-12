@@ -1,0 +1,265 @@
+{
+  "id": "research-knowledge-base",
+  "name": "research-knowledge-base",
+  "description": "Papers, authors, concepts, experiments, and datasets for research knowledge management.",
+  "entity_types": {
+    "paper": {
+      "description": "A research paper",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Paper title",
+          "maxLength": 500,
+          "required": true,
+          "x-embed": true
+        },
+        "abstract": {
+          "type": "string",
+          "description": "Paper abstract",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "year": {
+          "type": "integer",
+          "description": "Publication year",
+          "minimum": 0
+        },
+        "venue": {
+          "type": "string",
+          "description": "Publication venue"
+        },
+        "doi": {
+          "type": "string",
+          "description": "Digital object identifier"
+        },
+        "url": {
+          "type": "string",
+          "description": "Paper URL",
+          "format": "uri"
+        },
+        "status": {
+          "type": "string",
+          "description": "Reading status",
+          "enum": [
+            "to_read",
+            "reading",
+            "read",
+            "cited"
+          ],
+          "default": "to_read"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Research notes",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    },
+    "author": {
+      "description": "An author of research",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Author name",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "affiliation": {
+          "type": "string",
+          "description": "Author affiliation"
+        },
+        "orcid": {
+          "type": "string",
+          "description": "ORCID identifier",
+          "pattern": "^\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]$"
+        },
+        "homepage": {
+          "type": "string",
+          "description": "Author homepage",
+          "format": "uri"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Author notes"
+        }
+      }
+    },
+    "concept": {
+      "description": "A research concept",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Concept name",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "definition": {
+          "type": "string",
+          "description": "Concept definition",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Other names for the concept",
+          "uniqueItems": true
+        },
+        "area": {
+          "type": "string",
+          "description": "Research area"
+        }
+      }
+    },
+    "experiment": {
+      "description": "A research experiment",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Experiment title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "hypothesis": {
+          "type": "string",
+          "description": "Experiment hypothesis",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "method": {
+          "type": "string",
+          "description": "Experiment method",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "status": {
+          "type": "string",
+          "description": "Experiment status",
+          "enum": [
+            "planned",
+            "running",
+            "completed",
+            "abandoned"
+          ],
+          "default": "planned"
+        },
+        "result_summary": {
+          "type": "string",
+          "description": "Experiment result summary",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "conducted_on": {
+          "type": "string",
+          "description": "Date conducted",
+          "format": "date"
+        }
+      }
+    },
+    "dataset": {
+      "description": "A research dataset",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Dataset name",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Dataset description",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "uri": {
+          "type": "string",
+          "description": "Dataset location",
+          "format": "uri"
+        },
+        "license": {
+          "type": "string",
+          "description": "Dataset license"
+        },
+        "version": {
+          "type": "string",
+          "description": "Dataset version"
+        },
+        "data_format": {
+          "type": "string",
+          "description": "Data format"
+        }
+      }
+    }
+  },
+  "relation_types": {
+    "authored_by": {
+      "source": "paper",
+      "target": "author",
+      "description": "Authored by"
+    },
+    "cites": {
+      "source": "paper",
+      "target": "paper",
+      "description": "Cites"
+    },
+    "discusses": {
+      "source": "paper",
+      "target": "concept",
+      "description": "Discusses"
+    },
+    "subconcept_of": {
+      "source": "concept",
+      "target": "concept",
+      "description": "Subconcept of"
+    },
+    "based_on": {
+      "source": "experiment",
+      "target": "paper",
+      "description": "Based on"
+    },
+    "tests": {
+      "source": "experiment",
+      "target": "concept",
+      "description": "Tests"
+    },
+    "uses_dataset": {
+      "source": "experiment",
+      "target": "dataset",
+      "description": "Uses dataset"
+    },
+    "introduced_in": {
+      "source": "dataset",
+      "target": "paper",
+      "description": "Introduced in"
+    }
+  }
+}

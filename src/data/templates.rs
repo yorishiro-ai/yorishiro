@@ -18,6 +18,22 @@ pub const TEMPLATES: &[BuiltinTemplate] = &[
         source: include_str!("../../data/templates/task-management.json"),
     },
     BuiltinTemplate {
+        id: "creative-writing",
+        source: include_str!("../../data/templates/creative-writing.json"),
+    },
+    BuiltinTemplate {
+        id: "trpg-campaign",
+        source: include_str!("../../data/templates/trpg-campaign.json"),
+    },
+    BuiltinTemplate {
+        id: "game-dev-lore",
+        source: include_str!("../../data/templates/game-dev-lore.json"),
+    },
+    BuiltinTemplate {
+        id: "research-knowledge-base",
+        source: include_str!("../../data/templates/research-knowledge-base.json"),
+    },
+    BuiltinTemplate {
         id: "worldbuilding",
         source: include_str!("../../data/templates/worldbuilding.json"),
     },
