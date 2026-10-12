@@ -142,17 +142,3 @@ impl StripePriceMapping {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn plan_policy_flag_defaults_and_rejects_invalid_values() {
-        unsafe { std::env::remove_var("YORISHIRO_PLAN_POLICY_ENABLED") };
-        assert!(!super::plan_policy_enabled().expect("default flag"));
-        unsafe { std::env::set_var("YORISHIRO_PLAN_POLICY_ENABLED", "TrUe") };
-        assert!(super::plan_policy_enabled().expect("true flag"));
-        unsafe { std::env::set_var("YORISHIRO_PLAN_POLICY_ENABLED", "maybe") };
-        assert!(super::plan_policy_enabled().is_err());
-        unsafe { std::env::remove_var("YORISHIRO_PLAN_POLICY_ENABLED") };
-    }
-}

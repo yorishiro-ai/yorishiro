@@ -180,6 +180,8 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_cancellation_returns_the_tenant_to_free() {
+    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    policy.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);

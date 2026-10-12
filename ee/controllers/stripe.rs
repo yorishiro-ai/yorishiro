@@ -334,7 +334,11 @@ async fn apply_stripe_event(
                 return Ok(());
             };
             tenant_billing::set_plan(&txn, tenant_id, plan.as_str()).await?;
-            if crate::edition::ee::data::plan::plan_policy_enabled()? {
+            if *ctx
+                .shared_store
+                .get::<std::sync::Arc<bool>>()
+                .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("plan policy missing")))?
+            {
                 tenant_tenants::set_max_workspaces(&txn, tenant_id, plan.caps(true).max_workspaces)
                     .await?;
             }
@@ -345,7 +349,11 @@ async fn apply_stripe_event(
                 return Ok(());
             };
             tenant_billing::set_plan(&txn, tenant_id, Plan::Free.as_str()).await?;
-            if crate::edition::ee::data::plan::plan_policy_enabled()? {
+            if *ctx
+                .shared_store
+                .get::<std::sync::Arc<bool>>()
+                .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("plan policy missing")))?
+            {
                 tenant_tenants::set_max_workspaces(
                     &txn,
                     tenant_id,

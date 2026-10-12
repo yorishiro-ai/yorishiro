@@ -14,10 +14,9 @@ use crate::workers::queue::QueuePolicy;
 use crate::workers::registry::WorkerRegistry;
 
 /// Installs the enterprise services that override base shared-store seams.
-pub(crate) fn compose_context(ctx: &AppContext) {
-    if let Err(error) = crate::edition::ee::data::plan::plan_policy_enabled() {
-        panic!("invalid plan policy configuration: {error}");
-    }
+pub(crate) async fn compose_context(ctx: &AppContext) -> Result<()> {
+    let policy_enabled = crate::edition::ee::data::plan::plan_policy_enabled()?;
+    ctx.shared_store.insert(Arc::new(policy_enabled));
     // An absent or invalid licence key warns and continues rather than failing boot.
     let licence =
         Arc::new(crate::edition::ee::controllers::middleware::edition::LicenceState::from_env());
@@ -50,6 +49,7 @@ pub(crate) fn compose_context(ctx: &AppContext) {
     );
     ctx.shared_store.insert(Arc::new(LocoJobDispatcher)
         as Arc<dyn crate::edition::ee::workers::infer_fill::InferFillDispatcher>);
+    Ok(())
 }
 
 /// Adds the enterprise workers after the base's, so their tags and queue come from the worker type like every other worker's.

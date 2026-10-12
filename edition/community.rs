@@ -8,7 +8,9 @@ use crate::app::RouteMounts;
 use crate::controllers::mcp::McpToolSet;
 use crate::workers::registry::WorkerRegistry;
 
-pub(crate) fn compose_context(_ctx: &AppContext) {}
+pub(crate) fn compose_context(_ctx: &AppContext) -> Result<()> {
+    Ok(())
+}
 
 pub(crate) fn workers(registry: WorkerRegistry) -> WorkerRegistry {
     registry

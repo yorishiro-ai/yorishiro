@@ -2,11 +2,11 @@
 
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::edition::ee::controllers::middleware::edition::LicenceState;
 use crate::edition::ee::data::plan::Plan;
-use crate::edition::ee::data::plan::plan_policy_enabled;
 use crate::edition::ee::models::tenant_billing;
 use crate::error::YorishiroError;
 use crate::models::workspace_workspaces;
@@ -33,7 +33,10 @@ impl QueuePolicy for PlanQueuePolicy {
             .ok_or_else(|| {
                 "queue policy unavailable: application settings are missing".to_owned()
             })?;
-        let policy_enabled = plan_policy_enabled().map_err(|error| error.to_string())?;
+        let policy_enabled = *ctx
+            .shared_store
+            .get::<Arc<bool>>()
+            .ok_or_else(|| "queue policy unavailable: plan policy is missing".to_owned())?;
         let limit = match class {
             WorkerClass::Shared => settings.worker_class_limits.shared,
             WorkerClass::TenantPrivate => settings.worker_class_limits.tenant_private,

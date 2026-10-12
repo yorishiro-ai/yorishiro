@@ -47,6 +47,7 @@ pub async fn find_or_create(
     email: Option<&str>,
     display_name: Option<&str>,
     max_tenants: Option<i32>,
+    policy_enabled: bool,
 ) -> Result<ProvisionedLogin, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
         .await
@@ -107,7 +108,7 @@ pub async fn find_or_create(
         tenant.id,
         "default",
         crate::edition::ee::data::plan::Plan::Free
-            .caps(crate::edition::ee::data::plan::plan_policy_enabled()?)
+            .caps(policy_enabled)
             .default_max_entities,
         None,
     )

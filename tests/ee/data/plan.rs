@@ -1,4 +1,5 @@
-use yorishiro::edition::ee::data::plan::{Plan, PriorityTier};
+use serial_test::serial;
+use yorishiro::edition::ee::data::plan::{Plan, PriorityTier, plan_policy_enabled};
 
 #[test]
 fn plan_claims_preserve_existing_values_and_map_enterprise_to_team() {
@@ -28,6 +29,20 @@ fn plan_claims_preserve_existing_values_and_map_enterprise_to_team() {
         },
     );
     assert_eq!(unknown.active_plan_at(999), None);
+}
+
+#[test]
+#[serial(process_environment)]
+fn plan_policy_flag_uses_the_guarded_environment() {
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    assert!(!plan_policy_enabled().expect("unset flag"));
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "TrUe");
+    assert!(plan_policy_enabled().expect("true flag"));
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
+    assert!(!plan_policy_enabled().expect("false flag"));
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
+    assert!(plan_policy_enabled().is_err());
 }
 
 #[test]
