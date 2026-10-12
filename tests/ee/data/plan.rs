@@ -82,6 +82,8 @@ async fn invalid_plan_policy_fails_enterprise_boot() {
     .await;
     match result {
         Ok(_) => panic!("invalid policy must fail boot"),
-        Err(error) => assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED")),
+        Err(error) => {
+            assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED"));
+        }
     }
 }
