@@ -1,4 +1,6 @@
-use yorishiro::edition::ee::data::plan::{Plan, PriorityTier};
+use crate::EnvGuard;
+use serial_test::serial;
+use yorishiro::edition::ee::data::plan::{Plan, PriorityTier, plan_policy_enabled};
 
 #[test]
 fn plan_claims_preserve_existing_values_and_map_enterprise_to_team() {
@@ -61,4 +63,18 @@ fn compute_policies_match_the_published_bounds() {
         (team.base_official_concurrency, team.burst_ceiling),
         (8, 12)
     );
+}
+
+#[test]
+#[serial(process_environment)]
+fn plan_policy_parser_is_guarded_and_restores_environment() {
+    let guard = EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    assert!(!plan_policy_enabled().unwrap());
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "TrUe");
+    assert!(plan_policy_enabled().unwrap());
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
+    assert!(!plan_policy_enabled().unwrap());
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
+    assert!(plan_policy_enabled().is_err());
 }

@@ -123,7 +123,11 @@ pub(crate) struct StripePriceMapping {
     pub(crate) team_price_id: Option<String>,
 }
 
-pub(crate) fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
+/// Reads and validates the enterprise plan-policy switch.
+///
+/// # Errors
+/// Returns an error when the variable is set to a value other than `true` or `false`.
+pub fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
     match crate::edition::ee::data::non_empty_env("YORISHIRO_PLAN_POLICY_ENABLED") {
         None => Ok(false),
         Some(value) if value.eq_ignore_ascii_case("true") => Ok(true),

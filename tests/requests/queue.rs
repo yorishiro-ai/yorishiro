@@ -650,6 +650,55 @@ async fn pro_plan_uses_one_official_worker_when_policy_is_disabled() {
 
 #[tokio::test]
 #[serial_test::serial(process_environment)]
+async fn disabled_policy_honors_official_override_without_changing_metadata() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+    let guard = crate::EnvGuard::capture(&[
+        "YORISHIRO_PLAN_POLICY_ENABLED",
+        "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+    ]);
+    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "9");
+    with_sqlite_queue(|ctx, _pool, workspace_id| async move {
+        let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        tenant_billing::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(workspace.tenant_id),
+            plan: sea_orm::ActiveValue::Set(Some("enterprise".into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        reindex::enqueue_for_class(
+            &ctx,
+            ReindexArgs {
+                lifecycle_id: None,
+                workspace_id,
+                worker_class: WorkerClass::Official,
+                startup: false,
+            },
+        )
+        .await
+        .unwrap();
+        let row = queue_job_lifecycles::Entity::find()
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.plan.as_deref(), Some("team"));
+        assert_eq!(row.concurrency_key.as_deref(), Some("official:team"));
+        assert_eq!(row.concurrency_limit, Some(9));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial(process_environment)]
 async fn present_invalid_billing_plan_remains_diagnostic() {
     if !crate::require_sqlite_backend() {
         return;

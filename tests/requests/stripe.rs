@@ -2,7 +2,7 @@ use super::boot_request;
 use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
 use hmac::{Hmac, KeyInit, Mac};
-use sea_orm::ActiveValue;
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 use serde_json::json;
 use serial_test::serial;
 use sha2::Sha256;
@@ -35,10 +35,12 @@ fn licence(ctx: &loco_rs::app::AppContext) {
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&[
+        "DATABASE_URL",
         "YORISHIRO_STRIPE_WEBHOOK_SECRET",
         "YORISHIRO_STRIPE_PRICE_PRO",
         "YORISHIRO_STRIPE_PRICE_TEAM",
     ]);
+    guard.set("DATABASE_URL", "sqlite://");
     guard.set("YORISHIRO_STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET);
     guard.set("YORISHIRO_STRIPE_PRICE_PRO", "price_pro");
     guard.set("YORISHIRO_STRIPE_PRICE_TEAM", "price_team");
@@ -238,6 +240,67 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 Some(1),
                 "a cancelled tenant must drop to Free's workspace cap, not keep the paid one"
             );
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
+    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    policy.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    with_stripe_env(async {
+        boot_request::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
+            let tenant_id = create_tenant(&ctx.db, "grandfathered").await;
+            tenant_tenants::ActiveModel {
+                id: ActiveValue::Set(tenant_id),
+                max_workspaces: ActiveValue::Set(Some(17)),
+                ..Default::default()
+            }
+            .update(&ctx.db)
+            .await
+            .unwrap();
+            tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_grandfathered")
+                .await
+                .unwrap();
+            for (event_id, body) in [
+                (
+                    "evt_gf_up",
+                    subscription_updated_body("evt_gf_up", 1, "cus_grandfathered"),
+                ),
+                (
+                    "evt_gf_del",
+                    subscription_deleted_body("evt_gf_del", 2, "cus_grandfathered"),
+                ),
+            ] {
+                let now = Utc::now().timestamp();
+                let sig = sign(WEBHOOK_SECRET, now, &body);
+                let response = request
+                    .post("/api/stripe/webhook")
+                    .add_header("stripe-signature", format!("t={now},v1={sig}"))
+                    .bytes(body.into())
+                    .await;
+                assert_eq!(
+                    response.status_code(),
+                    StatusCode::OK,
+                    "{event_id}: {}",
+                    response.text()
+                );
+            }
+            let billing = tenant_billing::get_billing(&ctx.db, tenant_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(billing.plan.as_deref(), Some("free"));
+            let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(tenant.max_workspaces, Some(17));
         })
         .await;
     })

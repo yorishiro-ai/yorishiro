@@ -63,7 +63,7 @@ impl Hooks for App {
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         let ctx = base::after_context(ctx).await?;
-        active::compose_context(&ctx).await?;
+        active::compose_context(&ctx)?;
         Ok(ctx)
     }
 
