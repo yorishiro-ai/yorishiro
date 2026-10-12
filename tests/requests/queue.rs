@@ -504,11 +504,13 @@ async fn enterprise_billing_plan_uses_team_queue_policy() {
         return;
     }
     let guard = crate::EnvGuard::capture(&[
+        "YORISHIRO_PLAN_POLICY_ENABLED",
         "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
         "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
         "YORISHIRO_WORKER_OFFICIAL_LIMIT",
     ]);
     guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "2");
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
     guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "3");
     guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "9");
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {
@@ -555,8 +557,12 @@ async fn enterprise_billing_plan_uses_team_queue_fallback_without_official_overr
     if !crate::require_sqlite_backend() {
         return;
     }
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_WORKER_OFFICIAL_LIMIT"]);
+    let guard = crate::EnvGuard::capture(&[
+        "YORISHIRO_PLAN_POLICY_ENABLED",
+        "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+    ]);
     guard.remove("YORISHIRO_WORKER_OFFICIAL_LIMIT");
+    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {
         let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
             .one(&ctx.db)
@@ -590,7 +596,54 @@ async fn enterprise_billing_plan_uses_team_queue_fallback_without_official_overr
             .expect("queue lifecycle");
         assert_eq!(row.plan.as_deref(), Some("team"));
         assert_eq!(row.concurrency_key.as_deref(), Some("official:team"));
-        assert_eq!(row.concurrency_limit, Some(8));
+        assert_eq!(row.concurrency_limit, Some(1));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn pro_plan_uses_one_official_worker_when_policy_is_disabled() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+    let guard = crate::EnvGuard::capture(&[
+        "YORISHIRO_PLAN_POLICY_ENABLED",
+        "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+    ]);
+    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    guard.remove("YORISHIRO_WORKER_OFFICIAL_LIMIT");
+    with_sqlite_queue(|ctx, _pool, workspace_id| async move {
+        let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        tenant_billing::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(workspace.tenant_id),
+            plan: sea_orm::ActiveValue::Set(Some("pro".into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        reindex::enqueue_for_class(
+            &ctx,
+            ReindexArgs {
+                lifecycle_id: None,
+                workspace_id,
+                worker_class: WorkerClass::Official,
+                startup: false,
+            },
+        )
+        .await
+        .unwrap();
+        let row = queue_job_lifecycles::Entity::find()
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.concurrency_limit, Some(1));
     })
     .await;
 }

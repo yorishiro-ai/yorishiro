@@ -10,6 +10,7 @@ Enterprise edition features that require additional configuration.
 When enabled, subscription plans enforce their existing workspace, entity, and official-worker limits.
 When disabled, official-worker concurrency uses `YORISHIRO_WORKER_OFFICIAL_LIMIT` or `1`, and newly created tenants and workspaces are unlimited.
 Stripe plan data continues to be persisted, while existing tenant and workspace limits are grandfathered unchanged.
+When disabled, plan metadata remains informational and does not determine concurrency.
 
 ### 日本語
 
@@ -18,6 +19,7 @@ Stripe plan data continues to be persisted, while existing tenant and workspace 
 無効時は、Official worker の上限に `YORISHIRO_WORKER_OFFICIAL_LIMIT` を使い、未設定なら `1` とします。
 新しく作成する tenant と workspace は無制限です。
 Stripe の plan 情報は引き続き保存され、既存 tenant と workspace の上限は変更されません。
+無効時の plan メタデータは情報表示用であり、同時実行数は決定しません。
 
 ## Per-workspace embedding providers
 
