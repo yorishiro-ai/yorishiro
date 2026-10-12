@@ -35,12 +35,10 @@ fn licence(ctx: &loco_rs::app::AppContext) {
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&[
-        "DATABASE_URL",
         "YORISHIRO_STRIPE_WEBHOOK_SECRET",
         "YORISHIRO_STRIPE_PRICE_PRO",
         "YORISHIRO_STRIPE_PRICE_TEAM",
     ]);
-    guard.set("DATABASE_URL", "sqlite://");
     guard.set("YORISHIRO_STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET);
     guard.set("YORISHIRO_STRIPE_PRICE_PRO", "price_pro");
     guard.set("YORISHIRO_STRIPE_PRICE_TEAM", "price_team");

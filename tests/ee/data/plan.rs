@@ -33,20 +33,6 @@ fn plan_claims_preserve_existing_values_and_map_enterprise_to_team() {
 }
 
 #[test]
-#[serial(process_environment)]
-fn plan_policy_flag_uses_the_guarded_environment() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-    assert!(!plan_policy_enabled().expect("unset flag"));
-    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "TrUe");
-    assert!(plan_policy_enabled().expect("true flag"));
-    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
-    assert!(!plan_policy_enabled().expect("false flag"));
-    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
-    assert!(plan_policy_enabled().is_err());
-}
-
-#[test]
 fn compute_policies_match_the_published_bounds() {
     let free = Plan::Free.compute_policy();
     assert_eq!(free.priority, PriorityTier::Low);
@@ -77,4 +63,25 @@ fn plan_policy_parser_is_guarded_and_restores_environment() {
     assert!(!plan_policy_enabled().unwrap());
     guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
     assert!(plan_policy_enabled().is_err());
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn invalid_plan_policy_fails_enterprise_boot() {
+    let guard = EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
+    use loco_rs::app::Hooks;
+    let config = yorishiro::App::load_config(&loco_rs::environment::Environment::Test)
+        .await
+        .expect("load test config");
+    let result = yorishiro::App::boot(
+        loco_rs::boot::StartMode::ServerOnly,
+        &loco_rs::environment::Environment::Test,
+        config,
+    )
+    .await;
+    match result {
+        Ok(_) => panic!("invalid policy must fail boot"),
+        Err(error) => assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED")),
+    }
 }

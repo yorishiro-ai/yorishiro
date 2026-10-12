@@ -369,8 +369,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 #[tokio::test]
 #[serial(process_environment)]
 async fn oauth_provisioning_policy_controls_new_caps() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED", "DATABASE_URL"]);
-    guard.set("DATABASE_URL", "sqlite://");
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
     for (index, value, expected_tenant, expected_entities) in
         [(0, None, None, None), (1, Some("true"), Some(1), Some(500))]
     {
