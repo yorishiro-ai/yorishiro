@@ -87,7 +87,7 @@ anyhow.workspace = true
 rand.workspace = true
 sha2.workspace = true
 hex.workspace = true
-jsonschema = { version = "=0.56.0" }
+jsonschema = { version = "=0.58.5" }
 rmcp = { version = "3.3.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 schemars = { version = "1.2.2", features = ["uuid1"] }
