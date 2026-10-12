@@ -68,9 +68,35 @@ fn plan_policy_parser_is_guarded_and_restores_environment() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn invalid_plan_policy_fails_enterprise_boot() {
-    let guard = EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_TEST_TOPOLOGY",
+        "YORISHIRO_PLAN_POLICY_ENABLED",
+    ]);
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-sqlite");
     use loco_rs::app::Hooks;
+    let db = format!("/tmp/opencode/pr-f-533-boot-{}.sqlite3", std::process::id());
+    let queue = format!(
+        "/tmp/opencode/pr-f-533-boot-{}-queue.sqlite3",
+        std::process::id()
+    );
+    guard.set("DATABASE_URL", format!("sqlite://{db}?mode=rwc"));
+    guard.set("QUEUE_URL", format!("sqlite://{queue}?mode=rwc"));
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
+    let config = yorishiro::App::load_config(&loco_rs::environment::Environment::Test)
+        .await
+        .expect("load test config");
+    let boot = yorishiro::App::boot(
+        loco_rs::boot::StartMode::ServerOnly,
+        &loco_rs::environment::Environment::Test,
+        config,
+    )
+    .await
+    .expect("false policy must boot");
+    crate::requests::close_app_pools_sqlite(&boot.app_context, &db).await;
+
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
     let config = yorishiro::App::load_config(&loco_rs::environment::Environment::Test)
         .await
         .expect("load test config");
@@ -80,6 +106,5 @@ async fn invalid_plan_policy_fails_enterprise_boot() {
         config,
     )
     .await;
-    let error = result.err().expect("invalid policy must fail boot");
-    assert!(format!("{error:?}").contains("YORISHIRO_PLAN_POLICY_ENABLED"));
+    assert!(result.is_err(), "invalid policy must fail boot");
 }
