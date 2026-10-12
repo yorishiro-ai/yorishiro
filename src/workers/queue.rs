@@ -44,13 +44,27 @@ pub(crate) struct CommunityQueuePolicy;
 impl QueuePolicy for CommunityQueuePolicy {
     async fn concurrency(
         &self,
-        _ctx: &AppContext,
+        ctx: &AppContext,
         _workspace_id: Uuid,
-        _class: WorkerClass,
+        class: WorkerClass,
     ) -> Result<ConcurrencyPolicy, String> {
+        let settings = ctx
+            .shared_store
+            .get::<crate::data::settings::Settings>()
+            .ok_or_else(|| {
+                "queue policy unavailable: application settings are missing".to_owned()
+            })?;
+        let limit = match class {
+            WorkerClass::Shared => settings.worker_class_limits.shared,
+            WorkerClass::TenantPrivate => settings.worker_class_limits.tenant_private,
+            WorkerClass::Official => settings
+                .worker_class_limits
+                .official
+                .unwrap_or(SINGLE_JOB_LIMIT),
+        };
         Ok(ConcurrencyPolicy {
             plan: COMMUNITY_PLAN.to_owned(),
-            limit: SINGLE_JOB_LIMIT,
+            limit,
         })
     }
 }

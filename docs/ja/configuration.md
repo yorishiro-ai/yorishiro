@@ -4,6 +4,17 @@
 
 Yorishiro は環境変数で設定します。設定用のファイルは不要です。
 
+## ワーカークラスの admission limit
+
+これらの上限は、同じ application DB を共有する全プロセスと全 workspace にまたがる、class と plan のキー単位で適用されます。
+workspace ごとの上限ではありません。
+
+| 変数 | 説明 |
+|---|---|
+| `YORISHIRO_WORKER_CLASS_SHARED_LIMIT` | shared class の同時実行上限（default: `1`、`1`以上） |
+| `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | tenant-private class の同時実行上限（default: `1`、`1`以上） |
+| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | official class の任意の同時実行上限。未設定時は Community が `1`、Enterprise が plan 値の Free `1`、Pro `4`、Team `8` を使用します。設定時は両 edition を上書きし、`1`以上が必要です |
+
 ## 埋め込み（自動検索）
 
 Yorishiro はテキストを数値に変換し、類似検索を有効にできます。これを「埋め込み」と呼びます。

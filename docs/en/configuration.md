@@ -4,6 +4,17 @@
 
 Yorishiro is configured through environment variables. No config file is needed for the settings below.
 
+## Worker class admission limits
+
+These limits apply per class and plan key across every process and all workspaces that share the same application database.
+They are deployment-wide limits, not per-workspace limits.
+
+| Variable | Description |
+|---|---|
+| `YORISHIRO_WORKER_CLASS_SHARED_LIMIT` | Maximum concurrent shared-class jobs (default: `1`, must be at least `1`) |
+| `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | Maximum concurrent tenant-private jobs (default: `1`, must be at least `1`) |
+| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | Optional maximum concurrent official jobs. When unset, Community uses `1` and Enterprise uses the plan value: Free `1`, Pro `4`, Team `8`. When set, it must be at least `1` and overrides both editions |
+
 ## Embedding (automatic text search)
 
 Yorishiro can turn your text into numbers that enable similarity search. This is called an "embedding."

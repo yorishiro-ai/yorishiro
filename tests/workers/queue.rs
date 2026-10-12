@@ -24,6 +24,46 @@ async fn the_installed_policy_decides_and_a_missing_one_refuses() {
         let policy = concurrency_for(&ctx, Uuid::nil(), class).await.unwrap();
         assert_eq!((policy.plan.as_str(), policy.limit), ("community", 1));
     }
+
+    let mut settings = serde_json::json!({
+        "max_tenants": 1,
+        "worker_class_limits": {
+            "shared": 2,
+            "tenant_private": 3,
+            "official": 4
+        },
+        "embedding": {
+            "provider": "none",
+            "dimensions": 768,
+            "base_url": null,
+            "api_key": "",
+            "model": null,
+            "send_dimensions_param": false,
+            "local_model": "multilingual-e5-base",
+            "local_max_sequence_length": 512
+        },
+        "rate_limit": {
+            "auth_max_requests": 10,
+            "auth_window_seconds": 60,
+            "search_tokens_per_minute": 100000
+        },
+        "db_load_guard": {
+            "threshold": 0,
+            "sustain_seconds": 30,
+            "poll_seconds": 5
+        }
+    });
+    let settings: yorishiro::data::settings::Settings =
+        serde_json::from_value(settings.take()).expect("test settings");
+    ctx.shared_store.insert(settings);
+    for (class, expected) in [
+        (WorkerClass::Shared, 2),
+        (WorkerClass::TenantPrivate, 3),
+        (WorkerClass::Official, 4),
+    ] {
+        let policy = concurrency_for(&ctx, Uuid::nil(), class).await.unwrap();
+        assert_eq!(policy.limit, expected);
+    }
 }
 
 async fn database() -> sea_orm::DatabaseConnection {

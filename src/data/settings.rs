@@ -5,12 +5,32 @@ use serde::Deserialize;
 pub struct Settings {
     pub(crate) max_tenants: i32,
     #[serde(default)]
+    pub(crate) worker_class_limits: WorkerClassLimits,
+    #[serde(default)]
     pub(crate) mcp: Mcp,
     pub embedding: Embedding,
     pub(crate) rate_limit: RateLimit,
     pub(crate) db_load_guard: DbLoadGuard,
     #[serde(default)]
     pub query_embedding: QueryEmbedding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerClassLimits {
+    pub(crate) shared: i32,
+    pub(crate) tenant_private: i32,
+    pub(crate) official: Option<i32>,
+}
+
+impl Default for WorkerClassLimits {
+    fn default() -> Self {
+        Self {
+            shared: 1,
+            tenant_private: 1,
+            official: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
