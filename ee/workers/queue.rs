@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::edition::ee::controllers::middleware::edition::LicenceState;
 use crate::edition::ee::data::plan::Plan;
+use crate::edition::ee::data::plan::plan_policy_enabled;
 use crate::edition::ee::models::tenant_billing;
 use crate::error::YorishiroError;
 use crate::models::workspace_workspaces;
@@ -32,13 +33,17 @@ impl QueuePolicy for PlanQueuePolicy {
             .ok_or_else(|| {
                 "queue policy unavailable: application settings are missing".to_owned()
             })?;
+        let policy_enabled = plan_policy_enabled().map_err(|error| error.to_string())?;
         let limit = match class {
             WorkerClass::Shared => settings.worker_class_limits.shared,
             WorkerClass::TenantPrivate => settings.worker_class_limits.tenant_private,
-            WorkerClass::Official => settings
-                .worker_class_limits
-                .official
-                .unwrap_or(plan.compute_policy().base_official_concurrency as i32),
+            WorkerClass::Official => settings.worker_class_limits.official.unwrap_or_else(|| {
+                if policy_enabled {
+                    plan.compute_policy().base_official_concurrency as i32
+                } else {
+                    1
+                }
+            }),
         };
         Ok(ConcurrencyPolicy {
             plan: plan.as_str().to_owned(),

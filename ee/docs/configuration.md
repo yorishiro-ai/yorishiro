@@ -4,6 +4,21 @@
 
 Enterprise edition features that require additional configuration.
 
+## Plan policy
+
+`YORISHIRO_PLAN_POLICY_ENABLED` defaults to `false` and accepts only `true` or `false` (case-insensitive).
+When enabled, subscription plans enforce their existing workspace, entity, and official-worker limits.
+When disabled, official-worker concurrency uses `YORISHIRO_WORKER_OFFICIAL_LIMIT` or `1`, and newly created tenants and workspaces are unlimited.
+Stripe plan data continues to be persisted, while existing tenant and workspace limits are grandfathered unchanged.
+
+### 日本語
+
+`YORISHIRO_PLAN_POLICY_ENABLED` の既定値は `false` で、`true` または `false`（大文字小文字を区別しない）のみ受け付けます。
+有効にすると、サブスクリプションの plan に応じた workspace、entity、Official worker の既存の上限を適用します。
+無効時は、Official worker の上限に `YORISHIRO_WORKER_OFFICIAL_LIMIT` を使い、未設定なら `1` とします。
+新しく作成する tenant と workspace は無制限です。
+Stripe の plan 情報は引き続き保存され、既存 tenant と workspace の上限は変更されません。
+
 ## Per-workspace embedding providers
 
 Each workspace can use its own embedding endpoint. Use `PUT /api/workspace/embedding-key` to assign a different provider to a single workspace.

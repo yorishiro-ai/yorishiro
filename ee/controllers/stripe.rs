@@ -333,18 +333,26 @@ async fn apply_stripe_event(
                 );
                 return Ok(());
             };
-            let caps = plan.caps();
             tenant_billing::set_plan(&txn, tenant_id, plan.as_str()).await?;
-            tenant_tenants::set_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
+            if crate::edition::ee::data::plan::plan_policy_enabled()? {
+                tenant_tenants::set_max_workspaces(&txn, tenant_id, plan.caps(true).max_workspaces)
+                    .await?;
+            }
         }
         "customer.subscription.deleted" => {
             let object = &event.data.object;
             let Some(tenant_id) = resolve_tenant_by_customer(&txn, object).await? else {
                 return Ok(());
             };
-            let caps = Plan::Free.caps();
             tenant_billing::set_plan(&txn, tenant_id, Plan::Free.as_str()).await?;
-            tenant_tenants::set_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
+            if crate::edition::ee::data::plan::plan_policy_enabled()? {
+                tenant_tenants::set_max_workspaces(
+                    &txn,
+                    tenant_id,
+                    Plan::Free.caps(true).max_workspaces,
+                )
+                .await?;
+            }
         }
         _ => {}
     }

@@ -15,6 +15,9 @@ use crate::workers::registry::WorkerRegistry;
 
 /// Installs the enterprise services that override base shared-store seams.
 pub(crate) fn compose_context(ctx: &AppContext) {
+    if let Err(error) = crate::edition::ee::data::plan::plan_policy_enabled() {
+        panic!("invalid plan policy configuration: {error}");
+    }
     // An absent or invalid licence key warns and continues rather than failing boot.
     let licence =
         Arc::new(crate::edition::ee::controllers::middleware::edition::LicenceState::from_env());

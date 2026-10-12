@@ -63,7 +63,13 @@ impl Plan {
         }
     }
 
-    pub(crate) fn caps(self) -> PlanCaps {
+    pub(crate) fn caps(self, policy_enabled: bool) -> PlanCaps {
+        if !policy_enabled {
+            return PlanCaps {
+                max_workspaces: None,
+                default_max_entities: None,
+            };
+        }
         match self {
             Plan::Free => PlanCaps {
                 max_workspaces: Some(1),
@@ -117,11 +123,36 @@ pub(crate) struct StripePriceMapping {
     pub(crate) team_price_id: Option<String>,
 }
 
+pub(crate) fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
+    match crate::edition::ee::data::non_empty_env("YORISHIRO_PLAN_POLICY_ENABLED") {
+        None => Ok(false),
+        Some(value) if value.eq_ignore_ascii_case("true") => Ok(true),
+        Some(value) if value.eq_ignore_ascii_case("false") => Ok(false),
+        Some(value) => Err(crate::YorishiroError::Internal(anyhow::anyhow!(
+            "YORISHIRO_PLAN_POLICY_ENABLED must be true or false, got {value:?}"
+        ))),
+    }
+}
+
 impl StripePriceMapping {
     pub(crate) fn from_env() -> Self {
         Self {
             pro_price_id: crate::edition::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_PRO"),
             team_price_id: crate::edition::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_TEAM"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn plan_policy_flag_defaults_and_rejects_invalid_values() {
+        unsafe { std::env::remove_var("YORISHIRO_PLAN_POLICY_ENABLED") };
+        assert!(!super::plan_policy_enabled().expect("default flag"));
+        unsafe { std::env::set_var("YORISHIRO_PLAN_POLICY_ENABLED", "TrUe") };
+        assert!(super::plan_policy_enabled().expect("true flag"));
+        unsafe { std::env::set_var("YORISHIRO_PLAN_POLICY_ENABLED", "maybe") };
+        assert!(super::plan_policy_enabled().is_err());
+        unsafe { std::env::remove_var("YORISHIRO_PLAN_POLICY_ENABLED") };
     }
 }

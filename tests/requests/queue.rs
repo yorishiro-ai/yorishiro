@@ -450,6 +450,8 @@ async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
     if !crate::require_sqlite_backend() {
         return;
     }
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
     with_sqlite_queue(|ctx, _pool, workspace_id| async move {
         ctx.shared_store
             .insert(Arc::new(LicenceState::licensed(LicenceClaims {

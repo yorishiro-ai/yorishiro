@@ -107,7 +107,7 @@ pub async fn find_or_create(
         tenant.id,
         "default",
         crate::edition::ee::data::plan::Plan::Free
-            .caps()
+            .caps(crate::edition::ee::data::plan::plan_policy_enabled()?)
             .default_max_entities,
         None,
     )
