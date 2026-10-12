@@ -69,6 +69,21 @@ fn plan_policy_parser_is_guarded_and_restores_environment() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn invalid_plan_policy_fails_enterprise_boot() {
+    struct StartupFiles {
+        _directory: tempfile::TempDir,
+        db: String,
+        queue: String,
+    }
+    impl Drop for StartupFiles {
+        fn drop(&mut self) {
+            for path in [&self.db, &self.queue] {
+                for suffix in ["", "-wal", "-shm", "-journal"] {
+                    let _ = std::fs::remove_file(format!("{path}{suffix}"));
+                }
+            }
+        }
+    }
+
     let guard = EnvGuard::capture(&[
         "DATABASE_URL",
         "QUEUE_URL",
@@ -77,11 +92,14 @@ async fn invalid_plan_policy_fails_enterprise_boot() {
     ]);
     guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-sqlite");
     use loco_rs::app::Hooks;
-    let db = format!("/tmp/opencode/pr-f-533-boot-{}.sqlite3", std::process::id());
-    let queue = format!(
-        "/tmp/opencode/pr-f-533-boot-{}-queue.sqlite3",
-        std::process::id()
-    );
+    let directory = tempfile::tempdir().expect("create startup test directory");
+    let db = directory.path().join("db.sqlite3").display().to_string();
+    let queue = directory.path().join("queue.sqlite3").display().to_string();
+    let _files = StartupFiles {
+        _directory: directory,
+        db: db.clone(),
+        queue: queue.clone(),
+    };
     guard.set("DATABASE_URL", format!("sqlite://{db}?mode=rwc"));
     guard.set("QUEUE_URL", format!("sqlite://{queue}?mode=rwc"));
     guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
