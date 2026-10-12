@@ -1,5 +1,4 @@
-use serial_test::serial;
-use yorishiro::edition::ee::data::plan::{Plan, PriorityTier, plan_policy_enabled};
+use yorishiro::edition::ee::data::plan::{Plan, PriorityTier};
 
 #[test]
 fn plan_claims_preserve_existing_values_and_map_enterprise_to_team() {

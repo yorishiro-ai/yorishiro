@@ -331,8 +331,8 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             "a-first-login-subject",
             Some("firstlogin@example.com"),
             None,
-            false,
             None,
+            false,
         )
         .await
         .expect("first login provisioning");
@@ -370,8 +370,8 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 #[serial(process_environment)]
 async fn oauth_provisioning_policy_controls_new_caps() {
     let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    for (index, (value, expected_tenant, expected_entities)) in
-        [(0, None, None), (1, Some("true"), Some(500))]
+    for (index, value, expected_tenant, expected_entities) in
+        [(0, None, None, None), (1, Some("true"), Some(1), Some(500))]
     {
         match value {
             Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
