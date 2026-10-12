@@ -124,6 +124,7 @@ With no backend variables set, package and Docker installations store the SQLite
 | [docs/en/installation.md](docs/en/installation.md) | Docker, Docker Compose, deb/rpm, and build from source |
 | [docs/en/configuration.md](docs/en/configuration.md) | All settings: embedding, search quotas, logging, queue backends |
 | [docs/en/sqlite.md](docs/en/sqlite.md) | SQLite mode: capabilities and limitations |
+| [docs/en/templates.md](docs/en/templates.md) | Built-in templates and the deprecated `worldbuilding` template |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributing guidelines |
 | [AGENTS.md](AGENTS.md) | Notes for AI agents |
 

@@ -2,7 +2,7 @@
 
 use super::boot_request;
 use loco_rs::app::Hooks;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use yorishiro::App;
 use yorishiro::edition::ee::models::template_templates::{
     self as official_templates, OFFICIAL_TENANT_ID,
@@ -55,6 +55,56 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
         );
         assert_eq!(second.updated.len(), 0);
         assert_eq!(second.unchanged.len(), built_in_count);
+
+        let task_template = yorishiro::models::_entities::template_templates::Entity::find()
+            .filter(yorishiro::models::_entities::template_templates::Column::Name.eq("task-management"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let world_template = yorishiro::models::_entities::template_templates::Entity::find()
+            .filter(yorishiro::models::_entities::template_templates::Column::Name.eq("worldbuilding"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        for template in [task_template, world_template] {
+            let latest = template_versions::Entity::find()
+                .filter(template_versions::Column::TemplateId.eq(template.id))
+                .order_by_desc(template_versions::Column::Version)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let mut previous = latest.definition;
+            if template.name == "task-management" {
+                for entity in ["client", "milestone", "assignee", "work_session", "handoff"] {
+                    previous["entity_types"].as_object_mut().unwrap().remove(entity);
+                }
+                for relation in [
+                    "for_client", "milestone_of", "targets_milestone", "assigned_to", "worked_on",
+                    "performed_by", "handoff_from", "handoff_to", "handoff_about",
+                ] {
+                    previous["relation_types"].as_object_mut().unwrap().remove(relation);
+                }
+            } else {
+                previous["description"] = serde_json::json!(
+                    "Characters, locations, factions, and items for creative writing and TRPG worldbuilding"
+                );
+            }
+            let active = template_versions::ActiveModel {
+                id: ActiveValue::Set(latest.id),
+                definition: ActiveValue::Set(previous),
+                ..Default::default()
+            };
+            active.update(&ctx.db).await.unwrap();
+        }
+        let changed = official_templates::seed_official_templates(&ctx)
+            .await
+            .expect("seed changed definitions");
+        assert_eq!(changed.published.len(), 0);
+        assert_eq!(changed.updated.len(), 2);
+        assert_eq!(changed.unchanged.len(), built_in_count - 2);
     })
     .await;
 }
