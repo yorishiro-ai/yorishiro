@@ -1,0 +1,372 @@
+{
+  "id": "creative-writing",
+  "name": "creative-writing",
+  "description": "Characters, locations, organizations, and story structure for long-form creative writing.",
+  "entity_types": {
+    "character": {
+      "description": "A character in the story",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Full name or alias",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Other names used by the character",
+          "uniqueItems": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Appearance, personality, and background",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "role": {
+          "type": "string",
+          "description": "Role in the story",
+          "enum": [
+            "protagonist",
+            "antagonist",
+            "supporting",
+            "minor"
+          ]
+        },
+        "traits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Personality traits and notable features",
+          "uniqueItems": true
+        },
+        "status": {
+          "type": "string",
+          "description": "Current status in the story",
+          "enum": [
+            "alive",
+            "deceased",
+            "unknown"
+          ],
+          "default": "alive"
+        },
+        "profile": {
+          "type": "object",
+          "description": "Structured profile data",
+          "properties": {
+            "age": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Age in years"
+            },
+            "gender": {
+              "type": "string",
+              "description": "Gender identity"
+            },
+            "occupation": {
+              "type": "string",
+              "description": "Role or profession"
+            }
+          }
+        }
+      }
+    },
+    "location": {
+      "description": "A place in the story",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Name of the location",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "What the place looks like, its atmosphere, and its history",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "type": {
+          "type": "string",
+          "description": "Category of location",
+          "enum": [
+            "city",
+            "village",
+            "wilderness",
+            "landmark",
+            "building",
+            "other"
+          ]
+        }
+      }
+    },
+    "organization": {
+      "description": "An organization in the story",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Name of the organization",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Goals, beliefs, and structure",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        }
+      }
+    },
+    "item": {
+      "description": "A significant object in the story",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Name of the item",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "What the item is and its history",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "significance": {
+          "type": "string",
+          "description": "Why the item matters to the story",
+          "x-embed": true
+        }
+      }
+    },
+    "chapter": {
+      "description": "A chapter of the story",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Chapter title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "number": {
+          "type": "integer",
+          "description": "Chapter number",
+          "minimum": 1
+        },
+        "summary": {
+          "type": "string",
+          "description": "Chapter summary",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "status": {
+          "type": "string",
+          "description": "Chapter status",
+          "enum": [
+            "outline",
+            "draft",
+            "revised",
+            "final"
+          ],
+          "default": "outline"
+        },
+        "word_count": {
+          "type": "integer",
+          "description": "Number of words",
+          "minimum": 0
+        }
+      }
+    },
+    "scene": {
+      "description": "A scene in the story",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Scene title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "summary": {
+          "type": "string",
+          "description": "Scene summary",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "story_time": {
+          "type": "string",
+          "description": "Free-form in-story time"
+        },
+        "status": {
+          "type": "string",
+          "description": "Scene status",
+          "enum": [
+            "outline",
+            "draft",
+            "revised",
+            "final"
+          ]
+        }
+      }
+    },
+    "plot_thread": {
+      "description": "A plot thread in the story",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Plot thread title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Plot thread description",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "description": "Kind of plot thread",
+          "enum": [
+            "main_plot",
+            "subplot",
+            "mystery",
+            "foreshadowing",
+            "character_arc"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "description": "Plot thread status",
+          "enum": [
+            "planned",
+            "open",
+            "resolved",
+            "dropped"
+          ],
+          "default": "planned"
+        }
+      }
+    },
+    "event": {
+      "description": "An event in the story",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Event title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Event description",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "story_time": {
+          "type": "string",
+          "description": "Free-form story time"
+        },
+        "sequence": {
+          "type": "integer",
+          "description": "Sequence number",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "relation_types": {
+    "knows": {
+      "source": "character",
+      "target": "character",
+      "description": "Knows"
+    },
+    "member_of": {
+      "source": "character",
+      "target": "organization",
+      "description": "Member of"
+    },
+    "located_in": {
+      "source": "character",
+      "target": "location",
+      "description": "Located in"
+    },
+    "controls": {
+      "source": "organization",
+      "target": "location",
+      "description": "Controls"
+    },
+    "possesses": {
+      "source": "character",
+      "target": "item",
+      "description": "Possesses"
+    },
+    "found_at": {
+      "source": "item",
+      "target": "location",
+      "description": "Found at"
+    },
+    "appears_in": {
+      "source": "character",
+      "target": "scene",
+      "description": "Appears in"
+    },
+    "takes_place_at": {
+      "source": "scene",
+      "target": "location",
+      "description": "Takes place at"
+    },
+    "in_chapter": {
+      "source": "scene",
+      "target": "chapter",
+      "description": "In chapter"
+    },
+    "pov_character": {
+      "source": "scene",
+      "target": "character",
+      "description": "Pov character"
+    },
+    "advances": {
+      "source": "scene",
+      "target": "plot_thread",
+      "description": "Advances"
+    },
+    "involves": {
+      "source": "event",
+      "target": "character",
+      "description": "Involves"
+    },
+    "happens_at": {
+      "source": "event",
+      "target": "location",
+      "description": "Happens at"
+    }
+  }
+}

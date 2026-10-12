@@ -122,6 +122,7 @@ YAML では Loco の Tera `get_env` 式を使ってデプロイ時の値を上�
 | [docs/ja/installation.md](docs/ja/installation.md) | Docker、Docker Compose、deb/rpm、ソースからビルド |
 | [docs/ja/configuration.md](docs/ja/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
 | [docs/ja/sqlite.md](docs/ja/sqlite.md) | SQLiteモード：機能と制限 |
+| [docs/ja/templates.md](docs/ja/templates.md) | 組み込みテンプレートと非推奨の `worldbuilding` テンプレート |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 貢献ガイドライン |
 | [AGENTS.md](AGENTS.md) | AIエージェント向け情報 |
 

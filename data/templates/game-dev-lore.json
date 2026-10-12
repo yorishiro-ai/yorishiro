@@ -1,0 +1,444 @@
+{
+  "id": "game-dev-lore",
+  "name": "game-dev-lore",
+  "description": "A shared canon for game development setting materials, glossary terms, and assets.",
+  "entity_types": {
+    "character": {
+      "description": "A character in the game world",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Character name",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "game_id": {
+          "type": "string",
+          "description": "Identifier used in game data"
+        },
+        "role": {
+          "type": "string",
+          "description": "Character role",
+          "enum": [
+            "playable",
+            "npc",
+            "boss",
+            "enemy",
+            "other"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "description": "Character description",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "canon_status": {
+          "type": "string",
+          "description": "Approval state",
+          "enum": [
+            "draft",
+            "proposed",
+            "approved",
+            "deprecated"
+          ],
+          "default": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Person responsible for this item"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    },
+    "location": {
+      "description": "A location in the game world",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Location name",
+          "required": true,
+          "x-embed": true
+        },
+        "game_id": {
+          "type": "string",
+          "description": "Identifier used in game data"
+        },
+        "type": {
+          "type": "string",
+          "description": "Location type",
+          "enum": [
+            "city",
+            "village",
+            "dungeon",
+            "wilderness",
+            "landmark",
+            "building",
+            "other"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "description": "Location description"
+        },
+        "canon_status": {
+          "type": "string",
+          "description": "Approval state",
+          "enum": [
+            "draft",
+            "proposed",
+            "approved",
+            "deprecated"
+          ],
+          "default": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Person responsible for this item"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    },
+    "faction": {
+      "description": "A faction in the game world",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Faction name",
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Faction description"
+        },
+        "canon_status": {
+          "type": "string",
+          "description": "Approval state",
+          "enum": [
+            "draft",
+            "proposed",
+            "approved",
+            "deprecated"
+          ],
+          "default": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Person responsible for this item"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    },
+    "item": {
+      "description": "An item in the game world",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Item name",
+          "required": true,
+          "x-embed": true
+        },
+        "game_id": {
+          "type": "string",
+          "description": "Identifier used in game data"
+        },
+        "type": {
+          "type": "string",
+          "description": "Item type",
+          "enum": [
+            "weapon",
+            "armor",
+            "consumable",
+            "key_item",
+            "material",
+            "other"
+          ]
+        },
+        "rarity": {
+          "type": "string",
+          "description": "Item rarity",
+          "enum": [
+            "common",
+            "uncommon",
+            "rare",
+            "epic",
+            "legendary"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "description": "Item description"
+        },
+        "canon_status": {
+          "type": "string",
+          "description": "Approval state",
+          "enum": [
+            "draft",
+            "proposed",
+            "approved",
+            "deprecated"
+          ],
+          "default": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Person responsible for this item"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    },
+    "event": {
+      "description": "An event in the game world",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Event title",
+          "required": true,
+          "x-embed": true
+        },
+        "era": {
+          "type": "string",
+          "description": "In-world era"
+        },
+        "sequence": {
+          "type": "integer",
+          "description": "Sequence number",
+          "minimum": 0
+        },
+        "description": {
+          "type": "string",
+          "description": "Event description"
+        },
+        "canon_status": {
+          "type": "string",
+          "description": "Approval state",
+          "enum": [
+            "draft",
+            "proposed",
+            "approved",
+            "deprecated"
+          ],
+          "default": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Person responsible for this item"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    },
+    "term": {
+      "description": "A glossary term",
+      "fields": {
+        "term": {
+          "type": "string",
+          "description": "Term name",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "definition": {
+          "type": "string",
+          "description": "Term definition",
+          "required": true,
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Other names for the term",
+          "uniqueItems": true
+        },
+        "locale_notes": {
+          "type": "string",
+          "description": "Notes about localization"
+        },
+        "canon_status": {
+          "type": "string",
+          "description": "Approval state",
+          "enum": [
+            "draft",
+            "proposed",
+            "approved",
+            "deprecated"
+          ],
+          "default": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Person responsible for this item"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    },
+    "asset": {
+      "description": "A reference asset",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Asset title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "uri": {
+          "type": "string",
+          "description": "Asset location",
+          "format": "uri"
+        },
+        "kind": {
+          "type": "string",
+          "description": "Asset kind",
+          "enum": [
+            "concept_art",
+            "model",
+            "audio",
+            "video",
+            "document",
+            "other"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "description": "Asset notes"
+        },
+        "canon_status": {
+          "type": "string",
+          "description": "Approval state",
+          "enum": [
+            "draft",
+            "proposed",
+            "approved",
+            "deprecated"
+          ],
+          "default": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Person responsible for this item"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "relation_types": {
+    "member_of": {
+      "source": "character",
+      "target": "faction",
+      "description": "Member of"
+    },
+    "located_in": {
+      "source": "character",
+      "target": "location",
+      "description": "Located in"
+    },
+    "controls": {
+      "source": "faction",
+      "target": "location",
+      "description": "Controls"
+    },
+    "possesses": {
+      "source": "character",
+      "target": "item",
+      "description": "Possesses"
+    },
+    "found_at": {
+      "source": "item",
+      "target": "location",
+      "description": "Found at"
+    },
+    "allied_with": {
+      "source": "faction",
+      "target": "faction",
+      "description": "Allied with"
+    },
+    "hostile_to": {
+      "source": "faction",
+      "target": "faction",
+      "description": "Hostile to"
+    },
+    "participates_in": {
+      "source": "character",
+      "target": "event",
+      "description": "Participates in"
+    },
+    "occurs_at": {
+      "source": "event",
+      "target": "location",
+      "description": "Occurs at"
+    },
+    "depicts_character": {
+      "source": "asset",
+      "target": "character",
+      "description": "Depicts character"
+    },
+    "depicts_location": {
+      "source": "asset",
+      "target": "location",
+      "description": "Depicts location"
+    },
+    "depicts_item": {
+      "source": "asset",
+      "target": "item",
+      "description": "Depicts item"
+    }
+  }
+}

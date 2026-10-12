@@ -1,0 +1,391 @@
+{
+  "id": "trpg-campaign",
+  "name": "trpg-campaign",
+  "description": "Characters, locations, factions, items, and sessions for running a TRPG campaign.",
+  "entity_types": {
+    "character": {
+      "description": "A person or creature in the world",
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Full name or alias",
+          "x-embed": true,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "Appearance, personality, background",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "traits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Personality traits, abilities, or notable features",
+          "uniqueItems": true
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "alive",
+            "deceased",
+            "unknown"
+          ],
+          "default": "alive",
+          "description": "Current status in the story"
+        },
+        "profile": {
+          "type": "object",
+          "description": "Structured profile data",
+          "properties": {
+            "age": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Age in years"
+            },
+            "gender": {
+              "type": "string",
+              "description": "Gender identity"
+            },
+            "occupation": {
+              "type": "string",
+              "description": "Role or profession"
+            }
+          }
+        },
+        "kind": {
+          "type": "string",
+          "description": "Player character or non-player character",
+          "enum": [
+            "pc",
+            "npc"
+          ],
+          "required": true
+        },
+        "player": {
+          "type": "string",
+          "description": "Player name for a PC"
+        },
+        "level": {
+          "type": "integer",
+          "description": "Character level",
+          "minimum": 0
+        },
+        "system_notes": {
+          "type": "string",
+          "description": "Free-form rules notes",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        }
+      }
+    },
+    "location": {
+      "description": "A place in the world: city, dungeon, landmark, etc.",
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Name of the location",
+          "x-embed": true,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "What the place looks like, its atmosphere, history",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "city",
+            "village",
+            "dungeon",
+            "wilderness",
+            "landmark",
+            "building",
+            "other"
+          ],
+          "description": "Category of location"
+        }
+      }
+    },
+    "faction": {
+      "description": "An organization, group, or political entity",
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Name of the faction",
+          "x-embed": true,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "Goals, beliefs, structure",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "alignment": {
+          "type": "string",
+          "description": "Moral alignment or disposition"
+        }
+      }
+    },
+    "item": {
+      "description": "A notable object: weapon, artifact, document, etc.",
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Name of the item",
+          "x-embed": true,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "What it is, what it does, its history",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "weapon",
+            "armor",
+            "artifact",
+            "document",
+            "consumable",
+            "other"
+          ],
+          "description": "Category of item"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Game-mechanical properties (damage, weight, etc.)",
+          "properties": {
+            "weight": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Weight in arbitrary units"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Monetary value"
+            },
+            "rarity": {
+              "type": "string",
+              "enum": [
+                "common",
+                "uncommon",
+                "rare",
+                "legendary"
+              ],
+              "description": "Rarity tier"
+            }
+          }
+        }
+      }
+    },
+    "session": {
+      "description": "A TRPG game session",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Session title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "number": {
+          "type": "integer",
+          "description": "Session number",
+          "minimum": 1
+        },
+        "played_on": {
+          "type": "string",
+          "description": "Date played",
+          "format": "date"
+        },
+        "status": {
+          "type": "string",
+          "description": "Session status",
+          "enum": [
+            "planned",
+            "played"
+          ],
+          "default": "planned"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Session summary",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "prep_notes": {
+          "type": "string",
+          "description": "Preparation notes",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        }
+      }
+    },
+    "quest": {
+      "description": "A quest in the campaign",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Quest title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Quest description",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "status": {
+          "type": "string",
+          "description": "Quest status",
+          "enum": [
+            "available",
+            "active",
+            "completed",
+            "failed",
+            "abandoned"
+          ],
+          "default": "available"
+        },
+        "reward": {
+          "type": "string",
+          "description": "Quest reward"
+        }
+      }
+    },
+    "encounter": {
+      "description": "An encounter in the campaign",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Encounter title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Encounter description",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "description": "Encounter kind",
+          "enum": [
+            "combat",
+            "social",
+            "exploration",
+            "puzzle",
+            "other"
+          ]
+        },
+        "difficulty": {
+          "type": "string",
+          "description": "Encounter difficulty",
+          "enum": [
+            "easy",
+            "medium",
+            "hard",
+            "deadly"
+          ]
+        }
+      }
+    }
+  },
+  "relation_types": {
+    "knows": {
+      "source": "character",
+      "target": "character",
+      "description": "Knows"
+    },
+    "member_of": {
+      "source": "character",
+      "target": "faction",
+      "description": "Member of"
+    },
+    "located_in": {
+      "source": "character",
+      "target": "location",
+      "description": "Located in"
+    },
+    "controls": {
+      "source": "faction",
+      "target": "location",
+      "description": "Controls"
+    },
+    "possesses": {
+      "source": "character",
+      "target": "item",
+      "description": "Possesses"
+    },
+    "found_at": {
+      "source": "item",
+      "target": "location",
+      "description": "Found at"
+    },
+    "appears_in": {
+      "source": "character",
+      "target": "session",
+      "description": "Appears in"
+    },
+    "quest_giver": {
+      "source": "quest",
+      "target": "character",
+      "description": "Quest giver"
+    },
+    "quest_location": {
+      "source": "quest",
+      "target": "location",
+      "description": "Quest location"
+    },
+    "encounter_for": {
+      "source": "encounter",
+      "target": "quest",
+      "description": "Encounter for"
+    },
+    "encounter_at": {
+      "source": "encounter",
+      "target": "location",
+      "description": "Encounter at"
+    },
+    "run_in": {
+      "source": "encounter",
+      "target": "session",
+      "description": "Run in"
+    }
+  }
+}

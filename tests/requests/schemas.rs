@@ -1,6 +1,7 @@
 use super::boot_request;
 use axum::http::StatusCode;
 use yorishiro::App;
+use yorishiro::data::templates::TEMPLATES;
 use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{self, TenantArgs};
@@ -36,6 +37,28 @@ async fn create_schema_from_a_builtin_template() {
             body["schema"]["definition"]["entity_types"]["task"].is_object(),
             "body: {body}"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_schema_from_every_builtin_template() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let Setup { key, .. } = setup(&ctx).await;
+        for template in TEMPLATES {
+            let response = request
+                .post("/api/schemas")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .json(&serde_json::json!({ "template_id": template.id }))
+                .await;
+            assert_eq!(
+                response.status_code(),
+                StatusCode::CREATED,
+                "{}: {}",
+                template.id,
+                response.text()
+            );
+        }
     })
     .await;
 }
@@ -77,7 +100,19 @@ async fn list_templates_and_get_template_over_rest() {
             .iter()
             .map(|t| t["id"].as_str().unwrap())
             .collect();
-        assert!(ids.contains(&"task-management"), "ids: {ids:?}");
+        assert_eq!(
+            ids,
+            vec![
+                "general-notes",
+                "task-management",
+                "creative-writing",
+                "trpg-campaign",
+                "game-dev-lore",
+                "research-knowledge-base",
+                "worldbuilding",
+                "software-adr"
+            ]
+        );
 
         let response = request
             .get("/api/templates/task-management")
@@ -86,6 +121,18 @@ async fn list_templates_and_get_template_over_rest() {
         assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["name"], "task-management");
+
+        let response = request
+            .get("/api/templates/worldbuilding")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+        assert!(
+            response.json::<serde_json::Value>()["description"]
+                .as_str()
+                .unwrap()
+                .contains("Deprecated")
+        );
     })
     .await;
 }

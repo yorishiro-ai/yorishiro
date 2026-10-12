@@ -15,7 +15,11 @@
         },
         "status": {
           "type": "string",
-          "enum": ["active", "on_hold", "done"],
+          "enum": [
+            "active",
+            "on_hold",
+            "done"
+          ],
           "required": true,
           "description": "Current project status"
         },
@@ -28,7 +32,9 @@
           "type": "string",
           "description": "What this project is about",
           "x-embed": true,
-          "x-ui": { "widget": "textarea" }
+          "x-ui": {
+            "widget": "textarea"
+          }
         }
       }
     },
@@ -46,7 +52,9 @@
           "type": "string",
           "description": "Additional details or context",
           "x-embed": true,
-          "x-ui": { "widget": "textarea" }
+          "x-ui": {
+            "widget": "textarea"
+          }
         },
         "done": {
           "type": "boolean",
@@ -55,7 +63,12 @@
         },
         "priority": {
           "type": "string",
-          "enum": ["low", "medium", "high", "urgent"],
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "urgent"
+          ],
           "default": "medium",
           "description": "Task priority level"
         },
@@ -66,9 +79,193 @@
         },
         "tags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Labels for categorization",
           "uniqueItems": true
+        }
+      }
+    },
+    "client": {
+      "description": "A client for a project",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Client name",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "email": {
+          "type": "string",
+          "description": "Client email",
+          "format": "email"
+        },
+        "status": {
+          "type": "string",
+          "description": "Client status",
+          "enum": [
+            "active",
+            "inactive"
+          ],
+          "default": "active"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Client notes",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        }
+      }
+    },
+    "milestone": {
+      "description": "A milestone in a project",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Milestone title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "due": {
+          "type": "string",
+          "description": "Milestone due date",
+          "format": "date"
+        },
+        "status": {
+          "type": "string",
+          "description": "Milestone status",
+          "enum": [
+            "planned",
+            "in_progress",
+            "reached",
+            "missed"
+          ],
+          "default": "planned"
+        },
+        "description": {
+          "type": "string",
+          "description": "Milestone description",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        }
+      }
+    },
+    "assignee": {
+      "description": "A person or AI agent assigned to work",
+      "fields": {
+        "name": {
+          "type": "string",
+          "description": "Assignee name",
+          "maxLength": 100,
+          "required": true,
+          "x-embed": true
+        },
+        "kind": {
+          "type": "string",
+          "description": "Assignee kind",
+          "enum": [
+            "human",
+            "ai_agent"
+          ],
+          "required": true
+        },
+        "email": {
+          "type": "string",
+          "description": "Assignee email",
+          "format": "email"
+        },
+        "role": {
+          "type": "string",
+          "description": "Assignee role",
+          "maxLength": 100
+        }
+      }
+    },
+    "work_session": {
+      "description": "A session spent working on a task",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Work session title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "started_at": {
+          "type": "string",
+          "description": "Work session start time",
+          "format": "date-time",
+          "required": true
+        },
+        "ended_at": {
+          "type": "string",
+          "description": "Work session end time",
+          "format": "date-time"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Work session summary",
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        }
+      }
+    },
+    "handoff": {
+      "description": "A handoff between assignees",
+      "fields": {
+        "title": {
+          "type": "string",
+          "description": "Handoff title",
+          "maxLength": 200,
+          "required": true,
+          "x-embed": true
+        },
+        "summary": {
+          "type": "string",
+          "description": "Handoff summary",
+          "required": true,
+          "x-embed": true,
+          "x-ui": {
+            "widget": "textarea"
+          }
+        },
+        "status": {
+          "type": "string",
+          "description": "Handoff status",
+          "enum": [
+            "open",
+            "acknowledged",
+            "resolved"
+          ],
+          "default": "open"
+        },
+        "handed_over_at": {
+          "type": "string",
+          "description": "Handoff time",
+          "format": "date-time"
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Questions left open"
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Steps to take next"
         }
       }
     }
@@ -88,6 +285,51 @@
       "source": "task",
       "target": "task",
       "description": "This task blocks another task from starting"
+    },
+    "for_client": {
+      "source": "project",
+      "target": "client",
+      "description": "Project is carried out for this client"
+    },
+    "milestone_of": {
+      "source": "milestone",
+      "target": "project",
+      "description": "Milestone belongs to this project"
+    },
+    "targets_milestone": {
+      "source": "task",
+      "target": "milestone",
+      "description": "Task contributes to this milestone"
+    },
+    "assigned_to": {
+      "source": "task",
+      "target": "assignee",
+      "description": "Task is assigned to this assignee"
+    },
+    "worked_on": {
+      "source": "work_session",
+      "target": "task",
+      "description": "Session was spent on this task"
+    },
+    "performed_by": {
+      "source": "work_session",
+      "target": "assignee",
+      "description": "Session was done by this assignee"
+    },
+    "handoff_from": {
+      "source": "handoff",
+      "target": "assignee",
+      "description": "Who hands the work over"
+    },
+    "handoff_to": {
+      "source": "handoff",
+      "target": "assignee",
+      "description": "Who receives the work"
+    },
+    "handoff_about": {
+      "source": "handoff",
+      "target": "task",
+      "description": "The task the handoff is about"
     }
   }
 }
