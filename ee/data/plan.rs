@@ -132,9 +132,12 @@ pub fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
         None => Ok(false),
         Some(value) if value.eq_ignore_ascii_case("true") => Ok(true),
         Some(value) if value.eq_ignore_ascii_case("false") => Ok(false),
-        Some(value) => Err(crate::YorishiroError::Internal(anyhow::anyhow!(
-            "YORISHIRO_PLAN_POLICY_ENABLED must be true or false, got {value:?}"
-        ))),
+        Some(_) => {
+            tracing::error!("invalid YORISHIRO_PLAN_POLICY_ENABLED; specify true or false");
+            Err(crate::YorishiroError::Internal(anyhow::anyhow!(
+                "YORISHIRO_PLAN_POLICY_ENABLED must be true or false"
+            )))
+        }
     }
 }
 

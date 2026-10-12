@@ -80,5 +80,6 @@ async fn invalid_plan_policy_fails_enterprise_boot() {
         config,
     )
     .await;
-    assert!(result.is_err(), "invalid policy must fail boot");
+    let error = result.err().expect("invalid policy must fail boot");
+    assert!(format!("{error:?}").contains("YORISHIRO_PLAN_POLICY_ENABLED"));
 }
