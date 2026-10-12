@@ -1606,7 +1606,20 @@ mod conflict {
             holder.abort();
             let join = holder.await.unwrap_err();
             assert!(join.is_cancelled());
-            assert_eq!(provider.active.load(Ordering::SeqCst), 0);
+            // Dropping the holder releases the embedding permit, so the follower may enter the provider before this task runs again.
+            // Wait for that hand-off instead of assuming it has not happened yet.
+            // Two recorded calls with exactly one active proves the holder released its provider slot and the follower took it.
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while provider.order.lock().unwrap().len() != 2
+                    || provider.active.load(Ordering::SeqCst) != 1
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect(
+                "the follower should take over the released permit with exactly one active call",
+            );
 
             // Cancellation bypasses the worker's normal finish path.  The lifecycle
             // authority reconciles the live lease explicitly as Cancelled.
