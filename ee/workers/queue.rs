@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::edition::ee::controllers::middleware::edition::LicenceState;
@@ -32,13 +33,20 @@ impl QueuePolicy for PlanQueuePolicy {
             .ok_or_else(|| {
                 "queue policy unavailable: application settings are missing".to_owned()
             })?;
+        let policy_enabled = *ctx
+            .shared_store
+            .get::<Arc<bool>>()
+            .ok_or_else(|| "queue policy unavailable: plan policy is missing".to_owned())?;
         let limit = match class {
             WorkerClass::Shared => settings.worker_class_limits.shared,
             WorkerClass::TenantPrivate => settings.worker_class_limits.tenant_private,
-            WorkerClass::Official => settings
-                .worker_class_limits
-                .official
-                .unwrap_or(plan.compute_policy().base_official_concurrency as i32),
+            WorkerClass::Official => settings.worker_class_limits.official.unwrap_or_else(|| {
+                if policy_enabled {
+                    plan.compute_policy().base_official_concurrency as i32
+                } else {
+                    1
+                }
+            }),
         };
         Ok(ConcurrencyPolicy {
             plan: plan.as_str().to_owned(),

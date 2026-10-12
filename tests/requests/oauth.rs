@@ -294,6 +294,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             Some("newcomer@example.com"),
             None,
             Some(1),
+            false,
         )
         .await;
         // The call is expected to be refused; make the rollback explicit so a
@@ -331,6 +332,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             Some("firstlogin@example.com"),
             None,
             None,
+            false,
         )
         .await
         .expect("first login provisioning");
@@ -362,6 +364,60 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         assert_eq!(schema.name, "general-notes");
     })
     .await;
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn oauth_provisioning_policy_controls_new_caps() {
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    for (index, value, expected_tenant, expected_entities) in
+        [(0, None, None, None), (1, Some("true"), Some(1), Some(500))]
+    {
+        match value {
+            Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
+            None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
+        }
+        boot_request::<App, _, _>(|_request, ctx| async move {
+            licence(&ctx);
+            let txn = ctx.db.begin().await.expect("begin");
+            let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
+                &txn,
+                "oidc",
+                &format!("policy-subject-{index}"),
+                Some(&format!("policy-{index}@example.com")),
+                None,
+                None,
+                expected_tenant.is_some(),
+            )
+            .await
+            .expect("provisioning");
+            txn.commit().await.expect("commit");
+            let tenant = tenant_tenants::Entity::find_by_id(
+                yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
+                    provisioned.workspace_id,
+                )
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .tenant_id,
+            )
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+            let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
+                provisioned.workspace_id,
+            )
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(tenant.max_workspaces, expected_tenant);
+            assert_eq!(workspace.max_entities, expected_entities);
+        })
+        .await;
+    }
 }
 
 /// The rate limit reaches the OAuth entry points by the paths the edition names when it mounts them, not by anything the limiter itself knows.

@@ -950,3 +950,4 @@ src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::payload	integrati
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::worker_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::queue_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::tags	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+ee/data/plan.rs	fn	plan_policy_enabled	Startup configuration parser is exercised by the enterprise integration test.

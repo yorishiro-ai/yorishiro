@@ -1,4 +1,6 @@
-use yorishiro::edition::ee::data::plan::{Plan, PriorityTier};
+use crate::EnvGuard;
+use serial_test::serial;
+use yorishiro::edition::ee::data::plan::{Plan, PriorityTier, plan_policy_enabled};
 
 #[test]
 fn plan_claims_preserve_existing_values_and_map_enterprise_to_team() {
@@ -47,4 +49,81 @@ fn compute_policies_match_the_published_bounds() {
         (team.base_official_concurrency, team.burst_ceiling),
         (8, 12)
     );
+}
+
+#[test]
+#[serial(process_environment)]
+fn plan_policy_parser_is_guarded_and_restores_environment() {
+    let guard = EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    assert!(!plan_policy_enabled().unwrap());
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "TrUe");
+    assert!(plan_policy_enabled().unwrap());
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
+    assert!(!plan_policy_enabled().unwrap());
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
+    let error = plan_policy_enabled().expect_err("invalid flag");
+    assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED"));
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn invalid_plan_policy_fails_enterprise_boot() {
+    struct StartupFiles {
+        _directory: tempfile::TempDir,
+        db: String,
+        queue: String,
+    }
+    impl Drop for StartupFiles {
+        fn drop(&mut self) {
+            for path in [&self.db, &self.queue] {
+                for suffix in ["", "-wal", "-shm", "-journal"] {
+                    let _ = std::fs::remove_file(format!("{path}{suffix}"));
+                }
+            }
+        }
+    }
+
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_TEST_TOPOLOGY",
+        "YORISHIRO_PLAN_POLICY_ENABLED",
+    ]);
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-sqlite");
+    use loco_rs::app::Hooks;
+    let directory = tempfile::tempdir().expect("create startup test directory");
+    let db = directory.path().join("db.sqlite3").display().to_string();
+    let queue = directory.path().join("queue.sqlite3").display().to_string();
+    let _files = StartupFiles {
+        _directory: directory,
+        db: db.clone(),
+        queue: queue.clone(),
+    };
+    guard.set("DATABASE_URL", format!("sqlite://{db}?mode=rwc"));
+    guard.set("QUEUE_URL", format!("sqlite://{queue}?mode=rwc"));
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
+    let config = yorishiro::App::load_config(&loco_rs::environment::Environment::Test)
+        .await
+        .expect("load test config");
+    let boot = yorishiro::App::boot(
+        loco_rs::boot::StartMode::ServerOnly,
+        &loco_rs::environment::Environment::Test,
+        config,
+    )
+    .await
+    .expect("false policy must boot");
+    crate::requests::close_app_pools_sqlite(&boot.app_context, &db).await;
+
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
+    let config = yorishiro::App::load_config(&loco_rs::environment::Environment::Test)
+        .await
+        .expect("load test config");
+    let result = yorishiro::App::boot(
+        loco_rs::boot::StartMode::ServerOnly,
+        &loco_rs::environment::Environment::Test,
+        config,
+    )
+    .await;
+    assert!(result.is_err(), "invalid policy must fail boot");
 }

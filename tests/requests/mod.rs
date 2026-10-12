@@ -135,7 +135,9 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
         queue.shutdown().expect("shutdown sqlite test queue");
     }
     ctx.db.get_sqlite_connection_pool().close().await;
-    // Clean up the temp SQLite file and its journaling siblings.
+    if let Some(path) = sqlite_queue_path(&ctx.config) {
+        remove_sqlite_files(&path);
+    }
     remove_sqlite_files(db_path);
 }
 

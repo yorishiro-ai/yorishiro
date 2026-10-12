@@ -63,7 +63,13 @@ impl Plan {
         }
     }
 
-    pub(crate) fn caps(self) -> PlanCaps {
+    pub(crate) fn caps(self, policy_enabled: bool) -> PlanCaps {
+        if !policy_enabled {
+            return PlanCaps {
+                max_workspaces: None,
+                default_max_entities: None,
+            };
+        }
         match self {
             Plan::Free => PlanCaps {
                 max_workspaces: Some(1),
@@ -115,6 +121,24 @@ impl Plan {
 pub(crate) struct StripePriceMapping {
     pub(crate) pro_price_id: Option<String>,
     pub(crate) team_price_id: Option<String>,
+}
+
+/// Reads and validates the enterprise plan-policy switch.
+///
+/// # Errors
+/// Returns an error when the variable is set to a value other than `true` or `false`.
+pub fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
+    match crate::edition::ee::data::non_empty_env("YORISHIRO_PLAN_POLICY_ENABLED") {
+        None => Ok(false),
+        Some(value) if value.eq_ignore_ascii_case("true") => Ok(true),
+        Some(value) if value.eq_ignore_ascii_case("false") => Ok(false),
+        Some(_) => {
+            tracing::error!("invalid YORISHIRO_PLAN_POLICY_ENABLED; specify true or false");
+            Err(crate::YorishiroError::Internal(anyhow::anyhow!(
+                "YORISHIRO_PLAN_POLICY_ENABLED must be true or false"
+            )))
+        }
+    }
 }
 
 impl StripePriceMapping {

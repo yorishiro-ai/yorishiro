@@ -47,6 +47,7 @@ pub async fn find_or_create(
     email: Option<&str>,
     display_name: Option<&str>,
     max_tenants: Option<i32>,
+    policy_enabled: bool,
 ) -> Result<ProvisionedLogin, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
         .await
@@ -96,6 +97,11 @@ pub async fn find_or_create(
     let tenant_name = tenant_name_from_email(email);
     let tenant_active = tenant_tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set(tenant_name),
+        max_workspaces: sea_orm::ActiveValue::Set(
+            crate::edition::ee::data::plan::Plan::Free
+                .caps(policy_enabled)
+                .max_workspaces,
+        ),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant_active, conn)
@@ -107,7 +113,7 @@ pub async fn find_or_create(
         tenant.id,
         "default",
         crate::edition::ee::data::plan::Plan::Free
-            .caps()
+            .caps(policy_enabled)
             .default_max_entities,
         None,
     )
