@@ -62,7 +62,8 @@ fn plan_policy_parser_is_guarded_and_restores_environment() {
     guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
     assert!(!plan_policy_enabled().unwrap());
     guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
-    assert!(plan_policy_enabled().is_err());
+    let error = plan_policy_enabled().expect_err("invalid flag");
+    assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED"));
 }
 
 #[tokio::test]
