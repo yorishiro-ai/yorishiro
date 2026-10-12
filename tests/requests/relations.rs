@@ -264,12 +264,39 @@ async fn every_builtin_relation_type_can_be_created() {
             }
 
             for (relation_type, relation) in &definition.relation_types {
+                let target_id = if relation.source == relation.target {
+                    let entity = &definition.entity_types[&relation.target];
+                    let response = request
+                        .post("/api/entities")
+                        .add_header("Authorization", format!("Bearer {write_key}"))
+                        .json(&serde_json::json!({
+                            "schema_name": schema_name,
+                            "entity_type": relation.target,
+                            "data": required_data(&entity.fields),
+                        }))
+                        .await;
+                    assert_eq!(
+                        response.status_code(),
+                        StatusCode::CREATED,
+                        "{} {} target: {}",
+                        template.id,
+                        relation_type,
+                        response.text()
+                    );
+                    response.json::<serde_json::Value>()["id"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<Uuid>()
+                        .unwrap()
+                } else {
+                    ids[&relation.target]
+                };
                 let response = request
                     .post("/api/relations")
                     .add_header("Authorization", format!("Bearer {write_key}"))
                     .json(&serde_json::json!({
                         "source_id": ids[&relation.source],
-                        "target_id": ids[&relation.target],
+                        "target_id": target_id,
                         "relation_type": relation_type,
                         "properties": {},
                     }))
