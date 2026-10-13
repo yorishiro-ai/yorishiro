@@ -2058,6 +2058,12 @@ mod conflict {
             .join("contexts.sqlite3")
             .display()
             .to_string();
+        // The nested boot helper removes its database on return; it must not unlink the outer context's still-open database.
+        let other_db_path = directory
+            .path()
+            .join("other-context.sqlite3")
+            .display()
+            .to_string();
         let aggregate = Arc::new(AtomicUsize::new(0));
         let aggregate_max = Arc::new(AtomicUsize::new(0));
         let entered = Arc::new(Notify::new());
@@ -2132,7 +2138,7 @@ mod conflict {
                     entered: entered.clone(),
                     release: release.clone(),
                 });
-                boot_request_sqlite::<App, _, _>(db_path, |_request, ctx_b| async move {
+                boot_request_sqlite::<App, _, _>(other_db_path, |_request, ctx_b| async move {
                     let (workspace_b, entity_b) = seed(&ctx_b).await;
                     ctx_b
                         .shared_store
