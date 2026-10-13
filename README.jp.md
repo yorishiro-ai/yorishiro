@@ -26,6 +26,29 @@
 - **チームで整理する**
   - テナントとワークスペース、ロールベースのアクセス制御でデータを適切に分割・共有できます。
 
+## アーキテクチャ
+
+```mermaid
+flowchart LR
+    Clients["REST・MCP クライアント"] --> Server
+
+    subgraph Server["Yorishiro"]
+        Router["Loco ルーター"] --> CE["Community の機能<br/>エンティティ、スキーマ、検索、認証"]
+        Router --> EE["Enterprise の機能<br/>OAuth、課金、マーケットプレイス、推論"]
+        CE --> Queue["バックグラウンドキュー"]
+        EE --> Queue
+        Queue --> Workers["対象別ワーカー"]
+    end
+
+    CE --> DB[("PostgreSQL または SQLite")]
+    EE --> DB
+    Workers --> DB
+```
+
+Enterprise ビルドでは Community の機能に追加機能が加わります。
+ライセンス対象の機能には有効なキーが必要です。
+SQLite は単一テナント用です。PostgreSQL では行レベルセキュリティでテナントを分離します。
+
 ## エディション
 
 Community の機能は Enterprise でも利用できます。

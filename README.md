@@ -28,6 +28,28 @@ A knowledge store where you define your own data structures and search by meanin
 - **Organize with teams**
   - Tenants and workspaces with role-based access keep data scoped and shared as you choose.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    Clients["REST and MCP clients"] --> Server
+
+    subgraph Server["Yorishiro"]
+        Router["Loco router"] --> CE["Community features<br/>entities, schemas, search, auth"]
+        Router --> EE["Enterprise features<br/>OAuth, billing, marketplace, inference"]
+        CE --> Queue["Background queue"]
+        EE --> Queue
+        Queue --> Workers["Targeted workers"]
+    end
+
+    CE --> DB[("PostgreSQL or SQLite")]
+    EE --> DB
+    Workers --> DB
+```
+
+The Enterprise build adds features to the Community base; licence-gated features require a valid key.
+SQLite is single-tenant; PostgreSQL supports tenant isolation through row-level security.
+
 ## Editions
 
 Everything you can do in ce is also available in ee. ee adds the following on top of ce:
