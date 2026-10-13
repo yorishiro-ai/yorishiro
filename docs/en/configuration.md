@@ -4,28 +4,22 @@
 
 Yorishiro is configured through environment variables. No config file is needed for the settings below.
 
-## Where settings and arguments are defined
+## Server address and OAuth callback
 
-Loco renders environment-backed defaults from `config/<environment>.yaml`; application-specific values then deserialize into `src/data/settings.rs` and are validated by `src/data/config.rs`.
-Direct environment reads that cannot go through that configuration are named in `src/data/env.rs`; enterprise-only reads are named in `ee/data/env.rs` and remain separate from Community code.
-The three worker-class limit variables are now read by `ee/data/worker_policy.rs` instead of the shared YAML settings. Remove an old `settings.worker_class_limits` block from custom configuration files before upgrading; the typed settings reject unknown fields.
-OAuth and Stripe settings are read on each request so configuration changes take effect without rebooting. Retired embedding variables are checked for presence even when their value is not UTF-8.
-Loco owns the main CLI and its `start` flags. `src/workers/start.rs` holds Yorishiro's typed worker-target interpretation of those flags because Loco does not expose the parsed command; it must stay compatible with Loco's parser.
-
-The server listens on `BINDING` and `PORT` (default `5150`), including in every test topology.
-`HOST` is the public-facing base URL used by Loco, not the listen address.
-If `YORISHIRO_OAUTH_REDIRECT_URI` is unset, the OAuth callback uses the resolved server binding and port, replacing a wildcard binding with `localhost` for local testing.
-A configured legacy `YORISHIRO_BIND` still overrides that local fallback; it does not change the server listener.
-Set `YORISHIRO_OAUTH_REDIRECT_URI` explicitly behind a reverse proxy or when the external port differs from `PORT`.
+Set `BINDING` to the interface the server listens on and `PORT` to its listening port (default `5150`).
+`HOST` is the public URL used in links, not the listening address.
+Set `YORISHIRO_OAUTH_REDIRECT_URI` to the public callback URL when using OAuth behind a reverse proxy or a different external port.
+If it is unset, the callback defaults to `http://<BINDING>:<PORT>/auth/oauth/callback`; a wildcard binding such as `0.0.0.0` becomes `localhost`.
+`YORISHIRO_BIND`, if set, overrides the fallback callback host and port but does not change where the server listens.
 
 ## Worker class admission limits
 
-Admission is uncapped by default in both editions. In Enterprise, setting `YORISHIRO_PLAN_POLICY_ENABLED=true` opts in to target limits; Community does not apply target admission limits.
-When enabled, limits use one key per target across every process sharing the application database: `shared:shared`, `official:official`, or `tenant_private:tenant:<tenant-id>`.
-Shared and Official limits span the deployment; tenant-private limits span a tenant, not a workspace.
-The plan stays in lifecycle metadata and never enters the key.
-Enabling Enterprise plan policy makes each Official job compare its own plan-derived limit against the same Official running count, rather than a separate count per plan.
-Uncapped admission does not remove worker-process or embedding-provider concurrency limits and does not guarantee higher throughput; additional concurrent work can increase database contention or model memory use.
+Community does not limit concurrent jobs by target.
+Enterprise also leaves these limits off by default; set `YORISHIRO_PLAN_POLICY_ENABLED=true` to enable them.
+Shared and Official limits apply across the deployment, while the tenant-private limit applies separately to each tenant.
+All Official jobs share one running count, even when they belong to different plans.
+Removing these limits does not change the number of workers or the embedding provider's own concurrency limits.
+More concurrent jobs can increase database contention and model memory use without improving throughput.
 
 | Variable | Description |
 |---|---|
@@ -33,7 +27,9 @@ Uncapped admission does not remove worker-process or embedding-provider concurre
 | `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | Maximum concurrent tenant-private jobs when Enterprise plan policy is enabled (default: `1`, must be at least `1`) |
 | `YORISHIRO_WORKER_OFFICIAL_LIMIT` | Optional maximum concurrent official jobs when Enterprise plan policy is enabled. When unset, Enterprise uses the plan value: Free `1`, Pro `4`, Team `8`. When set, it must be at least `1` |
 
-Enterprise validates a configured limit at startup even when plan policy is disabled; Community ignores these three enterprise-only variables.
+Enterprise requires each configured limit to be a positive integer, even when plan policy is disabled.
+Community ignores these three variables.
+If you use a custom YAML configuration, omit `settings.worker_class_limits`; unknown settings prevent startup.
 
 ## Embedding (automatic text search)
 
@@ -74,10 +70,6 @@ You can choose between a local model that runs on your machine, or an OpenAI-com
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector size (default: `768`). Must match your chosen model |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | Include a `dimensions` field in the request. Default `false` |
 
-The OpenAI-compatible provider keeps the public `EmbeddingProvider` contract as its domain boundary.
-Its outbound request is behind a private provider-specific transport seam so failure tests can substitute the network without changing embedding behavior or exposing another application-wide HTTP service.
-Loco provides extension points for application composition, but it does not own this provider-specific outbound request, so no Loco transport extension is applicable here.
-
 ### Local model
 
 Set `YORISHIRO_EMBEDDING_PROVIDER=local` to use a model that runs on your machine.
@@ -89,20 +81,16 @@ The only available model is `multilingual-e5-base` (768 dimensions), which works
 | `YORISHIRO_LOCAL_MODEL` | Model name (default: `multilingual-e5-base`). An unrecognized value will fail startup |
 | `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum input length (default: `512`) |
 
-**Downloading the model.** The model file is about 1 GiB and downloads on first use. Subsequent starts use the cached copy. You can also place the files manually at `models/<short_id>/` in the working directory — both the model file and tokenizer file must be present.
+**Downloading the model.** The model file is about 1 GiB and downloads on first use.
+Subsequent starts use the cached copy.
+You can also place both the model and tokenizer files in `models/<short_id>/` under the working directory.
 
 If the download fails, restarting fixes it. The binary verifies the downloaded file against a built-in checksum.
 
-The download uses a private artifact transport seam, while the embedding artifact component keeps the pinned URL and revision, timeout, expected length, SHA-256 check, partial-file cleanup, and atomic rename together.
-Loco's storage extension points do not fit this cache because it is a deployment-local filesystem cache, not application storage, and the verified bytes must be staged beside the destination before a same-filesystem atomic rename.
-
 ### Changing embedding models
 
-The deployment supports the closed dimension set `768`, `1024`, and `1536`.
-Migrations create all three width partitions up front, even when no current workspace uses some of them.
-This keeps workspace-specific provider selection, credential rotation, and reindexing free of runtime table creation and allows different workspaces to coexist at different widths.
-Unused partitions contain only small catalog/index metadata; vector storage is charged only to populated partitions.
-Workspace and provider configuration selects one supported width, while `reindex_embeddings` moves existing vectors to the new model or width.
+Supported embedding dimensions are `768`, `1024`, and `1536`.
+Workspaces can use different models and supported dimensions.
 
 If you switch to a different embedding model, existing embedded entities will still use vectors from the old model. You need to regenerate embeddings for affected workspaces:
 
@@ -114,18 +102,15 @@ This re-embeds every entity in the workspace with the new model. Until it finish
 
 You can also queue a reindex via the API: `POST /api/migration-jobs/reindex` (requires Migration scope). A reindex also runs automatically on startup if any workspace's model has changed.
 
-On PostgreSQL, reindex execution is serialized per workspace by the tenant-pool advisory lock. On SQLite, the worker uses the model-owned reindex path directly under SQLite's single-tenant semantics.
-
-Embedding sync is deliberately a single queue attempt. The pinned Loco 1.2.0 queue API has no portable delayed-enqueue operation, and immediately re-enqueueing failures would create an unbounded loop while lifecycle and queue mutations cannot be committed atomically. A confirmed vector write is the only successful persistence outcome; disabled or unconfigured embedding is recorded as an explicit no-op, deletion after enqueue is a successful no-op, and a stale snapshot is terminally superseded by the newer entity write. Provider, resolver, database, validation, and structural failures are recorded as failed and returned to Loco, with no automatic requeue. Use the explicit resync or reindex operations for recovery until a separately designed scheduler exists.
-
-**Operational boundary for failed embedding jobs.** The custom `queue_job_lifecycles` row is authoritative only once Loco has deserialized the job payload and the payload carries a valid `lifecycle_id`. A payload that fails deserialization (a malformed UUID, an unknown `worker_class`, a missing required field) is rejected by the Loco queue runner before any embedding code runs, so such a failure is recorded solely as a failed job in the queue provider, and its lifecycle row may remain `queued`. To inspect these, list failed jobs through the provider (the `JobStatus::Failed` rows in the queue table, or the equivalent Redis failed set). A typed embedding execution failure is different: the lifecycle row is `failed` with its diagnostic in `error`, and the provider job is failed as well. Neither case is retried automatically.
+Failed embedding jobs are not retried automatically.
+Use `resync_embeddings` or `reindex_embeddings` to recover after fixing the cause.
+If a job has an invalid payload, check the queue provider's failed jobs; its lifecycle row can remain `queued`.
+For an embedding execution failure, check the lifecycle row's `error` field.
 
 ## Stripe webhooks
 
 Set `YORISHIRO_STRIPE_WEBHOOK_SECRET` to enable inbound Stripe webhook processing.
-The endpoint accepts only events whose raw request bytes pass Stripe's `Stripe-Signature` HMAC check and 300-second timestamp tolerance before JSON parsing.
-The parsed event then crosses a private typed boundary into billing processing, so business logic never receives an unverified payload.
-Loco extension points compose application routes and state, but they do not own provider-specific inbound cryptographic verification, so this boundary remains local to the Stripe controller.
+The endpoint verifies `Stripe-Signature` against the raw request with a 300-second timestamp tolerance before processing an event.
 
 ## Search token quota
 
@@ -137,13 +122,11 @@ Loco extension points compose application routes and state, but they do not own 
 
 The PostgreSQL load guard is disabled by default because it changes the deployment-wide maintenance state automatically.
 
-Status values are typed internally while preserving their existing string representation on API and database wire formats.
 Set `YORISHIRO_DB_LOAD_THRESHOLD` to the active-connection count that should be treated as busy to enable it.
 The guard samples `pg_stat_activity` every 5 seconds by default and changes to read-only only after the threshold remains crossed for 30 seconds.
 It returns to normal service after the same quiet period, but only when the guard itself set read-only mode.
 An operator-owned read-only or full-lock state is never cleared by the guard.
 The guard uses the PostgreSQL identity pool and is a no-op on SQLite.
-This is the port of the earlier guard implementation, with its opt-in default retained because automatic maintenance changes require an explicit operational choice.
 `cargo loco task db_load_guard` is diagnostic only and reports one sample without changing maintenance mode.
 
 | Variable | Default | Description |
@@ -226,10 +209,10 @@ A process may select several targets with comma-separated tags, but that does no
 A bare `--worker`, `--all`, or `--server-and-worker` is rejected; plain `start` continues to run only the server.
 Configure any automatic start of Official or tenant workers in your own process manager; no tag-discovery wrapper or per-profile configuration is supplied.
 
-**Before upgrading from class-based routing, stop every old-release producer, then drain all old queued, running, and retrying jobs using old-release workers before starting any new worker.**
-Keep old-release workers and their Redis named queues available until both the application outbox and provider queues are drained; stop the old workers only after the drain completes.
-Do not run old-release API or other producers alongside new workers: an old producer can enqueue a legacy job after the new worker's one-time startup check, leaving that job stranded.
-The new worker refuses startup when unfinished retired dispatches already exist in the application outbox, but this check does not prevent concurrent legacy enqueues or inspect pending jobs in provider queues.
+**When changing worker routing, stop job producers and drain queued, running, and retrying jobs with the matching workers before starting workers with the new routing.**
+Keep the matching Redis queues and workers available until both the application outbox and provider queues are drained.
+Do not run producers and workers with different routing at the same time; jobs can remain unprocessed.
+The startup check detects unfinished dispatches in the application outbox, but it cannot detect jobs in provider queues or jobs enqueued concurrently.
 A tenant Redis queue is created for each tenant target when jobs arrive, and deleting a tenant does not automatically remove its Redis queue.
 Monitor queue growth and remove an obsolete tenant queue only after its jobs have been drained and the tenant is no longer served.
 
@@ -249,19 +232,6 @@ SQLite with a Redis-compatible queue remains supported, but boot advises keeping
 Throughput scales most with PostgreSQL for application data and a Redis-compatible queue (Valkey), then with PostgreSQL for both, and least with SQLite for both.
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` controls how long a job may remain processing before the reaper recovers it.
 
-### Dispatch seam inventory
-
-Embedding sync and reindex enqueue paths use a small application-owned dispatch seam because their callers need deterministic tests for queue failure while Loco's `BackgroundWorker` extension point remains the production implementation.
-The single production adapter lives at the existing Loco worker integration point, so worker registration, tags, queue modes, payloads, and execution remain unchanged.
-Entity REST and MCP writes commit before they dispatch embedding sync, and the reindex endpoint commits its audit row before it dispatches.
-The reindex audit detail intentionally changed from `{ "job_id": ... }` to `{ "workspace_id": ... }` as an observable contract change.
-This preserves the append-only audit log and commit-before-dispatch ordering because the queue assigns `job_id` only during dispatch.
-The reindex API response still returns the queue `job_id` for polling or operational tracking.
-
-The scheduler, startup reindex detector, and workspace embedding-key update do not add another seam because they already delegate to the reindex enqueue helper.
-Worker registration, worker execution, and the queue-routing probe remain Loco-specific because substitution there would test or replace framework behavior rather than application dispatch policy.
-Infer-fill uses the same narrow seam in the Enterprise edition, while its durable job row is created before dispatch and marked failed when dispatch fails.
-
 ## Tenant reindex schedule
 
 You can configure a deployment to automatically reindex every workspace under a tenant on a regular interval. The schedule runs through the normal reindex flow (same as the manual `reindex_embeddings` task), so it respects the same workspace provider and model version checks.
@@ -269,7 +239,7 @@ You can configure a deployment to automatically reindex every workspace under a 
 Configure the schedule through the API endpoint (`POST /api/identity/tenants/schedule` or the equivalent route), which takes an ISO 8601 duration (`P1D` for daily, `P1W` for weekly) and an optional IANA timezone name (default: UTC).
 The interval accepts weeks, days, hours, minutes and seconds (for example `P1D`, `P1W`, `PT6H`) and must be at least `PT5M`; years and months are rejected.
 Repeated units such as `P1D1D` are rejected.
-The ticker clamps legacy intervals to five minutes and falls back to one day when the interval is unreadable or its next timestamp overflows.
+For stored schedules with intervals shorter than five minutes, the ticker uses five minutes; it falls back to one day when an interval is unreadable or its next timestamp overflows.
 The first `scheduled_for` is one interval after the schedule is set, and each scheduler tick that runs it sets the next one an interval after that tick.
 On each scheduler tick, any overdue `scheduled_for` runs, with no missed-run grace cutoff.
 
