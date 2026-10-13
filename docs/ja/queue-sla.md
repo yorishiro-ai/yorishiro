@@ -22,7 +22,7 @@ lease が有効な再配送は `Duplicate` とし、lease の期限切れ後の�
 ## 容量と診断
 
 各ジョブには複合対象タグを一つだけ指定します。`worker-target:shared`、`worker-target:official`、または `worker-target:tenant:<tenant-id>` です。
-ライフサイクル行には、クラス、任意のプラン、同時実行キー、設定された上限を時刻情報とともに保存します。
+ライフサイクル行には、クラス、任意のプラン、同時実行キー、任意の上限を時刻情報とともに保存します。上限が `NULL` の場合は admission を制限しません。
 `attempt` は、実行中の処理として受け入れた配送時だけ増加します。
 
 PostgreSQL と SQLite では、ライフサイクルをアプリケーションデータベースに永続化します。
@@ -40,7 +40,7 @@ Redis はプロバイダー側のジョブ状態を提供しますが、Redis �
 開始時には、既存の構造化 tracing に `queue_start_seconds` と `lifecycle_id` が出力されます。
 デプロイ先のログ・可観測性基盤で、このイベントをエクスポートまたは絞り込んでください。
 この Issue では別のメトリクスエンドポイントは追加しません。
-容量による延期は `worker capacity saturated`、再試行への遷移は `retrying`、プロバイダーまたはポリシーの失敗は diagnostic フィールド付きの `unavailable` として出力されます。
+Enterprise の plan policy を有効にした場合、容量による延期は `worker capacity saturated` として出力されます。再試行への遷移は `retrying`、プロバイダーまたはポリシーの失敗は diagnostic フィールド付きの `unavailable` として出力されます。
 ライフサイクル行を `worker_class` と `status` で集計し、記録された開始時刻をプランの目標と比較してください。
 `queued`、`retrying`、または `unavailable` が増え続ける場合、SLA を判断する前に容量またはプロバイダーの健全性を復旧してください。
 
@@ -58,12 +58,12 @@ workerに一致しない先行エントリがある場合、tag付きRedis job�
 
 Yorishiroは`tenant_private`に300、`official`に200、`shared`に100のpriorityを割り当てます。
 
-ライフサイクルの admission lock は `shared:shared`、`official:official`、`tenant_private:tenant:<tenant-id>` の対象キー単位で実行数を数えます。
+Enterprise の plan policy を有効にした場合、ライフサイクルの admission は `shared:shared`、`official:official`、`tenant_private:tenant:<tenant-id>` の対象キー単位で実行数を数えます。上限がなければキーはメタデータとして残りますが、容量の集計やロックは行いません。
 plan はライフサイクルのメタデータとして残り、キーには入りません。
 
 JWTのplan claim `enterprise` はTeamの上限にマッピングされます。
 
-capacity が埋まったジョブは対象タグを保持したまま retrying として記録し、クラスの priority で再投入します。
+上限を有効にして capacity が埋まったジョブは対象タグを保持したまま retrying として記録し、クラスの priority で再投入します。
 別の対象へ暗黙に変更しません。
 
 処理枠を予約するには、対象ごとにワーカープロセスを起動します。

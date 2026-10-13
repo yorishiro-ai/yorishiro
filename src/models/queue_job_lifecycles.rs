@@ -415,12 +415,12 @@ async fn admit(
     }
     let recovered = status == LifecycleStatus::Running;
 
-    let in_flight = match &row.concurrency_key {
-        Some(key) => {
+    let in_flight = match (&row.concurrency_key, row.concurrency_limit) {
+        (Some(key), Some(_)) if !ignore_capacity => {
             crate::db::lock_for_update(txn, &format!("queue-concurrency:{key}")).await?;
             Some(in_flight(txn, key, now, id).await?)
         }
-        None => None,
+        _ => None,
     };
     if !ignore_capacity
         && let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)

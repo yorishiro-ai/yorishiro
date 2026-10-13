@@ -154,9 +154,15 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn production_config_is_the_packaged_loco_config() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
+    let _guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    ]);
     _guard.remove("DATABASE_URL");
     _guard.remove("QUEUE_URL");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
     _guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
 
     let config = load(&Environment::Production).await.unwrap();
@@ -334,74 +340,6 @@ async fn query_embedding_settings_are_validated() {
             error.contains(expected),
             "{timeout}/{poll}/{retention}: {error}"
         );
-    }
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn worker_class_limits_default_override_and_validation() {
-    let guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
-        "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
-        "YORISHIRO_WORKER_OFFICIAL_LIMIT",
-    ]);
-    guard.set(
-        "DATABASE_URL",
-        "sqlite:///tmp/worker-class-config.sqlite3?mode=rwc",
-    );
-    guard.set(
-        "QUEUE_URL",
-        "sqlite:///tmp/worker-class-config-queue.sqlite3?mode=rwc",
-    );
-    let environment = Environment::Any("test_sqlite".into());
-
-    let defaults = load(&environment).await.unwrap();
-    let settings = defaults.settings::<serde_json::Value>().unwrap();
-    assert_eq!(settings["worker_class_limits"]["shared"], 1);
-    assert_eq!(settings["worker_class_limits"]["tenant_private"], 1);
-    assert!(settings["worker_class_limits"]["official"].is_null());
-
-    for (name, value) in [
-        ("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "2"),
-        ("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "3"),
-        ("YORISHIRO_WORKER_OFFICIAL_LIMIT", "4"),
-    ] {
-        guard.set(name, value);
-    }
-    let overridden = load(&environment).await.unwrap();
-    let settings = overridden.settings::<serde_json::Value>().unwrap();
-    assert_eq!(
-        (
-            settings["worker_class_limits"]["shared"].clone(),
-            settings["worker_class_limits"]["tenant_private"].clone(),
-            settings["worker_class_limits"]["official"].clone(),
-        ),
-        (
-            serde_json::json!(2),
-            serde_json::json!(3),
-            serde_json::json!(4)
-        )
-    );
-
-    for name in [
-        "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
-        "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
-        "YORISHIRO_WORKER_OFFICIAL_LIMIT",
-    ] {
-        guard.set(name, "0");
-        let error = load(&environment).await.unwrap_err().to_string();
-        assert!(error.contains("worker_class_limits"), "{name}: {error}");
-        guard.set(name, "not-an-integer");
-        let error = load(&environment).await.unwrap_err().to_string();
-        assert!(
-            error.contains(name)
-                || error.contains("invalid digit")
-                || error.contains("expected i32"),
-            "{name}: {error}"
-        );
-        guard.remove(name);
     }
 }
 

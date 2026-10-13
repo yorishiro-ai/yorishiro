@@ -89,8 +89,9 @@ impl LicenceState {
     /// An absent, empty or invalid key all yield an unlicensed state rather than aborting startup: refusing to boot would take down the free half over a enterprise-feature misconfiguration.
     /// An invalid one is logged at `warn`, since it almost certainly means someone expected enterprise features to be on.
     pub(crate) fn from_env() -> Self {
-        let from_env =
-            std::env::var_os("YORISHIRO_LICENSE_KEY").map(|v| v.into_string().unwrap_or_default());
+        let from_env = crate::edition::ee::data::env::Env::LicenceKey
+            .read_os()
+            .map(|v| v.into_string().unwrap_or_default());
 
         let Some(token) = resolve_licence_key(from_env) else {
             tracing::info!("no licence key configured: enterprise features are disabled");

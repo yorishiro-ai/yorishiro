@@ -128,7 +128,7 @@ pub(crate) struct StripePriceMapping {
 /// # Errors
 /// Returns an error when the variable is set to a value other than `true` or `false`.
 pub fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
-    match crate::edition::ee::data::non_empty_env("YORISHIRO_PLAN_POLICY_ENABLED") {
+    match crate::edition::ee::data::env::Env::PlanPolicyEnabled.non_empty() {
         None => Ok(false),
         Some(value) if value.eq_ignore_ascii_case("true") => Ok(true),
         Some(value) if value.eq_ignore_ascii_case("false") => Ok(false),
@@ -144,8 +144,8 @@ pub fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
 impl StripePriceMapping {
     pub(crate) fn from_env() -> Self {
         Self {
-            pro_price_id: crate::edition::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_PRO"),
-            team_price_id: crate::edition::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_TEAM"),
+            pro_price_id: crate::edition::ee::data::env::Env::StripePricePro.non_empty(),
+            team_price_id: crate::edition::ee::data::env::Env::StripePriceTeam.non_empty(),
         }
     }
 }

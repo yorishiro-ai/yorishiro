@@ -22,7 +22,7 @@ Terminal updates are guarded by the admitted attempt, so an old worker cannot fi
 ## Capacity and diagnostics
 
 Every job has one composite target tag: `worker-target:shared`, `worker-target:official`, or `worker-target:tenant:<tenant-id>`.
-The lifecycle row stores the class, optional plan, concurrency key, and configured limit beside the timing data.
+The lifecycle row stores the class, optional plan, concurrency key, and optional limit beside the timing data. A `NULL` limit means admission is uncapped.
 The `attempt` counter increments only when a delivery is admitted to running work.
 
 PostgreSQL and SQLite use the application database for lifecycle durability.
@@ -38,7 +38,7 @@ Run workers with explicit target tags.
 A start without targets is rejected.
 The admission path emits structured tracing fields `queue_start_seconds` and `lifecycle_id` when a job starts.
 Export or filter those existing tracing events in the deployment's log/observability system; no separate metrics endpoint is added by this issue.
-Capacity deferrals emit `worker capacity saturated`, retry transitions emit `retrying`, and provider or policy failures emit `unavailable` with a diagnostic field.
+When Enterprise plan policy is enabled, capacity deferrals emit `worker capacity saturated`. Retry transitions emit `retrying`, and provider or policy failures emit `unavailable` with a diagnostic field.
 Inspect lifecycle rows grouped by `worker_class` and `status`, then compare recorded start times with the plan objective.
 An increasing `queued`, `retrying`, or `unavailable` count means capacity or provider health must be restored before an SLA conclusion is made.
 
@@ -56,12 +56,12 @@ A tagged Redis job beyond that bounded scan can therefore be skipped for a polli
 
 Yorishiro assigns `tenant_private` priority 300, `official` priority 200, and `shared` priority 100.
 
-The lifecycle admission lock counts by target key: `shared:shared`, `official:official`, or `tenant_private:tenant:<tenant-id>`.
+When Enterprise plan policy is enabled, lifecycle admission counts by target key: `shared:shared`, `official:official`, or `tenant_private:tenant:<tenant-id>`. Without a limit, these keys remain metadata and no capacity count or lock is taken.
 The plan remains lifecycle metadata and is not part of the key.
 
 The JWT plan claim `enterprise` maps to the Team limits.
 
-Capacity saturation is a deterministic fallback: the job retains its target tag, is recorded as retrying, and is re-enqueued with its class priority rather than being silently rerouted.
+With admission limits enabled, capacity saturation is a deterministic fallback: the job retains its target tag, is recorded as retrying, and is re-enqueued with its class priority rather than being silently rerouted.
 
 Run target-specific processes to reserve worker capacity: `--worker=worker-target:shared`, `--worker=worker-target:official`, and `--worker=worker-target:tenant:<tenant-id>`.
 

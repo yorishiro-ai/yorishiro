@@ -11,7 +11,7 @@ use loco_rs::controller::Routes;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
 use crate::db;
-use crate::edition::ee::data::non_empty_env;
+use crate::edition::ee::data::env::Env;
 use crate::edition::ee::data::plan::{Plan, StripePriceMapping};
 use crate::edition::ee::models::tenant_tenants;
 use crate::edition::ee::models::{stripe_events, tenant_billing};
@@ -154,7 +154,7 @@ pub struct StripeConfig {
 impl StripeConfig {
     pub fn from_env() -> Self {
         Self {
-            webhook_secret: non_empty_env("YORISHIRO_STRIPE_WEBHOOK_SECRET"),
+            webhook_secret: Env::StripeWebhookSecret.non_empty(),
             price_mapping: StripePriceMapping::from_env(),
         }
     }

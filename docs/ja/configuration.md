@@ -4,19 +4,31 @@
 
 Yorishiro は環境変数で設定します。設定用のファイルは不要です。
 
+## 設定と引数の定義場所
+
+Loco は `config/<environment>.yaml` で環境変数の既定値を展開します。アプリ固有の値は `src/data/settings.rs` の型に読み込み、`src/data/config.rs` で検証します。
+設定ファイルを経由できない環境変数の名前は `src/data/env.rs`、Enterprise 専用の名前は `ee/data/env.rs` にまとめています。Community のコードから Enterprise の設定は参照しません。
+ワーカークラス上限の3変数は共通 YAML ではなく `ee/data/worker_policy.rs` が読みます。独自の設定ファイルに古い `settings.worker_class_limits` があれば、アップグレード前に削除してください。型付き設定は未知の項目を拒否します。
+OAuth と Stripe の設定は変更を再起動なしで反映できるよう、リクエストごとに読みます。廃止した埋め込み設定は UTF-8 でない値でも存在を検知します。
+基本的な CLI と `start` のフラグは Loco が所有します。Loco は解析済みの引数を公開しないため、`src/workers/start.rs` が互換性を保ちながら worker target を型付きで解釈します。
+
 ## ワーカークラスの admission limit
 
-これらの上限は同じ application DB を共有する全プロセスで、対象ごとの `shared:shared`、`official:official`、`tenant_private:tenant:<tenant-id>` のキーを使います。
+両 edition とも既定ではジョブの admission に同時実行上限を適用しません。Enterprise で `YORISHIRO_PLAN_POLICY_ENABLED=true` を指定した場合だけ対象ごとの上限を有効にします。Community には対象ごとの admission 上限はありません。
+有効にした上限は、同じ application DB を共有する全プロセスで対象ごとの `shared:shared`、`official:official`、`tenant_private:tenant:<tenant-id>` のキーを使います。
 Shared と Official はデプロイ全体、tenant-private は tenant 全体の上限であり、workspace ごとの上限ではありません。
 plan はライフサイクルのメタデータとして残り、キーには入りません。
 Enterprise の plan policy は既定で無効です。
 有効にした場合、Official ジョブは自身の plan に応じた上限を一つの共通 Official 実行数と比較し、plan ごとに実行数を分けません。
+admission を無制限にしても、ワーカープロセス数や埋め込み provider の同時実行数は変わりません。スループット向上は保証されず、DB の競合やモデルのメモリ使用量が増える場合があります。
 
 | 変数 | 説明 |
 |---|---|
-| `YORISHIRO_WORKER_CLASS_SHARED_LIMIT` | shared class の同時実行上限（default: `1`、`1`以上） |
-| `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | tenant-private class の同時実行上限（default: `1`、`1`以上） |
-| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | official class の任意の同時実行上限。未設定時は Community が `1`、Enterprise が plan 値の Free `1`、Pro `4`、Team `8` を使用します。設定時は両 edition を上書きし、`1`以上が必要です |
+| `YORISHIRO_WORKER_CLASS_SHARED_LIMIT` | Enterprise の plan policy が有効な場合の shared class 同時実行上限（default: `1`、`1`以上） |
+| `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | Enterprise の plan policy が有効な場合の tenant-private class 同時実行上限（default: `1`、`1`以上） |
+| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | Enterprise の plan policy が有効な場合の official class 同時実行上限。未設定時は plan 値の Free `1`、Pro `4`、Team `8` を使用します。設定時は `1`以上が必要です |
+
+Enterprise は plan policy が無効でも設定済みの上限値を起動時に検証します。Community はこの3変数を使用しません。
 
 ## 埋め込み（自動検索）
 

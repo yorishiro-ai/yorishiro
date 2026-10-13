@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{QuerySelect, Statement};
+use sea_orm::{ExprTrait, QuerySelect, Statement};
 use serde::Serialize;
 
 use crate::db_enum::db_enum;
@@ -86,14 +86,15 @@ pub(crate) async fn set_embedding_reindexing(
     workspace_id: Uuid,
     reindexing: bool,
 ) -> Result<(), YorishiroError> {
-    let backend = conn.get_database_backend();
-    conn.execute_raw(Statement::from_sql_and_values(
-        backend,
-        "UPDATE workspace_workspaces SET embedding_reindexing = $1 WHERE id = $2",
-        [reindexing.into(), workspace_id.into()],
-    ))
-    .await
-    .internal()?;
+    use crate::models::_entities::workspace_workspaces::Column;
+    use sea_orm::sea_query::Expr;
+
+    Entity::update_many()
+        .col_expr(Column::EmbeddingReindexing, Expr::value(reindexing))
+        .filter(Column::Id.eq(workspace_id))
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }
 
@@ -101,39 +102,41 @@ pub(crate) async fn embedding_reindexing(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<bool, YorishiroError> {
-    let backend = conn.get_database_backend();
-    let row = conn
-        .query_one_raw(Statement::from_sql_and_values(
-            backend,
-            "SELECT embedding_reindexing FROM workspace_workspaces WHERE id = $1",
-            [workspace_id.into()],
-        ))
+    use crate::models::_entities::workspace_workspaces::Column;
+
+    let row = Entity::find()
+        .select_only()
+        .column(Column::EmbeddingReindexing)
+        .filter(Column::Id.eq(workspace_id))
+        .into_tuple::<bool>()
+        .one(conn)
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
-    row.try_get("", "embedding_reindexing").internal()
+    Ok(row)
 }
 
 pub(crate) async fn stamped_for_reindex(
     conn: &impl ConnectionTrait,
 ) -> Result<Vec<StartupReindexRow>, YorishiroError> {
-    let backend = conn.get_database_backend();
-    conn.query_all_raw(Statement::from_string(
-        backend,
-        "SELECT id, embedding_model, embedding_reindexing FROM workspace_workspaces \
-         WHERE embedding_model IS NOT NULL OR embedding_reindexing = TRUE",
-    ))
-    .await
-    .internal()?
-    .into_iter()
-    .map(|row| {
-        Ok(StartupReindexRow {
-            id: row.try_get("", "id").internal()?,
-            embedding_model: row.try_get("", "embedding_model").internal()?,
-            embedding_reindexing: row.try_get("", "embedding_reindexing").internal()?,
-        })
-    })
-    .collect()
+    use crate::models::_entities::workspace_workspaces::Column;
+
+    Entity::find()
+        .select_only()
+        .columns([
+            Column::Id,
+            Column::EmbeddingModel,
+            Column::EmbeddingReindexing,
+        ])
+        .filter(
+            Column::EmbeddingModel
+                .is_not_null()
+                .or(Column::EmbeddingReindexing.eq(true)),
+        )
+        .into_model::<StartupReindexRow>()
+        .all(conn)
+        .await
+        .internal()
 }
 
 pub(crate) async fn list_for_tenant(
@@ -255,9 +258,7 @@ pub(crate) async fn is_schema_pending(
 ///
 /// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other's write.
 ///
-/// Raw SQL, not `ActiveModel`: `COALESCE(...)` can't be expressed via `Set(...)`, and `yorishiro_app` holds UPDATE only on `workspace_workspaces (status, schema_id)` (a column-level GRANT), so the statement must touch exactly those two columns.
-///
-/// SeaORM cannot express `COALESCE` in a `Set` clause, nor can it target a column subset for UPDATE.
+/// This single-statement write uses `COALESCE(...)` and touches exactly the two columns allowed by `yorishiro_app`'s column-level UPDATE grant; a read followed by `ActiveModel` would overwrite concurrent changes.
 pub(crate) async fn mark_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

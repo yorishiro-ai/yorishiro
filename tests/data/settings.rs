@@ -3,11 +3,6 @@ use yorishiro::data::settings::{EmbeddingProvider, Settings};
 fn settings() -> serde_json::Value {
     serde_json::json!({
         "max_tenants": 1,
-        "worker_class_limits": {
-            "shared": 1,
-            "tenant_private": 1,
-            "official": null
-        },
         "embedding": {
             "provider": "local",
             "dimensions": 768,

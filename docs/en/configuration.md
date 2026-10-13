@@ -4,18 +4,30 @@
 
 Yorishiro is configured through environment variables. No config file is needed for the settings below.
 
+## Where settings and arguments are defined
+
+Loco renders environment-backed defaults from `config/<environment>.yaml`; application-specific values then deserialize into `src/data/settings.rs` and are validated by `src/data/config.rs`.
+Direct environment reads that cannot go through that configuration are named in `src/data/env.rs`; enterprise-only reads are named in `ee/data/env.rs` and remain separate from Community code.
+The three worker-class limit variables are now read by `ee/data/worker_policy.rs` instead of the shared YAML settings. Remove an old `settings.worker_class_limits` block from custom configuration files before upgrading; the typed settings reject unknown fields.
+OAuth and Stripe settings are read on each request so configuration changes take effect without rebooting. Retired embedding variables are checked for presence even when their value is not UTF-8.
+Loco owns the main CLI and its `start` flags. `src/workers/start.rs` holds Yorishiro's typed worker-target interpretation of those flags because Loco does not expose the parsed command; it must stay compatible with Loco's parser.
+
 ## Worker class admission limits
 
-These limits use one key per target across every process sharing the application database: `shared:shared`, `official:official`, or `tenant_private:tenant:<tenant-id>`.
+Admission is uncapped by default in both editions. In Enterprise, setting `YORISHIRO_PLAN_POLICY_ENABLED=true` opts in to target limits; Community does not apply target admission limits.
+When enabled, limits use one key per target across every process sharing the application database: `shared:shared`, `official:official`, or `tenant_private:tenant:<tenant-id>`.
 Shared and Official limits span the deployment; tenant-private limits span a tenant, not a workspace.
 The plan stays in lifecycle metadata and never enters the key.
-Enterprise plan policy defaults to disabled; enabling it makes each Official job compare its own plan-derived limit against the same Official running count, rather than a separate count per plan.
+Enabling Enterprise plan policy makes each Official job compare its own plan-derived limit against the same Official running count, rather than a separate count per plan.
+Uncapped admission does not remove worker-process or embedding-provider concurrency limits and does not guarantee higher throughput; additional concurrent work can increase database contention or model memory use.
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_WORKER_CLASS_SHARED_LIMIT` | Maximum concurrent shared-class jobs (default: `1`, must be at least `1`) |
-| `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | Maximum concurrent tenant-private jobs (default: `1`, must be at least `1`) |
-| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | Optional maximum concurrent official jobs. When unset, Community uses `1` and Enterprise uses the plan value: Free `1`, Pro `4`, Team `8`. When set, it must be at least `1` and overrides both editions |
+| `YORISHIRO_WORKER_CLASS_SHARED_LIMIT` | Maximum concurrent shared-class jobs when Enterprise plan policy is enabled (default: `1`, must be at least `1`) |
+| `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` | Maximum concurrent tenant-private jobs when Enterprise plan policy is enabled (default: `1`, must be at least `1`) |
+| `YORISHIRO_WORKER_OFFICIAL_LIMIT` | Optional maximum concurrent official jobs when Enterprise plan policy is enabled. When unset, Enterprise uses the plan value: Free `1`, Pro `4`, Team `8`. When set, it must be at least `1` |
+
+Enterprise validates a configured limit at startup even when plan policy is disabled; Community ignores these three enterprise-only variables.
 
 ## Embedding (automatic text search)
 

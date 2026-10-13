@@ -1,4 +1,6 @@
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QuerySelect, Statement,
+};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -81,14 +83,14 @@ pub(super) async fn embed_and_write(
         // The upsert found no matching entity row with the expected token.
         // Distinguish: was the entity deleted, or just token-mismatched?
 
-        // Use query_one_raw instead of execute_raw(SELECT 1).rows_affected():
-        // a SELECT never "affects" rows, so rows_affected is meaningless.
-        let entity_exists = conn
-            .query_one_raw(Statement::from_sql_and_values(
-                backend,
-                "SELECT 1 FROM entity_entities WHERE id = $1 AND workspace_id = $2",
-                [input.entity_id.into(), input.workspace_id.into()],
-            ))
+        use crate::models::_entities::entity_entities::{Column, Entity};
+
+        let entity_exists = Entity::find_by_id(input.entity_id)
+            .select_only()
+            .column(Column::Id)
+            .filter(Column::WorkspaceId.eq(input.workspace_id))
+            .into_tuple::<Uuid>()
+            .one(conn)
             .await
             .internal()?
             .is_some();

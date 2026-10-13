@@ -1,7 +1,7 @@
 //! Loads `config/<environment>.yaml` and rejects settings the application cannot run with.
 
 use std::{
-    env, fs,
+    fs,
     path::{Component, Path, PathBuf},
     str::FromStr,
 };
@@ -28,10 +28,11 @@ pub async fn load(environment: &Environment) -> Result<Config> {
 fn test_environment(environment: &Environment) -> Environment {
     match environment {
         Environment::Test => {
-            if let Ok(topology) = env::var("YORISHIRO_TEST_TOPOLOGY") {
+            if let Ok(topology) = crate::data::env::Env::TestTopology.read() {
                 return Environment::Any(format!("test_{}", topology.replace('-', "_")));
             }
-            let url = env::var("DATABASE_URL")
+            let url = crate::data::env::Env::DatabaseUrl
+                .read()
                 .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());
             if url.starts_with("sqlite:") {
                 Environment::Any("test_sqlite".into())
@@ -48,17 +49,6 @@ fn validate(config: &Config) -> Result<()> {
     if settings.max_tenants < 0 {
         return Err(Error::Message(
             "settings.max_tenants must not be negative".into(),
-        ));
-    }
-    if settings.worker_class_limits.shared < 1
-        || settings.worker_class_limits.tenant_private < 1
-        || settings
-            .worker_class_limits
-            .official
-            .is_some_and(|limit| limit < 1)
-    {
-        return Err(Error::Message(
-            "settings.worker_class_limits values must be greater than zero".into(),
         ));
     }
     if settings

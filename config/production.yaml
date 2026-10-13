@@ -18,7 +18,7 @@
 # Set `YORISHIRO_QUEUE_KIND=Redis` and a `redis://` or `rediss://` `QUEUE_URL` to use the Redis-compatible provider independently of the application database.
 #
 # The enterprise edition variables below are not rendered by this file (they are read
-# directly via `std::env::var` in `ee/`), but listed here for completeness so this
+# through the typed keys in `ee/data/env.rs`), but listed here for completeness so this
 # document is the single reference for every configuration option:
 #   YORISHIRO_BIND          - Network bind address used by `ee/`'s OAuth redirect URI logic
 #   YORISHIRO_LICENSE_KEY   - RSA256-signed licence key for enterprise features (see `ee/services/licence.rs`)
@@ -127,10 +127,6 @@ workers:
   mode: BackgroundQueue
 
 settings:
-  worker_class_limits:
-    shared: <%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="1") %>
-    tenant_private: <%= get_env(name="YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", default="1") %>
-    official: <%= get_env(name="YORISHIRO_WORKER_OFFICIAL_LIMIT", default="") %>
   max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="1") %>
   mcp:
     allowed_hosts: "<%= get_env(name="YORISHIRO_MCP_ALLOWED_HOSTS", default="") %>"
