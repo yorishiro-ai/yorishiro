@@ -30,24 +30,57 @@
 
 ```mermaid
 flowchart LR
-    Clients["REST・MCP クライアント"] --> Server
+    MCP["MCP クライアント<br/>(Claude、Cursor など)"]
+    REST["REST クライアント"]
 
-    subgraph Server["Yorishiro"]
-        Router["Loco ルーター"] --> CE["Community の機能<br/>エンティティ、スキーマ、検索、認証"]
-        Router --> EE["Enterprise の機能<br/>OAuth、課金、マーケットプレイス、推論"]
-        CE --> Queue["バックグラウンドキュー"]
-        EE --> Queue
-        Queue --> Workers["対象別ワーカー"]
+    subgraph Server["Yorishiro (単一バイナリ)"]
+        Router["Loco ルーター"]
+
+        subgraph CE["Community の基本機能"]
+            CEControllers["コントローラー<br/>エンティティ、スキーマ、検索、認証"]
+            Models["モデルとポリシー"]
+        end
+
+        subgraph EE["Enterprise の追加機能 (Enterprise ビルド)"]
+            EEControllers["コントローラー<br/>OAuth、課金、マーケットプレイス、推論"]
+            EEPolicies["Enterprise のポリシーとプロバイダー"]
+        end
+
+        Embed["埋め込みプロバイダー<br/>ローカルモデルまたは OpenAI 互換エンドポイント"]
+        Queue["キュープロバイダー<br/>SQLite、PostgreSQL、Redis 互換"]
+
+        subgraph Workers["対象別バックグラウンドワーカー"]
+            WEmbed["埋め込み同期"]
+            WReindex["再インデックス"]
+            WInfer["infer-fill (Enterprise)"]
+        end
+
+        DB[("アプリケーション DB<br/>PostgreSQL または SQLite")]
     end
 
-    CE --> DB[("PostgreSQL または SQLite")]
-    EE --> DB
+    MCP --> Router
+    REST --> Router
+    Router --> CEControllers
+    Router --> EEControllers
+    CEControllers --> Models
+    EEControllers --> Models
+    EEPolicies -.拡張.-> Models
+    Models --> DB
+    CEControllers --> Embed
+    EEControllers --> Embed
+    CEControllers --> Queue
+    EEControllers --> Queue
+    Queue --> WEmbed
+    Queue --> WReindex
+    Queue --> WInfer
+    WEmbed --> Embed
     Workers --> DB
 ```
 
 Enterprise ビルドでは Community の機能に追加機能が加わります。
 ライセンス対象の機能には有効なキーが必要です。
-SQLite は単一テナント用です。PostgreSQL では行レベルセキュリティでテナントを分離します。
+SQLite は単一テナント用です。
+PostgreSQL では行レベルセキュリティでテナントを分離します。
 
 ## エディション
 

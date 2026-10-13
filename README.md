@@ -32,18 +32,50 @@ A knowledge store where you define your own data structures and search by meanin
 
 ```mermaid
 flowchart LR
-    Clients["REST and MCP clients"] --> Server
+    MCP["MCP clients<br/>(Claude, Cursor, etc.)"]
+    REST["REST clients"]
 
-    subgraph Server["Yorishiro"]
-        Router["Loco router"] --> CE["Community features<br/>entities, schemas, search, auth"]
-        Router --> EE["Enterprise features<br/>OAuth, billing, marketplace, inference"]
-        CE --> Queue["Background queue"]
-        EE --> Queue
-        Queue --> Workers["Targeted workers"]
+    subgraph Server["Yorishiro (one binary)"]
+        Router["Loco router"]
+
+        subgraph CE["Community base"]
+            CEControllers["Controllers<br/>entities, schemas, search, auth"]
+            Models["Models and policies"]
+        end
+
+        subgraph EE["Enterprise overlay (Enterprise build)"]
+            EEControllers["Controllers<br/>OAuth, billing, marketplace, inference"]
+            EEPolicies["Enterprise policies and providers"]
+        end
+
+        Embed["Embedding provider<br/>local model or OpenAI-compatible endpoint"]
+        Queue["Queue provider<br/>SQLite, PostgreSQL, or Redis-compatible"]
+
+        subgraph Workers["Targeted background workers"]
+            WEmbed["Embedding sync"]
+            WReindex["Reindex"]
+            WInfer["Infer-fill (Enterprise)"]
+        end
+
+        DB[("Application database<br/>PostgreSQL or SQLite")]
     end
 
-    CE --> DB[("PostgreSQL or SQLite")]
-    EE --> DB
+    MCP --> Router
+    REST --> Router
+    Router --> CEControllers
+    Router --> EEControllers
+    CEControllers --> Models
+    EEControllers --> Models
+    EEPolicies -.extend.-> Models
+    Models --> DB
+    CEControllers --> Embed
+    EEControllers --> Embed
+    CEControllers --> Queue
+    EEControllers --> Queue
+    Queue --> WEmbed
+    Queue --> WReindex
+    Queue --> WInfer
+    WEmbed --> Embed
     Workers --> DB
 ```
 
