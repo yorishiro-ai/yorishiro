@@ -29,16 +29,15 @@ pub(crate) async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yo
 pub async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,
-    configured_max: Option<i32>,
+    effective_max: Option<i32>,
 ) -> Result<Model, YorishiroError> {
     // SQLite has no database-enforced tenant isolation (no RLS, no roles), so a second tenant on that backend would be a silent isolation break rather than merely an unwanted one.
     // The cap is hardcoded rather than read from YORISHIRO_MAX_TENANTS: an operator raising that variable must not be able to loosen a constraint that exists because the isolation mechanism itself is absent, not because of a configurable policy choice.
     let effective_max = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
         Some(SQLITE_MAX_TENANTS)
     } else {
-        configured_max
+        effective_max
     };
-
     if let Some(max) = effective_max {
         crate::db::lock_for_update(conn, "create_tenant")
             .await

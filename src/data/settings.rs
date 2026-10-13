@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default = "default_max_tenants")]
     pub(crate) max_tenants: i32,
     #[serde(default)]
     pub(crate) mcp: Mcp,
@@ -11,6 +12,10 @@ pub struct Settings {
     pub(crate) db_load_guard: DbLoadGuard,
     #[serde(default)]
     pub query_embedding: QueryEmbedding,
+}
+
+fn default_max_tenants() -> i32 {
+    1
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]

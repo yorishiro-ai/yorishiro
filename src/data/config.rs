@@ -20,9 +20,38 @@ use crate::error::YorishiroError;
 /// Returns an error if the operation cannot be completed.
 pub async fn load(environment: &Environment) -> Result<Config> {
     let environment = test_environment(environment);
-    let config = environment.load()?;
+    let folder = std::env::var_os("LOCO_CONFIG_FOLDER").map(PathBuf::from);
+    let config = if let Some(folder) = folder.as_ref()
+        && matches!(environment, Environment::Production)
+        && !folder.join("production.yaml").exists()
+        && !folder.join("production.local.yaml").exists()
+        && folder.join("production.yaml.example").exists()
+    {
+        load_example(folder, &environment)?
+    } else {
+        environment.load()?
+    };
     validate(&config)?;
     Ok(config)
+}
+
+fn load_example(folder: &Path, environment: &Environment) -> Result<Config> {
+    let example_folder =
+        std::env::temp_dir().join(format!("yorishiro-config-{}", uuid::Uuid::now_v7()));
+    fs::create_dir(&example_folder)?;
+    let result = (|| {
+        fs::copy(
+            folder.join("production.yaml.example"),
+            example_folder.join("production.yaml"),
+        )?;
+        let local = folder.join("production.local.yaml");
+        if local.exists() {
+            fs::copy(&local, example_folder.join("production.local.yaml"))?;
+        }
+        Config::from_folder(environment, &example_folder)
+    })();
+    fs::remove_dir_all(example_folder)?;
+    result
 }
 
 fn test_environment(environment: &Environment) -> Environment {

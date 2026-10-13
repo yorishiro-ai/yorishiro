@@ -93,10 +93,9 @@ contents:
     dst: /lib/systemd/system/yorishiro-worker.service
   - src: ./packaging/yorishiro-scheduler.service
     dst: /lib/systemd/system/yorishiro-scheduler.service
-  # Install a reference copy of the production defaults.
-  # The package never owns or installs /etc/yorishiro/production.yaml.
+  # The package owns the live defaults; the local file is administrator-owned.
   - src: ./config/production.yaml
-    dst: /etc/yorishiro/example.yaml
+    dst: /etc/yorishiro/production.yaml.example
     file_info:
       mode: 0644
       owner: root

@@ -140,7 +140,9 @@ The guard uses the PostgreSQL identity pool and is a no-op on SQLite.
 Yorishiro uses Loco's `config/<environment>.yaml` layout.
 `LOCO_ENV` selects the environment and defaults to `development`.
 `LOCO_CONFIG_FOLDER` can point Loco at another directory containing the selected YAML file.
-Package and Docker installations set `LOCO_ENV=production` and provide `production.yaml` in their configuration directory.
+Package and Docker installations set `LOCO_ENV=production`.
+Packages load `production.yaml.example` when no local production configuration exists; an administrator-owned `production.yaml` takes precedence.
+Docker installations provide `production.yaml` in their configuration directory.
 
 The YAML files use Loco's Tera `get_env` expressions for deploy-time values such as `DATABASE_URL`, `QUEUE_URL`, and embedding settings.
 Application data supports SQLite and PostgreSQL.
@@ -152,7 +154,7 @@ An unconfigured development or production environment uses SQLite for both roles
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant hosting |
 | `HOST` | `http://localhost` | Your server's hostname or address |
-| `YORISHIRO_MAX_TENANTS` | `1` | Tenant cap; `0` allows unlimited tenants and disables the first-run setup wizard |
+| `YORISHIRO_MAX_TENANTS` | `1` | EE only with a valid licence: tenant cap; `0` allows unlimited tenants and disables the first-run setup wizard. CE and unlicensed EE enforce one tenant and warn if overridden. |
 | `YORISHIRO_MCP_ALLOWED_HOSTS` | Unset | Comma-separated exact `Host` values allowed by `/mcp` in addition to `localhost`, `127.0.0.1`, and `::1`. Wildcards are rejected. |
 | `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` | Loco queue provider: `Sqlite`, `Postgres`, or `Redis` |
 | `QUEUE_URL` | Provider default | Queue provider URI, including `redis://` or `rediss://` for the Redis-compatible provider |

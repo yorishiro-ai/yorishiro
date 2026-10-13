@@ -5,22 +5,17 @@ use yorishiro::App;
 use super::boot_request;
 use super::with_max_tenants;
 
-/// With no cap set, both endpoints must answer as if setup does not exist, rather than leaking whether a tenant exists on a deployment that never opted into the wizard at all.
-///
-/// This covers `App` rather than the shipped binary, and the distinction matters: `src/bin/main.rs` sets a single-tenant default before booting, which this does not.
-/// `config/test_postgres.yaml` sets no `YORISHIRO_MAX_TENANTS`, and this harness boots `App` directly through `request_with_create_db` without going through any binary's `main`, so the prologue that would set the variable never runs here.
-/// A base deployment started from the binary therefore has the wizard *enabled*, which is the opposite of what this test asserts and is not a contradiction: the two exercise different entry points.
-/// Nothing in this suite invokes a binary, so the prologue itself is deliberately untested rather than overlooked; testing it would mean building a harness around `main` for four lines.
+/// The source default enables first-run setup with a single-tenant cap, even when the environment does not define an override.
 #[tokio::test]
 #[serial(process_environment)]
-async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
+async fn setup_uses_the_single_tenant_source_default() {
     let ambient = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
     ambient.remove("YORISHIRO_MAX_TENANTS");
     boot_request::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), StatusCode::OK);
         let body: serde_json::Value = status.json();
-        assert_eq!(body["setup_required"], false);
+        assert_eq!(body["setup_required"], true);
 
         let response = request
             .post("/setup")
@@ -31,7 +26,7 @@ async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
             .await;
         assert_eq!(
             response.status_code(),
-            404,
+            201,
             "response: {:?}",
             response.text()
         );

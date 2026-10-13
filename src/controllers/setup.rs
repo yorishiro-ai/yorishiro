@@ -1,8 +1,8 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
 //!
 //! Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the deployment's first tenant/workspace from scratch: there is no one to invite from yet.
-//! Gated on `settings.max_tenants` resolving to an actual cap rather than a separate flag, so the wizard can never be enabled on a deployment that lacks the tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a deploy and its first real tenant and claim ownership of the whole deployment.
-//! `0` means unlimited and disables the wizard; the environment YAML supplies the single-tenant default.
+//! The resolved edition tenant cap controls whether first-run setup is available.
+//! An unlimited cap disables the wizard; the source default is one tenant.
 
 use axum::Json;
 use axum::extract::State;
@@ -22,11 +22,10 @@ use crate::models::tenant_memberships::MembershipRole;
 use crate::models::{tenancy, tenant_tenants, user_users};
 
 fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
-    let settings = ctx
-        .shared_store
-        .get::<crate::data::settings::Settings>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
-    Ok((settings.max_tenants > 0).then_some(settings.max_tenants))
+    ctx.shared_store
+        .get::<crate::data::tenant_policy::TenantCap>()
+        .map(|cap| cap.resolve())
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("tenant cap policy missing")))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = crate::dtos::setup::SetupStatusResponse)), security(()), tag = "community"))]

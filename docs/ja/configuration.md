@@ -144,7 +144,9 @@ PostgreSQL の負荷ガードは、デプロイメント全体のメンテナン
 Yorishiro は Loco 標準の `config/<environment>.yaml` 構成を使います。
 `LOCO_ENV` が環境を選び、未設定時は `development` です。
 `LOCO_CONFIG_FOLDER` で、選択した YAML を置く別のディレクトリを指定できます。
-パッケージ版と Docker 版は `LOCO_ENV=production` を設定し、それぞれの設定ディレクトリにある `production.yaml` を使います。
+パッケージ版と Docker 版は `LOCO_ENV=production` を設定します。
+パッケージ版はローカルの本番設定がなければ `production.yaml.example` を読み込み、管理者所有の `production.yaml` があればそちらを優先します。
+Docker 版は設定ディレクトリの `production.yaml` を使います。
 
 YAML では Loco の Tera `get_env` 式を使い、`DATABASE_URL`、`QUEUE_URL`、埋め込み設定などのデプロイ時の値を読み込みます。
 アプリケーションデータは SQLite と PostgreSQL に対応します。
@@ -156,7 +158,7 @@ development と production の未設定時は両方に SQLite を使うため、
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナント運用には `postgres://` を指定 |
 | `HOST` | `http://localhost` | サーバのホスト名またはアドレス |
-| `YORISHIRO_MAX_TENANTS` | `1` | テナント上限。`0` は無制限となり、初回セットアップウィザードを無効化 |
+| `YORISHIRO_MAX_TENANTS` | `1` | 有効なライセンスがある EE のみ適用されるテナント上限。`0` は無制限となり、初回セットアップウィザードを無効化。CE と未ライセンス EE は1テナントに固定し、上書き値があれば警告 |
 | `YORISHIRO_MCP_ALLOWED_HOSTS` | 未設定 | `/mcp` で `localhost`、`127.0.0.1`、`::1` に加えて許可する `Host` のカンマ区切りの完全一致値。ワイルドカードは拒否されます |
 | `YORISHIRO_QUEUE_KIND` | `DATABASE_URL` から導出 | Loco のキュープロバイダ。`Sqlite`、`Postgres`、`Redis` から選択 |
 | `QUEUE_URL` | プロバイダ別の既定値 | キュープロバイダの接続 URI。Redis 互換プロバイダは `redis://` または `rediss://` |

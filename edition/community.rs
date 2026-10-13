@@ -12,6 +12,18 @@ pub(crate) fn compose_context(_ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn tenant_creation_cap(
+    configured: i32,
+    _ctx: &AppContext,
+) -> impl Fn() -> Option<i32> + Send + Sync + 'static {
+    if configured != 1 {
+        tracing::warn!(
+            "YORISHIRO_MAX_TENANTS is ignored in Community Edition; enforcing one tenant"
+        );
+    }
+    || Some(1)
+}
+
 pub(crate) fn workers(registry: WorkerRegistry) -> WorkerRegistry {
     registry
 }

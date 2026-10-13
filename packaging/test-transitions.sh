@@ -37,7 +37,7 @@ run_deb_transition() {
   local from="$1" to="$2"
   local base="/pkg/yorishiro-${from}-${VERSION}-amd64.deb"
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.deb"; fi
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
     $legacy_config_metadata
@@ -58,8 +58,9 @@ run_deb_transition() {
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${to})\" = 'install ok installed'
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${from} 2>/dev/null || true)\" != 'install ok installed'
     cmp /tmp/production.before /etc/yorishiro/production.yaml
+    cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
-    test -f /etc/yorishiro/example.yaml
+    test -f /etc/yorishiro/production.yaml.example
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = root:yorishiro
     test \"\$(stat -c '%a' /var/lib/yorishiro)\" = 1770
@@ -71,7 +72,7 @@ run_deb_transition() {
 }
 
 run_deb_untouched_transition() {
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv /legacy/yorishiro-${VERSION}-amd64.deb
     $legacy_config_metadata
@@ -79,6 +80,7 @@ run_deb_untouched_transition() {
     stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
     apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
     cmp /tmp/production.before /etc/yorishiro/production.yaml
+    cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
   "
 }
@@ -105,7 +107,7 @@ run_deb_absent_transition() {
     rm -f /etc/yorishiro/production.yaml
     apt-get install -y -qq /pkg/yorishiro-${to}-${VERSION}-amd64.deb
     test ! -e /etc/yorishiro/production.yaml
-    test -f /etc/yorishiro/example.yaml
+    test -f /etc/yorishiro/production.yaml.example
   "
 }
 
@@ -113,8 +115,8 @@ run_deb_current_remove_preserves_admin_config() {
   docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
-    test -f /etc/yorishiro/example.yaml
-    cp /etc/yorishiro/example.yaml /etc/yorishiro/production.yaml
+    test -f /etc/yorishiro/production.yaml.example
+    cp /etc/yorishiro/production.yaml.example /etc/yorishiro/production.yaml
     printf '\n# administrator-owned\n' >> /etc/yorishiro/production.yaml
     chown root:root /etc/yorishiro/production.yaml
     chmod 0600 /etc/yorishiro/production.yaml
@@ -123,7 +125,7 @@ run_deb_current_remove_preserves_admin_config() {
     apt-get remove -y -qq yorishiro-ce
     cmp /tmp/production.before /etc/yorishiro/production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
-    test ! -e /etc/yorishiro/example.yaml
+    test ! -e /etc/yorishiro/production.yaml.example
   "
 }
 
@@ -131,7 +133,7 @@ run_rpm_transition() {
   local from="$1" to="$2"
   local base="/pkg/yorishiro-${from}-${VERSION}-amd64.rpm"
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.rpm"; fi
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro almalinux:10 bash -eu -c "
+  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
     dnf install -y -q $base
     $legacy_config_metadata
     # Seed the legacy package-owned path before installing the new edition package.
@@ -150,8 +152,9 @@ run_rpm_transition() {
     rpm -q yorishiro-${to}
     ! rpm -q yorishiro-${from}
     cmp /tmp/production.before /etc/yorishiro/production.yaml
+    cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
-    test -f /etc/yorishiro/example.yaml
+    test -f /etc/yorishiro/production.yaml.example
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = root:yorishiro
     test \"\$(stat -c '%a' /var/lib/yorishiro)\" = 1770
@@ -163,13 +166,14 @@ run_rpm_transition() {
 }
 
 run_rpm_untouched_transition() {
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro almalinux:10 bash -eu -c "
+  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
     dnf install -y -q /legacy/yorishiro-${VERSION}-amd64.rpm
     $legacy_config_metadata
     cp /etc/yorishiro/production.yaml /tmp/production.before
     stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
     dnf install -y -q /pkg/yorishiro-ce-${VERSION}-amd64.rpm
     cmp /tmp/production.before /etc/yorishiro/production.yaml
+    cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
   "
 }
@@ -193,15 +197,15 @@ run_rpm_absent_transition() {
     rm -f /etc/yorishiro/production.yaml
     dnf install -y -q /pkg/yorishiro-${to}-${VERSION}-amd64.rpm
     test ! -e /etc/yorishiro/production.yaml
-    test -f /etc/yorishiro/example.yaml
+    test -f /etc/yorishiro/production.yaml.example
   "
 }
 
 run_rpm_current_remove_preserves_admin_config() {
   docker run --rm -v "$PKG_DIR":/pkg:ro almalinux:10 bash -eu -c "
     dnf install -y -q /pkg/yorishiro-ce-${VERSION}-amd64.rpm
-    test -f /etc/yorishiro/example.yaml
-    cp /etc/yorishiro/example.yaml /etc/yorishiro/production.yaml
+    test -f /etc/yorishiro/production.yaml.example
+    cp /etc/yorishiro/production.yaml.example /etc/yorishiro/production.yaml
     printf '\n# administrator-owned\n' >> /etc/yorishiro/production.yaml
     chown root:root /etc/yorishiro/production.yaml
     chmod 0600 /etc/yorishiro/production.yaml
@@ -210,7 +214,7 @@ run_rpm_current_remove_preserves_admin_config() {
     dnf remove -y -q yorishiro-ce
     cmp /tmp/production.before /etc/yorishiro/production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
-    test ! -e /etc/yorishiro/example.yaml
+    test ! -e /etc/yorishiro/production.yaml.example
   "
 }
 

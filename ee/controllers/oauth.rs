@@ -111,16 +111,15 @@ async fn callback(
         oauth::handle_callback(&config, &code, &request_state, csrf_cookie_value.as_deref())
             .await?;
 
-    // The deployment's actual embedding model and width, the same source `setup.rs` stamps a freshly bootstrapped workspace with, not a guessed default: `entity_entities.embedding`'s index is a fixed width, and a workspace stamped with the wrong one fails every entity write's dimension check.
-    let settings = ctx
+    let max_tenants = ctx
         .shared_store
-        .get::<crate::data::settings::Settings>()
+        .get::<crate::data::tenant_policy::TenantCap>()
         .ok_or_else(|| {
             ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "application settings missing"
+                "tenant cap policy missing"
             )))
-        })?;
-    let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
+        })?
+        .resolve();
 
     let txn = ctx.db.begin().await.internal()?;
     let provisioned = crate::edition::ee::models::user_users::find_or_create(
