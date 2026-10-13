@@ -134,7 +134,7 @@ run_rpm_transition() {
   local base="/pkg/yorishiro-${from}-${VERSION}-amd64.rpm"
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.rpm"; fi
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
-    dnf install -y -q $base
+    dnf install -y -q diffutils $base
     $legacy_config_metadata
     # Seed the legacy package-owned path before installing the new edition package.
     printf 'edited-by-transition' > /etc/yorishiro/production.yaml
@@ -167,7 +167,7 @@ run_rpm_transition() {
 
 run_rpm_untouched_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
-    dnf install -y -q /legacy/yorishiro-${VERSION}-amd64.rpm
+    dnf install -y -q diffutils /legacy/yorishiro-${VERSION}-amd64.rpm
     $legacy_config_metadata
     cp /etc/yorishiro/production.yaml /tmp/production.before
     stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
@@ -203,7 +203,7 @@ run_rpm_absent_transition() {
 
 run_rpm_current_remove_preserves_admin_config() {
   docker run --rm -v "$PKG_DIR":/pkg:ro almalinux:10 bash -eu -c "
-    dnf install -y -q /pkg/yorishiro-ce-${VERSION}-amd64.rpm
+    dnf install -y -q diffutils /pkg/yorishiro-ce-${VERSION}-amd64.rpm
     test -f /etc/yorishiro/production.yaml.example
     cp /etc/yorishiro/production.yaml.example /etc/yorishiro/production.yaml
     printf '\n# administrator-owned\n' >> /etc/yorishiro/production.yaml
