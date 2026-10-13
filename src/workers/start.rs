@@ -28,8 +28,7 @@ struct Cli {
 }
 
 /// Mirror of loco-rs 1.2.0's `Commands::Start` (`cli.rs`, lines 71-96); every other subcommand is [`Commands::Other`].
-// Only the flags that decide which workers run are read; the rest are here so the arguments parse as loco-rs parses them.
-#[allow(dead_code)]
+// The other flags still need fields so clap parses them like loco-rs.
 #[derive(Subcommand)]
 enum Commands {
     #[command(group(ArgGroup::new("start_mode").args(&["worker", "server_and_worker", "all"])))]
@@ -115,14 +114,24 @@ where
             "could not read the worker targets from the command line: {error}"
         ))
     })?;
+    let _ = cli.environment;
     match cli.command {
         Commands::Start {
             worker,
             server_and_worker,
             all,
-            ..
-        } => from_flags(worker, server_and_worker, all),
-        Commands::Other(_) => Ok(WorkerStart::NoWorkers),
+            scheduler,
+            binding,
+            port,
+            no_banner,
+        } => {
+            let _ = (scheduler, binding, port, no_banner);
+            from_flags(worker, server_and_worker, all)
+        }
+        Commands::Other(args) => {
+            let _ = args;
+            Ok(WorkerStart::NoWorkers)
+        }
     }
 }
 
