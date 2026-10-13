@@ -22,7 +22,6 @@ Linux のビルドはリポジトリの `.cargo/config.toml` を使うため、`
 ローカルの一般的なトポロジーには `make test-postgres`、`make test-sqlite`、`make test-valkey` を使います。
 `postgres-postgres`、`sqlite-sqlite`、`postgres-valkey`、`sqlite-valkey` の検証には `uv run scripts/test_topology.py <topology>` を使います。
 このラッパーは CE または EE の Cargo feature を明示して実行し、環境変数のラベルではなく Loco が解決したテスト設定の証拠を検証します。
-トポロジーゲートのラッパーは `uv run scripts/test_topology.py` です。
 テストコマンドが成功してもトポロジーの証拠が不正な場合は、stderr に `YORISHIRO_TOPOLOGY_REJECTED` を出して非 0 で終了します。
 CI は両方を確認し、ビルドやテストの失敗を mismatch 自己テストの成功として扱いません。
 CI は正式な 4 トポロジーを CE と EE の両方で検証し、版・DB・キューを含む固有名の 8 ジョブを実行します。
@@ -65,7 +64,6 @@ $ DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' \
 ## push 前の確認
 
 ```console
-$ cargo check --locked --workspace
-$ cargo clippy --locked --workspace --tests -- -D warnings
-$ cargo fmt --all -- --check
+$ make check-all
+$ make check-all-ee
 ```

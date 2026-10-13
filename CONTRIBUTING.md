@@ -6,9 +6,10 @@
 
 | Location | Holds |
 |---|---|
-| `src/models/` | Record shapes, input DTOs, and queries |
+| `src/models/` | Table-owned persistence and domain operations |
 | `src/controllers/` | Request handlers |
-| `src/services/` | Auth, embedding, MCP |
+| `src/dtos/` | Request and response types |
+| `src/services/` | External embedding clients |
 | `migration/src/` | Schema migrations |
 | `src/tasks/` | Admin and one-off commands |
 | `ee/` | Enterprise edition (mirrors `models/`, `controllers/`, `services/`) |
@@ -17,9 +18,9 @@
 
 - `src/` never refers to `ee/`: no `cfg(feature = "enterprise")` and no `crate::ee`. Edition wiring goes in `edition/`, and `make edition-boundary-check` enforces it.
 - `src/models/_entities/` is auto-generated. Never edit by hand.
-- Root files under `src/models/` are Loco generator compatibility markers. Keep them when moving model implementations into feature directories.
+- Table extensions live in `src/models/<table>.rs`; large ones may contain private submodules.
 - Business logic goes in `src/models/<table>.rs` next to the generated entity.
-- Raw SQL is only where SeaORM cannot express it (JSONB containment, pgvector, advisory locks).
+- Use SeaORM by default; explain raw SQL where backend primitives, atomic writes, or query shape require it.
 - `src/db.rs` handles connections, not tables.
 
 ### Database pools
@@ -46,7 +47,7 @@ Async waits release the task to do other work, but one physical connection still
 Run the full suite with Rust's default parallel test execution.
 
 Use `make test-postgres`, `make test-sqlite`, or `make test-valkey` locally.
-For the complete six-topology matrix, use `uv run scripts/test_topology.py <topology>`.
+For the four supported topologies, use `uv run scripts/test_topology.py <topology>`.
 The wrapper selects CE or EE explicitly and requires configured-app evidence from a successful Loco boot.
 
 Request tests must call `close_app_pools` before returning. See `tests/requests/mod.rs` for the pattern.
@@ -59,9 +60,8 @@ Linux builds use the repository `.cargo/config.toml`, which requires `mold` and 
 Install both tools before running Cargo locally.
 
 ```console
-$ cargo check --locked --workspace
-$ cargo clippy --locked --workspace --tests -- -D warnings
-$ cargo fmt --all -- --check
+$ make check-all
+$ make check-all-ee
 ```
 
 Tests need PostgreSQL with `vector` and `pg_trgm` in `template1`, and a non-superuser role.

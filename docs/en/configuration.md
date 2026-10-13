@@ -145,16 +145,16 @@ Package and Docker installations set `LOCO_ENV=production` and provide `producti
 The YAML files use Loco's Tera `get_env` expressions for deploy-time values such as `DATABASE_URL`, `QUEUE_URL`, and embedding settings.
 Application data supports SQLite and PostgreSQL.
 Queue storage is selected independently through Loco's queue provider.
-This release provides SQLite, PostgreSQL, and Redis-compatible queue providers.
+SQLite, PostgreSQL, and Redis-compatible queue providers are available.
 An unconfigured development or production environment uses SQLite for both roles, so no external service is required.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
+| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant hosting |
 | `HOST` | `http://localhost` | Your server's hostname or address |
 | `YORISHIRO_MAX_TENANTS` | `1` | Tenant cap; `0` allows unlimited tenants and disables the first-run setup wizard |
 | `YORISHIRO_MCP_ALLOWED_HOSTS` | Unset | Comma-separated exact `Host` values allowed by `/mcp` in addition to `localhost`, `127.0.0.1`, and `::1`. Wildcards are rejected. |
-| `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` | Loco queue provider: `Sqlite`, `Postgres`, or `Redis` in this release |
+| `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` | Loco queue provider: `Sqlite`, `Postgres`, or `Redis` |
 | `QUEUE_URL` | Provider default | Queue provider URI, including `redis://` or `rediss://` for the Redis-compatible provider |
 | `YORISHIRO_EMBEDDING_BASE_URL` | Unset | Embeddings endpoint URL |
 | `YORISHIRO_EMBEDDING_MODEL` | Unset | Embeddings model name |

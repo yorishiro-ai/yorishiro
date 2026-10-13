@@ -5,7 +5,7 @@ Prerelease packages are published on the [Releases](https://github.com/yorishiro
 They support Ubuntu 24.04 and AlmaLinux 10 (glibc 2.39+).
 
 Releases publish separate `yorishiro-ce` and `yorishiro-ee` packages.
-CE is built without the `enterprise` Cargo feature, while EE includes it and requires an EE licence for production use.
+CE provides Community features, while EE includes Enterprise features and requires a licence for production use.
 The packages conflict with each other, so both editions cannot be installed at once.
 Installing the other edition replaces the current package and preserves the shared configuration and state paths.
 
@@ -30,10 +30,9 @@ CE does not install the enterprise licence file.
 
 ## Configuration
 
-Before enabling or starting the service, copy `/etc/yorishiro/example.yaml` to
-`/etc/yorishiro/production.yaml` and edit the administrator-owned copy.
+Before enabling or starting the service, copy `/etc/yorishiro/example.yaml` to `/etc/yorishiro/production.yaml` and edit the administrator-owned copy.
 The package never owns or installs `/etc/yorishiro/production.yaml` and upgrades or removal preserve it.
-The application database can use SQLite or PostgreSQL, while queue storage is independently selected through Loco's queue provider.
+The application database can use SQLite or PostgreSQL; queue storage is selected separately.
 
 ```yaml
 database:
@@ -58,8 +57,8 @@ $ sudo systemctl status yorishiro
 $ sudo systemctl status yorishiro-worker
 ```
 
-The worker is a separate unit because Loco 1.2.0 cannot combine `--server-and-worker` with tagged workers.
-The worker unit selects `worker-target:shared`. Configure additional target-specific units if needed.
+The worker runs as a separate service and selects `worker-target:shared`.
+Configure additional target-specific services if needed.
 
 ## Directory integrity
 

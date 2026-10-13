@@ -4,19 +4,19 @@ Yorishiro ships as a single binary. Docker is the simplest option.
 
 ## Quick start
 
-The default configuration uses SQLite — no external database required.
+The default configuration uses SQLite, so no external database is required.
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
-1. Open `http://localhost/` and create an account through the setup wizard.
+1. Open `http://localhost/` (host port `80`, container port `5150`) and create an account through the setup wizard.
 2. Generate an API key and start creating entities.
 
 ## Switching to PostgreSQL
 
-For multi-tenant hosting or vector search:
+For multi-tenant hosting:
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \

@@ -28,52 +28,6 @@ A knowledge store where you define your own data structures and search by meanin
 - **Organize with teams**
   - Tenants and workspaces with role-based access keep data scoped and shared as you choose.
 
-## Architecture
-
-```mermaid
-flowchart LR
-    MCP["MCP clients<br/>(Claude, Cursor, etc.)"]
-    REST["REST clients"]
-
-    subgraph Server["Yorishiro (one binary)"]
-        Router["Router (Loco)"]
-
-        subgraph CE["ce (community edition)<br/>entities, schemas, search, auth"]
-            direction TB
-            CEControllers["controllers"]
-            CEResolvers["default resolvers<br/>(unlicensed: return None)"]
-        end
-
-        subgraph EE["ee (enterprise edition)<br/>overlays ce"]
-            direction TB
-            EEControllers["controllers<br/>billing, OAuth, marketplace, dashboard"]
-            EEResolvers["resolver impls<br/>(replace ce's defaults)"]
-        end
-
-        Embed["Embedding provider<br/>local model, or any<br/>OpenAI-compatible endpoint"]
-
-        subgraph Workers["Background workers"]
-            direction TB
-            WEmbed["embedding sync"]
-            WReindex["reindex"]
-        end
-
-        DB[("PostgreSQL or SQLite<br/>RLS-scoped per tenant")]
-    end
-
-    MCP --> Router
-    REST --> Router
-    Router --> CEControllers
-    Router --> EEControllers
-    EEResolvers -.overrides.-> CEResolvers
-    CEControllers --> CEResolvers
-    CEResolvers --> DB
-    EEControllers --> DB
-    CEControllers --> Embed
-    Embed --> Workers
-    Workers --> DB
-```
-
 ## Editions
 
 Everything you can do in ce is also available in ee. ee adds the following on top of ce:
@@ -86,20 +40,20 @@ Everything you can do in ce is also available in ee. ee adds the following on to
 | OAuth2 / OIDC login | — | Available |
 | Stripe billing | — | Available |
 
-One binary, one repository. Enterprise features are controlled by a licence key.
+Enterprise features require a licence key.
 
-### MCP tool inventory
+### MCP tools
 
-The runtime MCP inventory, including names, descriptions, and input schemas, is documented in [docs/en/mcp-tools.md](docs/en/mcp-tools.md).
+See [MCP tools](docs/en/mcp-tools.md) for available tools and their inputs.
 
 A licensed enterprise deployment adds the origin-template tools shown in that document.
 Those tools are not advertised or callable through MCP in community mode.
 
 ## Quick start
 
-The default configuration uses SQLite — no external database required.
+The default configuration uses SQLite, so no external database is required.
 
-1. Open `http://localhost/` and create an account through the setup wizard.
+1. Open `http://localhost/` for Docker (with the documented port mapping), or `http://localhost:5150/` for packages and source runs, and create an account through the setup wizard.
 2. Generate an API key and start creating entities.
 
 For a source checkout using a background queue, run the server and tagged worker separately:
@@ -109,12 +63,11 @@ For installation instructions, see [docs/en/installation.md](docs/en/installatio
 
 ## Configuration
 
-Configuration follows Loco's environment layout under `config/`.
-`LOCO_ENV` selects `config/<environment>.yaml`, and `LOCO_CONFIG_FOLDER` can select another configuration directory.
-The YAML files use Loco's Tera `get_env` expressions for deployment overrides.
-Source development defaults to `config/development.yaml`, while package and Docker installations run with `config/production.yaml`.
+Configure Yorishiro with `config/<environment>.yaml` and the environment variables it reads.
+`LOCO_ENV` selects the configuration environment; local source runs use `development`, while packages and Docker use `production`.
+`LOCO_CONFIG_FOLDER` lets you use a different configuration directory.
 Application data can use SQLite or PostgreSQL.
-Queue storage is selected independently through Loco's queue provider, with SQLite, PostgreSQL, and Redis-compatible providers available in this release.
+For a SQLite application database, choose a separate SQLite queue file or a Redis-compatible service; for PostgreSQL, choose a PostgreSQL queue or a Redis-compatible service.
 With no backend variables set, package and Docker installations store the SQLite defaults under `/var/lib/yorishiro`.
 
 ## Documentation

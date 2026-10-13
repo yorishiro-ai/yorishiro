@@ -149,16 +149,16 @@ Yorishiro は Loco 標準の `config/<environment>.yaml` 構成を使います�
 YAML では Loco の Tera `get_env` 式を使い、`DATABASE_URL`、`QUEUE_URL`、埋め込み設定などのデプロイ時の値を読み込みます。
 アプリケーションデータは SQLite と PostgreSQL に対応します。
 キューの保存先は Loco のキュープロバイダとして独立して選択します。
-このリリースでは SQLite、PostgreSQL、Redis 互換キュープロバイダを利用できます。
+SQLite、PostgreSQL、Redis 互換のキューを利用できます。
 development と production の未設定時は両方に SQLite を使うため、外部サービスは不要です。
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
+| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナント運用には `postgres://` を指定 |
 | `HOST` | `http://localhost` | サーバのホスト名またはアドレス |
 | `YORISHIRO_MAX_TENANTS` | `1` | テナント上限。`0` は無制限となり、初回セットアップウィザードを無効化 |
 | `YORISHIRO_MCP_ALLOWED_HOSTS` | 未設定 | `/mcp` で `localhost`、`127.0.0.1`、`::1` に加えて許可する `Host` のカンマ区切りの完全一致値。ワイルドカードは拒否されます |
-| `YORISHIRO_QUEUE_KIND` | `DATABASE_URL` から導出 | Loco のキュープロバイダ。このリリースでは `Sqlite`、`Postgres`、`Redis` |
+| `YORISHIRO_QUEUE_KIND` | `DATABASE_URL` から導出 | Loco のキュープロバイダ。`Sqlite`、`Postgres`、`Redis` から選択 |
 | `QUEUE_URL` | プロバイダ別の既定値 | キュープロバイダの接続 URI。Redis 互換プロバイダは `redis://` または `rediss://` |
 | `YORISHIRO_EMBEDDING_BASE_URL` | 未設定 | 埋め込みエンドポイントの URL |
 | `YORISHIRO_EMBEDDING_MODEL` | 未設定 | 埋め込みモデル名 |
