@@ -208,9 +208,10 @@ A process may select several targets with comma-separated tags, but that does no
 A bare `--worker`, `--all`, or `--server-and-worker` is rejected; plain `start` continues to run only the server.
 Configure any automatic start of Official or tenant workers in your own process manager; no tag-discovery wrapper or per-profile configuration is supplied.
 
-**Before upgrading from class-based routing, drain all old queued, running, and retrying jobs using the old release.**
-Do not remove the old Redis named queues until they are drained.
-The new workers reject startup while unfinished retired dispatches remain in the application outbox; a Redis queue's pending jobs still require operator inspection and drain before upgrading.
+**Before upgrading from class-based routing, stop every old-release producer, then drain all old queued, running, and retrying jobs using old-release workers before starting any new worker.**
+Keep old-release workers and their Redis named queues available until both the application outbox and provider queues are drained; stop the old workers only after the drain completes.
+Do not run old-release API or other producers alongside new workers: an old producer can enqueue a legacy job after the new worker's one-time startup check, leaving that job stranded.
+The new worker refuses startup when unfinished retired dispatches already exist in the application outbox, but this check does not prevent concurrent legacy enqueues or inspect pending jobs in provider queues.
 A tenant Redis queue is created for each tenant target when jobs arrive, and deleting a tenant does not automatically remove its Redis queue.
 Monitor queue growth and remove an obsolete tenant queue only after its jobs have been drained and the tenant is no longer served.
 
