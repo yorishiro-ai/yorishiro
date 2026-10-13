@@ -163,13 +163,7 @@ jobs:
           done
 
       - name: Check for allow(dead_code)
-        run: |
-          # SeaORM FromQueryResult requires exact field names for column mapping,
-          # so columns read from SQL but unused on the Rust side need a _ prefix.
-          if git grep -n 'allow(dead_code)' -- src ee edition migration/src; then
-            echo "ERROR: allow(dead_code) found above (except known entity_relations exception). Delete the unused item, don't remove it."
-            exit 1
-          fi
+        run: make dead-code-allow-check
 
       - name: Check EE
         run: make check-ee

@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_VALKEY_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -46,6 +46,11 @@ edition-boundary-check:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_edition_boundary.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_edition_boundary.py
 	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
+
+dead-code-allow-check:
+	@if git grep -n -E 'allow[[:space:]]*\([[:space:]]*dead_code' -- src ee edition migration/src tests; then \
+		echo 'ERROR: remove the unused item instead of allowing dead_code' >&2; exit 1; \
+	fi
 
 # Nightly is required because LLVM branch coverage is not available on stable.
 # Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
@@ -111,9 +116,9 @@ entities: build
 	docker compose down -v testdb
 
 # CE is the base boundary. EE compatibility is checked separately after CE work is complete.
-check-all: fmt-check python-lint public-api-check edition-boundary-check check-ce clippy-ce
+check-all: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check check-ce clippy-ce
 
-check-all-ee: fmt-check python-lint public-api-check edition-boundary-check check-ee clippy-ee
+check-all-ee: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check check-ee clippy-ee
 
 package-docker-check:
 	@test -n "$(IMAGE)" || { echo 'IMAGE is required' >&2; exit 2; }

@@ -5,11 +5,6 @@
 //! the shared setup logic while letting each caller specify its own key scope
 //! and return shape.
 
-// This module is compiled as part of the test binary, so clippy warns about
-// unused items when no test file has been updated to call the shared fixture
-// yet. The dead_code allowances apply only to this file.
-#![allow(dead_code)]
-
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
