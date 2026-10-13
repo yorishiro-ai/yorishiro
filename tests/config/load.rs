@@ -114,7 +114,13 @@ async fn test_configs_disable_external_embedding_downloads_by_default() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn every_supported_topology_loads_from_loco_test_environment() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_TEST_TOPOLOGY",
+        "PORT",
+    ]);
+    guard.set("PORT", "5151");
     for (topology, database, queue) in [
         (
             "postgres-postgres",
@@ -142,6 +148,7 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
         guard.set("QUEUE_URL", queue);
         let config = load(&Environment::Test).await.unwrap();
         assert_eq!(config.database.uri, database);
+        assert_eq!(config.server.port, 5151, "{topology} must honor PORT");
         match (topology.split('-').nth(1).unwrap(), config.queue.unwrap()) {
             ("postgres", QueueConfig::Postgres(actual)) => assert_eq!(actual.uri, queue),
             ("sqlite", QueueConfig::Sqlite(actual)) => assert_eq!(actual.uri, queue),

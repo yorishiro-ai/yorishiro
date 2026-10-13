@@ -20,7 +20,7 @@
 # The enterprise edition variables below are not rendered by this file (they are read
 # through the typed keys in `ee/data/env.rs`), but listed here for completeness so this
 # document is the single reference for every configuration option:
-#   YORISHIRO_BIND          - Network bind address used by `ee/`'s OAuth redirect URI logic
+#   YORISHIRO_BIND          - Legacy OAuth callback host:port override. Prefer YORISHIRO_OAUTH_REDIRECT_URI for public URLs; server binding uses BINDING and PORT.
 #   YORISHIRO_LICENSE_KEY   - RSA256-signed licence key for enterprise features (see `ee/services/licence.rs`)
 
 # Application logging configuration
@@ -38,7 +38,7 @@ logger:
 
 # Web server configuration
 server:
-  # Port on which the server will listen. the server binding is 0.0.0.0:{PORT}
+  # Port on which the server listens, on the interface selected by BINDING.
   port: <%= get_env(name="PORT", default="5150") %>
   # Binding for the server (which interface to bind to).
   # `0.0.0.0`, not `localhost`: inside a container or a VM, a server bound to

@@ -19,7 +19,7 @@ logger:
 
 # Web server configuration
 server:
-  # Port on which the server will listen. the server binding is 0.0.0.0:{PORT}
+  # Port on which the server listens, on the interface selected by BINDING.
   # Every Loco app defaults to 5150, so a second one on this machine will
   # collide. Override without editing this file: `PORT=5151 cargo loco start`.
   port: <%= get_env(name="PORT", default="5150") %>

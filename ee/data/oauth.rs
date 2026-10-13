@@ -4,8 +4,9 @@
 //! `Ok(None)` (via [`OAuthConfig::from_env`]) means OAuth is disabled.
 //! Every `/auth/oauth/authorize` and `/auth/oauth/callback` request then answers `404`, and the community server's own `/auth/login` (email/password) is unaffected.
 
-use crate::YorishiroError;
+use loco_rs::config::Server;
 
+use crate::YorishiroError;
 use crate::edition::ee::data::env::Env;
 
 #[derive(Clone)]
@@ -16,7 +17,7 @@ pub struct OAuthConfig {
     pub client_id: String,
     pub client_secret: String,
     /// Where the provider redirects back to after the user authenticates.
-    /// Defaults to a `localhost`-rewritten `YORISHIRO_BIND`, see [`default_redirect_uri`]: a bind address is usually `0.0.0.0:...`, not a host a browser can reach.
+    /// Defaults to the configured server binding and port, rewriting an all-interfaces binding to `localhost` for local testing.
     pub redirect_uri: String,
     /// HMAC key used to sign the `state` parameter that round-trips through the provider.
     /// Derived from `client_secret` so no separate secret needs provisioning.
@@ -24,10 +25,10 @@ pub struct OAuthConfig {
 }
 
 impl OAuthConfig {
-    /// Reads the four `YORISHIRO_OAUTH_*` variables.
+    /// Reads the `YORISHIRO_OAUTH_*` variables and the resolved listener for a local callback fallback.
     /// Returns `Ok(None)` when `YORISHIRO_OAUTH_ISSUER_URL` is unset or empty: OAuth login is opt-in, and every other variable is meaningless without an issuer to talk to.
     /// `YORISHIRO_OAUTH_CLIENT_ID`/`YORISHIRO_OAUTH_CLIENT_SECRET` are required once the issuer is set; a deployment that sets the issuer but leaves one of these unset or empty gets `Err` naming which, rather than silently leaving OAuth half-configured or being treated the same as simply unconfigured.
-    pub(crate) fn from_env() -> Result<Option<Self>, YorishiroError> {
+    pub(crate) fn from_env(server: &Server) -> Result<Option<Self>, YorishiroError> {
         let Some(issuer_url) = Env::OAuthIssuerUrl.non_empty() else {
             return Ok(None);
         };
@@ -37,7 +38,7 @@ impl OAuthConfig {
 
         let redirect_uri = Env::OAuthRedirectUri
             .non_empty()
-            .unwrap_or_else(default_redirect_uri);
+            .unwrap_or_else(|| default_redirect_uri(server));
 
         let state_signing_key = client_secret.as_bytes().to_vec();
 
@@ -75,10 +76,18 @@ pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, Yorishi
     }
 }
 
-/// `http://{host}/auth/oauth/callback`, where `host` rewrites an all-interfaces `YORISHIRO_BIND` to `localhost` since a browser cannot dial `0.0.0.0` directly.
+/// `http://{host}/auth/oauth/callback`, using the server's actual binding and port unless the legacy `YORISHIRO_BIND` override is set.
 /// This default only covers local testing; a real deployment sets `YORISHIRO_OAUTH_REDIRECT_URI` explicitly.
-fn default_redirect_uri() -> String {
-    let bind = Env::Bind.read().unwrap_or_else(|_| "0.0.0.0:8080".into());
+pub fn default_redirect_uri(server: &Server) -> String {
+    let bind = Env::Bind.non_empty().unwrap_or_else(|| {
+        let binding = &server.binding;
+        let binding = if binding.parse::<std::net::Ipv6Addr>().is_ok() {
+            format!("[{binding}]")
+        } else {
+            binding.clone()
+        };
+        format!("{binding}:{}", server.port)
+    });
     format!(
         "http://{}/auth/oauth/callback",
         rewrite_unspecified_host(&bind)

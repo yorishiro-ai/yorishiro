@@ -3,7 +3,7 @@
 //! All three routes carry the licence gate, so an unlicensed deployment answers `404` to every one of them before any of the below runs.
 //! SSO login is a enterprise-edition feature, which is a decision about what the feature is; needing configuration on top of that does not make it a community route.
 //!
-//! They are also opt-in within a licensed deployment: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing.
+//! They are also opt-in within a licensed deployment: `OAuthConfig::from_env` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing.
 //! A set issuer with a missing `client_id`/`client_secret` is a different case, `Err`, and answers `500` naming the misconfiguration rather than either `404`.
 //! `status` is the exception: past the gate it answers `200` whether or not OAuth is configured, and `500` on that same partial-configuration error, but never `404`.
 //! That is what makes it the route `licence_gate.rs` tests the gate with, since its `404` can only come from the gate, while `authorize` and `callback` produce one of their own whenever the issuer is unset.
@@ -60,17 +60,17 @@ fn csrf_clear_cookie() -> String {
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
 /// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = crate::edition::ee::controllers::openapi::OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
-async fn status() -> Result<Json<OAuthStatus>, ApiError> {
+async fn status(State(ctx): State<AppContext>) -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
-        enabled: OAuthConfig::from_env()?.is_some(),
+        enabled: OAuthConfig::from_env(&ctx.config.server)?.is_some(),
     }))
 }
 
 /// `GET /auth/oauth/authorize`: starts the login flow by redirecting the browser to the identity provider's own authorization endpoint.
 /// Also sets the CSRF cookie that `callback` checks the returning `state` against: without it, `state`'s HMAC signature alone only proves this server issued *some* state, not that the browser presenting it at callback time is the one that started this flow.
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/authorize", responses((status = 302, description = "Redirects to the configured identity provider"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
-async fn authorize() -> Result<Response, ApiError> {
-    let config = OAuthConfig::from_env()?.ok_or_else(not_found)?;
+async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> {
+    let config = OAuthConfig::from_env(&ctx.config.server)?.ok_or_else(not_found)?;
 
     let redirect = oauth::build_authorize_redirect(&config)
         .await
@@ -93,7 +93,7 @@ async fn callback(
     headers: HeaderMap,
     Query(params): Query<CallbackParams>,
 ) -> Result<Response, ApiError> {
-    let config = OAuthConfig::from_env()?.ok_or_else(not_found)?;
+    let config = OAuthConfig::from_env(&ctx.config.server)?.ok_or_else(not_found)?;
 
     let csrf_cookie_value = read_cookie(&headers, CSRF_COOKIE_NAME);
     let clear_cookie = csrf_clear_cookie();

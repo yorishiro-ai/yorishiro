@@ -61,7 +61,7 @@ fn config() -> OAuthConfig {
         issuer_url: "https://idp.example".into(),
         client_id: "client-id".into(),
         client_secret: "client-secret".into(),
-        redirect_uri: "http://localhost:8080/auth/oauth/callback".into(),
+        redirect_uri: "http://localhost:5150/auth/oauth/callback".into(),
         state_signing_key: b"client-secret".to_vec(),
     }
 }

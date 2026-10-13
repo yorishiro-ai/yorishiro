@@ -12,6 +12,12 @@ The three worker-class limit variables are now read by `ee/data/worker_policy.rs
 OAuth and Stripe settings are read on each request so configuration changes take effect without rebooting. Retired embedding variables are checked for presence even when their value is not UTF-8.
 Loco owns the main CLI and its `start` flags. `src/workers/start.rs` holds Yorishiro's typed worker-target interpretation of those flags because Loco does not expose the parsed command; it must stay compatible with Loco's parser.
 
+The server listens on `BINDING` and `PORT` (default `5150`), including in every test topology.
+`HOST` is the public-facing base URL used by Loco, not the listen address.
+If `YORISHIRO_OAUTH_REDIRECT_URI` is unset, the OAuth callback uses the resolved server binding and port, replacing a wildcard binding with `localhost` for local testing.
+A configured legacy `YORISHIRO_BIND` still overrides that local fallback; it does not change the server listener.
+Set `YORISHIRO_OAUTH_REDIRECT_URI` explicitly behind a reverse proxy or when the external port differs from `PORT`.
+
 ## Worker class admission limits
 
 Admission is uncapped by default in both editions. In Enterprise, setting `YORISHIRO_PLAN_POLICY_ENABLED=true` opts in to target limits; Community does not apply target admission limits.

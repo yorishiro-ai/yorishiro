@@ -12,6 +12,14 @@ Loco は `config/<environment>.yaml` で環境変数の既定値を展開しま�
 OAuth と Stripe の設定は変更を再起動なしで反映できるよう、リクエストごとに読みます。廃止した埋め込み設定は UTF-8 でない値でも存在を検知します。
 基本的な CLI と `start` のフラグは Loco が所有します。Loco は解析済みの引数を公開しないため、`src/workers/start.rs` が互換性を保ちながら worker target を型付きで解釈します。
 
+サーバーは `BINDING` と `PORT`（既定値は `5150`）で待ち受けます。
+テスト用のすべての構成でも同じ変数を使います。
+`HOST` は Loco が使う公開側のベース URL であり、待ち受けアドレスではありません。
+`YORISHIRO_OAUTH_REDIRECT_URI` が未設定なら、OAuth の callback は解決済みの待ち受けアドレスとポートを使います。
+全インターフェースへの bind は、ローカルでアクセスできるよう `localhost` に置き換えます。
+旧設定の `YORISHIRO_BIND` を明示した場合は、このローカル向け既定値を上書きしますが、サーバーの待ち受け先は変わりません。
+リバースプロキシの背後や外部ポートが `PORT` と異なる場合は、`YORISHIRO_OAUTH_REDIRECT_URI` を明示してください。
+
 ## ワーカークラスの admission limit
 
 両 edition とも既定ではジョブの admission に同時実行上限を適用しません。Enterprise で `YORISHIRO_PLAN_POLICY_ENABLED=true` を指定した場合だけ対象ごとの上限を有効にします。Community には対象ごとの admission 上限はありません。
