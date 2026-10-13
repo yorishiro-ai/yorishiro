@@ -217,6 +217,34 @@ async fn signup_without_invite_respects_the_tenant_cap() {
     .await;
 }
 
+#[tokio::test]
+#[serial(process_environment)]
+async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    super::with_max_tenants("100", async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
+            for email in ["first@example.com", "second@example.com"] {
+                let response = request
+                    .post("/auth/signup")
+                    .json(&serde_json::json!({
+                        "email": email,
+                        "password": "correct-horse-battery-staple",
+                    }))
+                    .await;
+                if email.starts_with("first") {
+                    assert_eq!(response.status_code(), StatusCode::CREATED);
+                } else {
+                    assert_eq!(response.status_code(), StatusCode::CONFLICT);
+                }
+            }
+        })
+        .await;
+    })
+    .await;
+}
+
 /// Widens `DB_MAX_CONNECTIONS` past `config/test_postgres.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
 async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);

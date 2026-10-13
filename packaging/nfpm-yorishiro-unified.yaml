@@ -90,7 +90,7 @@ contents:
   # Install a reference copy of the production defaults.
   # The package never owns or installs /etc/yorishiro/production.yaml.
   - src: ./config/production.yaml
-    dst: /etc/yorishiro/example.yaml
+    dst: /etc/yorishiro/production.yaml.example
     file_info:
       mode: 0644
       owner: root

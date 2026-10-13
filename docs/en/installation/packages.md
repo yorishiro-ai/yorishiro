@@ -23,15 +23,20 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | `/usr/bin/yorishiro` | The binary |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
 | `/lib/systemd/system/yorishiro-worker.service` | Tagged background worker unit |
-| `/etc/yorishiro/example.yaml` | Installed reference copied from `config/production.yaml` |
+| `/etc/yorishiro/production.yaml.example` | Latest packaged production defaults, refreshed on every upgrade |
+| `/etc/yorishiro/production.yaml` | Optional administrator-owned override |
 
 The EE package installs the same shared paths and additionally installs `/etc/yorishiro/LICENSE.enterprise`.
 CE does not install the enterprise licence file.
 
 ## Configuration
 
-Before enabling or starting the service, copy `/etc/yorishiro/example.yaml` to `/etc/yorishiro/production.yaml` and edit the administrator-owned copy.
-The package never owns or installs `/etc/yorishiro/production.yaml` and upgrades or removal preserve it.
+The service uses production defaults from the package when `/etc/yorishiro/production.yaml` is absent.
+Create `/etc/yorishiro/production.yaml` only when you need an administrator-owned override.
+Package upgrades always refresh `/etc/yorishiro/production.yaml.example` from the latest defaults and preserve the override; package removal also preserves the override.
+Community edition enforces a maximum of one tenant regardless of `YORISHIRO_MAX_TENANTS` or the YAML setting, and warns when either requests another value.
+Enterprise edition honors `YORISHIRO_MAX_TENANTS` only with a valid, unexpired licence; `0` means unlimited, and without a licence it warns and enforces one tenant.
+SQLite remains limited to one tenant in either edition.
 The application database can use SQLite or PostgreSQL; queue storage is selected separately.
 
 ```yaml

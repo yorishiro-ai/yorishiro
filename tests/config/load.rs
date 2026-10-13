@@ -184,6 +184,40 @@ async fn production_config_is_the_packaged_loco_config() {
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn production_example_is_used_when_local_config_is_absent() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/config/production.yaml"),
+        directory.path().join("production.yaml.example"),
+    )
+    .unwrap();
+    let guard = EnvGuard::capture(&[
+        "LOCO_CONFIG_FOLDER",
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    ]);
+    guard.set("LOCO_CONFIG_FOLDER", directory.path().to_str().unwrap());
+    guard.set(
+        "DATABASE_URL",
+        "sqlite:///tmp/packaged-fallback.sqlite3?mode=rwc",
+    );
+    guard.set(
+        "QUEUE_URL",
+        "sqlite:///tmp/packaged-fallback-queue.sqlite3?mode=rwc",
+    );
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+
+    let config = load(&Environment::Production).await.unwrap();
+    assert_eq!(
+        config.database.uri,
+        "sqlite:///tmp/packaged-fallback.sqlite3?mode=rwc"
+    );
+    assert!(!directory.path().join("production.yaml").exists());
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn production_selects_queue_provider_independently_from_database() {
     let _guard = EnvGuard::capture(&[
         "DATABASE_URL",

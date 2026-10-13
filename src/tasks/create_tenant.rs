@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::error::ResultExt;
+use crate::error::{ResultExt, YorishiroError};
 
 /// `cargo loco task create_tenant name:acme`
 ///
@@ -20,10 +20,11 @@ impl Task for CreateTenant {
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
         let name = vars.cli_arg("name")?;
 
-        let settings = app_context
-            .config
-            .settings::<crate::data::settings::Settings>()?;
-        let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
+        let max_tenants = app_context
+            .shared_store
+            .get::<crate::data::tenant_policy::TenantCap>()
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("tenant cap policy missing")))?
+            .resolve();
         let tenant =
             crate::models::tenant_tenants::create_tenant(&app_context.db, name, max_tenants)
                 .await

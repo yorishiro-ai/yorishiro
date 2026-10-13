@@ -13,6 +13,34 @@ use crate::workers::embedding_sync::WorkerClassResolver;
 use crate::workers::queue::QueuePolicy;
 use crate::workers::registry::WorkerRegistry;
 
+pub(crate) fn tenant_creation_cap(
+    configured: i32,
+    ctx: &AppContext,
+) -> impl Fn() -> Option<i32> + Send + Sync + 'static {
+    let licence = ctx
+        .shared_store
+        .get::<Arc<crate::edition::ee::controllers::middleware::edition::LicenceState>>();
+    if licence.as_ref().is_none_or(|state| !state.is_active()) && configured != 1 {
+        tracing::warn!(
+            "YORISHIRO_MAX_TENANTS is ignored without a valid enterprise licence; enforcing one tenant"
+        );
+    }
+    move || {
+        tenant_cap_for_licence(
+            configured,
+            licence.as_ref().is_some_and(|state| state.is_active()),
+        )
+    }
+}
+
+pub(crate) fn tenant_cap_for_licence(configured: i32, licensed: bool) -> Option<i32> {
+    if licensed {
+        (configured > 0).then_some(configured)
+    } else {
+        Some(1)
+    }
+}
+
 /// Installs the enterprise services that override base shared-store seams.
 pub(crate) fn compose_context(ctx: &AppContext) -> Result<()> {
     let policy_enabled = crate::edition::ee::data::plan::plan_policy_enabled()?;

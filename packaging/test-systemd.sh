@@ -227,9 +227,9 @@ docker exec "$PG" psql -U yorishiro -d yorishiro \
 # on a real host.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
 
-# The package ships only example.yaml. Copy it before starting the service.
-docker exec "$APP" cp /etc/yorishiro/example.yaml /etc/yorishiro/production.yaml
-# These environment overrides configure the administrator-owned copy.
+# The package defaults are active without an administrator override.
+# Community builds also force the source-level tenant cap to one.
+# These environment overrides configure the packaged defaults at runtime.
 docker exec "$APP" systemctl set-environment \
   DATABASE_URL="postgres://yorishiro:secret@$PGIP:5432/yorishiro" \
   HOST=http://127.0.0.1:5150 \

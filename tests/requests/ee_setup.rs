@@ -42,3 +42,30 @@ async fn setup_still_works_after_hooks_seed_has_run() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn unlicensed_ee_cannot_raise_the_tenant_cap() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
+    with_max_tenants("100", async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
+            let first = request
+                .post("/auth/signup")
+                .json(&serde_json::json!({"email":"first-ee@example.com","password":"correct-horse-battery-staple"}))
+                .await;
+            assert_eq!(first.status_code(), StatusCode::CREATED);
+            let second = request
+                .post("/auth/signup")
+                .json(&serde_json::json!({"email":"second-ee@example.com","password":"correct-horse-battery-staple"}))
+                .await;
+            assert_eq!(second.status_code(), StatusCode::CONFLICT);
+        })
+        .await;
+    })
+    .await;
+    drop(guard);
+}

@@ -73,9 +73,9 @@ probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":
   getent passwd yorishiro >/dev/null && echo "USER"
   [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "EE_LICENCE"
-  [ ! -e /etc/yorishiro/production.yaml ] && echo "NO_CONFIG"
-  [ -f /etc/yorishiro/example.yaml ] && echo "EXAMPLE"
-  cmp /etc/yorishiro/example.yaml /canonical-example.yaml && echo "EXAMPLE_BYTES"
+  [ ! -e /etc/yorishiro/production.yaml ] && echo "NO_OVERRIDE"
+  [ -f /etc/yorishiro/production.yaml.example ] && echo "EXAMPLE"
+  cmp /etc/yorishiro/production.yaml.example /canonical-example.yaml && echo "EXAMPLE_BYTES"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "root" ] && echo "STATEOWNER"
   [ "$(stat -c "%a" /var/lib/yorishiro)" = "1770" ] && echo "STATEPERMS"
   [ "$(stat -c "%G" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEGRP"
@@ -137,7 +137,7 @@ probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":
     echo "POST_RESTORE_FAILED"
   fi
 ' 2>&1)
-ALL_WANTS="RUNS USER COPYRIGHT NO_CONFIG EXAMPLE EXAMPLE_BYTES STATEOWNER STATEPERMS STATEGRP PROBEOWNER PROBEPERMS STATEWRITE PROBE_UNRMED_BY_YORISHIRO PROBE_INTACT_AFTER_MV REDIRECTOVERWRITE_FAILED POST_META_INTACT POST_RESTORED"
+ALL_WANTS="RUNS USER COPYRIGHT NO_OVERRIDE EXAMPLE EXAMPLE_BYTES STATEOWNER STATEPERMS STATEGRP PROBEOWNER PROBEPERMS STATEWRITE PROBE_UNRMED_BY_YORISHIRO PROBE_INTACT_AFTER_MV REDIRECTOVERWRITE_FAILED POST_META_INTACT POST_RESTORED"
 if [ "$(edition)" = ee ]; then ALL_WANTS="$ALL_WANTS EE_LICENCE"; fi
 for want in $ALL_WANTS; do
   case "$probe" in
@@ -332,8 +332,7 @@ else
   # Started the way the unit does, since there is no systemd here: the same Loco environment
   # selects the packaged production configuration.
   #
-  # The package ships only example.yaml. The administrator creates production.yaml before start.
-  docker exec "app-$$" cp /etc/yorishiro/example.yaml /etc/yorishiro/production.yaml
+  # No local production.yaml is needed: Loco falls back to production.yaml.example.
   #
   # The output goes to a file because `docker exec -d` discards it and PID 1 here is `sleep`,
   # so `docker logs` never shows the server.
