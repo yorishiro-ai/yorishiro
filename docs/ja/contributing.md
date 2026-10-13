@@ -33,7 +33,8 @@ Valkey のトポロジーを専用エンドポイントで検証する場合は 
 Valkey-compatible な `redis://` エンドポイントにはデータベース 15 を指定してください。Loco はキューの後処理で、このテスト専用データベースを消去します。
 リポジトリのその他の補助スクリプトも uv プロジェクトから実行し、Python 標準ライブラリだけを使います。
 すべてのテストは `tests/` に置きます。
-`src/`、`ee/`、`edition/` には `#[test]` も `#[cfg(test)]` も置けず、CI が両方を拒否します。
+`src/`、`ee/`、`edition/`、`migration/src/` にテスト属性や `#[cfg(test)]` は置けません。`make test-location-check` がローカルと CI で検出します。
+`make debug-macro-check` は Rust コードの `dbg!` と `debug_assert*` を拒否します。常に成立すべき条件には `assert!` を使います。
 テストがクレート内の非公開の項目を必要とする場合は、その項目を `pub` に広げ、[public-api.md](public-api.md) の `integration-test` 境界として `scripts/public_api_allowlist.tsv` に登録します。
 `tests/` はエンタープライズ機能なしでもビルドできるため、Community エディションを単独でテストできます。`ee/` を必要とするモジュールには `#[cfg(feature = "enterprise")]` を付け、`tests/ee/` は `ee/` の構成を写します。
 機能ゲートを置けるのは `tests/` と `edition/` だけです。`src/` はエンタープライズ層の名前を一切出してはならず、`make edition-boundary-check` がこれを検査します。

@@ -102,19 +102,16 @@ jobs:
         run: |
           # Only tests/requests/mod.rs may call the raw loco helpers directly.
           # All other test files must use boot_request/boot_request_sqlite instead.
-          if git grep -l 'request_with_create_db::<\|request_with_create_sqlite::<' tests/ | grep -v 'tests/requests/mod.rs'; then
+          if git grep -l 'request_with_create_db::<\|request_with_create_sqlite::<' -- tests/ ':!tests/requests/mod.rs'; then
             echo "ERROR: call boot_request/boot_request_sqlite instead of the raw loco helper directly"
             exit 1
           fi
 
       - name: Check that tests live in tests/
-        run: |
-          # Tests and test-only seams belong to the integration-test crate: no #[test] or
-          # #[cfg(test)] in the shipped sources.
-          if git grep -nE '#\[(tokio::)?test\b|#\[cfg\(test\)\]' -- src ee edition; then
-            echo "ERROR: move the test above into tests/ (see docs/en/contributing.md)"
-            exit 1
-          fi
+        run: make test-location-check
+
+      - name: Check for debug-only macros
+        run: make debug-macro-check
 
       - name: Check the edition boundary
         run: |

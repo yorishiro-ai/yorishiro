@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_VALKEY_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -50,6 +50,16 @@ edition-boundary-check:
 dead-code-allow-check:
 	@if git grep -n -E 'allow[[:space:]]*\([[:space:]]*dead_code' -- src ee edition migration/src tests; then \
 		echo 'ERROR: remove the unused item instead of allowing dead_code' >&2; exit 1; \
+	fi
+
+test-location-check:
+	@if git grep -n -E '#\[[[:space:]]*((tokio|async_std)::)?test([[:space:]]|\]|\()|#\[[[:space:]]*cfg[[:space:]]*\([[:space:]]*test[[:space:]]*\)' -- src ee edition migration/src; then \
+		echo 'ERROR: tests and test-only code belong in tests/' >&2; exit 1; \
+	fi
+
+debug-macro-check:
+	@if git grep -n -E '(^|[^[:alnum:]_])(dbg|debug_assert|debug_assert_eq|debug_assert_ne)[[:space:]]*!' -- src ee edition migration/src tests; then \
+		echo 'ERROR: remove debug-only macros; use tests/ for assertions' >&2; exit 1; \
 	fi
 
 # Nightly is required because LLVM branch coverage is not available on stable.
@@ -116,9 +126,9 @@ entities: build
 	docker compose down -v testdb
 
 # CE is the base boundary. EE compatibility is checked separately after CE work is complete.
-check-all: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check check-ce clippy-ce
+check-all: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ce clippy-ce
 
-check-all-ee: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check check-ee clippy-ee
+check-all-ee: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ee clippy-ee
 
 package-docker-check:
 	@test -n "$(IMAGE)" || { echo 'IMAGE is required' >&2; exit 2; }

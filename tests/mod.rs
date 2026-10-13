@@ -142,7 +142,7 @@ fn an_environment_write_inside_a_reader_is_refused() {
 impl EnvironmentWrite {
     fn enter() -> Self {
         let (readers, writers) = SCOPES.with(std::cell::Cell::get);
-        debug_assert!(
+        assert!(
             readers == 0 || writers > 0,
             "an EnvGuard was captured inside a booted test's scope: capture it before boot_request"
         );
