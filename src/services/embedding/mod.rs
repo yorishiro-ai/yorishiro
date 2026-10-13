@@ -233,37 +233,37 @@ enum OnnxVarFate {
 
 /// The `YORISHIRO_ONNX_*` variables this deployment might still have set from before the local
 /// provider moved from `ort`/ONNX to candle.
-const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 7] = [
+const RENAMED_ONNX_VARS: [(crate::data::env::RetiredEnv, OnnxVarFate); 7] = [
     (
-        "YORISHIRO_ONNX_MODEL_PATH",
+        crate::data::env::RetiredEnv::OnnxModelPath,
         OnnxVarFate::Renamed("YORISHIRO_LOCAL_MODEL_PATH"),
     ),
     (
-        "YORISHIRO_ONNX_TOKENIZER_PATH",
+        crate::data::env::RetiredEnv::OnnxTokenizerPath,
         OnnxVarFate::Renamed("YORISHIRO_LOCAL_TOKENIZER_PATH"),
     ),
     (
-        "YORISHIRO_LOCAL_MODEL_PATH",
+        crate::data::env::RetiredEnv::LocalModelPath,
         OnnxVarFate::Removed {
             alternative: Some("models/<short_id>/model.safetensors"),
         },
     ),
     (
-        "YORISHIRO_LOCAL_TOKENIZER_PATH",
+        crate::data::env::RetiredEnv::LocalTokenizerPath,
         OnnxVarFate::Removed {
             alternative: Some("models/<short_id>/tokenizer.json"),
         },
     ),
     (
-        "YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH",
+        crate::data::env::RetiredEnv::OnnxMaxSequenceLength,
         OnnxVarFate::Renamed("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH"),
     ),
     (
-        "YORISHIRO_ONNX_POOLING",
+        crate::data::env::RetiredEnv::OnnxPooling,
         OnnxVarFate::Removed { alternative: None },
     ),
     (
-        "YORISHIRO_ONNX_QUERY_INSTRUCTION",
+        crate::data::env::RetiredEnv::OnnxQueryInstruction,
         OnnxVarFate::Removed { alternative: None },
     ),
 ];
@@ -285,32 +285,33 @@ const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 7] = [
 /// from `YORISHIRO_LOCAL_MODEL`), so a mismatch could never be detected at write time.
 fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
     for (old, fate) in RENAMED_ONNX_VARS {
+        let old_name = old.name();
         // `var_os`, not `var`: `var` returns `Err` both when the variable is unset and when it is
         // set to a non-UTF-8 value, so checking `.is_err()` would let a non-UTF-8
         // `YORISHIRO_ONNX_MODEL_PATH` slip past this guard as though it were absent. `var_os`
         // only cares whether the variable is present, regardless of what it decodes to.
-        if std::env::var_os(old).is_none() {
+        if !old.is_set() {
             continue;
         }
         match fate {
             OnnxVarFate::Renamed(new) => anyhow::bail!(
-                "{old} is set but no longer read; the local embedding provider now reads {new}. \
-                 Remove {old} (or rename it to {new} if it should still apply) before starting: \
+                "{old_name} is set but no longer read; the local embedding provider now reads {new}. \
+                 Remove {old_name} (or rename it to {new} if it should still apply) before starting: \
                  leaving it set would silently start this provider on a different model than the \
-                 one {old} names, which is not safe to detect and correct after the fact once \
+                 one {old_name} names, which is not safe to detect and correct after the fact once \
                  vectors from the wrong model have been written."
             ),
             OnnxVarFate::Removed { alternative } => {
                 let msg = if alternative.is_some() {
                     format!(
-                        "{old} is set but no longer has any effect: this setting was removed rather than \
-                         renamed, and nothing reads it. Use {alternative:?} (relative to your working directory) \
-                         and place both model files under models/<short_id>/ instead. Remove {old} before starting."
+                        "{old_name} is set but no longer has any effect: this setting was removed rather than \
+                          renamed, and nothing reads it. Use {alternative:?} (relative to your working directory) \
+                          and place both model files under models/<short_id>/ instead. Remove {old_name} before starting."
                     )
                 } else {
                     format!(
-                        "{old} is set but no longer has any effect: this setting was removed rather than \
-                         renamed, and nothing reads it. Remove {old} before starting; leaving it set \
+                        "{old_name} is set but no longer has any effect: this setting was removed rather than \
+                          renamed, and nothing reads it. Remove {old_name} before starting; leaving it set \
                          changes no behaviour, but its presence claims a configuration this deployment no \
                          longer has."
                     )

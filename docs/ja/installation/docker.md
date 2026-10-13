@@ -1,22 +1,22 @@
 # Docker インストール
 
-Yorishiroは1つのバイナリとして提供されます。Dockerが最も簡単な方法です。
+Yorishiro は1つのバイナリで動作します。Docker ならすぐに試せます。
 
 ## クイックスタート
 
-デフォルト設定はSQLiteを使用しており、外部データベースは不要です。
+既定では SQLite を使うため、外部データベースは不要です。
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
-1. `http://localhost/` にアクセスし、セットアップウィザードでアカウントを作成。
-2. APIキーを生成し、エンティティの作成を開始。
+1. `http://localhost/`（ホスト側ポート `80`、コンテナ側ポート `5150`）にアクセスし、セットアップウィザードでアカウントを作成します。
+2. API キーを発行して、エンティティを作成します。
 
 ## PostgreSQL に切り替える
 
-マルチテナントホスティングやベクトル検索：
+マルチテナントで運用する場合は PostgreSQL を指定します。
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
@@ -26,7 +26,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 
 ## Valkey (Redis) に切り替える
 
-分散キュー処理：
+キューに Valkey を使う場合は接続先を指定します。
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
@@ -37,7 +37,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 
 ## ボリューム永続化
 
-デフォルトではDockerはコンテナ内部にデータを保存します。永続化する場合：
+コンテナを削除してもデータを残すには、ボリュームをマウントします。
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \

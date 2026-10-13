@@ -1,4 +1,35 @@
+use serial_test::serial;
 use yorishiro::edition::ee::data::oauth::*;
+
+#[test]
+#[serial(process_environment)]
+fn default_redirect_uses_the_resolved_listener_unless_explicitly_overridden() {
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_BIND"]);
+    guard.remove("YORISHIRO_BIND");
+    let mut server: loco_rs::config::Server = serde_json::from_value(serde_json::json!({
+        "binding": "0.0.0.0", "port": 5151, "host": "http://localhost", "ident": null
+    }))
+    .unwrap();
+    assert_eq!(
+        default_redirect_uri(&server),
+        "http://localhost:5151/auth/oauth/callback"
+    );
+    server.binding = "::".into();
+    assert_eq!(
+        default_redirect_uri(&server),
+        "http://localhost:5151/auth/oauth/callback"
+    );
+    server.binding = "127.0.0.1".into();
+    assert_eq!(
+        default_redirect_uri(&server),
+        "http://127.0.0.1:5151/auth/oauth/callback"
+    );
+    guard.set("YORISHIRO_BIND", "127.0.0.1:8080");
+    assert_eq!(
+        default_redirect_uri(&server),
+        "http://127.0.0.1:8080/auth/oauth/callback"
+    );
+}
 
 #[test]
 fn require_non_empty_accepts_a_present_value() {

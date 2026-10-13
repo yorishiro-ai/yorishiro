@@ -66,6 +66,46 @@ fn plan_policy_parser_is_guarded_and_restores_environment() {
     assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED"));
 }
 
+#[test]
+#[serial(process_environment)]
+fn enterprise_worker_limits_reject_invalid_values_at_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in [
+        "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
+        "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
+        "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+    ] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_yorishiro"))
+            .args(["start", "--worker=worker-target:shared"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env("LOCO_ENV", "test_sqlite")
+            .env(
+                "DATABASE_URL",
+                format!(
+                    "sqlite://{}?mode=rwc",
+                    dir.path().join("app.sqlite3").display()
+                ),
+            )
+            .env(
+                "QUEUE_URL",
+                format!(
+                    "sqlite://{}?mode=rwc",
+                    dir.path().join("queue.sqlite3").display()
+                ),
+            )
+            .env(name, "0")
+            .output()
+            .expect("start worker with invalid limit");
+        assert!(!output.status.success(), "{name} must be rejected");
+        let message = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(message.contains(name), "{name}: {message}");
+    }
+}
+
 #[tokio::test]
 #[serial(process_environment)]
 async fn invalid_plan_policy_fails_enterprise_boot() {

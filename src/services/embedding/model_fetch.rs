@@ -124,7 +124,7 @@ static NEXT_STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
 /// The Docker image sets `HOME` for its service user for exactly this reason, but nothing here may assume that holds for every deployment: an operator running the binary directly, under a different supervisor, or in a container image of their own can still reach a user with no home.
 /// Nothing invents a fallback directory in that case; the caller degrades and names the two path variables instead, since writing hundreds of megabytes to a guessed location is worse than not writing it.
 pub(crate) fn cache_dir(def: &LocalModelDef) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
+    let home = crate::data::env::Env::Home.read_os()?;
     if home.is_empty() {
         return None;
     }

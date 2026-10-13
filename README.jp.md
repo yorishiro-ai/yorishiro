@@ -28,53 +28,38 @@
 
 ## アーキテクチャ
 
+### リクエストの流れ
+
 ```mermaid
 flowchart LR
-    MCP["MCPクライアント<br/>(Claude, Cursor, など)"]
-    REST["RESTクライアント"]
-
-    subgraph Server["Yorishiro（単一バイナリ）"]
-        Router["Router (Loco)"]
-
-        subgraph CE["ce（community edition）<br/>entities, schemas, search, auth"]
-            direction TB
-            CEControllers["controllers"]
-            CEResolvers["デフォルトresolver<br/>（未ライセンス時はNoneを返す）"]
-        end
-
-        subgraph EE["ee（enterprise edition）<br/>ceを覆いかぶす"]
-            direction TB
-            EEControllers["controllers<br/>billing, OAuth, marketplace, dashboard"]
-            EEResolvers["resolver実装<br/>（ceのデフォルトを置き換える）"]
-        end
-
-        Embed["Embeddingプロバイダー<br/>(ローカルモデル、または<br/>OpenAI互換エンドポイント)"]
-
-        subgraph Workers["バックグラウンドワーカー"]
-            direction TB
-            WEmbed["embedding sync"]
-            WReindex["reindex"]
-        end
-
-        DB[("PostgreSQL または SQLite<br/>テナントごとにRLSでスコープ")]
-    end
-
-    MCP --> Router
-    REST --> Router
-    Router --> CEControllers
-    Router --> EEControllers
-    EEResolvers -.overrides.-> CEResolvers
-    CEControllers --> CEResolvers
-    CEResolvers --> DB
-    EEControllers --> DB
-    CEControllers --> Embed
-    Embed --> Workers
-    Workers --> DB
+    Clients["REST・MCP クライアント"] --> Router["Loco ルーター"]
+    Router --> Community["Community のコントローラー<br/>エンティティ、スキーマ、検索、認証"]
+    Router --> Enterprise["Enterprise のコントローラー<br/>OAuth、課金、マーケットプレイス、推論"]
+    Community --> Models["モデルとポリシー"]
+    Enterprise --> Models
+    Models --> DB[("アプリケーション DB<br/>PostgreSQL または SQLite")]
 ```
+
+### バックグラウンドジョブ
+
+```mermaid
+flowchart LR
+    Dispatch["ジョブの投入"] --> Queue["キュープロバイダー<br/>SQLite、PostgreSQL、Redis 互換"]
+    Queue --> Workers["対象別ワーカー<br/>埋め込み同期、再インデックス、infer-fill (Enterprise)"]
+    Workers --> DB[("アプリケーション DB<br/>PostgreSQL または SQLite")]
+    Workers -->|埋め込み同期| Embed["埋め込みプロバイダー<br/>ローカルモデルまたは OpenAI 互換エンドポイント"]
+```
+
+二つの図は同じアプリケーションを示しています。
+Enterprise ビルドでは Community の機能にコントローラーとワーカーが加わります。
+ライセンス対象の機能には有効なキーが必要です。
+SQLite は単一テナント用です。
+PostgreSQL では行レベルセキュリティでテナントを分離します。
 
 ## エディション
 
-ceでできることはeeでもすべて利用可能です。eeはceの上に以下の機能を追加します：
+Community の機能は Enterprise でも利用できます。
+Enterprise では次の機能が加わります。
 
 | 機能 | コミュニティエディション(無料) | エンタープライズエディション |
 |---|---|---|
@@ -84,21 +69,21 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 | OAuth2 / OIDCログイン | — | 利用可能 |
 | Stripe課金 | — | 利用可能 |
 
-1つのバイナリ、1つのリポジトリ。エンタープライズ機能はライセンスキーで有効化します。
+Enterprise の機能にはライセンスキーが必要です。
 
-### MCPツール一覧
+### MCPツール
 
-実行時のMCPインベントリには、ツール名、説明、入力スキーマが含まれます。詳細は [docs/ja/mcp-tools.md](docs/ja/mcp-tools.md) を参照してください。
+利用できるツールと入力項目は [MCPツール](docs/ja/mcp-tools.md) を参照してください。
 
 ライセンスが有効なエンタープライズ環境では、同ドキュメントに示すoriginテンプレート用ツールが追加されます。
 コミュニティモードでは、これらのツールはMCP上に表示されず、呼び出すこともできません。
 
 ## クイックスタート
 
-デフォルト設定はSQLiteを使用しており、外部データベースは不要です。
+既定では SQLite を使うため、外部データベースは不要です。
 
-1. `http://localhost/` にアクセスし、セットアップウィザードでアカウントを作成。
-2. APIキーを生成し、エンティティの作成を開始。
+1. Docker（記載のポート割り当てを使用）の場合は `http://localhost/`、パッケージまたはソースからの起動では `http://localhost:5150/` にアクセスし、セットアップウィザードでアカウントを作成します。
+2. API キーを発行して、エンティティを作成します。
 
 バックグラウンドキューを使うソースチェックアウトでは、サーバーとタグ付きワーカーを別々に起動します。
 `cargo loco start` と `cargo loco start --worker=worker-target:shared` を実行してください。
@@ -107,12 +92,13 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 
 ## 設定
 
-設定は Loco 標準の `config/` 配下に置きます。
-`LOCO_ENV` が `config/<environment>.yaml` を選び、`LOCO_CONFIG_FOLDER` で別の設定ディレクトリを指定できます。
-YAML では Loco の Tera `get_env` 式を使ってデプロイ時の値を上書きします。
-ソース開発では `config/development.yaml` を使い、パッケージと Docker では `config/production.yaml` を使います。
+Yorishiro の設定には `config/<environment>.yaml` と、その設定ファイルから読み込む環境変数を使います。
+`LOCO_ENV` で設定環境を選びます。
+ソースからのローカル実行では `development`、パッケージと Docker では `production` を使います。
+別の設定ディレクトリを使う場合は `LOCO_CONFIG_FOLDER` を指定してください。
 アプリケーションデータは SQLite または PostgreSQL を利用できます。
-キューの保存先は Loco のキュープロバイダとして独立して選択でき、このリリースでは SQLite、PostgreSQL、Redis 互換プロバイダを利用できます。
+キューの保存先は別に設定します。
+アプリケーションのデータベースが SQLite の場合は別ファイルの SQLite キューか Redis 互換サービス、PostgreSQL の場合は PostgreSQL キューか Redis 互換サービスを使えます。
 バックエンド変数を設定しない場合のみ、パッケージと Docker は SQLite の既定データを `/var/lib/yorishiro` に保存します。
 
 ## ドキュメント
@@ -123,8 +109,8 @@ YAML では Loco の Tera `get_env` 式を使ってデプロイ時の値を上�
 | [docs/ja/configuration.md](docs/ja/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
 | [docs/ja/sqlite.md](docs/ja/sqlite.md) | SQLiteモード：機能と制限 |
 | [docs/ja/templates.md](docs/ja/templates.md) | 組み込みテンプレートと非推奨の `worldbuilding` テンプレート |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 貢献ガイドライン |
-| [AGENTS.md](AGENTS.md) | AIエージェント向け情報 |
+| [開発に参加する](docs/ja/contributing.md) | 開発とテストの手順 |
+| [AGENTS.md](AGENTS.md) | AI エージェント向けの開発規約 |
 
 ## ライセンス
 

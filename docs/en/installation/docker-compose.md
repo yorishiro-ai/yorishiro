@@ -1,6 +1,7 @@
 # Docker Compose
 
 Copy the following to `compose.yml` and run from that directory.
+The `80:5150` mapping exposes the server on host port `80`; the server listens on port `5150` in the container.
 
 ## Default (SQLite)
 
@@ -12,23 +13,25 @@ services:
     ports:
       - "80:5150"
     volumes:
-      - data:/home/yorishiro/.cache/yorishiro
+      - data:/var/lib/yorishiro
+      - model-cache:/home/yorishiro/.cache/yorishiro
     environment:
       - DATABASE_URL=sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc
       - QUEUE_URL=sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc
 
 volumes:
   data:
+  model-cache:
 ```
 
 Start with `docker compose up -d`. Stop with `docker compose down`.
 
-The local embedding provider downloads about 522 MiB on first use.
+The local embedding provider downloads its model on first use.
 Set `YORISHIRO_EMBEDDING_PROVIDER=none` to skip that download when embedding is not required.
 
 ## PostgreSQL
 
-Replace the `DATABASE_URL` line:
+In the default example, replace the `DATABASE_URL` line:
 
 ```yaml
 environment:
@@ -98,4 +101,4 @@ volumes:
   valkey-data:
 ```
 
-See [docs/configuration.md](../configuration.md) for all settings.
+See [configuration](../configuration.md) for all settings.

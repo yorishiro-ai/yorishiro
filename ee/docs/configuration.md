@@ -1,25 +1,18 @@
 # Enterprise configuration
 
-[English](../../docs/en/configuration.md) | [日本語](../../docs/ja/configuration.md)
+[English](configuration.md) | [日本語](ja/configuration.md)
 
 Enterprise edition features that require additional configuration.
 
 ## Plan policy
 
 `YORISHIRO_PLAN_POLICY_ENABLED` defaults to `false` and accepts only `true` or `false` (case-insensitive).
-When enabled, subscription plans enforce their existing workspace, entity, and official-worker limits.
-When disabled, official-worker concurrency uses `YORISHIRO_WORKER_OFFICIAL_LIMIT` or `1`, and newly created tenants and workspaces are unlimited.
-Stripe plan data continues to be persisted, while existing tenant and workspace limits are grandfathered unchanged.
-When disabled, plan metadata remains informational and does not determine concurrency.
-
-### 日本語
-
-`YORISHIRO_PLAN_POLICY_ENABLED` の既定値は `false` で、`true` または `false`（大文字小文字を区別しない）のみ受け付けます。
-有効にすると、サブスクリプションの plan に応じた workspace、entity、Official worker の既存の上限を適用します。
-無効時は、Official worker の上限に `YORISHIRO_WORKER_OFFICIAL_LIMIT` を使い、未設定なら `1` とします。
-新しく作成する tenant と workspace は無制限です。
-Stripe の plan 情報は引き続き保存され、既存 tenant と workspace の上限は変更されません。
-無効時の plan メタデータは情報表示用であり、同時実行数は決定しません。
+When enabled, subscription plans enforce workspace and entity limits and target admission limits for background jobs.
+Shared jobs default to a deployment-wide limit of `1`; tenant-private jobs default to `1` per tenant; Official jobs share a deployment-wide count with a plan-derived limit (Free `1`, Pro `4`, Team `8`).
+Set `YORISHIRO_WORKER_CLASS_SHARED_LIMIT`, `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT`, or `YORISHIRO_WORKER_OFFICIAL_LIMIT` to override the corresponding target limit with a positive integer.
+When disabled, no target admission limits apply, even if the override variables are set.
+Enterprise still validates configured overrides at startup.
+Plan data remains available for billing and job records, and existing tenant and workspace limits remain unchanged.
 
 ## Per-workspace embedding providers
 
@@ -35,10 +28,10 @@ Each workspace can use its own embedding endpoint. Use `PUT /api/workspace/embed
 
 ## OAuth2/OIDC login
 
-OAuth2/OIDC login fetches the provider discovery document, exchanges the authorization code, and retrieves the provider JWKS through a private OAuth-specific transport seam.
-The production implementation owns the `reqwest` client, the ten-second timeout, HTTPS-or-loopback URL validation, redirect restrictions, response parsing, and credential redaction.
-Tests can substitute those three provider operations without changing authorization, callback, PKCE, state-token, cookie, or user-provisioning behavior.
-Loco provides application composition and queue extension points, but it does not provide an extension point for this provider-specific outbound transport, so the seam is composed inside the existing OAuth service instead of adding a generic HTTP service.
+Set `YORISHIRO_OAUTH_ISSUER_URL`, `YORISHIRO_OAUTH_CLIENT_ID`, and `YORISHIRO_OAUTH_CLIENT_SECRET` to enable login.
+Set `YORISHIRO_OAUTH_REDIRECT_URI` to the public callback URL, particularly behind a reverse proxy.
+If it is unset, the callback uses the listening host and port, replacing a wildcard host with `localhost`; `YORISHIRO_BIND` overrides this fallback without changing the listener.
+The identity provider must use HTTPS unless it runs on a loopback address.
 
 ## Asynchronous infer-fill
 
@@ -61,10 +54,6 @@ If a worker crashes after claiming it, the durable row remains `running` and is 
 Operators must reconcile a `running` job before retrying it through an operational procedure.
 Job records are retained until a future retention policy is introduced.
 
-The OpenAI-compatible chat-completions call stays behind a private inference-client transport seam.
-The production implementation uses the configured `reqwest` client, while tests can substitute the network without changing infer-fill behavior or exposing a generic application-wide HTTP service.
-No Loco extension applies because Loco provides application composition and queue extension points, not a provider-specific outbound transport for this call.
-
 ## Per-workspace worker class
 
 `PUT /api/workspace/worker-class` assigns a workspace's background jobs to a specific compute pool.
@@ -73,22 +62,11 @@ No Loco extension applies because Loco provides application composition and queu
 |---|---|
 | `worker_class` | `tenant_private`, `official`, or `shared` |
 
-## Compute policy foundations
+## Queue priorities
 
-This release defines and tests plan-derived policy primitives, but does not activate them in production queue execution.
-Loco Queue does not expose provider-neutral demand observation, and the current compute path has no actual-cost source.
-Therefore this release does not enforce queue priority or SLA objectives, route automatic Official bursts, or charge compute automatically.
-
-| Plan | Priority | Queue-start objective | Official base | Burst ceiling |
-|---|---|---:|---:|---:|
-| Free | low | best effort | 1 | 2 |
-| Pro | normal | 60 seconds | 4 | 6 |
-| Team | high | 15 seconds | 8 | 12 |
-
-The pure burst predicate requires observed official demand above the base limit, within the ceiling, and positive credits.
-The routing hook seam preserves explicit assignments and never implicitly selects TenantPrivate.
-`debit_actual` provides an append-only, no-overdraft debit primitive for a future caller that can provide an actual cost.
-Provider-neutral demand observation, an explicit actual-cost callback, production routing, and post-success charging remain follow-up work.
+Tenant-private jobs have priority 300, Official jobs 200, and Shared jobs 100.
+The plan policy defines queue-start objectives of best effort for Free, 60 seconds for Pro, and 15 seconds for Team, but does not enforce them.
+Automatic Official bursts and compute charging are not available.
 
 ## Schema origin notifications
 

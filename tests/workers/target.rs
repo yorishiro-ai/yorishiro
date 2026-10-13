@@ -1,4 +1,4 @@
-//! Worker targets: how a target is named and read back, and how it scopes the concurrency limit.
+//! Worker targets: how a target is named and read back, and how it scopes optional concurrency limits.
 
 use uuid::Uuid;
 use yorishiro::workers::embedding_sync::WorkerClass;
@@ -183,7 +183,7 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
     );
 }
 
-/// The limit for a class counts the jobs of one target: one tenant's workspaces share a limit with each other and with nobody else's, while shared and official work counts across the whole deployment.
+/// Target keys group a tenant's workspaces, while shared and official keys span the deployment; limits are opt-in.
 mod concurrency {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
     use uuid::Uuid;
@@ -257,13 +257,15 @@ mod concurrency {
         matches!(admission, Admission::Started { .. })
     }
 
-    fn saturated(admission: &Admission) -> bool {
-        matches!(admission, Admission::Saturated { .. })
-    }
-
     #[tokio::test]
     #[serial_test::serial(process_environment)]
-    async fn a_tenant_private_job_is_counted_against_its_own_tenant_only() {
+    async fn tenant_private_jobs_keep_their_key_without_a_default_cap() {
+        let guard = crate::EnvGuard::capture(&[
+            "YORISHIRO_PLAN_POLICY_ENABLED",
+            "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
+        ]);
+        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+        guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
             let (tenant_a, a_first) = workspace_of_new_tenant(&ctx).await;
             let a_second = workspace_of(&ctx, tenant_a).await;
@@ -282,15 +284,10 @@ mod concurrency {
                 other.concurrency_key.as_deref(),
                 Some(format!("tenant_private:tenant:{tenant_b}").as_str())
             );
-            assert_eq!(
-                first.concurrency_limit,
-                Some(1),
-                "the default tenant-private limit"
-            );
+            assert_eq!(first.concurrency_limit, None);
 
             assert!(started(&start(&ctx, &first).await));
-            // Within one tenant the limit holds, whichever workspace the job is for.
-            assert!(saturated(&start(&ctx, &second).await));
+            assert!(started(&start(&ctx, &second).await));
             // Another tenant's job is not held back by it.
             assert!(started(&start(&ctx, &other).await));
         })
@@ -299,7 +296,15 @@ mod concurrency {
 
     #[tokio::test]
     #[serial_test::serial(process_environment)]
-    async fn shared_and_official_jobs_are_counted_across_the_whole_deployment() {
+    async fn shared_and_official_jobs_keep_their_keys_without_default_caps() {
+        let guard = crate::EnvGuard::capture(&[
+            "YORISHIRO_PLAN_POLICY_ENABLED",
+            "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
+            "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+        ]);
+        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+        guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "1");
+        guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
             for (class, key) in [
                 (WorkerClass::Shared, "shared:shared"),
@@ -312,11 +317,13 @@ mod concurrency {
 
                 assert_eq!(first.concurrency_key.as_deref(), Some(key));
                 assert_eq!(second.concurrency_key.as_deref(), Some(key));
-                assert_eq!(first.concurrency_limit, Some(1), "the default {key} limit");
+                assert_eq!(
+                    first.concurrency_limit, None,
+                    "the default {key} cap is disabled"
+                );
 
                 assert!(started(&start(&ctx, &first).await), "{key}");
-                // A different tenant's job still counts against the same limit.
-                assert!(saturated(&start(&ctx, &second).await), "{key}");
+                assert!(started(&start(&ctx, &second).await), "{key}");
             }
         })
         .await;

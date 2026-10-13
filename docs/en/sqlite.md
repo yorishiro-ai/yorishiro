@@ -1,8 +1,11 @@
 # SQLite mode
 
-Yorishiro can run on SQLite instead of PostgreSQL. Use this for local evaluation, personal use, or a single-person workspace that does not share data with anyone else.
+Yorishiro can run on SQLite instead of PostgreSQL.
+Use this for local evaluation, personal use, or a single-person workspace that does not share data with anyone else.
 
-Do not use SQLite for multi-tenant hosting. It stores all data in a single file with no database-level tenant isolation. PostgreSQL is required when two or more tenants share the same deployment.
+Do not use SQLite for multi-tenant hosting.
+It stores all data in a single file with no database-level tenant isolation.
+PostgreSQL is required when two or more tenants share the same deployment.
 
 ## What works on SQLite
 
@@ -11,8 +14,8 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 - **Full-text search.** Text search with character-n-gram fuzzy matching via FTS5 `tokenize='trigram'`.
 - **API key authentication.** Create and use API keys.
 - **Embedding sync.** Generate and store vectors the same way as PostgreSQL.
-- **Template library and schema origin.** Templates (their tags are stored as a JSON array on both backends), creating a schema from a library template, listing upstream changes, and merging upstream template changes.
-- **Recall.** `recall_context` traverses relations hop by hop; both backends batch the neighbor lookup at each hop, with a separate limit per pivot.
+- **Template library and schema origin.** Create schemas from templates and review or merge template updates.
+- **Recall.** `recall_context` finds related entities across multiple hops.
 - **Column preferences and inference proposals** (enterprise).
 - **Snapshots and undo.** Restore entities from a snapshot (requires a prior snapshot created on PostgreSQL).
 
@@ -21,20 +24,15 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 - **Multiple tenants.** SQLite supports exactly one tenant. The tenant cap is hardcoded to 1 and cannot be changed.
 - **Content filtering.** The `filter` query parameter (JSONB containment) returns an error on SQLite.
 - **The marketplace** (enterprise). It lists and publishes across tenants, so its endpoints answer `501` with the `backend_unsupported` code on SQLite.
-- **Features that depend on advisory locks.** SQLite has one writer and no named locks, so the lock is a no-op there.
-  Infer-fill still runs one job per workspace at a time on SQLite: a unique index on running jobs refuses a second claim, and the worker puts that job back on the queue.
+- **Named advisory locks.** SQLite does not provide them; infer-fill still runs only one job per workspace at a time.
 - **SQLite snapshots.** Creating snapshots is not supported on SQLite. A snapshot created on PostgreSQL can be restored on SQLite.
 
 ## Configuration
+
 Supported queue configurations for SQLite are a separate SQLite queue file or a Redis-compatible (Valkey) queue.
 A PostgreSQL queue with a SQLite database is forbidden and rejected before boot with `ValidationFailed`.
-Future enterprise-only RabbitMQ/SQS queues will require a PostgreSQL database and will not be available on SQLite.
-The PostgreSQL template-tags upgrade rewrites the small template table under an exclusive lock and removes the unused tags GIN index.
-Rollback restores the original index and converts non-array JSON tags to empty arrays.
-Migration 000020 adds a partial unique index for running infer-fill jobs on both backends.
-If a workspace already has multiple running jobs, the migration aborts without changing them and reports the workspace and count.
-Drain workers, resolve the duplicates, and retry the migration; do not mark jobs stopped while their workers are still running.
-Validation and index creation share a transaction and hold a database write lock, so claims cannot race the index installation.
+If an upgrade reports multiple running infer-fill jobs in one workspace, let the active workers finish, resolve any duplicates, and retry the upgrade.
+Do not mark jobs stopped while their workers are still running.
 
 All `sqlite:` URL forms, including `sqlite:/path` and `sqlite::memory:`, select SQLite defaults:
 
@@ -45,11 +43,10 @@ cargo run
 
 SQLite background jobs use a separate file, `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`, by default.
 The application database and queue must not share a file because their independent connection pools can hold SQLite locks against each other while a worker dequeues a job.
-If an existing installation points `QUEUE_URL` at the application file, move the queue database to the separate path before starting the updated version.
-The queue tables are recreated there as needed, so jobs still pending in the old shared file should be drained or migrated by the operator first.
-PostgreSQL and Redis queue configurations are unchanged.
+If `QUEUE_URL` points to the application file, drain or move pending jobs and configure a separate queue file before starting the server.
 
-At least 2 connections are required. The server refuses to start if `max_connections` is less than 2.
+At least 2 connections are required.
+The server refuses to start if `max_connections` is less than 2.
 
 ## Configuration files
 
@@ -58,4 +55,6 @@ Set `QUEUE_URL` to another SQLite file when using a custom application path.
 
 ## Authentication
 
-Authentication bypasses the tenant pool and connects directly to the database. There is no row-level security. This is safe when there is only one tenant.
+Authentication bypasses the tenant pool and connects directly to the database.
+There is no row-level security.
+Use SQLite only with a single tenant.

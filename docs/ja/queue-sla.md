@@ -1,85 +1,72 @@
 # キュー開始目標
 
-Yorishiro は、アプリケーションのワーカーアダプターから投入したジョブごとにライフサイクル行を記録します。
+Yorishiro はワーカーに投入するジョブごとに実行記録を保存します。
 
 ## 意味
 
-`enqueue_at` は、プロバイダーへ投入する前にアプリケーションが記録する時刻です。
+`enqueue_at` は、ジョブをキューに登録する前に記録する時刻です。
 
-`claim_at` と `start_at` は、ワーカーハンドラーがジョブを受け取った最初の時刻です。
-Loco はプロバイダーの claim フックを公開していないため、これらは意図的に同じ値であり、観測可能な claim と開始の境界を表します。
+`claim_at` と `start_at` は、ワーカーが最初にジョブを受け取る時刻です。
+キューから受け取る時刻と処理を始める時刻を別々に取得できないため、同じ値になります。
 
 キュー開始レイテンシーは `start_at - enqueue_at` です。
-プロバイダーの再試行や再配送でも最初の投入時刻を保持するため、再試行によって開始が速く見えることはありません。
+再試行や再配送でも元の `enqueue_at` を使うため、次の試行まで待つ時間も開始までの時間に含まれます。
 
 ライフサイクルの状態は `queued`、`running`、`retrying`、`completed`、`failed`、`cancelled`、`unavailable` です。
 キュー容量の不足とプロバイダーエラーは、開始成功として数えません。
 重複配送は、ライフサイクル行が実行中または終端状態なら無視されます。
 実行中の行には5分間の lease があります。
-lease が有効な再配送は `Duplicate` とし、lease の期限切れ後の再配送は行を回収して `attempt` を増やします。
-終端遷移は受け入れ時の attempt で保護するため、古いワーカーが回収後の attempt を完了または再試行に変更することはありません。
+有効期間中の再配送は重複として無視します。
+期限が切れると、次の配送で `attempt` が増えます。
+前のワーカーはジョブを完了または再試行に変更できません。
 
 ## 容量と診断
 
-各ジョブには複合対象タグを一つだけ指定します。`worker-target:shared`、`worker-target:official`、または `worker-target:tenant:<tenant-id>` です。
-ライフサイクル行には、クラス、任意のプラン、同時実行キー、設定された上限を時刻情報とともに保存します。
+各ジョブのワーカー対象は `worker-target:shared`、`worker-target:official`、`worker-target:tenant:<tenant-id>` のいずれか一つです。
+実行記録には時刻のほか、ジョブの種類、プラン、ワーカー対象、上限の設定を保存します。
+上限が設定されていない場合、対象ごとの同時実行数は制限しません。
 `attempt` は、実行中の処理として受け入れた配送時だけ増加します。
 
-PostgreSQL と SQLite では、ライフサイクルをアプリケーションデータベースに永続化します。
-Redis はプロバイダー側のジョブ状態を提供しますが、Redis の検査方法はプロバイダー固有であるため、ライフサイクルの永続性はアプリケーションデータベースに置きます。
-運用ダッシュボードでは、プロバイダーの queued、processing、completed、failed、cancelled 状態とライフサイクル行を組み合わせてください。
+Redis をキューに使う場合も、ジョブの実行記録はアプリケーションのデータベースに保存します。
+問題を調べるときは、キュー内のジョブ状態と実行記録の両方を確認してください。
 
-ライフサイクル行のコミット後に主エンティティへの書き込みが失敗した場合、その投入失敗はライフサイクルの診断情報と構造化ログに記録されます。
-すでにコミット済みのライフサイクル行へロールバックして呼び出し元に返すことはできません。
-キュープロバイダーが未設定または到達不能の場合、呼び出し側は行を `unavailable` として扱い、プロバイダーエラーを返します。
+実行記録を保存した後でエンティティの書き込みに失敗した場合は、実行記録の診断情報とログにエラーが残ります。
+キューが利用できない場合、ジョブは `unavailable` となり、リクエストはエラーを返します。
 
 ## 運用
 
 対象タグを明示してワーカーを起動してください。
-対象なしの起動は拒否されます。
-開始時には、既存の構造化 tracing に `queue_start_seconds` と `lifecycle_id` が出力されます。
-デプロイ先のログ・可観測性基盤で、このイベントをエクスポートまたは絞り込んでください。
-この Issue では別のメトリクスエンドポイントは追加しません。
-容量による延期は `worker capacity saturated`、再試行への遷移は `retrying`、プロバイダーまたはポリシーの失敗は diagnostic フィールド付きの `unavailable` として出力されます。
-ライフサイクル行を `worker_class` と `status` で集計し、記録された開始時刻をプランの目標と比較してください。
-`queued`、`retrying`、または `unavailable` が増え続ける場合、SLA を判断する前に容量またはプロバイダーの健全性を復旧してください。
-
-この Issue では、プリエンプション、バーストクレジット、RabbitMQ、SQS、提供計算、WASM 実行は追加しません。
+対象を指定せずにワーカーを起動することはできません。
+ジョブの開始時には、ログに `queue_start_seconds` と `lifecycle_id` が出力されます。
+開始までの時間を監視するには、ログのこれらの項目を確認してください。
+Enterprise のプランによる上限を有効にすると、上限に達したジョブの延期は `worker capacity saturated` として記録されます。
+再試行は `retrying`、キュープロバイダーやポリシーの処理に失敗した場合は診断情報付きの `unavailable` として記録されます。
+実行記録を `worker_class` と `status` ごとに集計し、開始までの時間をプランの目標と比較してください。
+`queued`、`retrying`、`unavailable` が増え続ける場合は、開始時間を評価する前にワーカーの空き状況とキューの稼働状況を確認してください。
 
 ## 優先度と容量
 
-Loco 1.2.0が提供する検証済みのスケジューリング機能を使用します。対応providerは整数priorityを受け付けます。
+PostgreSQL と SQLite では、優先度、実行予定時刻、ID の順に処理対象を選びます。
+Redis では、優先度順の先頭1000件を調べてからワーカー対象を照合します。
+先行するジョブが別の対象向けだと、1000件より後にある該当ジョブは次の確認まで待つ場合があります。
 
-PostgreSQLとSQLiteは`ORDER BY priority DESC, run_at, id`で処理対象のジョブを選ぶため、そのqueryから見える行の順序は決定的です。
+優先度は `tenant_private` が300、`official` が200、`shared` が100です。
 
-Redisはpriority順のZSETの先頭1000件だけをscanし、その後tagの一致を確認してpriority、`run_at`、idで候補を並べます。
+Enterprise のプランによる上限を有効にすると、Shared と Official の実行数をデプロイ全体で数え、tenant-private の実行数をテナントごとに数えます。
+無効な場合は、対象ごとの同時実行数に上限を設けません。
 
-workerに一致しない先行エントリがある場合、tag付きRedis jobがこの上限を超えて次のpolling cycleまでskipされることがあります。
+`enterprise` プランには Team の上限を適用します。
 
-Yorishiroは`tenant_private`に300、`official`に200、`shared`に100のpriorityを割り当てます。
+上限に達したジョブは、元の優先度と処理対象を保ったまま次の試行を待ちます。
+別のワーカー対象には移しません。
 
-ライフサイクルの admission lock は `shared:shared`、`official:official`、`tenant_private:tenant:<tenant-id>` の対象キー単位で実行数を数えます。
-plan はライフサイクルのメタデータとして残り、キーには入りません。
-
-JWTのplan claim `enterprise` はTeamの上限にマッピングされます。
-
-capacity が埋まったジョブは対象タグを保持したまま retrying として記録し、クラスの priority で再投入します。
-別の対象へ暗黙に変更しません。
-
-処理枠を予約するには、対象ごとにワーカープロセスを起動します。
+対象ごとに処理枠を確保するには、ワーカープロセスを分けて起動します。
 `--worker=worker-target:shared`、`--worker=worker-target:official`、`--worker=worker-target:tenant:<tenant-id>` を使用します。
 
-複数対象をまとめたワーカーも利用できますが、`num_workers` は共有 polling pool であり、対象ごとの処理枠は予約しません。
+一つのワーカーで複数の対象を処理する場合、`num_workers` の処理枠は対象間で共有されます。
 
-providerの挙動は固定しているLoco 1.2.0のソースで確認し、全providerに同じordering保証があるとは扱わずproviderごとに記載しています。
+優先度の低いジョブが `queued` または `retrying` で1分待つと、同じワーカーを使う新規の高優先度ジョブは、待っているジョブが開始するまで優先度50で登録されます。
+キューに登録済みのジョブの優先度は変わりません。
+対象ごとにワーカーを分けると、各対象の処理枠を確保できます。
 
-starvation protectionは、providerのqueued rowを後からreprioritizeするのではなく、durableなadmission boundaryで行います。
-
-低いクラスのライフサイクルが1分間`queued`または`retrying`で待機した場合、そのdurable rowを観測した新しい高いクラスのdispatchには、低いクラスのworkがadmitされるまでpriority 50を割り当てます。
-
-これにより閾値到達後の連続到着から保護しますが、provider内ですでに先行しているジョブはproviderのorderingとbounded scanの挙動に従います。
-
-この抑制は候補ワーカーを共有する新規投入にのみ適用されます。
-対象別ワーカープロセスは処理枠を分離します。
-
-scheduling decision、クラス、priority、capacity limit、active capacity、saturation、fallbackは構造化tracing fieldとして出力します。
+ログにはジョブの振り分け、種類、優先度、設定された上限、実行中のジョブ数、上限による延期が記録されます。

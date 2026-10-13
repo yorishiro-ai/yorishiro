@@ -1,6 +1,7 @@
 # Docker Compose
 
 以下を `compose.yml` にコピーし、そのディレクトリで実行します。
+`80:5150` は、ホストのポート `80` をコンテナ内のサーバーポート `5150` に接続します。
 
 ## デフォルト（SQLite）
 
@@ -12,23 +13,25 @@ services:
     ports:
       - "80:5150"
     volumes:
-      - data:/home/yorishiro/.cache/yorishiro
+      - data:/var/lib/yorishiro
+      - model-cache:/home/yorishiro/.cache/yorishiro
     environment:
       - DATABASE_URL=sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc
       - QUEUE_URL=sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc
 
 volumes:
   data:
+  model-cache:
 ```
 
-`docker compose up -d` で開始、`docker compose down` で停止します。
+`docker compose up -d` で起動し、`docker compose down` で停止します。
 
-ローカル埋め込みプロバイダは初回使用時に約 522 MiB をダウンロードします。
+ローカルの埋め込みプロバイダーは初回使用時にモデルをダウンロードします。
 埋め込みが不要な場合は `YORISHIRO_EMBEDDING_PROVIDER=none` を設定するとダウンロードを省略できます。
 
 ## PostgreSQL
 
-`DATABASE_URL` を書き換えます：
+既定の例で `DATABASE_URL` の行を次のように変更します。
 
 ```yaml
 environment:
@@ -98,4 +101,4 @@ volumes:
   valkey-data:
 ```
 
-全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。
+設定項目は [設定](../configuration.md) を参照してください。

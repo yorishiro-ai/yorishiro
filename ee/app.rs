@@ -17,6 +17,9 @@ use crate::workers::registry::WorkerRegistry;
 pub(crate) fn compose_context(ctx: &AppContext) -> Result<()> {
     let policy_enabled = crate::edition::ee::data::plan::plan_policy_enabled()?;
     ctx.shared_store.insert(Arc::new(policy_enabled));
+    ctx.shared_store.insert(Arc::new(
+        crate::edition::ee::data::worker_policy::WorkerClassLimits::from_env()?,
+    ));
     // An absent or invalid licence key warns and continues rather than failing boot.
     let licence =
         Arc::new(crate::edition::ee::controllers::middleware::edition::LicenceState::from_env());

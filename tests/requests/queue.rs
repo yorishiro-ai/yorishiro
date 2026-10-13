@@ -453,7 +453,7 @@ async fn missing_billing_uses_free_policy_for_reindex_but_not_embedding() {
             reindex.concurrency_key.as_deref(),
             Some("official:official")
         );
-        assert_eq!(reindex.concurrency_limit, Some(1));
+        assert_eq!(reindex.concurrency_limit, None);
     })
     .await;
 }
@@ -543,25 +543,32 @@ async fn enterprise_billing_plan_uses_team_queue_policy() {
         .await
         .expect("insert enterprise billing");
 
-        reindex::enqueue_for_class(
-            &ctx,
-            ReindexArgs {
-                lifecycle_id: None,
-                workspace_id,
-                worker_class: WorkerClass::Official,
-                startup: false,
-            },
-        )
-        .await
-        .expect("reindex enqueue with enterprise billing");
-        let row = queue_job_lifecycles::Entity::find()
-            .one(&ctx.db)
+        for (class, key, limit) in [
+            (WorkerClass::Shared, "shared:shared", 2),
+            (WorkerClass::TenantPrivate, "tenant_private:tenant:", 3),
+            (WorkerClass::Official, "official:official", 9),
+        ] {
+            reindex::enqueue_for_class(
+                &ctx,
+                ReindexArgs {
+                    lifecycle_id: None,
+                    workspace_id,
+                    worker_class: class,
+                    startup: false,
+                },
+            )
             .await
-            .expect("read queue lifecycle")
-            .expect("queue lifecycle");
-        assert_eq!(row.plan.as_deref(), Some("team"));
-        assert_eq!(row.concurrency_key.as_deref(), Some("official:official"));
-        assert_eq!(row.concurrency_limit, Some(9));
+            .expect("reindex enqueue with enterprise billing");
+            let row = queue_job_lifecycles::Entity::find()
+                .filter(queue_job_lifecycles::Column::WorkerClass.eq(class.as_db_str()))
+                .one(&ctx.db)
+                .await
+                .expect("read queue lifecycle")
+                .expect("queue lifecycle");
+            assert_eq!(row.plan.as_deref(), Some("team"));
+            assert!(row.concurrency_key.as_deref().unwrap().starts_with(key));
+            assert_eq!(row.concurrency_limit, Some(limit));
+        }
     })
     .await;
 }
@@ -611,14 +618,14 @@ async fn enterprise_billing_plan_uses_team_queue_fallback_without_official_overr
             .expect("queue lifecycle");
         assert_eq!(row.plan.as_deref(), Some("team"));
         assert_eq!(row.concurrency_key.as_deref(), Some("official:official"));
-        assert_eq!(row.concurrency_limit, Some(1));
+        assert_eq!(row.concurrency_limit, None);
     })
     .await;
 }
 
 #[tokio::test]
 #[serial_test::serial(process_environment)]
-async fn pro_plan_uses_one_official_worker_when_policy_is_disabled() {
+async fn pro_plan_has_no_official_cap_when_policy_is_disabled() {
     if !crate::require_sqlite_backend() {
         return;
     }
@@ -658,14 +665,14 @@ async fn pro_plan_uses_one_official_worker_when_policy_is_disabled() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(row.concurrency_limit, Some(1));
+        assert_eq!(row.concurrency_limit, None);
     })
     .await;
 }
 
 #[tokio::test]
 #[serial_test::serial(process_environment)]
-async fn disabled_policy_honors_official_override_without_changing_metadata() {
+async fn disabled_policy_ignores_official_override_without_changing_metadata() {
     if !crate::require_sqlite_backend() {
         return;
     }
@@ -707,7 +714,7 @@ async fn disabled_policy_honors_official_override_without_changing_metadata() {
             .unwrap();
         assert_eq!(row.plan.as_deref(), Some("team"));
         assert_eq!(row.concurrency_key.as_deref(), Some("official:official"));
-        assert_eq!(row.concurrency_limit, Some(9));
+        assert_eq!(row.concurrency_limit, None);
     })
     .await;
 }

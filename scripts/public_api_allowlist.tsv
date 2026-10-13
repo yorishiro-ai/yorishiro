@@ -1,5 +1,6 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+ee/data/oauth.rs	fn	default_redirect_uri	integration-test: verify OAuth callback fallback uses the resolved listener and preserves the legacy override.
 src/models/workspace_invites.rs	struct	RedeemedInvite	seaorm-facade: invite result moved from the cross-table facade to the table-owning model.
 src/models/workspace_invites.rs	field	RedeemedInvite::tenant_id	seaorm-facade: invite result field moved with its existing public type.
 src/models/workspace_invites.rs	field	RedeemedInvite::email	seaorm-facade: invite result field moved with its existing public type.

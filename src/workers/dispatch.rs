@@ -202,7 +202,7 @@ where
         (
             Some(policy.plan),
             Some(target.concurrency_key()),
-            Some(policy.limit),
+            policy.limit,
         )
     } else {
         (None, None, None)

@@ -11,19 +11,16 @@ use uuid::Uuid;
 
 use crate::workers::embedding_sync::WorkerClass;
 
-/// How many jobs of one class a workspace may have running unless a policy says otherwise.
-pub const SINGLE_JOB_LIMIT: i32 = 1;
-
 /// The plan label this crate's own rule records on a lifecycle row.
 const COMMUNITY_PLAN: &str = "community";
 
-/// What a job is admitted under: the plan label recorded on its lifecycle row, and how many jobs of its class may run at once.
+/// What a job is admitted under: its lifecycle plan label and an optional target concurrency cap.
 pub struct ConcurrencyPolicy {
     pub plan: String,
-    pub limit: i32,
+    pub limit: Option<i32>,
 }
 
-/// Decides how many jobs of a class one workspace may have running.
+/// Chooses an optional target admission cap and lifecycle plan label.
 ///
 /// A seam: an edition that sells compute replaces this rule without touching the dispatcher that asks.
 /// The error is a diagnostic for the operator, and a job whose policy cannot be determined is refused rather than admitted under a guess.
@@ -37,34 +34,20 @@ pub trait QueuePolicy: Send + Sync {
     ) -> Result<ConcurrencyPolicy, String>;
 }
 
-/// This crate's own rule: one running job per class, whatever the workspace.
+/// Community admission has no target concurrency cap.
 pub(crate) struct CommunityQueuePolicy;
 
 #[async_trait]
 impl QueuePolicy for CommunityQueuePolicy {
     async fn concurrency(
         &self,
-        ctx: &AppContext,
+        _ctx: &AppContext,
         _workspace_id: Uuid,
-        class: WorkerClass,
+        _class: WorkerClass,
     ) -> Result<ConcurrencyPolicy, String> {
-        let settings = ctx
-            .shared_store
-            .get::<crate::data::settings::Settings>()
-            .ok_or_else(|| {
-                "queue policy unavailable: application settings are missing".to_owned()
-            })?;
-        let limit = match class {
-            WorkerClass::Shared => settings.worker_class_limits.shared,
-            WorkerClass::TenantPrivate => settings.worker_class_limits.tenant_private,
-            WorkerClass::Official => settings
-                .worker_class_limits
-                .official
-                .unwrap_or(SINGLE_JOB_LIMIT),
-        };
         Ok(ConcurrencyPolicy {
             plan: COMMUNITY_PLAN.to_owned(),
-            limit,
+            limit: None,
         })
     }
 }

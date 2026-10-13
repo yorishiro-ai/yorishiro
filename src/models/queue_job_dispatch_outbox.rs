@@ -1,5 +1,7 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, Statement, TransactionTrait};
+use sea_orm::{
+    ActiveValue::Set, ConnectionTrait, DatabaseConnection, DbErr, Statement, TransactionTrait,
+};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -48,11 +50,15 @@ pub async fn record(
         .map_err(|error| DbErr::Custom(error.to_string()))?;
     let txn = db.begin().await?;
     crate::models::queue_job_lifecycles::Entity::record_enqueue(&txn, lifecycle).await?;
-    txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        "INSERT INTO queue_job_dispatch_outbox (lifecycle_id, payload, worker_name, queue_name, tags) VALUES ($1, $2, $3, $4, $5)",
-            [lifecycle_id.into(), payload.into(), worker_name.into(), queue_name.into(), tags.into()],
-    ))
+    crate::models::_entities::queue_job_dispatch_outbox::ActiveModel {
+        lifecycle_id: Set(lifecycle_id),
+        payload: Set(payload),
+        worker_name: Set(worker_name),
+        queue_name: Set(queue_name),
+        tags: Set(tags),
+        ..Default::default()
+    }
+    .insert(&txn)
     .await?;
     txn.commit().await
 }
@@ -62,6 +68,7 @@ pub async fn record(
 /// # Errors
 /// Returns an error if the query fails or a stored row cannot be decoded.
 pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, YorishiroError> {
+    // One batch joins lifecycle state to outbox payloads and compares backend-specific cooldown and retry timestamps.
     let backend = db.get_database_backend();
     let cooldown = match backend {
         sea_orm::DatabaseBackend::Sqlite => format!(
@@ -155,13 +162,15 @@ pub async fn count_retired_routes(db: &impl ConnectionTrait) -> Result<u64, DbEr
 }
 
 pub(crate) async fn attempted(db: &impl ConnectionTrait, id: Uuid) -> Result<(), DbErr> {
-    db.execute_raw(Statement::from_sql_and_values(
-        db.get_database_backend(),
-        "UPDATE queue_job_dispatch_outbox SET last_attempt_at = CURRENT_TIMESTAMP WHERE lifecycle_id = $1",
-        [id.into()],
-    ))
-    .await
-    .map(|_| ())
+    use crate::models::_entities::queue_job_dispatch_outbox::{Column, Entity};
+    use sea_orm::sea_query::Expr;
+
+    Entity::update_many()
+        .col_expr(Column::LastAttemptAt, Expr::cust("CURRENT_TIMESTAMP"))
+        .filter(Column::LifecycleId.eq(id))
+        .exec(db)
+        .await
+        .map(|_| ())
 }
 
 /// Stamps the dispatch as attempted when its cooldown has passed, so only one caller recovers it.
@@ -169,6 +178,7 @@ pub(crate) async fn attempted(db: &impl ConnectionTrait, id: Uuid) -> Result<(),
 /// # Errors
 /// Returns an error if the update fails.
 pub async fn claim_due(db: &impl ConnectionTrait, id: Uuid) -> Result<bool, DbErr> {
+    // The cooldown test and timestamp write must be one statement so two recovery processes cannot both claim the same dispatch.
     let backend = db.get_database_backend();
     let cooldown = if backend == sea_orm::DatabaseBackend::Sqlite {
         format!(
@@ -190,11 +200,8 @@ pub async fn claim_due(db: &impl ConnectionTrait, id: Uuid) -> Result<bool, DbEr
 }
 
 pub(crate) async fn remove(db: &impl ConnectionTrait, id: Uuid) -> Result<(), DbErr> {
-    db.execute_raw(Statement::from_sql_and_values(
-        db.get_database_backend(),
-        "DELETE FROM queue_job_dispatch_outbox WHERE lifecycle_id = $1",
-        [id.into()],
-    ))
-    .await
-    .map(|_| ())
+    crate::models::_entities::queue_job_dispatch_outbox::Entity::delete_by_id(id)
+        .exec(db)
+        .await
+        .map(|_| ())
 }
