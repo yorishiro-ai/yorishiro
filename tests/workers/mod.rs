@@ -4,10 +4,10 @@ mod queue;
 
 mod embedding_sync;
 mod query_embedding;
-mod queue_routing;
 mod reindex;
 mod startup_reindex;
-mod tag_discovery;
+mod target;
+mod target_routing;
 
 use loco_rs::app::AppContext;
 use loco_rs::environment::Environment;

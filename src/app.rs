@@ -36,27 +36,56 @@ pub(crate) fn app_version() -> String {
     )
 }
 
-/// Loads the canonical plain-YAML configuration.
+/// Loads the configuration, then applies what the command line asks of the workers it starts.
+///
+/// `yorishiro start` does not go through `Hooks::boot`, so this is the first point on its path that can still refuse a worker start before anything is built, and the last that can still change the queue configuration the provider is created from.
+///
+/// # Errors
+/// Returns an error when the configuration is invalid, or when the command starts workers without a valid worker target.
 pub(crate) async fn load_config(env: &Environment) -> Result<Config> {
-    crate::data::config::load(env).await
+    let mut config = crate::data::config::load(env).await?;
+    let start = crate::workers::start::worker_start_from_args(std::env::args_os())
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    serve_start(start, &mut config);
+    Ok(config)
 }
 
-/// Validates the queue policy, makes a Redis queue poll every queue `workers` enqueue to, then boots through Loco as `H`.
+/// Makes a Redis queue poll the queue of each target a start serves.
+fn serve_start(start: crate::workers::start::WorkerStart, config: &mut Config) {
+    if let crate::workers::start::WorkerStart::Targets(targets) = start {
+        let queues: Vec<String> = targets.iter().map(|target| target.queue()).collect();
+        crate::data::config::serve_worker_queues(config, &queues);
+    }
+}
+
+/// Validates the queue policy and the worker targets, then boots through Loco as `H`.
+///
+/// The command line does not call this (see [`load_config`]); a caller that boots with a [`StartMode`], such as the test harness, does, and gets the same checks.
+///
+/// # Errors
+/// Returns an error when the queue policy is invalid or the mode starts workers without a valid worker target.
 pub(crate) async fn boot<H: Hooks>(
     mode: StartMode,
     environment: &Environment,
     mut config: Config,
-    workers: &WorkerRegistry,
 ) -> Result<BootResult> {
     crate::data::config::validate_queue_policy(&config)?;
-    for advisory in crate::data::config::topology_advisories(&config) {
-        tracing::warn!("{advisory}");
-    }
-    crate::data::config::serve_worker_queues(&mut config, &workers.queues());
+    let start = crate::workers::start::worker_start_from_mode(&mode)
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    serve_start(start, &mut config);
     // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
     // The call site in main.rs already covers all CLI subcommands.
     crate::db::register_sqlite_extensions();
     create_app::<H, Migrator>(mode, environment, config).await
+}
+
+/// Logs the advisories for the configured database and queue.
+///
+/// This runs from `Hooks::before_run`, which a command-line start reaches after the logger is set up; `load_config` runs before it, where nothing would be logged.
+pub(crate) fn before_run(ctx: &AppContext) {
+    for advisory in crate::data::config::topology_advisories(&ctx.config) {
+        tracing::warn!("{advisory}");
+    }
 }
 
 pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
@@ -311,8 +340,25 @@ pub(crate) async fn connect_workers(
     workers: &WorkerRegistry,
 ) -> Result<()> {
     install_embedding_provider(ctx).await?;
+    refuse_retired_routes(ctx).await?;
     workers.connect(ctx, queue).await?;
     crate::workers::startup_reindex::run(ctx).await;
+    Ok(())
+}
+
+/// Refuses to start a worker while jobs enqueued by a release that routed by worker class are still unfinished.
+///
+/// Those jobs carry tags no worker asks for any more, so they would wait forever, and their running rows would not count against the limit the new concurrency keys enforce.
+/// The queue has to be drained by the previous release first.
+async fn refuse_retired_routes(ctx: &AppContext) -> Result<()> {
+    let retired = crate::models::queue_job_dispatch_outbox::count_retired_routes(&ctx.db)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    if retired > 0 {
+        return Err(loco_rs::Error::Message(format!(
+            "{retired} queued, running, or retrying jobs were enqueued by a release that routed jobs by worker class; drain the queue with that release before starting workers (see the upgrade notes in the configuration documentation)"
+        )));
+    }
     Ok(())
 }
 

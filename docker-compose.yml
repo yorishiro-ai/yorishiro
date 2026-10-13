@@ -122,12 +122,9 @@ services:
   worker:
     <<: *yorishiro
     container_name: worker
-    # Override the image default ENTRYPOINT ["yorishiro"] because we need to run the
-    # wrapper script directly (it performs shell substitution via `$(...)` to discover
-    # tags programmatically).  Compose exec-form does not support shell substitution,
-    # so we must replace the entrypoint, not just the command.
-    entrypoint: ["/var/lib/yorishiro/worker-wrapper.sh"]
-    command: []
+    # The worker serves the shared target. To serve others, list them after `--worker=`, separated by
+    # commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
+    command: ["start", "--worker=worker-target:shared"]
     # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
     # reported unhealthy forever.
     healthcheck:

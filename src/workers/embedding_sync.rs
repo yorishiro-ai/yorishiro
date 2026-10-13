@@ -3,18 +3,9 @@
 //! A queue provider rather than a bare `tokio::spawn`: a spawned task loses every in-flight sync on a process restart, a forced kill, or a provider outage past its own retry budget, leaving the entity's `embedding` column permanently `NULL` with nothing to retry it (`tasks::resync_embeddings` is the operational recovery command for rows in that state).
 //! The configured Loco queue provider persists the job, so a re-deployed or restarted process resumes it instead of losing it.
 //!
-//! **There is no "subscribe to every `WorkerClass`" worker mode.** An empty tag list makes loco's
-//! dequeue query `AND (tags IS NULL)` (confirmed against the pinned `loco-rs` 1.2.0 `bgworker/pg.rs`, and the
-//! matching logic in `sqlt.rs`/`redis.rs`), so a bare `--worker` process dequeues only *untagged*
-//! jobs. Every job this module enqueues carries exactly one tag, so such a process takes none of
-//! them, rather than taking "the leftover ones nothing else claimed".
-//!
-//! Covering every class in one process can use `yorishiro worker-tags` output piped into
-//! `--worker=...`, or the `worker-wrapper.sh` script that does it automatically at boot.
-//! This all-job command names every currently registered tag, whichever edition registered it.
-//! There is no wildcard flag, so a new [`WorkerClass`] or job type needs its tag added to those commands by
-//! hand. The matching worker type is caught at compile time by `enqueue_for_class`'s exhaustive
-//! match; the command is not, and is an operational concern.
+//! Every job this module enqueues carries exactly one tag, the `worker-target:<name>` of the target it is for (see [`crate::workers::target`]).
+//! An empty tag list makes loco's dequeue query `AND (tags IS NULL)` (confirmed against the pinned `loco-rs` 1.2.0 `bgworker/pg.rs`, and the matching logic in `sqlt.rs`/`redis.rs`), so a worker that names no target would take none of them.
+//! `App::boot` therefore reads a bare `--worker` as the shared target, and refuses any tag that names no target.
 
 use std::sync::Arc;
 
@@ -32,20 +23,10 @@ use crate::models::entity_entities;
 use crate::workers::dispatch::EmbeddingSyncDispatcher;
 
 db_enum! {
-    /// Which class of worker process a queued job is meant for.
+    /// What kind of compute a queued job is meant for.
     ///
-    /// Routes jobs by `BackgroundWorker::tags()`, which every provider honours, and also by a named queue per class (`queue()`), which only Redis honours: the SQL providers discard `queue: Option<String>` because their tables have no column for it.
-    /// Redis filters tags client-side over the first 1000 entries of a queue, so without a queue per class a backlog of one class would hide every other class's jobs from its workers.
-    /// `App::boot` adds these queue names to a Redis queue's `queues`, since Redis workers poll only the queues the configuration names.
-    ///
-    /// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.2.0's
-    /// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
-    /// tagged with every class would put all three tags on every job, and a `--worker=worker-class:...`
-    /// process would then dequeue every class's work rather than its own.
-    ///
-    /// Hence one type per class ([`EmbeddingSyncWorkerTenantPrivate`], [`EmbeddingSyncWorkerOfficial`],
-    /// [`EmbeddingSyncWorkerShared`]), each fixed to a single tag, so the class picked at enqueue time
-    /// is the tag that lands in the queue table.
+    /// The class is recorded on the job's lifecycle row and decides its priority band and concurrency limit.
+    /// It does not choose the worker: that is the job's [`crate::workers::target::WorkerTarget`], which a `TenantPrivate` job derives from the tenant that owns its workspace.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum WorkerClass {
         /// Runs only on compute a single tenant registered for its own workspaces.
@@ -54,26 +35,6 @@ db_enum! {
         Official = "official",
         /// Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.
         Shared = "shared",
-    }
-}
-
-impl WorkerClass {
-    /// The `tags()` value this class routes through.
-    ///
-    /// `worker-class:<variant>` rather than the bare variant name: a future tag dimension (region, priority band) added to the same job would otherwise collide on an unprefixed string with no way to tell which dimension it came from.
-    pub fn tag(self) -> &'static str {
-        match self {
-            Self::TenantPrivate => "worker-class:tenant-private",
-            Self::Official => "worker-class:official",
-            Self::Shared => "worker-class:shared",
-        }
-    }
-
-    /// The named queue this class routes through on a provider that honours one (Redis).
-    ///
-    /// Decided here rather than at each worker, so a class and its queue cannot drift apart; it merely equals the tag today.
-    pub(crate) fn queue(self) -> &'static str {
-        self.tag()
     }
 }
 
@@ -302,42 +263,25 @@ async fn perform_embedding_with_lifecycle(
     error.map_or(Ok(()), |error| Err(error.into()))
 }
 
-/// Declares one `WorkerClass`'s worker type: a thin struct giving `tags()` a fixed single tag, so that class's jobs are visible only to a worker process asking for it.
-macro_rules! embedding_sync_worker_for_class {
-    ($worker_ty:ident, $class:expr) => {
-        #[doc = concat!("`EmbeddingSyncWorker` restricted to `", stringify!($class), "` jobs.")]
-        pub struct $worker_ty {
-            ctx: AppContext,
-        }
-
-        #[async_trait]
-        impl BackgroundWorker<EmbeddingSyncArgs> for $worker_ty {
-            fn build(ctx: &AppContext) -> Self {
-                Self { ctx: ctx.clone() }
-            }
-
-            fn tags() -> Vec<String> {
-                vec![$class.tag().to_string()]
-            }
-
-            fn queue() -> Option<String> {
-                Some($class.queue().to_string())
-            }
-
-            async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-                perform_embedding_with_lifecycle(&self.ctx, &args).await
-            }
-        }
-    };
+/// The worker that embeds one entity.
+///
+/// It declares no tags and no queue: a job's target is chosen when the job is enqueued ([`crate::workers::target::enqueue`]), and a worker process chooses which targets to serve when it starts.
+pub struct EmbeddingSyncWorker {
+    ctx: AppContext,
 }
 
-embedding_sync_worker_for_class!(EmbeddingSyncWorkerTenantPrivate, WorkerClass::TenantPrivate);
-embedding_sync_worker_for_class!(EmbeddingSyncWorkerOfficial, WorkerClass::Official);
-embedding_sync_worker_for_class!(EmbeddingSyncWorkerShared, WorkerClass::Shared);
+#[async_trait]
+impl BackgroundWorker<EmbeddingSyncArgs> for EmbeddingSyncWorker {
+    fn build(ctx: &AppContext) -> Self {
+        Self { ctx: ctx.clone() }
+    }
 
-/// Enqueues `args` on the worker type matching `args.worker_class`, so the queued tag is the one the caller resolved.
-///
-/// Exhaustively matched, with no `_` arm: a fourth `WorkerClass` without its worker type fails to compile rather than falling through to the wrong queue.
+    async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
+        perform_embedding_with_lifecycle(&self.ctx, &args).await
+    }
+}
+
+/// Enqueues `args` through the installed dispatcher, which picks the target from `args.worker_class` and the workspace.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

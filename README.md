@@ -103,7 +103,7 @@ The default configuration uses SQLite — no external database required.
 2. Generate an API key and start creating entities.
 
 For a source checkout using a background queue, run the server and tagged worker separately:
-`cargo loco start` and `cargo loco start --worker="$(cargo loco worker-tags)"`.
+`cargo loco start` and `cargo loco start --worker=worker-target:shared`.
 
 For installation instructions, see [docs/en/installation.md](docs/en/installation.md).
 

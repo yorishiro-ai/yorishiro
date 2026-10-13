@@ -5,13 +5,9 @@ use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
 use sea_orm::TransactionTrait;
 use uuid::Uuid;
 
-use super::embedding_sync::{
-    EmbeddingSyncArgs, EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
-    EmbeddingSyncWorkerTenantPrivate, WorkerClass,
-};
-use super::reindex::{
-    ReindexArgs, ReindexWorkerOfficial, ReindexWorkerShared, ReindexWorkerTenantPrivate,
-};
+use super::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
+use super::reindex::{ReindexArgs, ReindexWorker};
+use super::target::WorkerTarget;
 use crate::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
 
 /// The typed dispatch seam used by the selected application enqueue paths.
@@ -35,53 +31,23 @@ pub(crate) struct LocoJobDispatcher;
 #[async_trait]
 impl EmbeddingSyncDispatcher for LocoJobDispatcher {
     async fn dispatch(&self, ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<String> {
-        let route = match args.worker_class {
-            WorkerClass::TenantPrivate => worker_route::<EmbeddingSyncWorkerTenantPrivate, _>(),
-            WorkerClass::Official => worker_route::<EmbeddingSyncWorkerOfficial, _>(),
-            WorkerClass::Shared => worker_route::<EmbeddingSyncWorkerShared, _>(),
-        };
         let spec = JobSpec {
             job_name: EmbeddingSyncArgs::JOB_NAME,
             workspace_id: args.workspace_id,
             class: args.worker_class,
             dispatch_payload: serde_json::to_value(&args)
                 .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
-            route,
+            worker_name: EmbeddingSyncWorker::class_name(),
             use_queue_concurrency: false,
         };
-        dispatch_job(ctx, spec, |lifecycle_id, priority| {
+        dispatch_job(ctx, spec, |lifecycle_id, priority, target| {
             let args = EmbeddingSyncArgs {
                 lifecycle_id: Some(lifecycle_id),
                 ..args
             };
-            // Exhaustive, with no `_` arm: a new class without its worker type fails to compile instead of landing on the wrong tag.
             async move {
-                match args.worker_class {
-                    WorkerClass::TenantPrivate => {
-                        EmbeddingSyncWorkerTenantPrivate::perform_later_with_priority(
-                            ctx,
-                            args,
-                            Some(priority),
-                        )
-                        .await
-                    }
-                    WorkerClass::Official => {
-                        EmbeddingSyncWorkerOfficial::perform_later_with_priority(
-                            ctx,
-                            args,
-                            Some(priority),
-                        )
-                        .await
-                    }
-                    WorkerClass::Shared => {
-                        EmbeddingSyncWorkerShared::perform_later_with_priority(
-                            ctx,
-                            args,
-                            Some(priority),
-                        )
-                        .await
-                    }
-                }
+                super::target::enqueue::<EmbeddingSyncWorker, _>(ctx, target, args, Some(priority))
+                    .await
             }
         })
         .await
@@ -91,70 +57,25 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
 #[async_trait]
 impl ReindexDispatcher for LocoJobDispatcher {
     async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
-        let route = match args.worker_class {
-            WorkerClass::TenantPrivate => worker_route::<ReindexWorkerTenantPrivate, _>(),
-            WorkerClass::Official => worker_route::<ReindexWorkerOfficial, _>(),
-            WorkerClass::Shared => worker_route::<ReindexWorkerShared, _>(),
-        };
         let spec = JobSpec {
             job_name: args.job_name(),
             workspace_id: args.workspace_id,
             class: args.worker_class,
             dispatch_payload: serde_json::to_value(&args)
                 .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
-            route,
+            worker_name: ReindexWorker::class_name(),
             use_queue_concurrency: true,
         };
-        dispatch_job(ctx, spec, |lifecycle_id, priority| {
+        dispatch_job(ctx, spec, |lifecycle_id, priority, target| {
             let args = ReindexArgs {
                 lifecycle_id: Some(lifecycle_id),
                 ..args
             };
             async move {
-                match args.worker_class {
-                    WorkerClass::TenantPrivate => {
-                        ReindexWorkerTenantPrivate::perform_later_with_priority(
-                            ctx,
-                            args,
-                            Some(priority),
-                        )
-                        .await
-                    }
-                    WorkerClass::Official => {
-                        ReindexWorkerOfficial::perform_later_with_priority(
-                            ctx,
-                            args,
-                            Some(priority),
-                        )
-                        .await
-                    }
-                    WorkerClass::Shared => {
-                        ReindexWorkerShared::perform_later_with_priority(ctx, args, Some(priority))
-                            .await
-                    }
-                }
+                super::target::enqueue::<ReindexWorker, _>(ctx, target, args, Some(priority)).await
             }
         })
         .await
-    }
-}
-
-pub(crate) struct JobRoute {
-    pub(crate) worker_name: String,
-    pub(crate) queue_name: Option<String>,
-    pub(crate) tags: Option<Vec<String>>,
-}
-
-pub(crate) fn worker_route<W, A>() -> JobRoute
-where
-    W: BackgroundWorker<A>,
-    A: Send + Sync + serde::Serialize + 'static,
-{
-    let tags = W::tags();
-    JobRoute {
-        worker_name: W::class_name(),
-        queue_name: W::queue(),
-        tags: (!tags.is_empty()).then_some(tags),
     }
 }
 
@@ -239,25 +160,35 @@ pub(crate) struct JobSpec {
     pub(crate) workspace_id: Uuid,
     pub(crate) class: WorkerClass,
     pub(crate) dispatch_payload: serde_json::Value,
-    pub(crate) route: JobRoute,
+    pub(crate) worker_name: String,
     pub(crate) use_queue_concurrency: bool,
 }
 
-/// Admits one job: resolves its concurrency policy and priority, records the lifecycle row, then hands the job to the class's worker through `enqueue`.
+/// Admits one job: resolves its target, concurrency policy and priority, records the lifecycle row, then hands the job to the target's workers through `enqueue`.
 ///
-/// Both policy lookups fail closed.
-/// A job whose capacity or starvation policy cannot be determined is recorded as unavailable and refused, rather than enqueued under a guess that would let one class borrow another's reservation.
+/// Every lookup fails closed.
+/// A job whose target, capacity or starvation policy cannot be determined is recorded as unavailable and refused, rather than enqueued under a guess that would let one class borrow another's reservation or send a tenant's work to the wrong workers.
 pub(crate) async fn dispatch_job<F, Fut>(
     ctx: &AppContext,
     spec: JobSpec,
     enqueue: F,
 ) -> loco_rs::Result<String>
 where
-    F: FnOnce(Uuid, i32) -> Fut,
+    F: FnOnce(Uuid, i32, WorkerTarget) -> Fut,
     Fut: Future<Output = loco_rs::Result<String>>,
 {
     let lifecycle_id = Uuid::now_v7();
     let class = spec.class.as_db_str();
+
+    let target = match WorkerTarget::for_job(&ctx.db, spec.class, spec.workspace_id).await {
+        Ok(target) => target,
+        Err(error) => {
+            let diagnostic = format!("worker target lookup failed: {error}");
+            refuse(ctx, &spec, lifecycle_id, None, class, 0, &diagnostic).await;
+            tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, diagnostic = %diagnostic, "queue dispatch refused because the worker target is unknown");
+            return Err(loco_rs::Error::Message(diagnostic));
+        }
+    };
 
     let (plan, concurrency_key, concurrency_limit) = if spec.use_queue_concurrency {
         let policy = match super::queue::concurrency_for(ctx, spec.workspace_id, spec.class).await {
@@ -268,8 +199,11 @@ where
                 return Err(loco_rs::Error::Message(error));
             }
         };
-        let key = format!("{class}:{}", policy.plan);
-        (Some(policy.plan), Some(key), Some(policy.limit))
+        (
+            Some(policy.plan),
+            Some(target.concurrency_key()),
+            Some(policy.limit),
+        )
     } else {
         (None, None, None)
     };
@@ -319,9 +253,9 @@ where
             concurrency_limit,
         },
         spec.dispatch_payload.clone(),
-        spec.route.worker_name,
-        spec.route.queue_name,
-        spec.route.tags,
+        spec.worker_name,
+        Some(target.queue()),
+        Some(vec![target.tag()]),
     )
     .await
     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
@@ -331,7 +265,7 @@ where
     {
         tracing::warn!(lifecycle_id = %lifecycle_id, diagnostic = %error, "dispatch attempt timestamp could not be recorded");
     }
-    match enqueue(lifecycle_id, scheduling.priority).await {
+    match enqueue(lifecycle_id, scheduling.priority, target).await {
         Ok(job_id) => {
             if let Err(error) = Entity::mark_dispatched(&ctx.db, lifecycle_id, &job_id).await {
                 tracing::error!(

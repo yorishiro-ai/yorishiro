@@ -87,9 +87,12 @@ async fn rejects_a_missing_queue_before_creating_a_job() {
     );
 }
 
+/// Infer-fill jobs travel to the shared target when they are enqueued, so the worker declares no tag or queue of its own.
+/// Loco stores the class name on every queued job and finds the handler by it, so renaming the worker strands whatever is already queued.
 #[test]
-fn infer_fill_worker_keeps_its_routing_tag_and_class_name() {
-    assert_eq!(InferFillWorker::tags(), vec!["infer-fill".to_string()]);
+fn infer_fill_worker_declares_no_routing_and_keeps_its_class_name() {
+    assert!(InferFillWorker::tags().is_empty());
+    assert!(InferFillWorker::queue().is_none());
     assert_eq!(InferFillWorker::class_name(), "InferFillWorker");
 }
 

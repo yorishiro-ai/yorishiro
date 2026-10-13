@@ -23,16 +23,10 @@ pub struct App;
 
 /// Every worker this build registers: the base's, then the active edition's.
 ///
-/// Loco registration, the Redis queue configuration and [`worker_tags`] all read this, so they cannot disagree.
+/// Loco registration reads this, so a process registers exactly the workers the build carries.
 #[must_use]
 pub fn workers() -> WorkerRegistry {
     active::workers(WorkerRegistry::community())
-}
-
-/// Every tag `yorishiro start --worker=...` can be asked for, as printed by `yorishiro worker-tags`.
-#[must_use]
-pub fn worker_tags() -> Vec<String> {
-    workers().tags()
 }
 
 #[async_trait]
@@ -54,11 +48,16 @@ impl Hooks for App {
         environment: &Environment,
         config: Config,
     ) -> Result<BootResult> {
-        base::boot::<Self>(mode, environment, config, &workers()).await
+        base::boot::<Self>(mode, environment, config).await
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
         Ok(base::initializers())
+    }
+
+    async fn before_run(ctx: &AppContext) -> Result<()> {
+        base::before_run(ctx);
+        Ok(())
     }
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {

@@ -1,6 +1,6 @@
 //! A booted app with a real queue worker, for tests that need the server to ask a worker to embed a search query.
 //!
-//! The server under test holds no embedding model, so every semantic search needs a worker consuming `query-embedding` jobs.
+//! The server under test holds no embedding model, so every semantic search needs a worker serving the shared target, where `query-embedding` jobs go.
 //! The worker runs against the booted app's own queue provider, the one the HTTP handlers enqueue to.
 //! On SQLite that provider is pointed at a private queue file for the test.
 //! On PostgreSQL it is the shared queue table, so callers also take `serial(queue_postgres)`.
@@ -18,6 +18,7 @@ use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
 use yorishiro::workers::query_embedding::QueryEmbeddingWorker;
+use yorishiro::workers::target::WorkerTarget;
 
 use super::{boot_request, is_sqlite_queue};
 
@@ -35,9 +36,6 @@ pub(crate) fn isolated_redis_url(url: &str) -> String {
         format!("{base}/{database}?{query}")
     }
 }
-
-/// The tag the query embedding worker consumes, as `worker-tags` prints it.
-pub(crate) const QUERY_TAG: &str = "query-embedding";
 
 /// Embeds text as a one-hot vector whose axis comes from a keyword, so a query and a document that share a keyword are at distance zero and every other pair is orthogonal.
 /// Records the kind of every call and can be made slow, to model a worker that answers after the search gave up.
@@ -108,6 +106,31 @@ impl EmbeddingProvider for FailingProvider {
     }
 }
 
+/// The queue a worker for the shared target runs on.
+///
+/// A Redis worker polls only the queues its configuration names, which `yorishiro start --worker=...` fills in from the targets it serves.
+/// The booted test app is a server, so for Redis this builds the provider a worker process would have, over the same database.
+async fn shared_target_queue(ctx: &AppContext) -> Arc<loco_rs::bgworker::Queue> {
+    if let Some(loco_rs::config::QueueConfig::Redis(redis)) = ctx.config.queue.clone() {
+        let mut redis = redis;
+        redis.dangerously_flush = false;
+        redis.queues = Some(vec![WorkerTarget::Shared.queue()]);
+        let queue = Arc::new(
+            loco_rs::bgworker::redis::create_provider(&redis)
+                .await
+                .expect("the worker's Redis queue provider"),
+        );
+        queue
+            .setup()
+            .await
+            .expect("set up the worker's Redis queue");
+        return queue;
+    }
+    ctx.queue_provider
+        .clone()
+        .expect("the app's queue provider")
+}
+
 /// Boots the app, installs `provider` as the worker's deployment default, and runs a query embedding worker against the app's queue until `callback` returns.
 #[allow(clippy::future_not_send)]
 pub(crate) async fn boot_with_query_worker<F, Fut>(
@@ -136,16 +159,14 @@ pub(crate) async fn boot_with_query_worker<F, Fut>(
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         ctx.shared_store.insert(provider);
-        let queue = ctx
-            .queue_provider
-            .clone()
-            .expect("the app's queue provider");
+        let queue = shared_target_queue(&ctx).await;
         queue
             .register(QueryEmbeddingWorker::build(&ctx))
             .await
             .expect("register the query embedding worker");
         let running = queue.clone();
-        let worker = tokio::spawn(async move { running.run(vec![QUERY_TAG.to_owned()]).await });
+        let worker =
+            tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
 
         callback(request, ctx).await;
 

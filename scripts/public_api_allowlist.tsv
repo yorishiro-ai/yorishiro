@@ -871,7 +871,6 @@ src/services/embedding/openai.rs	fn	OpenAiCompatibleProvider::with_http	integrat
 src/services/embedding/openai.rs	struct	OpenAiHttpResponse	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/openai.rs	trait	OpenAiCompatibleHttp	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
 src/workers/dispatch.rs	trait	EmbeddingSyncDispatcher	integration-test: tests/workers/dispatch.rs exercises it now that the unit tests moved out of src/.
-src/workers/embedding_sync.rs	fn	WorkerClass::tag	integration-test: tests/workers/embedding_sync.rs exercises it now that the unit tests moved out of src/.
 src/workers/embedding_sync.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/embedding_sync.rs exercises it now that the unit tests moved out of src/.
 src/workers/lifecycle.rs	fn	perform_with_lifecycle	integration-test: tests/workers/lifecycle.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	lifecycle	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
@@ -894,18 +893,15 @@ src/workers/queue.rs	trait	QueuePolicy	integration-test: tests/workers/queue.rs 
 src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/lib.rs	mod	edition	ce-ee-composition: the only Hooks implementation lives in this module, which sits outside src/ so that nothing under src/ names an edition overlay.
-src/lib.rs	use	edition::{App,worker_tags}	ce-ee-composition: the binary and the integration tests boot the application and read its worker tags through the single composition root, without src naming it elsewhere.
+src/lib.rs	use	edition::App	ce-ee-composition: the binary and the integration tests boot the application through the single composition root, without src naming it elsewhere.
 edition/app.rs	struct	App	ce-ee-composition: the crate's only Hooks implementation, delegating to src/app.rs and the active edition.
-edition/app.rs	fn	workers	ce-ee-composition: the composed worker registry that Loco registration, the Redis queue configuration and worker-tags all derive from.
-edition/app.rs	fn	worker_tags	ce-ee-composition: the tag list printed by the worker-tags command, derived from the composed worker registry.
-edition/mod.rs	use	app::{App,worker_tags,workers}	ce-ee-composition: re-exports the Hooks implementation and the worker registry derivations from the module that defines them, for the binary and the integration tests.
+edition/app.rs	fn	workers	ce-ee-composition: the composed worker registry that Loco registration reads.
+edition/mod.rs	use	app::{App,workers}	ce-ee-composition: re-exports the Hooks implementation and the worker registry from the module that defines them, for the binary and the integration tests.
 edition/mod.rs	mod	ee	ce-ee-composition: the enterprise overlay is compiled in here, behind the enterprise feature, rather than from src/.
-src/workers/mod.rs	mod	registry	worker-registry: the single registration list that tags, queues and Loco registration derive from.
+src/workers/mod.rs	mod	registry	worker-registry: the single registration list Loco registration reads.
 src/workers/registry.rs	struct	WorkerRegistry	worker-registry: typed value holding one registration per worker type; the composition root extends the community baseline with an edition's workers.
 src/workers/registry.rs	fn	WorkerRegistry::community	worker-registry: the base application's workers, which the composition root and the integration tests start from.
-src/workers/registry.rs	fn	WorkerRegistry::register	worker-registry: how an edition adds one worker type whose tags and queue come from the type itself.
-src/workers/registry.rs	fn	WorkerRegistry::tags	worker-registry: the tag list for --worker=..., read by the worker-tags command and the integration tests.
-src/workers/registry.rs	fn	WorkerRegistry::queues	worker-registry: the named queues a Redis provider must poll, read at boot and by the integration tests.
+src/workers/registry.rs	fn	WorkerRegistry::register	worker-registry: how an edition adds one worker type.
 src/controllers/mcp/mod.rs	struct	McpToolSet	ce-ee-composition: the MCP tools and access policy an edition extends from the community set.
 src/controllers/mcp/mod.rs	fn	McpToolSet::extend	ce-ee-composition: how an edition adds MCP tools and its access policy; unused by the community build, which is why it cannot be narrowed to pub(crate).
 src/workers/queue.rs	const	SINGLE_JOB_LIMIT	integration-test: the one-running-job default that the queue policy tests and the plan policy overlay both state.
@@ -951,3 +947,15 @@ src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::worker_name	integ
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::queue_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::tags	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 ee/data/plan.rs	fn	plan_policy_enabled	Startup configuration parser is exercised by the enterprise integration test.
+src/models/queue_job_dispatch_outbox.rs	fn	count_retired_routes	integration-test: tests/workers/target.rs exercises the count the worker start check refuses on.
+src/workers/embedding_sync.rs	struct	EmbeddingSyncWorker	integration-test: tests/workers/embedding_sync.rs registers and runs the worker on each queue provider.
+src/workers/reindex.rs	struct	ReindexWorker	integration-test: tests/workers/reindex.rs and tests/ee/workers/reindex.rs exercise the worker.
+src/workers/mod.rs	mod	target	integration-test: tests/workers/target.rs and tests/workers/target_routing.rs exercise it.
+src/workers/target.rs	enum	WorkerTarget	integration-test: tests/workers/target.rs exercises how a target is named, read back, and keyed.
+src/workers/target.rs	fn	WorkerTarget::class	integration-test: tests/workers/target.rs exercises it.
+src/workers/target.rs	fn	WorkerTarget::concurrency_key	integration-test: tests/workers/target.rs exercises it.
+src/workers/target.rs	fn	WorkerTarget::parse_tag	integration-test: tests/workers/target.rs exercises the boundary values a start must refuse.
+src/workers/target.rs	fn	WorkerTarget::queue	integration-test: tests/workers/target.rs and tests/workers/embedding_sync.rs exercise it.
+src/workers/target.rs	fn	WorkerTarget::tag	integration-test: tests/workers/target.rs and tests/workers/target_routing.rs exercise it.
+src/workers/target.rs	fn	targets_for_start	integration-test: tests/workers/target.rs exercises how a start resolves its tags.
+src/workers/target.rs	struct	InvalidWorkerTarget	integration-test: tests/workers/target.rs exercises the error a refused tag reports.

@@ -1,4 +1,4 @@
-//! The queue-lifecycle protocol every class-restricted worker follows.
+//! The queue-lifecycle protocol every target-restricted worker follows.
 //!
 //! A job that carries a `lifecycle_id` is admitted against `queue_job_lifecycles` before it runs, keeps its lease alive while it runs, and is recorded as completed or deferred afterwards.
 //! A job without one (enqueued before lifecycle tracking existed) just runs.
@@ -11,13 +11,14 @@ use uuid::Uuid;
 
 use crate::models::queue_job_lifecycles::{Admission, Entity, LifecycleStatus};
 use crate::workers::embedding_sync::WorkerClass;
+use crate::workers::target::WorkerTarget;
 
 const SATURATED: &str = "worker capacity saturated";
 
-/// Runs `work` under the lifecycle `lifecycle_id` names, re-enqueueing the job through `W` when it has to wait or fails.
+/// Runs `work` under the lifecycle `lifecycle_id` names, re-enqueueing the job as a `W` job when it has to wait or fails.
 ///
 /// A failure is recorded and re-enqueued instead of returned: Loco has no retry of its own, so returning `Err` would drop the job from the queue while the lifecycle row still said it was waiting.
-/// The re-enqueue goes through `W` so the retry keeps the tag of the class that owns the job.
+/// The re-enqueue resolves the target again from `class` and `workspace_id`, so the retry stays with the workers the job was first sent to.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -25,6 +26,7 @@ pub async fn perform_with_lifecycle<W, A, F, Fut>(
     ctx: &AppContext,
     lifecycle_id: Option<Uuid>,
     class: WorkerClass,
+    workspace_id: Uuid,
     args: &A,
     work: F,
 ) -> loco_rs::Result<()>
@@ -65,7 +67,7 @@ where
                 None => Entity::defer(&ctx.db, id, None, SATURATED).await,
             }
             .map_err(message)?;
-            return requeue::<W, A>(ctx, id, class, args).await;
+            return requeue::<W, A>(ctx, id, class, workspace_id, args).await;
         }
     };
 
@@ -86,7 +88,7 @@ where
             Entity::defer(&ctx.db, id, Some(attempt), &error.to_string())
                 .await
                 .map_err(message)?;
-            requeue::<W, A>(ctx, id, class, args).await
+            requeue::<W, A>(ctx, id, class, workspace_id, args).await
         }
     }
 }
@@ -102,6 +104,7 @@ pub(crate) async fn perform_with_terminal_lifecycle<W, A, F, Fut>(
     ctx: &AppContext,
     lifecycle_id: Option<Uuid>,
     class: WorkerClass,
+    workspace_id: Uuid,
     args: &A,
     work: F,
 ) -> loco_rs::Result<()>
@@ -132,7 +135,7 @@ where
                 None => Entity::defer(&ctx.db, id, None, SATURATED).await,
             }
             .map_err(message)?;
-            return requeue::<W, A>(ctx, id, class, args).await;
+            return requeue::<W, A>(ctx, id, class, workspace_id, args).await;
         }
     };
     let heartbeat = Entity::heartbeat(ctx.db.clone(), id, attempt);
@@ -165,6 +168,7 @@ async fn requeue<W, A>(
     ctx: &AppContext,
     lifecycle_id: Uuid,
     class: WorkerClass,
+    workspace_id: Uuid,
     args: &A,
 ) -> loco_rs::Result<()>
 where
@@ -175,7 +179,11 @@ where
         .await
         .map_err(message)?;
     let scheduling = crate::workers::queue::decide(class);
-    W::perform_later_with_priority(ctx, args.clone(), Some(scheduling.priority)).await?;
+    let target = WorkerTarget::for_job(&ctx.db, class, workspace_id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    crate::workers::target::enqueue::<W, A>(ctx, target, args.clone(), Some(scheduling.priority))
+        .await?;
     Ok(())
 }
 

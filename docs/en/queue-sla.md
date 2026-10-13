@@ -21,7 +21,7 @@ Terminal updates are guarded by the admitted attempt, so an old worker cannot fi
 
 ## Capacity and diagnostics
 
-Worker-class tags remain `worker-class:tenant-private`, `worker-class:official`, and `worker-class:shared`.
+Every job has one composite target tag: `worker-target:shared`, `worker-target:official`, or `worker-target:tenant:<tenant-id>`.
 The lifecycle row stores the class, optional plan, concurrency key, and configured limit beside the timing data.
 The `attempt` counter increments only when a delivery is admitted to running work.
 
@@ -34,8 +34,8 @@ If the queue provider is absent or unreachable, the row is marked `unavailable` 
 
 ## Operations
 
-Run workers with the existing class tags.
-Do not start an untagged worker and expect it to consume class-routed jobs.
+Run workers with explicit target tags.
+A start without targets is rejected.
 The admission path emits structured tracing fields `queue_start_seconds` and `lifecycle_id` when a job starts.
 Export or filter those existing tracing events in the deployment's log/observability system; no separate metrics endpoint is added by this issue.
 Capacity deferrals emit `worker capacity saturated`, retry transitions emit `retrying`, and provider or policy failures emit `unavailable` with a diagnostic field.
@@ -56,15 +56,16 @@ A tagged Redis job beyond that bounded scan can therefore be skipped for a polli
 
 Yorishiro assigns `tenant_private` priority 300, `official` priority 200, and `shared` priority 100.
 
-The lifecycle admission lock reserves capacity by `worker_class:plan`, so a saturated class cannot consume another class's capacity.
+The lifecycle admission lock counts by target key: `shared:shared`, `official:official`, or `tenant_private:tenant:<tenant-id>`.
+The plan remains lifecycle metadata and is not part of the key.
 
 The JWT plan claim `enterprise` maps to the Team limits.
 
-Capacity saturation is a deterministic fallback: the job remains tagged for its preferred class, is recorded as retrying, and is re-enqueued with its class priority rather than being silently rerouted.
+Capacity saturation is a deterministic fallback: the job retains its target tag, is recorded as retrying, and is re-enqueued with its class priority rather than being silently rerouted.
 
-Run class-specific worker processes when reserved capacity and starvation protection are required: `--worker=worker-class:tenant-private`, `--worker=worker-class:official`, and `--worker=worker-class:shared`.
+Run target-specific processes to reserve worker capacity: `--worker=worker-target:shared`, `--worker=worker-target:official`, and `--worker=worker-target:tenant:<tenant-id>`.
 
-A combined worker is supported, but its `num_workers` is a shared polling pool and is not a reservation of one worker per class.
+A combined worker is supported, but its `num_workers` is a shared polling pool and does not reserve one worker per target.
 
 Provider behavior is validated against the pinned Loco 1.2.0 source and documented per provider rather than treated as one universal ordering guarantee.
 
@@ -74,6 +75,6 @@ When a lower-class lifecycle has remained `queued` or `retrying` for one minute,
 
 This protects continuous arrivals after the threshold, while jobs already ahead in a provider remain subject to that provider's ordering and bounded-scan behavior.
 
-The suppression applies only to new dispatches sharing the candidate worker set; class-specific worker processes remain the stronger reserved-capacity isolation mode.
+The suppression applies only to new dispatches sharing the candidate worker set; target-specific worker processes provide reserved worker capacity.
 
 Scheduling decisions, class, priority, capacity limit, active capacity, saturation, and fallback are emitted as structured tracing fields.

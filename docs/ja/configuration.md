@@ -6,8 +6,11 @@ Yorishiro は環境変数で設定します。設定用のファイルは不要�
 
 ## ワーカークラスの admission limit
 
-これらの上限は、同じ application DB を共有する全プロセスと全 workspace にまたがる、class と plan のキー単位で適用されます。
-workspace ごとの上限ではありません。
+これらの上限は同じ application DB を共有する全プロセスで、対象ごとの `shared:shared`、`official:official`、`tenant_private:tenant:<tenant-id>` のキーを使います。
+Shared と Official はデプロイ全体、tenant-private は tenant 全体の上限であり、workspace ごとの上限ではありません。
+plan はライフサイクルのメタデータとして残り、キーには入りません。
+Enterprise の plan policy は既定で無効です。
+有効にした場合、Official ジョブは自身の plan に応じた上限を一つの共通 Official 実行数と比較し、plan ごとに実行数を分けません。
 
 | 変数 | 説明 |
 |---|---|
@@ -202,30 +205,29 @@ Yorishiro は既定ではメールを送信しません。
 `ForegroundBlocking` と `BackgroundAsync` は設定読み込み時とアプリケーション起動時に拒否されます。
 
 HTTP サーバとワーカーは別プロセスで起動します。
-すべてのジョブを処理するワーカーのコマンドは、デプロイ方法によって異なります：
+パッケージと Docker Compose は、個人利用向けに shared 対象のワーカーだけを起動します。
+ソースからは `cargo loco start --worker=worker-target:shared`、インストール済みバイナリでは `yorishiro start --worker=worker-target:shared` を使用します。
+Official または tenant-private の処理には、運用者が追加のプロセスを明示的に起動します。
 
-- **パッケージベースのデプロイ（推奨）：** `/var/lib/yorishiro/worker-wrapper.sh` にインストールされたラッパースクリプトを使用します。
-  起動時にすべての登録済みタグを自動検出します。systemd ユニット `yorishiro-worker.service` がこのパスを使用します。
-
-- **ソースまたは Docker デプロイ：** `cargo loco start --worker="$(cargo loco worker-tags)"`
-  （ソース）または Docker イメージ内の `/var/lib/yorishiro/worker-wrapper.sh`（ラッパースクリプトをコピー済み）を使用します。
-  どちらもプロセス自身が登録に使うワーカーレジストリからタグをプログラムで導出するため、新しいワーカークラスやジョブタイプが追加された場合にも自動的に追従します。
-
-特定の埋め込み・再インデックス対象グループだけを処理する場合は、プールごとに起動します。
-
-```
-cargo loco start --worker=worker-class:shared
-cargo loco start --worker=worker-class:official
-cargo loco start --worker=worker-class:tenant-private
+```console
+cargo loco start --worker=worker-target:official
+cargo loco start --worker=worker-target:tenant:0198f3a0-0000-7000-8000-00000000000a
 ```
 
-`infer-fill` は別のタグ付きジョブです。
-infer-fill 専用プロセスは `cargo loco start --worker=infer-fill` を使います。
-すべてのジョブを処理するコマンドには、3 つのワーカープールタグと `infer-fill` を含めます。
+tenant の ID は小文字・ハイフン付きの正規 UUID とし、workspace の ID は使用しません。
+各ジョブには `worker-target:<target>` という複合タグを一つだけ付けます。
+Redis では対象タグと同名のキューを対象ごとに使い、ワーカーは指定した対象のキューだけをポーリングします。
+検索クエリの埋め込みと Enterprise の infer-fill は shared 対象を使用し、これらだけを選択するワーカー起動方法はありません。
+コンマ区切りで複数対象を指定できますが、対象ごとの処理枠は予約されません。
+対象なしの `--worker`、`--all`、`--server-and-worker` は起動時に拒否され、通常の `start` は従来どおりサーバーのみを起動します。
+Official と tenant の自動起動は運用者がプロセスマネージャーで設定します。
+タグ検出用ラッパーや対象ごとの設定ファイルは提供しません。
 
-Yorishiro のバックグラウンドジョブには、タグなしの `cargo loco start --worker`、`--server-and-worker`、`--all` を使わないでください。
-これらのモードでは Loco に空のタグ一覧が渡され、タグなしジョブだけが対象になります。
-Yorishiro が登録するジョブにはタグが付くため、これらのモードでは処理されません。
+**旧クラス別ルーティングからアップグレードする前に、旧リリースで queued、running、retrying のジョブを必ず処理し終えてください。**
+旧 Redis キューは処理完了前に削除しないでください。
+新ワーカーは旧ルートの未完了 dispatch がアプリケーションの outbox に残ると起動を拒否しますが、Redis キュー内の残存ジョブも運用者が確認して処理する必要があります。
+tenant 対象の Redis キューはジョブの到着に応じて作られ、tenant を削除しても自動削除されません。
+キューの増加を監視し、その tenant のジョブを処理し終えた後に不要なキューを削除してください。
 
 各ワーカープロセスには、同じキュー設定と、そのジョブに必要な埋め込みまたは推論の設定が必要です。
 ワーカーは HTTP サーバと同じホストでも別サーバでも動かせます。

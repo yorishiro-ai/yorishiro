@@ -7,10 +7,8 @@
 //! which runs under the same advisory lock as the `reindex_embeddings` task,
 //! so both entry points are serialized per workspace.
 //!
-//! **Tag routing**: like `embedding_sync`, each `WorkerClass` gets its own worker type
-//! carrying a single fixed tag, so `--worker=worker-class:shared` etc. picks up only the
-//! jobs that belong to that tag. Without this, a tag-restricted worker would dequeue zero
-//! reindex jobs.
+//! **Routing**: like `embedding_sync`, a reindex job carries one `worker-target:<name>` tag chosen when it is enqueued,
+//! so `--worker=worker-target:tenant:<id>` picks up only that tenant's reindex jobs.
 
 use std::sync::Arc;
 
@@ -55,7 +53,7 @@ impl ReindexArgs {
 /// Shared implementation of the reindex worker's `perform` body: builds the provider,
 /// fetches candidates, acquires the lock, and runs `reindex_workspace_with_lock`.
 ///
-/// Shared by all three worker types below, which differ only in the tag `tags()` returns.
+/// Called by [`ReindexWorker`] once the job has been admitted.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
     // Resolve in the worker so workspace-specific overrides are honored without putting
     // credentials in the queue payload.
@@ -119,52 +117,33 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
     Ok(())
 }
 
-/// Declares one `WorkerClass`'s reindex worker type: a thin struct giving `tags()` a fixed single tag,
-/// so that class's reindex jobs are visible only to a worker process asking for it.
-macro_rules! reindex_worker_for_class {
-    ($worker_ty:ident, $class:expr) => {
-        #[doc = concat!("`ReindexWorker` restricted to `", stringify!($class), "` jobs.")]
-        pub struct $worker_ty {
-            ctx: AppContext,
-        }
-
-        #[async_trait]
-        impl BackgroundWorker<ReindexArgs> for $worker_ty {
-            fn build(ctx: &AppContext) -> Self {
-                Self { ctx: ctx.clone() }
-            }
-
-            fn tags() -> Vec<String> {
-                vec![$class.tag().to_string()]
-            }
-
-            fn queue() -> Option<String> {
-                Some($class.queue().to_string())
-            }
-
-            async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-                crate::workers::lifecycle::perform_with_terminal_lifecycle::<Self, _, _, _>(
-                    &self.ctx,
-                    args.lifecycle_id,
-                    $class,
-                    &args,
-                    || perform_reindex(&self.ctx, &args),
-                )
-                .await
-            }
-        }
-    };
+/// The worker that reindexes one workspace.
+///
+/// It declares no tags and no queue: the target is chosen when the job is enqueued ([`crate::workers::target::enqueue`]).
+pub struct ReindexWorker {
+    ctx: AppContext,
 }
 
-reindex_worker_for_class!(ReindexWorkerTenantPrivate, WorkerClass::TenantPrivate);
-reindex_worker_for_class!(ReindexWorkerOfficial, WorkerClass::Official);
-reindex_worker_for_class!(ReindexWorkerShared, WorkerClass::Shared);
+#[async_trait]
+impl BackgroundWorker<ReindexArgs> for ReindexWorker {
+    fn build(ctx: &AppContext) -> Self {
+        Self { ctx: ctx.clone() }
+    }
 
-/// Enqueues `args` on the worker type matching `args.worker_class`, so the queued tag
-/// is the one the caller resolved.
-///
-/// Exhaustively matched, with no `_` arm: a fourth `WorkerClass` without its worker type
-/// fails to compile rather than falling through to the wrong queue.
+    async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
+        crate::workers::lifecycle::perform_with_terminal_lifecycle::<Self, _, _, _>(
+            &self.ctx,
+            args.lifecycle_id,
+            args.worker_class,
+            args.workspace_id,
+            &args,
+            || perform_reindex(&self.ctx, &args),
+        )
+        .await
+    }
+}
+
+/// Enqueues `args` through the installed dispatcher, which picks the target from `args.worker_class` and the workspace.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

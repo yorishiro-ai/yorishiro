@@ -271,7 +271,7 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
 
         let jobs = sqlt::get_jobs(&pool, None, None).await.expect("get_jobs");
         assert_eq!(jobs.len(), 1, "jobs: {jobs:?}");
-        assert_eq!(jobs[0].name, "EmbeddingSyncWorkerShared");
+        assert_eq!(jobs[0].name, "EmbeddingSyncWorker");
     })
     .await;
 }
@@ -282,11 +282,17 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
 /// A regression that sent every class to one worker, or dropped the tag, shows up here as two rows sharing a name or carrying `None`.
 #[tokio::test]
 #[serial_test::serial(process_environment)]
-async fn each_worker_class_carries_its_own_tag() {
+async fn each_worker_class_is_sent_to_its_own_target() {
     if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, pool, workspace_id| async move {
+        let tenant_id = workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .expect("read the workspace")
+            .expect("the workspace exists")
+            .tenant_id;
         for class in [
             WorkerClass::Shared,
             WorkerClass::Official,
@@ -316,18 +322,18 @@ async fn each_worker_class_carries_its_own_tag() {
             seen,
             vec![
                 (
-                    "EmbeddingSyncWorkerOfficial".to_string(),
-                    vec!["worker-class:official".to_string()],
+                    "EmbeddingSyncWorker".to_string(),
+                    vec!["worker-target:official".to_string()],
                     200,
                 ),
                 (
-                    "EmbeddingSyncWorkerShared".to_string(),
-                    vec!["worker-class:shared".to_string()],
+                    "EmbeddingSyncWorker".to_string(),
+                    vec!["worker-target:shared".to_string()],
                     100,
                 ),
                 (
-                    "EmbeddingSyncWorkerTenantPrivate".to_string(),
-                    vec!["worker-class:tenant-private".to_string()],
+                    "EmbeddingSyncWorker".to_string(),
+                    vec![format!("worker-target:tenant:{tenant_id}")],
                     300,
                 ),
             ]
@@ -338,11 +344,17 @@ async fn each_worker_class_carries_its_own_tag() {
 
 #[tokio::test]
 #[serial_test::serial(process_environment)]
-async fn each_reindex_worker_class_carries_its_own_tag() {
+async fn each_reindex_worker_class_is_sent_to_its_own_target() {
     if !crate::require_sqlite_backend() {
         return;
     }
     with_sqlite_queue(|ctx, pool, workspace_id| async move {
+        let tenant_id = workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .expect("read the workspace")
+            .expect("the workspace exists")
+            .tenant_id;
         for class in [
             WorkerClass::Shared,
             WorkerClass::Official,
@@ -380,18 +392,18 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
             seen,
             vec![
                 (
-                    "ReindexWorkerOfficial".to_string(),
-                    vec!["worker-class:official".to_string()],
+                    "ReindexWorker".to_string(),
+                    vec!["worker-target:official".to_string()],
                     200,
                 ),
                 (
-                    "ReindexWorkerShared".to_string(),
-                    vec!["worker-class:shared".to_string()],
+                    "ReindexWorker".to_string(),
+                    vec!["worker-target:shared".to_string()],
                     100,
                 ),
                 (
-                    "ReindexWorkerTenantPrivate".to_string(),
-                    vec!["worker-class:tenant-private".to_string()],
+                    "ReindexWorker".to_string(),
+                    vec![format!("worker-target:tenant:{tenant_id}")],
                     300,
                 ),
             ]
@@ -437,7 +449,10 @@ async fn missing_billing_uses_free_policy_for_reindex_but_not_embedding() {
         assert_eq!(embedding.concurrency_limit, None);
         let reindex = rows.iter().find(|row| row.job_name == "reindex").unwrap();
         assert_eq!(reindex.plan.as_deref(), Some("free"));
-        assert_eq!(reindex.concurrency_key.as_deref(), Some("official:free"));
+        assert_eq!(
+            reindex.concurrency_key.as_deref(),
+            Some("official:official")
+        );
         assert_eq!(reindex.concurrency_limit, Some(1));
     })
     .await;
@@ -491,7 +506,7 @@ async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
             .expect("read queue lifecycle")
             .expect("queue lifecycle");
         assert_eq!(row.plan.as_deref(), Some("pro"));
-        assert_eq!(row.concurrency_key.as_deref(), Some("official:pro"));
+        assert_eq!(row.concurrency_key.as_deref(), Some("official:official"));
         assert_eq!(row.concurrency_limit, Some(4));
     })
     .await;
@@ -545,7 +560,7 @@ async fn enterprise_billing_plan_uses_team_queue_policy() {
             .expect("read queue lifecycle")
             .expect("queue lifecycle");
         assert_eq!(row.plan.as_deref(), Some("team"));
-        assert_eq!(row.concurrency_key.as_deref(), Some("official:team"));
+        assert_eq!(row.concurrency_key.as_deref(), Some("official:official"));
         assert_eq!(row.concurrency_limit, Some(9));
     })
     .await;
@@ -595,7 +610,7 @@ async fn enterprise_billing_plan_uses_team_queue_fallback_without_official_overr
             .expect("read queue lifecycle")
             .expect("queue lifecycle");
         assert_eq!(row.plan.as_deref(), Some("team"));
-        assert_eq!(row.concurrency_key.as_deref(), Some("official:team"));
+        assert_eq!(row.concurrency_key.as_deref(), Some("official:official"));
         assert_eq!(row.concurrency_limit, Some(1));
     })
     .await;
@@ -691,7 +706,7 @@ async fn disabled_policy_honors_official_override_without_changing_metadata() {
             .unwrap()
             .unwrap();
         assert_eq!(row.plan.as_deref(), Some("team"));
-        assert_eq!(row.concurrency_key.as_deref(), Some("official:team"));
+        assert_eq!(row.concurrency_key.as_deref(), Some("official:official"));
         assert_eq!(row.concurrency_limit, Some(9));
     })
     .await;

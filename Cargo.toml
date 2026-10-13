@@ -67,6 +67,9 @@ uuid = { version = "1.26.1", features = ["v4", "v7"] }
 
 [dependencies]
 loco-rs = { workspace = true }
+# Reads `start --worker` from the command line with the same rules loco-rs applies (workers::start).
+# loco-rs keeps its `Cli` private, so the definition is mirrored; the version and `derive` feature are the ones loco-rs already builds.
+clap = { version = "4.4.7", features = ["derive"] }
 migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true

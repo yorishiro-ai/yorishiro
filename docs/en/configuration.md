@@ -6,8 +6,10 @@ Yorishiro is configured through environment variables. No config file is needed 
 
 ## Worker class admission limits
 
-These limits apply per class and plan key across every process and all workspaces that share the same application database.
-They are deployment-wide limits, not per-workspace limits.
+These limits use one key per target across every process sharing the application database: `shared:shared`, `official:official`, or `tenant_private:tenant:<tenant-id>`.
+Shared and Official limits span the deployment; tenant-private limits span a tenant, not a workspace.
+The plan stays in lifecycle metadata and never enters the key.
+Enterprise plan policy defaults to disabled; enabling it makes each Official job compare its own plan-derived limit against the same Official running count, rather than a separate count per plan.
 
 | Variable | Description |
 |---|---|
@@ -189,29 +191,28 @@ Yorishiro requires `workers.mode: BackgroundQueue` in every environment configur
 `ForegroundBlocking` and `BackgroundAsync` are rejected at configuration load and application boot.
 
 Run the HTTP server and workers as separate processes.
-The supported all-job worker command depends on how you deploy:
+Packages and Docker Compose start a worker for the shared target only, suitable for a personal installation.
+For source deployments run `cargo loco start --worker=worker-target:shared`; the installed binary uses `yorishiro start --worker=worker-target:shared`.
+Operators who need Official or tenant-private work must start additional processes explicitly:
 
-- **Package-based deployment (recommended):** use the wrapper installed at `/var/lib/yorishiro/worker-wrapper.sh`
-  which discovers every registered tag at boot.  The systemd unit `yorishiro-worker.service` uses this path.
-
-- **Source or Docker deployment:** use `cargo loco start --worker="$(cargo loco worker-tags)"`
-  (source) or `/var/lib/yorishiro/worker-wrapper.sh` (Docker image copies the wrapper there).
-  Both discover tags programmatically from the worker registry the process itself registers from, so they stay in sync when new worker classes or job types are added.
-
-Pool-specific workers use an explicit tag:
-
-```
-cargo loco start --worker=worker-class:shared
-cargo loco start --worker=worker-class:official
-cargo loco start --worker=worker-class:tenant-private
+```console
+cargo loco start --worker=worker-target:official
+cargo loco start --worker=worker-target:tenant:0198f3a0-0000-7000-8000-00000000000a
 ```
 
-`infer-fill` is a separate tagged job type, so an infer-fill-only process uses `cargo loco start --worker=infer-fill`.
-The all-job command includes it as well as every worker-pool tag.
+Use the tenant's canonical lowercase hyphenated UUID, not a workspace ID.
+Each job has exactly one composite `worker-target:<target>` tag.
+Redis uses a named queue with the same name for each target, and each worker polls only its selected target queues.
+Query embedding and Enterprise infer-fill use the shared target; a query-only or infer-fill-only worker selection is not available.
+A process may select several targets with comma-separated tags, but that does not reserve capacity for any target.
+A bare `--worker`, `--all`, or `--server-and-worker` is rejected; plain `start` continues to run only the server.
+Configure any automatic start of Official or tenant workers in your own process manager; no tag-discovery wrapper or per-profile configuration is supplied.
 
-Do not use a bare `cargo loco start --worker`, `--server-and-worker`, or `--all` for Yorishiro background jobs.
-Loco passes an empty tag list for those modes, which consumes only untagged jobs.
-Yorishiro's registered jobs are tagged, so those modes do not consume them.
+**Before upgrading from class-based routing, drain all old queued, running, and retrying jobs using the old release.**
+Do not remove the old Redis named queues until they are drained.
+The new workers reject startup while unfinished retired dispatches remain in the application outbox; a Redis queue's pending jobs still require operator inspection and drain before upgrading.
+A tenant Redis queue is created for each tenant target when jobs arrive, and deleting a tenant does not automatically remove its Redis queue.
+Monitor queue growth and remove an obsolete tenant queue only after its jobs have been drained and the tenant is no longer served.
 
 Every worker process needs the same queue configuration and embedding or inference configuration that its jobs require.
 Workers may run on the same host as the HTTP server or on a separate server.

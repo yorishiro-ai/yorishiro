@@ -123,6 +123,37 @@ pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, Yori
     .collect()
 }
 
+/// Counts unfinished dispatches that still use the retired tag routing.
+///
+/// # Errors
+/// Returns an error if the query fails, including when the schema has not been migrated.
+pub async fn count_retired_routes(db: &impl ConnectionTrait) -> Result<u64, DbErr> {
+    let backend = db.get_database_backend();
+    // Raw SQL expresses JSON array membership on both backends without matching serialized substrings.
+    let current_target = match backend {
+        sea_orm::DatabaseBackend::Sqlite => {
+            "EXISTS (SELECT 1 FROM json_each(o.tags) t WHERE substr(t.value, 1, 14) = 'worker-target:')"
+        }
+        _ => {
+            "EXISTS (SELECT 1 FROM jsonb_array_elements_text(o.tags) t(value) WHERE left(t.value, 14) = 'worker-target:')"
+        }
+    };
+    let row = db
+        .query_one_raw(Statement::from_string(
+            backend,
+            format!(
+                "SELECT COUNT(*) AS retired FROM queue_job_dispatch_outbox o \
+                 JOIN queue_job_lifecycles l ON l.id = o.lifecycle_id \
+                 WHERE l.status IN ('queued', 'running', 'retrying') \
+                 AND o.tags IS NOT NULL AND NOT ({current_target})"
+            ),
+        ))
+        .await?
+        .ok_or_else(|| DbErr::Custom("retired route count returned no row".into()))?;
+    let count: i64 = row.try_get("", "retired")?;
+    u64::try_from(count).map_err(|error| DbErr::Type(error.to_string()))
+}
+
 pub(crate) async fn attempted(db: &impl ConnectionTrait, id: Uuid) -> Result<(), DbErr> {
     db.execute_raw(Statement::from_sql_and_values(
         db.get_database_backend(),
