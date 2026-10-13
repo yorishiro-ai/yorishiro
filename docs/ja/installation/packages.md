@@ -21,7 +21,6 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | ファイル | 説明 |
 |---|---|
 | `/usr/bin/yorishiro` | バイナリ |
-| `/var/lib/yorishiro/worker-wrapper.sh` | 起動時にタグを自動検出するラッパースクリプト |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
 | `/lib/systemd/system/yorishiro-worker.service` | タグ付きバックグラウンドワーカーユニット |
 | `/etc/yorishiro/example.yaml` | `config/production.yaml` から配布する参照設定 |
@@ -61,11 +60,10 @@ $ sudo systemctl status yorishiro-worker
 ```
 
 Loco 1.2.0では、`--server-and-worker`とタグ付きワーカーを組み合わせられないため、ワーカーは別ユニットで起動します。
-ラッパースクリプトは起動時に `yorishiro worker-tags` を実行して登録済みのすべてのタグを自動検出するため、新しいワーカークラスやジョブタイプが追加されてもリストは常に正しく保たれます。
+ワーカーユニットは `worker-target:shared` を指定します。必要な対象は別ユニットとして設定してください。
 
 ## ディレクトリの整合性
 
 状態ディレクトリ `/var/lib/yorishiro` の所有者は `root:yorishiro`、モード `1770`（sticky bit + グループ書込可能）です。
-`yorishiro` ユーザはディレクトリ内で状態ファイルの作成・更新ができますが、`worker-wrapper.sh` などの root 所有ファイルの置き換えや名前変更はできません。
-これにより、アカウント侵害時に状態の漏洩を目的としたラッパースクリプトへの置き換えが防止されます。
+`yorishiro` ユーザはディレクトリ内で状態ファイルの作成・更新ができますが、root 所有ファイルの置き換えや名前変更はできません。
 sticky bit により、ディレクトリが書込可能でも各ユーザは自分のファイルしか削除できません。

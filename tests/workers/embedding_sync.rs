@@ -1,25 +1,13 @@
-/// Tests for the embedding sync worker: worker class tags, serialization, and class names.
+/// Tests for the embedding sync worker: routing, serialization, and class names.
 use loco_rs::bgworker::BackgroundWorker;
-use yorishiro::workers::embedding_sync::{
-    EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared, EmbeddingSyncWorkerTenantPrivate,
-    WorkerClass,
-};
+use yorishiro::workers::embedding_sync::{EmbeddingSyncWorker, WorkerClass};
 
-/// Each of the three worker types must carry exactly its own `WorkerClass`'s tag and no other: a type whose `tags()` drifted to list a second class's tag (or dropped its own) would let a tag-restricted worker process either miss its own jobs or pick up another class's, exactly the bug this whole split exists to close.
+/// The worker declares neither tags nor a queue: a job's target is chosen when the job is enqueued, and a process chooses its targets when it starts.
+/// A tag here would put a second, fixed tag on every job and let a worker for another target match on it.
 #[test]
-fn each_worker_type_carries_exactly_its_own_class_tag() {
-    assert_eq!(
-        EmbeddingSyncWorkerTenantPrivate::tags(),
-        vec!["worker-class:tenant-private".to_string()]
-    );
-    assert_eq!(
-        EmbeddingSyncWorkerOfficial::tags(),
-        vec!["worker-class:official".to_string()]
-    );
-    assert_eq!(
-        EmbeddingSyncWorkerShared::tags(),
-        vec!["worker-class:shared".to_string()]
-    );
+fn the_worker_declares_no_routing_of_its_own() {
+    assert!(EmbeddingSyncWorker::tags().is_empty());
+    assert!(EmbeddingSyncWorker::queue().is_none());
 }
 
 /// `serde(rename_all = "snake_case")` is what `EmbeddingSyncArgs` persists in the queue payload; asserting the wire form catches an accidental rename breaking a job already sitting in a queue at deploy time.
@@ -66,24 +54,10 @@ fn from_db_str_rejects_an_unknown_value() {
     assert!(WorkerClass::from_db_str("not-a-real-class").is_none());
 }
 
-/// `App::connect_workers` registers each of the three types under its own `class_name()`.
-/// Registering needs a real `Queue`, which a unit test has no access to, so this guards the
-/// assumption instead: three distinct class names, or one `register` call silently clobbers
-/// another's handler rather than adding a third.
-/// `enqueue_for_class`'s exhaustive `match` on `WorkerClass` already forces a compile error if a fourth variant is added with no worker type to dispatch to; this test covers the complementary runtime gap `connect_workers` itself has no compiler check for: a worker type that exists and is dispatched to, but was never actually registered.
+/// Loco stores the class name on every queued job and finds the handler by it, so renaming the worker strands whatever is already queued.
 #[test]
-fn the_three_worker_types_have_distinct_class_names() {
-    let names = [
-        EmbeddingSyncWorkerTenantPrivate::class_name(),
-        EmbeddingSyncWorkerOfficial::class_name(),
-        EmbeddingSyncWorkerShared::class_name(),
-    ];
-    let unique: std::collections::HashSet<_> = names.iter().collect();
-    assert_eq!(
-        unique.len(),
-        names.len(),
-        "worker types must have distinct class_name()s, got {names:?}"
-    );
+fn the_worker_keeps_its_queue_class_name() {
+    assert_eq!(EmbeddingSyncWorker::class_name(), "EmbeddingSyncWorker");
 }
 
 mod unit {
@@ -197,9 +171,8 @@ mod conflict {
     use yorishiro::services::embedding::{
         EmbedKind, EmbeddingProvider, WorkspaceEmbeddingResolver,
     };
-    use yorishiro::workers::embedding_sync::{
-        EmbeddingSyncArgs, EmbeddingSyncWorkerShared, WorkerClass,
-    };
+    use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
+    use yorishiro::workers::target::WorkerTarget;
 
     use crate::requests::{boot_request, boot_request_sqlite};
 
@@ -325,14 +298,12 @@ mod conflict {
             );
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
             queue
-                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .register(EmbeddingSyncWorker::build(&ctx))
                 .await
                 .expect("register embedding worker");
             let running = queue.clone();
             let runner =
-                tokio::spawn(
-                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
-                );
+                tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             Self {
                 queue,
                 ctx,
@@ -370,14 +341,12 @@ mod conflict {
             );
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
             queue
-                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .register(EmbeddingSyncWorker::build(&ctx))
                 .await
                 .expect("register embedding worker");
             let running = queue.clone();
             let runner =
-                tokio::spawn(
-                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
-                );
+                tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             Self {
                 queue,
                 ctx,
@@ -391,9 +360,7 @@ mod conflict {
                 bgworker::redis::create_provider(&RedisQueueConfig {
                     uri: uri.clone(),
                     dangerously_flush: false,
-                    queues: Some(
-                        yorishiro::workers::registry::WorkerRegistry::community().queues(),
-                    ),
+                    queues: Some(vec![WorkerTarget::Shared.queue()]),
                     num_workers: workers,
                     reaper: None,
                 })
@@ -411,14 +378,12 @@ mod conflict {
             );
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
             queue
-                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .register(EmbeddingSyncWorker::build(&ctx))
                 .await
                 .expect("register embedding worker");
             let running = queue.clone();
             let runner =
-                tokio::spawn(
-                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
-                );
+                tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             Self {
                 queue,
                 ctx,
@@ -949,7 +914,7 @@ mod conflict {
                 .await
                 .expect("record lifecycle");
 
-                let result = EmbeddingSyncWorkerShared::build(&ctx)
+                let result = EmbeddingSyncWorker::build(&ctx)
                     .perform(EmbeddingSyncArgs {
                         lifecycle_id: Some(lifecycle_id),
                         workspace_id,
@@ -993,27 +958,30 @@ mod conflict {
             )
             .await
             .expect("record live failure lifecycle");
-            EmbeddingSyncWorkerShared::perform_later_with_priority(
-                &ctx,
-                EmbeddingSyncArgs {
-                    lifecycle_id: Some(live_id),
-                    workspace_id,
-                    entity_id,
-                    worker_class: WorkerClass::Shared,
-                },
-                Some(100),
-            )
-            .await
-            .expect("enqueue live failure");
+            ctx.queue_provider
+                .as_ref()
+                .unwrap()
+                .enqueue(
+                    EmbeddingSyncWorker::class_name(),
+                    Some(WorkerTarget::Shared.queue()),
+                    EmbeddingSyncArgs {
+                        lifecycle_id: Some(live_id),
+                        workspace_id,
+                        entity_id,
+                        worker_class: WorkerClass::Shared,
+                    },
+                    Some(vec![WorkerTarget::Shared.tag()]),
+                    Some(100),
+                )
+                .await
+                .expect("enqueue live failure");
             queue
-                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .register(EmbeddingSyncWorker::build(&ctx))
                 .await
                 .expect("register embedding worker");
             let running = queue.clone();
             let worker =
-                tokio::spawn(
-                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
-                );
+                tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             let failed_jobs = tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 loop {
                     let jobs = sqlt::get_jobs(
@@ -1122,18 +1090,23 @@ mod conflict {
                 )
                 .await
                 .unwrap();
-                EmbeddingSyncWorkerShared::perform_later_with_priority(
-                    &ctx,
-                    EmbeddingSyncArgs {
-                        lifecycle_id: Some(lifecycle_id),
-                        workspace_id,
-                        entity_id,
-                        worker_class: WorkerClass::Shared,
-                    },
-                    Some(100),
-                )
-                .await
-                .expect("enqueue document job");
+                ctx.queue_provider
+                    .as_ref()
+                    .unwrap()
+                    .enqueue(
+                        EmbeddingSyncWorker::class_name(),
+                        Some(WorkerTarget::Shared.queue()),
+                        EmbeddingSyncArgs {
+                            lifecycle_id: Some(lifecycle_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        },
+                        Some(vec![WorkerTarget::Shared.tag()]),
+                        Some(100),
+                    )
+                    .await
+                    .expect("enqueue document job");
             }
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 while provider.calls.load(Ordering::SeqCst) == 0 {
@@ -1228,7 +1201,7 @@ mod conflict {
             let document = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(lifecycle_id),
                             workspace_id,
@@ -1331,7 +1304,7 @@ mod conflict {
             let holder = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(lifecycle_id),
                             workspace_id,
@@ -1400,7 +1373,7 @@ mod conflict {
             )
             .await
             .unwrap();
-            EmbeddingSyncWorkerShared::build(&ctx)
+            EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(noop_id),
                     workspace_id: no_content.0,
@@ -1459,7 +1432,7 @@ mod conflict {
             let failed = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(failed_id),
                             workspace_id,
@@ -1479,7 +1452,7 @@ mod conflict {
             let waiting = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(waiting_id),
                             workspace_id,
@@ -1557,7 +1530,7 @@ mod conflict {
             let holder = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(holder_id),
                             workspace_id,
@@ -1578,7 +1551,7 @@ mod conflict {
             let follower = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(follower_id),
                             workspace_id,
@@ -1708,7 +1681,7 @@ mod conflict {
             let holder = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(holder_id),
                             workspace_id,
@@ -1727,7 +1700,7 @@ mod conflict {
             let follower = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
-                    EmbeddingSyncWorkerShared::build(&ctx)
+                    EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(follower_id),
                             workspace_id,
@@ -1842,18 +1815,25 @@ mod conflict {
             let result = std::panic::AssertUnwindSafe(async {
                 // Loco's queue reaper owns Processing delivery reclamation.  This test
                 // starts the already-reclaimed payload directly in the real queue runner.
-                EmbeddingSyncWorkerShared::perform_later_with_priority(
-                    &harness.ctx,
-                    EmbeddingSyncArgs {
-                        lifecycle_id: Some(lifecycle_id),
-                        workspace_id,
-                        entity_id,
-                        worker_class: WorkerClass::Shared,
-                    },
-                    Some(100),
-                )
-                .await
-                .unwrap();
+                harness
+                    .ctx
+                    .queue_provider
+                    .as_ref()
+                    .unwrap()
+                    .enqueue(
+                        EmbeddingSyncWorker::class_name(),
+                        Some(WorkerTarget::Shared.queue()),
+                        EmbeddingSyncArgs {
+                            lifecycle_id: Some(lifecycle_id),
+                            workspace_id,
+                            entity_id,
+                            worker_class: WorkerClass::Shared,
+                        },
+                        Some(vec![WorkerTarget::Shared.tag()]),
+                        Some(100),
+                    )
+                    .await
+                    .unwrap();
                 let original_queue_count = harness.observation.total_count().await;
                 assert_eq!(original_queue_count, 1);
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -1957,7 +1937,7 @@ mod conflict {
                 harness
                     .queue
                     .enqueue(
-                        EmbeddingSyncWorkerShared::class_name(),
+                        EmbeddingSyncWorker::class_name(),
                         None,
                         EmbeddingSyncArgs {
                             lifecycle_id: Some(id),
@@ -1965,7 +1945,7 @@ mod conflict {
                             entity_id,
                             worker_class: WorkerClass::Shared,
                         },
-                        Some(vec![WorkerClass::Shared.tag().into()]),
+                        Some(vec![WorkerTarget::Shared.tag()]),
                         Some(100),
                     )
                     .await
@@ -2128,7 +2108,7 @@ mod conflict {
                 harness_a
                     .queue
                     .enqueue(
-                        EmbeddingSyncWorkerShared::class_name(),
+                        EmbeddingSyncWorker::class_name(),
                         None,
                         EmbeddingSyncArgs {
                             lifecycle_id: Some(id_a),
@@ -2136,7 +2116,7 @@ mod conflict {
                             entity_id: entity,
                             worker_class: WorkerClass::Shared,
                         },
-                        Some(vec![WorkerClass::Shared.tag().into()]),
+                        Some(vec![WorkerTarget::Shared.tag()]),
                         Some(100),
                     )
                     .await
@@ -2190,7 +2170,7 @@ mod conflict {
                         harness_b
                             .queue
                             .enqueue(
-                                EmbeddingSyncWorkerShared::class_name(),
+                                EmbeddingSyncWorker::class_name(),
                                 None,
                                 EmbeddingSyncArgs {
                                     lifecycle_id: Some(id_b),
@@ -2198,7 +2178,7 @@ mod conflict {
                                     entity_id: entity_b,
                                     worker_class: WorkerClass::Shared,
                                 },
-                                Some(vec![WorkerClass::Shared.tag().into()]),
+                                Some(vec![WorkerTarget::Shared.tag()]),
                                 Some(100),
                             )
                             .await
@@ -2377,7 +2357,7 @@ mod conflict {
             )
             .await
             .expect("record no-content lifecycle");
-            EmbeddingSyncWorkerShared::build(&ctx)
+            EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(no_content_id),
                     workspace_id,
@@ -2415,7 +2395,7 @@ mod conflict {
             )
             .await
             .expect("record disabled lifecycle");
-            EmbeddingSyncWorkerShared::build(&ctx)
+            EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(disabled_id),
                     workspace_id,
@@ -2465,7 +2445,17 @@ mod conflict {
             ctx.shared_store
                 .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
 
-            let queue = ctx.queue_provider.clone().expect("booted queue");
+            let queue = match ctx.config.queue.as_ref() {
+                Some(loco_rs::config::QueueConfig::Redis(redis)) => {
+                    let mut config = redis.clone();
+                    config.dangerously_flush = false;
+                    config.queues = Some(vec![WorkerTarget::Shared.queue()]);
+                    let queue = Arc::new(bgworker::redis::create_provider(&config).await.unwrap());
+                    queue.setup().await.expect("set up target queue");
+                    queue
+                }
+                _ => ctx.queue_provider.clone().expect("booted queue"),
+            };
             let queue_pool = match ctx.config.queue.as_ref() {
                 Some(loco_rs::config::QueueConfig::Sqlite(queue)) => Some(
                     sqlx::SqlitePool::connect(&queue.uri)
@@ -2506,7 +2496,7 @@ mod conflict {
                     .status
             };
 
-            EmbeddingSyncWorkerShared::build(&ctx)
+            EmbeddingSyncWorker::build(&ctx)
                 .perform(args.clone())
                 .await
                 .expect("a superseded delivery is a terminal no-op");
@@ -2593,13 +2583,13 @@ mod conflict {
                 );
             }
             queue
-                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .register(EmbeddingSyncWorker::build(&ctx))
                 .await
                 .expect("register embedding worker");
             let running = queue.clone();
             let worker =
                 tokio::spawn(
-                    async move { running.run(vec![WorkerClass::Shared.tag().into()]).await },
+                    async move { running.run(vec![WorkerTarget::Shared.tag()]).await },
                 );
             tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 loop {
@@ -2650,7 +2640,7 @@ mod conflict {
             Entity::record_enqueue(&ctx.db, enqueue(waiting))
                 .await
                 .expect("record waiting");
-            let result = EmbeddingSyncWorkerShared::build(&ctx)
+            let result = EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(waiting),
                     workspace_id,
@@ -2710,7 +2700,7 @@ mod conflict {
                 .expect("connect to the queue file");
 
             queue
-                .register(EmbeddingSyncWorkerShared::build(&ctx))
+                .register(EmbeddingSyncWorker::build(&ctx))
                 .await
                 .expect("register embedding worker");
             for payload in [
@@ -2720,10 +2710,10 @@ mod conflict {
             ] {
                 queue
                     .enqueue(
-                        EmbeddingSyncWorkerShared::class_name(),
+                        EmbeddingSyncWorker::class_name(),
                         None,
                         payload,
-                        Some(vec![WorkerClass::Shared.tag().into()]),
+                        Some(vec![WorkerTarget::Shared.tag()]),
                         Some(100),
                     )
                     .await
@@ -2732,7 +2722,7 @@ mod conflict {
 
             let running = queue.clone();
             let worker = tokio::spawn(async move {
-                running.run(vec![WorkerClass::Shared.tag().into()]).await
+                running.run(vec![WorkerTarget::Shared.tag()]).await
             });
             let failed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 loop {
@@ -2798,7 +2788,7 @@ mod conflict {
             .await
             .expect("record lifecycle");
 
-            EmbeddingSyncWorkerShared::build(&ctx)
+            EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(lifecycle_id),
                     workspace_id,
@@ -2860,7 +2850,7 @@ mod conflict {
             .await
             .expect("record lifecycle");
 
-            let _ = EmbeddingSyncWorkerShared::build(&ctx)
+            let _ = EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(lifecycle_id),
                     workspace_id,

@@ -10,7 +10,7 @@ use sea_orm::{Database, EntityTrait};
 use tempfile::tempdir;
 
 use yorishiro::models::queue_job_lifecycles::Enqueue;
-use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorkerShared};
+use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker};
 use yorishiro::workers::lifecycle::*;
 
 async fn context() -> AppContext {
@@ -66,10 +66,11 @@ async fn run(
     runs: &AtomicUsize,
     outcome: loco_rs::Result<()>,
 ) -> loco_rs::Result<()> {
-    perform_with_lifecycle::<EmbeddingSyncWorkerShared, _, _, _>(
+    perform_with_lifecycle::<EmbeddingSyncWorker, _, _, _>(
         ctx,
         args.lifecycle_id,
         WorkerClass::Shared,
+        args.workspace_id,
         args,
         || async {
             runs.fetch_add(1, Ordering::SeqCst);

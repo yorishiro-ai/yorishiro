@@ -46,7 +46,7 @@ There is no trait between them, because there is one overlay and no runtime choi
 | `controllers::mcp::McpToolSet` | Adds MCP tools and the policy that decides which of them a request may use. |
 | `shared_store` seams | Replace a rule at runtime by inserting its own `Arc<dyn Trait>`, such as the authenticator or the queue policy. |
 
-Worker tags, the Redis queue configuration, and Loco worker registration are all derived from the one composed `WorkerRegistry`, so `yorishiro worker-tags` cannot disagree with what the process registers.
+`WorkerRegistry` composes the registered worker types. Job dispatch supplies the target tag and Redis queue dynamically, while worker startup selects the target queues.
 
 A table keeps its module under `src/models/` even when only the overlay uses it.
 The migrations and generated entities are one shared schema, and every generated entity needs an `ActiveModelBehavior` implementation (and, for secret-bearing ones, a redacting `Debug`) in every build.

@@ -21,9 +21,6 @@ use crate::edition::ee::services::inference::InferenceClient;
 use crate::error::ResultExt;
 use crate::models::schema_schemas;
 
-/// The tag infer-fill jobs carry, and the named queue they use on providers that honour one.
-pub(crate) const QUEUE: &str = "infer-fill";
-
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InferFillArgs {
@@ -176,14 +173,6 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
         Self { ctx: ctx.clone() }
     }
 
-    fn tags() -> Vec<String> {
-        vec![QUEUE.to_string()]
-    }
-
-    fn queue() -> Option<String> {
-        Some(QUEUE.to_string())
-    }
-
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
         self.perform_job(args).await
     }
@@ -208,8 +197,9 @@ impl InferFillWorker {
             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
         let scheduling =
             crate::workers::queue::decide(crate::workers::embedding_sync::WorkerClass::Shared);
-        <Self as BackgroundWorker<InferFillArgs>>::perform_later_with_priority(
+        crate::workers::target::enqueue::<Self, _>(
             &self.ctx,
+            crate::workers::target::WorkerTarget::Shared,
             args.clone(),
             Some(scheduling.priority),
         )
@@ -265,8 +255,9 @@ impl InferFillWorker {
                     let scheduling = crate::workers::queue::decide(
                         crate::workers::embedding_sync::WorkerClass::Shared,
                     );
-                    Self::perform_later_with_priority(
+                    crate::workers::target::enqueue::<Self, _>(
                         &self.ctx,
+                        crate::workers::target::WorkerTarget::Shared,
                         args.clone(),
                         Some(scheduling.priority),
                     )
@@ -391,8 +382,9 @@ impl InferFillWorker {
                     let scheduling = crate::workers::queue::decide(
                         crate::workers::embedding_sync::WorkerClass::Shared,
                     );
-                    Self::perform_later_with_priority(
+                    crate::workers::target::enqueue::<Self, _>(
                         &self.ctx,
+                        crate::workers::target::WorkerTarget::Shared,
                         args.clone(),
                         Some(scheduling.priority),
                     )

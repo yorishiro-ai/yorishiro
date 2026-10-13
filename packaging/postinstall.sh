@@ -3,7 +3,7 @@
 #
 # root:yorishiro mode 1770 (sticky + group-writable) lets the yorishiro user
 # create/update state files but prevents it from unlinking or renaming
-# root-owned files such as the wrapper script.
+# root-owned files an administrator places there.
 set -e
 mkdir -p /var/lib/yorishiro
 chown root:yorishiro /var/lib/yorishiro

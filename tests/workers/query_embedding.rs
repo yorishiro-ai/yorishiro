@@ -11,7 +11,6 @@ use yorishiro::models::query_embedding_requests::{Entity as Requests, QueryOutco
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
-use yorishiro::workers::registry::WorkerRegistry;
 
 use crate::requests::boot_request;
 
@@ -44,18 +43,11 @@ async fn perform(ctx: &AppContext, workspace_id: Uuid, request_id: Uuid) -> loco
         .await
 }
 
-/// The tag and queue come from the worker type itself, through the one registry Loco registration, the Redis queue list and `worker-tags` all read.
+/// Search jobs travel to the shared target when they are enqueued, so the worker declares no tag or queue of its own.
 #[test]
-fn the_query_worker_is_in_the_registry_with_its_own_tag_and_queue() {
-    assert_eq!(QueryEmbeddingWorker::tags(), vec!["query-embedding"]);
-    assert_eq!(
-        QueryEmbeddingWorker::queue().as_deref(),
-        Some("query-embedding")
-    );
-    let registry = WorkerRegistry::community();
-    assert!(registry.tags().contains(&"query-embedding".to_owned()));
-    assert!(registry.queues().contains(&"query-embedding".to_owned()));
-    assert!(yorishiro::edition::worker_tags().contains(&"query-embedding".to_owned()));
+fn the_query_worker_declares_no_routing_of_its_own() {
+    assert!(QueryEmbeddingWorker::tags().is_empty());
+    assert!(QueryEmbeddingWorker::queue().is_none());
 }
 
 /// The job names a request and a workspace and nothing else, so no query text sits in the queue.

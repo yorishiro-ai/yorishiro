@@ -16,7 +16,8 @@ Use `make test-valkey` to run the Valkey topology tests against a local or expli
 The Valkey-compatible `redis://` endpoint must select database 15 because Loco clears that reserved database during queue cleanup.
 The remaining repository helper scripts also run through the uv project and use only Python's standard library.
 Every test lives in `tests/`.
-`src/`, `ee/`, and `edition/` contain no `#[test]` and no `#[cfg(test)]`, and CI rejects both.
+`src/`, `ee/`, `edition/`, and `migration/src/` contain no test attributes or `#[cfg(test)]`; `make test-location-check` rejects both locally and in CI.
+`make debug-macro-check` rejects `dbg!` and `debug_assert*` in Rust code; use `assert!` for invariants that must hold in every build.
 A test that needs an item the crate keeps private widens it to `pub` and records the item in `scripts/public_api_allowlist.tsv` under the `integration-test` boundary described in [public-api.md](public-api.md).
 `tests/` also builds without the enterprise feature, so the Community edition is tested on its own: modules that need `ee/` carry `#[cfg(feature = "enterprise")]`, and `tests/ee/` mirrors `ee/`.
 The feature gate belongs only in `tests/` and `edition/`: `src/` must not name the enterprise overlay at all, which `make edition-boundary-check` enforces.

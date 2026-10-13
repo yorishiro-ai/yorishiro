@@ -11,7 +11,7 @@ use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{entity_entities, entity_entities::CreateEntityInput, schema_schemas};
 use yorishiro::services::embedding::{EmbeddingProvider, WorkspaceEmbeddingResolver};
 use yorishiro::workers::embedding_sync::WorkerClass;
-use yorishiro::workers::reindex::{ReindexArgs, ReindexWorkerShared};
+use yorishiro::workers::reindex::{ReindexArgs, ReindexWorker};
 
 struct Provider {
     model: &'static str,
@@ -152,7 +152,7 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     };
     let encoded = serde_json::to_string(&args).expect("serialize args");
     assert!(!encoded.contains("key") && !encoded.contains("secret"));
-    ReindexWorkerShared::build(&ctx)
+    ReindexWorker::build(&ctx)
         .perform(args)
         .await
         .expect("reindex");
@@ -205,7 +205,7 @@ async fn absent_and_disabled_providers_are_terminal_worker_errors() {
         .await
         .expect("workspace");
         ctx.shared_store.insert(provider);
-        let result = ReindexWorkerShared::build(&ctx)
+        let result = ReindexWorker::build(&ctx)
             .perform(ReindexArgs {
                 lifecycle_id: None,
                 workspace_id: workspace.id,

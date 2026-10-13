@@ -5,7 +5,7 @@
 //! A failure is recorded on the row and also returned to Loco, so the provider job shows as failed.
 //!
 //! The job is not admitted through the lifecycle table: a search is waiting for it, so it must neither queue behind a class's concurrency limit nor be retried after the request has expired.
-//! It has its own tag and queue, so a deployment can dedicate workers to queries, and every worker started with all tags handles both documents and queries.
+//! It travels to the shared target like documents do, so any worker serving the shared target answers searches; its priority puts a waiting search ahead of document backlog on that target.
 //! A job whose row is gone or no longer pending is a late delivery and does nothing.
 
 use std::time::Duration;
@@ -24,9 +24,7 @@ use crate::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
 use crate::models::search;
 use crate::services::embedding::EmbedKind;
 use crate::workers::embedding_sync::resolve_worker_provider;
-
-/// The tag and queue query jobs travel on.
-const TAG: &str = "query-embedding";
+use crate::workers::target::WorkerTarget;
 
 /// Above every document class band in `workers::queue::priority`, so a waiting search is dequeued before document backlog.
 const PRIORITY: i32 = 1000;
@@ -51,14 +49,6 @@ pub struct QueryEmbeddingWorker {
 impl BackgroundWorker<QueryEmbeddingArgs> for QueryEmbeddingWorker {
     fn build(ctx: &AppContext) -> Self {
         Self { ctx: ctx.clone() }
-    }
-
-    fn tags() -> Vec<String> {
-        vec![TAG.to_owned()]
-    }
-
-    fn queue() -> Option<String> {
-        Some(TAG.to_owned())
     }
 
     async fn perform(&self, args: QueryEmbeddingArgs) -> loco_rs::Result<()> {
@@ -161,8 +151,13 @@ pub async fn embed_query(
         request_id,
         workspace_id,
     };
-    if let Err(error) =
-        QueryEmbeddingWorker::perform_later_with_priority(ctx, job, Some(PRIORITY)).await
+    if let Err(error) = crate::workers::target::enqueue::<QueryEmbeddingWorker, _>(
+        ctx,
+        WorkerTarget::Shared,
+        job,
+        Some(PRIORITY),
+    )
+    .await
     {
         // Nothing will answer this row, so remove it rather than leave it to expire.
         if matches!(scope.expire(request_id).await, Ok(true)) {

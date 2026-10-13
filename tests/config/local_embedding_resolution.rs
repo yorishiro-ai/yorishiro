@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use loco_rs::{app::Hooks, boot::StartMode, environment::Environment};
 use yorishiro::services::embedding::EmbeddingProvider;
+use yorishiro::workers::target::WorkerTarget;
 
 const UNKNOWN_MODEL: &str = "nonexistent-model-that-does-not-exist";
 
@@ -67,8 +68,12 @@ async fn a_context_alone_never_builds_a_provider() {
 #[tokio::test]
 async fn a_worker_with_an_unknown_local_model_fails_at_start() {
     for mode in [
-        StartMode::WorkerOnly { tags: vec![] },
-        StartMode::ServerAndWorker,
+        StartMode::WorkerOnly {
+            tags: vec![WorkerTarget::Shared.tag()],
+        },
+        StartMode::WorkerAndScheduler {
+            tags: vec![WorkerTarget::Official.tag()],
+        },
     ] {
         let dir = tempfile::tempdir().unwrap();
         let result =
@@ -86,18 +91,44 @@ async fn a_worker_with_an_unknown_local_model_fails_at_start() {
     }
 }
 
+/// A start that asks for workers without a valid target is refused before the provider is built, so the unknown model never gets a chance to fail it.
+#[tokio::test]
+async fn a_start_without_a_valid_worker_target_is_refused_before_anything_is_built() {
+    for mode in [
+        StartMode::WorkerOnly { tags: vec![] },
+        StartMode::WorkerAndScheduler { tags: vec![] },
+        StartMode::WorkerOnly {
+            tags: vec!["worker-class:shared".into()],
+        },
+        StartMode::ServerAndWorker,
+        StartMode::All,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let error = yorishiro::App::boot(mode, &Environment::Test, unknown_model_config(&dir))
+            .await
+            .err()
+            .expect("a start without a worker target must be refused");
+        let message = format!("{error}");
+        assert!(message.contains("worker-target:shared"), "{message}");
+        assert!(!message.contains("not a known local model"), "{message}");
+    }
+}
+
 /// With `YORISHIRO_EMBEDDING_PROVIDER=none` the worker holds the explicitly disabled provider with a clear remedy, and connecting its workers again keeps that one instance.
 #[tokio::test]
 async fn a_worker_holds_exactly_one_provider_and_none_means_disabled() {
     let dir = tempfile::tempdir().unwrap();
     let (uri, queue_uri) = sqlite_uris(&dir);
-    let config = serde_yaml::from_str::<loco_rs::config::Config>(
+    let mut config = serde_yaml::from_str::<loco_rs::config::Config>(
         &minimal_config_with_none_embedding(&uri, &queue_uri),
     )
     .unwrap();
+    config.database.auto_migrate = true;
 
     let boot = yorishiro::App::boot(
-        StartMode::WorkerOnly { tags: vec![] },
+        StartMode::WorkerOnly {
+            tags: vec![WorkerTarget::Shared.tag()],
+        },
         &Environment::Test,
         config,
     )

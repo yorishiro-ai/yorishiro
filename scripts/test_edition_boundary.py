@@ -53,7 +53,7 @@ class EditionBoundaryTest(unittest.TestCase):
             "use crate::edition as overlay;\nfn f() { overlay::ee::run(); }\n",
             "use crate::edition as anything_at_all;\n",
             "use crate::{edition as x, models};\n",
-            "use yorishiro::edition::worker_tags;\n",
+            "use yorishiro::edition::workers;\n",
             "fn f() { crate::edition::workers(); }\n",
         ):
             self.assertIn("the edition composition root as an identifier", self.rules_for(source), source)
@@ -70,7 +70,7 @@ class EditionBoundaryTest(unittest.TestCase):
             self.assertTrue(self.rules_for(source), source)
 
     def test_ee_is_found_even_where_the_crate_root_may_name_edition(self) -> None:
-        self.assertEqual(self.rules_for("pub mod edition;\npub use edition::{App, worker_tags};\n", "src/lib.rs"), [])
+        self.assertEqual(self.rules_for("pub mod edition;\npub use edition::App;\n", "src/lib.rs"), [])
         for source in ("pub use edition::ee as x;\n", "pub use edition::ee;\n", "pub use edition :: ee;\n", "pub use edition::\nee;\n", "use edition as e;\npub use e::ee;\n"):
             self.assertTrue(self.rules_for(source, "src/lib.rs"), source)
 

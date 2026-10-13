@@ -25,4 +25,4 @@ use ee::app as active;
 #[cfg(not(feature = "enterprise"))]
 use community as active;
 
-pub use app::{App, worker_tags, workers};
+pub use app::{App, workers};

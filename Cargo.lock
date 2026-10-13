@@ -7675,6 +7675,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "chrono",
+ "clap",
  "futures",
  "hex",
  "hmac 0.13.0",

@@ -21,7 +21,7 @@ lease が有効な再配送は `Duplicate` とし、lease の期限切れ後の�
 
 ## 容量と診断
 
-既存のワーカークラスタグ `worker-class:tenant-private`、`worker-class:official`、`worker-class:shared` を維持します。
+各ジョブには複合対象タグを一つだけ指定します。`worker-target:shared`、`worker-target:official`、または `worker-target:tenant:<tenant-id>` です。
 ライフサイクル行には、クラス、任意のプラン、同時実行キー、設定された上限を時刻情報とともに保存します。
 `attempt` は、実行中の処理として受け入れた配送時だけ増加します。
 
@@ -35,8 +35,8 @@ Redis はプロバイダー側のジョブ状態を提供しますが、Redis �
 
 ## 運用
 
-既存のクラスタグを指定してワーカーを起動してください。
-タグなしワーカーはクラスルーティングされたジョブを処理しません。
+対象タグを明示してワーカーを起動してください。
+対象なしの起動は拒否されます。
 開始時には、既存の構造化 tracing に `queue_start_seconds` と `lifecycle_id` が出力されます。
 デプロイ先のログ・可観測性基盤で、このイベントをエクスポートまたは絞り込んでください。
 この Issue では別のメトリクスエンドポイントは追加しません。
@@ -58,15 +58,18 @@ workerに一致しない先行エントリがある場合、tag付きRedis job�
 
 Yorishiroは`tenant_private`に300、`official`に200、`shared`に100のpriorityを割り当てます。
 
-ライフサイクルのadmission lockは`worker_class:plan`単位でcapacityを予約するため、capacityが埋まったクラスが別のクラスのcapacityを消費することはありません。
+ライフサイクルの admission lock は `shared:shared`、`official:official`、`tenant_private:tenant:<tenant-id>` の対象キー単位で実行数を数えます。
+plan はライフサイクルのメタデータとして残り、キーには入りません。
 
 JWTのplan claim `enterprise` はTeamの上限にマッピングされます。
 
-capacityが埋まった場合の決定的なfallbackは、ジョブを優先されたクラスのtagのままretryingに記録し、クラスのpriorityで再enqueueすることです。別のクラスへ暗黙にrerouteしません。
+capacity が埋まったジョブは対象タグを保持したまま retrying として記録し、クラスの priority で再投入します。
+別の対象へ暗黙に変更しません。
 
-予約capacityとstarvation protectionが必要な場合は、クラスごとにworker processを起動します。使用するtagは`--worker=worker-class:tenant-private`、`--worker=worker-class:official`、`--worker=worker-class:shared`です。
+処理枠を予約するには、対象ごとにワーカープロセスを起動します。
+`--worker=worker-target:shared`、`--worker=worker-target:official`、`--worker=worker-target:tenant:<tenant-id>` を使用します。
 
-複数クラスをまとめたworkerも利用できますが、その`num_workers`は共有polling poolであり、クラスごとのworker予約にはなりません。
+複数対象をまとめたワーカーも利用できますが、`num_workers` は共有 polling pool であり、対象ごとの処理枠は予約しません。
 
 providerの挙動は固定しているLoco 1.2.0のソースで確認し、全providerに同じordering保証があるとは扱わずproviderごとに記載しています。
 
@@ -76,6 +79,7 @@ starvation protectionは、providerのqueued rowを後からreprioritizeする�
 
 これにより閾値到達後の連続到着から保護しますが、provider内ですでに先行しているジョブはproviderのorderingとbounded scanの挙動に従います。
 
-この抑制は候補worker setを共有する新規dispatchだけに適用され、クラス別worker processは引き続きreserved capacityを分離する強い運用モードです。
+この抑制は候補ワーカーを共有する新規投入にのみ適用されます。
+対象別ワーカープロセスは処理枠を分離します。
 
 scheduling decision、クラス、priority、capacity limit、active capacity、saturation、fallbackは構造化tracing fieldとして出力します。

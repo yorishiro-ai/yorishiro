@@ -5,4 +5,6 @@ pub mod query_embedding;
 pub mod queue;
 pub mod registry;
 pub mod reindex;
+pub(crate) mod start;
 pub mod startup_reindex;
+pub mod target;
