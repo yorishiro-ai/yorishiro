@@ -67,3 +67,12 @@ $ DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' \
 $ make check-all
 $ make check-all-ee
 ```
+
+## CI の変更検出
+
+CI は明示された base commit との差分を分類し、安定した `Required validation` チェックを報告します。
+ドキュメントだけの変更では重いビルドとテストを省略し、未分類のパスがあれば全検証を実行します。
+定期実行と手動実行では常に全検証を実行します。
+ローカル action の変更では、その action を利用するすべての検証グループを実行します。
+パッケージ、Docker、リリース関連の PR では CE/EE のパッケージをビルドし、共通のパッケージ検証を実行します。
+リリースワークフローは手動起動専用です。PR からパッケージ、イメージ、タグ、リリースを公開することはありません。

@@ -7,7 +7,7 @@ Ubuntu 24.04 と AlmaLinux 10（glibc 2.39以降）に対応しています。
 Community 用の `yorishiro-ce` と Enterprise 用の `yorishiro-ee` から選べます。
 Enterprise の本番利用にはライセンスが必要です。
 両パッケージは同時にはインストールできません。
-もう一方をインストールすると現在のパッケージを置き換え、共有の設定と状態パスは維持されます。
+もう一方をインストールすると現在のパッケージを置き換えます。
 
 ## インストール
 
@@ -34,7 +34,6 @@ CE は EE ライセンスファイルをインストールしません。
 `/etc/yorishiro/production.yaml` がない場合、サービスはパッケージの本番用デフォルト設定で起動します。
 管理者による上書きが必要な場合のみ `/etc/yorishiro/production.yaml` を作成してください。
 パッケージのアップグレードでは `/etc/yorishiro/production.yaml.example` が常に最新のデフォルト設定に更新され、管理者用オーバーライドは保持されます。
-パッケージ削除後も管理者用オーバーライドは保持されます。
 Community Edition は `YORISHIRO_MAX_TENANTS` や YAML の設定にかかわらず、テナント数を1に制限します。異なる値が指定されると警告します。
 Enterprise Edition は有効期限内の有効なライセンスがある場合のみ `YORISHIRO_MAX_TENANTS` を適用し、`0` は無制限です。ライセンスがない場合は警告して1テナントに制限します。
 どちらの Edition でも SQLite は1テナントに制限されます。
