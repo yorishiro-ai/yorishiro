@@ -33,11 +33,21 @@ test "$(find "$PKG_DIR" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \)
 
 legacy_config_metadata='test -f /etc/yorishiro/production.yaml && test "$(stat -c "%U:%G" /etc/yorishiro/production.yaml)" = root:yorishiro && test "$(stat -c "%a" /etc/yorishiro/production.yaml)" = 640'
 
+old_package_id() {
+  case "$1" in
+    yorishiro) printf '%s\n' yorishiro ;;
+    ce|ee) printf 'yorishiro-%s\n' "$1" ;;
+    *) echo "unknown package transition source: $1" >&2; return 2 ;;
+  esac
+}
+
 run_deb_transition() {
   local from="$1" to="$2"
+  local old_package
+  old_package="$(old_package_id "$from")"
   local base="/pkg/yorishiro-${from}-${VERSION}-amd64.deb"
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.deb"; fi
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
     $legacy_config_metadata
@@ -56,7 +66,16 @@ run_deb_transition() {
     systemctl --root=/ enable yorishiro-scheduler.service
     apt-get install -y -qq /pkg/yorishiro-${to}-${VERSION}-amd64.deb
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${to})\" = 'install ok installed'
-    test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${from} 2>/dev/null || true)\" != 'install ok installed'
+    set +e
+    old_status=\"\$(dpkg-query -W -f='\${Status}' \"\$OLD_PACKAGE\" 2>/dev/null)\"
+    old_query_status=\$?
+    set -e
+    if [ \"\$old_query_status\" -eq 0 ]; then
+      test \"\$old_status\" != 'install ok installed'
+    else
+      test \"\$old_query_status\" -eq 1
+      test -z \"\$old_status\"
+    fi
     cmp /tmp/production.before /etc/yorishiro/production.yaml
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
@@ -131,9 +150,11 @@ run_deb_current_remove_preserves_admin_config() {
 
 run_rpm_transition() {
   local from="$1" to="$2"
+  local old_package
+  old_package="$(old_package_id "$from")"
   local base="/pkg/yorishiro-${from}-${VERSION}-amd64.rpm"
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.rpm"; fi
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
+  docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
     dnf install -y -q diffutils $base
     $legacy_config_metadata
     # Seed the legacy package-owned path before installing the new edition package.
@@ -150,7 +171,15 @@ run_rpm_transition() {
     systemctl --root=/ enable yorishiro-scheduler.service
     dnf install -y -q /pkg/yorishiro-${to}-${VERSION}-amd64.rpm
     rpm -q yorishiro-${to}
-    ! rpm -q yorishiro-${from}
+    set +e
+    rpm -q \"\$OLD_PACKAGE\"
+    old_query_status=\$?
+    set -e
+    if [ \"\$old_query_status\" -eq 0 ]; then
+      echo \"old package still installed: \$OLD_PACKAGE\" >&2
+      exit 1
+    fi
+    test \"\$old_query_status\" -eq 1
     cmp /tmp/production.before /etc/yorishiro/production.yaml
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
