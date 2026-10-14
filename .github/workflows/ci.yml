@@ -554,7 +554,7 @@ jobs:
           edition: ${{ matrix.edition }}
           target: ${{ matrix.target }}
           arch: ${{ matrix.arch }}
-          version: 0.0.0
+          version: 0.0.0-${{ github.sha }}
           build-tag: ${{ github.sha }}
 
   required-check:
