@@ -43,6 +43,15 @@ def test_misc_workflow_change_does_not_force_package_matrix() -> None:
     assert not result["package_validation"]
 
 
+def test_housekeeping_workflow_is_light_but_unknown_workflow_is_full() -> None:
+    housekeeping = classify([".github/workflows/stale.yml"])
+    assert not housekeeping["package_build"]
+    assert not housekeeping["rust_validation"]
+    unknown = classify([".github/workflows/new-job.yml"])
+    assert unknown["full"]
+    assert unknown["package_build"] and unknown["rust_validation"]
+
+
 def test_shared_actions_fan_out_to_consumers() -> None:
     rust = classify([".github/actions/rust-setup/action.yml"])
     assert rust["rust"] and rust["ee"] and rust["deps"] and rust["packaging"] and rust["release"]
@@ -90,6 +99,7 @@ if __name__ == "__main__":
         test_release_workflow_selects_all_validations,
         test_manual_full_run_selects_every_group,
         test_misc_workflow_change_does_not_force_package_matrix,
+        test_housekeeping_workflow_is_light_but_unknown_workflow_is_full,
         test_shared_actions_fan_out_to_consumers,
         test_missing_paths_force_full_and_manual_force_is_full,
         test_selected_gate_states_fail_unless_success_or_intentionally_skipped,

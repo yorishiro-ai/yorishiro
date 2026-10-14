@@ -72,7 +72,8 @@ def classify_path(path: str) -> set[str]:
         ".github/workflows/stale.yml": set(),
     }
     if s.startswith(".github/workflows/"):
-        return workflow_groups.get(s, set(ALL))
+        workflow_selected = workflow_groups.get(s)
+        return set(ALL) if workflow_selected is None else workflow_selected
     if s.startswith(".github/") and not groups:
         return set(ALL)
     if not groups:
