@@ -513,7 +513,7 @@ jobs:
           merge-multiple: true
       - uses: ./.github/actions/package-tests
         with:
-          version: ${{ github.sha }}
+          version: 0.0.0-${{ github.sha }}
       - name: Verify Docker configuration ownership and fallback
         if: ${{ needs.changes.outputs.docker_validation == 'true' }}
         run: |
