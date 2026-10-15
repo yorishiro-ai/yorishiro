@@ -32,8 +32,10 @@ runs:
         IMAGE: ${{ inputs.image }}
         TAG: ${{ inputs.tag }}
         EDITION: ${{ inputs.edition }}
+        DESCRIPTION: An MCP-native, multi-tenant knowledge store with user-defined schemas.
       run: |
         docker buildx imagetools create \
+          --annotation "index:org.opencontainers.image.description=${DESCRIPTION}" \
           -t "${IMAGE}:${TAG}-${EDITION}" \
           "${IMAGE}:${TAG}-${EDITION}-amd64" \
           "${IMAGE}:${TAG}-${EDITION}-arm64"

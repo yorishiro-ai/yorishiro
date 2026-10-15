@@ -1,7 +1,7 @@
 name: Cache Cleanup
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches: [develop]
 
@@ -15,7 +15,12 @@ jobs:
     steps:
       - name: Delete caches for this PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_REF: refs/pull/${{ github.event.pull_request.number }}/merge
-        run: gh cache delete --all --ref "$PR_REF" --repo "$REPO" --succeed-on-no-caches
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Invalid pull request number" >&2
+            exit 1
+          fi
+          gh cache delete --all --ref "refs/pull/$PR_NUMBER/merge" --repo "$REPO" --succeed-on-no-caches

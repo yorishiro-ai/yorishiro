@@ -25,9 +25,10 @@ Migration tests cover fresh installs, incremental upgrades from each recorded mi
 The PostgreSQL migration tests use unique scratch databases and the SQLite tests use temporary files, so every test tears down its own database resources.
 
 Before pushing, run `make check-all`.
+The main CI workflow runs only for pull requests targeting `develop`.
+It does not run on pushes, on a schedule, or by manual dispatch.
 CI classifies pull request changes from the explicit base commit and publishes a stable `Required validation` check.
 Documentation-only changes keep the heavy build and test jobs skipped, while unknown paths run the full validation set.
-Scheduled and manually dispatched CI runs always run the full validation set.
 Changes to local actions select every validation group consumed by that action.
 Package, Docker, and release-related pull request changes build the CE/EE package matrix and run shared package verification.
 Package verification checks the public filenames and embedded package name, version, release, and architecture for all eight artifacts, then rejects renamed, missing, or mismatched-version artifacts.

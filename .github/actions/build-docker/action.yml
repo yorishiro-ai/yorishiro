@@ -44,6 +44,7 @@ runs:
         context: .
         push: ${{ inputs.push == 'true' }}
         provenance: false
+        annotations: manifest:org.opencontainers.image.description=An MCP-native, multi-tenant knowledge store with user-defined schemas.
         build-args: |
           EDITION=${{ inputs.edition }}
           RUST_VERSION=${{ steps.rust.outputs.version }}

@@ -54,6 +54,9 @@ Request tests must call `close_app_pools` before returning. See `tests/requests/
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 
+The main CI workflow runs for pull requests targeting `develop` only.
+It does not run on pushes, on a schedule, or by manual dispatch.
+
 ## Before you push
 
 Linux builds use the repository `.cargo/config.toml`, which requires `mold` and `sccache`.
