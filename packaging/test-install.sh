@@ -275,9 +275,9 @@ fi
 # if that path were wrong. A path in a comment is documentation the package ships, so it is
 # checked like the rest of the package.
 #
-# Two exclusions, each because the path is not a file the package ships: systemd's own
-# `WantedBy=` targets (`multi-user.target` is a unit name, and appears without a directory), and
-# anything under `/proc` or `/sys`.
+# Three exclusions, each because the path is not a required package file: systemd's own
+# `WantedBy=` targets (`multi-user.target` is a unit name, and appears without a directory),
+# anything under `/proc` or `/sys`, and the optional administrator-created production override.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
@@ -288,7 +288,7 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   done
   grep -hoE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" $units \
     | sed -e "s/^[[:space:]=\"]//" -e "s/[.,]$//" \
-    | grep -vE "^/(proc|sys)(/|$)" \
+    | grep -vE "^/(proc|sys)(/|$)|^/etc/yorishiro/production\.yaml$" \
     | sort -u | while read -r p; do
       [ -e "$p" ] || echo "MISSING:$p"
   done
@@ -298,7 +298,7 @@ if ! grep -q CHECKED <<<"$out"; then
 elif grep -q MISSING: <<<"$out"; then
   bad "the unit names paths the package does not install: $(grep -o 'MISSING:[^ ]*' <<<"$out" | tr '\n' ' ')"
 else
-  ok "every path the unit names exists after install"
+  ok "every required path the unit names exists after install; optional production.yaml may be absent"
 fi
 
 # --------------------------------------------------------------------------------------------
