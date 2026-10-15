@@ -6,8 +6,6 @@ name: CI
 # for postgres and sqlite backends via a matrix.
 
 on:
-  push:
-    branches: [develop]
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [develop]
