@@ -23,57 +23,33 @@ runs:
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: |
-        set -euo pipefail
-        for edition in ce ee; do
-          for arch in amd64 arm64; do
-            case "$arch" in amd64) deb_arch=amd64; rpm_arch=x86_64 ;; arm64) deb_arch=arm64; rpm_arch=aarch64 ;; esac
-            package="yorishiro-${edition}"
-            deb="dist/${package}-${VERSION}-${arch}.deb"
-            rpm="dist/${package}-${VERSION}-${arch}.rpm"
-            for ext in deb rpm; do
-              test -f "dist/${package}-${VERSION}-${arch}.${ext}"
-            done
-            test "$(dpkg-deb -f "$deb" Package)" = "$package"
-            test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
-            test "$(dpkg-deb -f "$deb" Architecture)" = "$deb_arch"
-            test "$(rpm -qp --qf '%{NAME}' "$rpm")" = "$package"
-            test "$(rpm -qp --qf '%{VERSION}' "$rpm")" = "$VERSION"
-            test "$(rpm -qp --qf '%{RELEASE}' "$rpm")" = 1
-            test "$(rpm -qp --qf '%{ARCH}' "$rpm")" = "$rpm_arch"
-          done
-        done
-        test "$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
-        for f in dist/*.deb; do
-          dpkg-deb -I "$f" | grep -E 'Conflicts:.*yorishiro|Replaces:.*yorishiro'
-        done
-        for f in dist/*.rpm; do
-          rpm -qp --conflicts "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
-          rpm -qp --obsoletes "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
-        done
+      run: ./packaging/test-artifacts.sh dist "$VERSION"
+
+    - name: Verify artifact metadata checks reject invalid packages
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: ./packaging/test-artifacts-self.sh dist "$VERSION"
 
     - uses: ./.github/actions/install-nfpm
 
-    - name: Build retired unified packages for migration tests
+    - name: Extract a real package binary for the legacy fixture
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
         ARCH: amd64
       run: |
         set -euo pipefail
-        mkdir -p target/release /tmp/unified
+        mkdir -p target/release
         dpkg-deb -x "dist/yorishiro-ce-${VERSION}-amd64.deb" /tmp/ce
         cp /tmp/ce/usr/bin/yorishiro target/release/yorishiro
-        nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager deb --target /tmp/unified
-        nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager rpm --target /tmp/unified
-        mv "/tmp/unified/yorishiro_${VERSION}_amd64.deb" "/tmp/unified/yorishiro-${VERSION}-amd64.deb"
-        mv "/tmp/unified/yorishiro-${VERSION}-1.x86_64.rpm" "/tmp/unified/yorishiro-${VERSION}-amd64.rpm"
 
     - name: Test package transitions and co-install refusal
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./packaging/test-transitions.sh dist /tmp/unified "$VERSION"
+        ARCH: amd64
+      run: ./packaging/test-transitions.sh dist "$VERSION"
 
     - name: Test representative installed packages
       shell: bash
