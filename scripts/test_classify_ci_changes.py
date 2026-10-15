@@ -11,6 +11,9 @@ def test_unknown_defaults_to_full() -> None:
 
 
 def test_docs_are_lightweight() -> None:
+    assert classify_path("ee/docs/installation.md") == {"docs"}
+    assert classify(["ee/docs/installation.md"])["docs_only"]
+    assert classify_path("ee/models/example.rs") == {"ee"}
     result = classify(["docs/en/contributing.md", "docs/ja/contributing.md"])
     assert result["docs_only"]
     assert not result["rust_validation"]

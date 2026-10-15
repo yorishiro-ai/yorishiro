@@ -18,9 +18,12 @@ if path_is_exempt /etc/yorishiro/production.yaml.missing; then
   echo 'missing required path was incorrectly exempted' >&2
   exit 1
 fi
-! path_is_exempt /etc/yorishiro/production.yaml.example
-! path_is_exempt /usr/bin/yorishiro
-! path_is_exempt /lib/systemd/system/yorishiro.service
+for path in /etc/yorishiro/production.yaml.example /usr/bin/yorishiro /lib/systemd/system/yorishiro.service; do
+  if path_is_exempt "$path"; then
+    echo "required package path was incorrectly exempted: $path" >&2
+    exit 1
+  fi
+done
 path_is_exempt /proc/1/status
 path_is_exempt /sys/kernel/osrelease
 

@@ -16,7 +16,7 @@ done
 mv "$WORK/renamed/yorishiro-ce-${VERSION}-amd64.deb" "$WORK/renamed/renamed.deb"
 rm "$WORK/missing/yorishiro-ee-${VERSION}-arm64.rpm"
 dpkg-deb -R "$WORK/wrong-version/yorishiro-ce-${VERSION}-amd64.deb" "$WORK/control"
-sed -i 's/^Version: .*/Version: 0.0.1-test/' "$WORK/control/DEBIAN/control"
+sed -i "s/^Version: .*/Version: ${VERSION}.wrong-version/" "$WORK/control/DEBIAN/control"
 dpkg-deb -b "$WORK/control" "$WORK/wrong-version/yorishiro-ce-${VERSION}-amd64.deb" >/dev/null
 
 for case_name in renamed missing wrong-version; do

@@ -25,7 +25,8 @@ for edition in ce ee; do
 done
 test "$(find "$DIST" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
 for f in "$DIST"/*.deb; do
-  dpkg-deb -I "$f" | grep -E 'Conflicts:.*yorishiro|Replaces:.*yorishiro'
+  dpkg-deb -f "$f" Conflicts | grep -q yorishiro
+  dpkg-deb -f "$f" Replaces | grep -q yorishiro
 done
 for f in "$DIST"/*.rpm; do
   rpm -qp --conflicts "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'

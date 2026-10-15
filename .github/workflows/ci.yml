@@ -597,7 +597,7 @@ jobs:
           fi
           require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"
           require_success PACKAGE "$PACKAGE_RESULT" "$PACKAGE"
-          if selected "$PACKAGE_BUILD_SELECTED"; then
+          if selected "$PACKAGE_BUILD_SELECTED" && [[ "$FULL" == true || "$RUST" == true ]]; then
             [[ "$CE" == success && "$EE" == success && "$MSRV" == success ]] || {
               echo "package build prerequisites did not succeed" >&2
               exit 1

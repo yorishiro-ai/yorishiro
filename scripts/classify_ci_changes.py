@@ -33,7 +33,7 @@ def classify_path(path: str) -> set[str]:
 
     if s.startswith("src/"):
         groups |= {"rust"}
-    if s.startswith("ee/"):
+    if s.startswith("ee/") and not s.startswith("ee/docs/"):
         groups |= {"ee"}
     if s.startswith("edition/"):
         groups |= {"shared", "rust", "ee"}
