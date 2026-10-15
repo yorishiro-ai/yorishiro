@@ -10,7 +10,7 @@ CI checks both conditions so build or test failures cannot masquerade as a succe
 CI runs all four permitted topologies for both CE and EE, with eight distinct edition/database/queue job names.
 `make entities` requires the `sea-orm-cli` version pinned in `Cargo.lock`, matching CI; use a fresh PostgreSQL database to verify generation from migrations alone.
 The pinned generator omits partial unique indexes from entities, so those indexes remain owned solely by migrations.
-`make python-lint` (also in both `check-all` targets) statically verifies every matrix pair appears exactly once and rejects crossed SQL pairs or extra axes.
+`make python-lint` (also in both `check-all` targets) runs the CI classifier and topology self-tests and statically verifies every matrix pair appears exactly once, rejecting crossed SQL pairs or extra axes.
 Use `make test-valkey` to run the Valkey topology tests against a local or explicitly configured endpoint.
 The Valkey-compatible `redis://` endpoint must select database 15 because Loco clears that reserved database during queue cleanup.
 The remaining repository helper scripts also run through the uv project and use only Python's standard library.
@@ -30,4 +30,7 @@ Documentation-only changes keep the heavy build and test jobs skipped, while unk
 Scheduled and manually dispatched CI runs always run the full validation set.
 Changes to local actions select every validation group consumed by that action.
 Package, Docker, and release-related pull request changes build the CE/EE package matrix and run shared package verification.
+Package verification checks the public filenames and embedded package name, version, release, and architecture for all eight artifacts, then rejects renamed, missing, or mismatched-version artifacts.
+It also exercises the real legacy package transition; the RPM legacy-to-CE live configuration preservation failure remains known and is not hidden by weakening that assertion.
+The Docker package ownership check runs through the shared package action so CI does not repeat it.
 Release workflows remain dispatch-only, and pull requests never publish packages, images, tags, or releases.
