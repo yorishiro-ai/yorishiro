@@ -2,12 +2,10 @@
 # Exercise package identity, replacement, and shared-file behavior in Debian and RPM containers.
 set -euo pipefail
 
-PKG_DIR="${1:?usage: test-transitions.sh <package directory> <unified package directory> <version>}"
-UNIFIED_DIR="${2:?usage: test-transitions.sh <package directory> <unified package directory> <version>}"
-VERSION="${3:?usage: test-transitions.sh <package directory> <unified package directory> <version>}"
+PKG_DIR="${1:?usage: test-transitions.sh <package directory> <version>}"
+VERSION="${2:?usage: test-transitions.sh <package directory> <version>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKG_DIR="$(cd "$PKG_DIR" && pwd)"
-UNIFIED_DIR="$(cd "$UNIFIED_DIR" && pwd)"
 LEGACY_DIR="$(mktemp -d)"
 LEGACY_CFG="$REPO/packaging/nfpm-yorishiro-unified-legacy.yaml"
 trap 'rm -rf "$LEGACY_DIR"' EXIT
@@ -16,8 +14,10 @@ trap 'rm -rf "$LEGACY_DIR"' EXIT
 # manager's ownership transition instead of creating production.yaml after installing the new
 # layout. The binary and service files are the same; only the old managed config entry differs.
 command -v nfpm >/dev/null || { echo "nfpm is required to build the legacy fixture" >&2; exit 2; }
-nfpm package --config "$LEGACY_CFG" --packager deb --target "$LEGACY_DIR"
-nfpm package --config "$LEGACY_CFG" --packager rpm --target "$LEGACY_DIR"
+VERSION="${VERSION:?VERSION is required to build the legacy fixture}"
+ARCH="${ARCH:?ARCH is required to build the legacy fixture}"
+VERSION="$VERSION" ARCH="$ARCH" nfpm package --config "$LEGACY_CFG" --packager deb --target "$LEGACY_DIR"
+VERSION="$VERSION" ARCH="$ARCH" nfpm package --config "$LEGACY_CFG" --packager rpm --target "$LEGACY_DIR"
 mv "$LEGACY_DIR/yorishiro_${VERSION}_amd64.deb" "$LEGACY_DIR/yorishiro-${VERSION}-amd64.deb"
 mv "$LEGACY_DIR/yorishiro-${VERSION}-1.x86_64.rpm" "$LEGACY_DIR/yorishiro-${VERSION}-amd64.rpm"
 
