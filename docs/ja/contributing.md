@@ -76,6 +76,6 @@ CI は明示された base commit との差分を分類し、安定した `Requi
 ローカル action の変更では、その action を利用するすべての検証グループを実行します。
 パッケージ、Docker、リリース関連の PR では CE/EE のパッケージをビルドし、共通のパッケージ検証を実行します。
 パッケージ検証は 8 成果物すべての公開ファイル名と、埋め込まれたパッケージ名、版、release、architecture を照合し、誤名、欠落、版不一致の成果物を拒否します。
-実際の legacy package 移行も検証します。`/etc/yorishiro/production.yaml` は任意の管理者所有オーバーライドなので、移行テストでは package が提供する example を確認し、live override が存在しない状態も許容します。
+fresh install、CE/EE edition 切り替え、同時インストールの拒否、および削除時の管理者設定の動作を検証します。
 Docker package ownership 検査は共通 package action から実行し、CI での重複実行を避けます。
 リリースワークフローは手動起動専用です。PR からパッケージ、イメージ、タグ、リリースを公開することはありません。

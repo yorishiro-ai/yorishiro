@@ -31,24 +31,10 @@ runs:
         VERSION: ${{ inputs.version }}
       run: ./packaging/test-artifacts-self.sh dist "$VERSION"
 
-    - uses: ./.github/actions/install-nfpm
-
-    - name: Extract a real package binary for the legacy fixture
-      shell: bash
-      env:
-        VERSION: ${{ inputs.version }}
-        ARCH: amd64
-      run: |
-        set -euo pipefail
-        mkdir -p target/release
-        dpkg-deb -x "dist/yorishiro-ce-${VERSION}-amd64.deb" /tmp/ce
-        cp /tmp/ce/usr/bin/yorishiro target/release/yorishiro
-
     - name: Test package transitions and co-install refusal
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-        ARCH: amd64
       run: ./packaging/test-transitions.sh dist "$VERSION"
 
     - name: Test representative installed packages

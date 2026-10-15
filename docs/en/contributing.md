@@ -31,6 +31,6 @@ Scheduled and manually dispatched CI runs always run the full validation set.
 Changes to local actions select every validation group consumed by that action.
 Package, Docker, and release-related pull request changes build the CE/EE package matrix and run shared package verification.
 Package verification checks the public filenames and embedded package name, version, release, and architecture for all eight artifacts, then rejects renamed, missing, or mismatched-version artifacts.
-It also exercises the real legacy package transition. `/etc/yorishiro/production.yaml` is an optional administrator-owned override, so the transition checks the packaged example and accepts the live override being absent.
+It exercises fresh installation, CE/EE edition switches, co-install refusal, and administrator-config behavior on removal.
 The Docker package ownership check runs through the shared package action so CI does not repeat it.
 Release workflows remain dispatch-only, and pull requests never publish packages, images, tags, or releases.
