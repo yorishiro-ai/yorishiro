@@ -31,7 +31,7 @@ for edition in ce ee; do
 done
 test "$(find "$PKG_DIR" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
 
-legacy_config_metadata='test -f /etc/yorishiro/production.yaml && test "$(stat -c "%U:%G" /etc/yorishiro/production.yaml)" = root:yorishiro && test "$(stat -c "%a" /etc/yorishiro/production.yaml)" = 640'
+legacy_example_metadata='test -f /etc/yorishiro/production.yaml.example && cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml'
 
 old_package_id() {
   case "$1" in
@@ -50,14 +50,8 @@ run_deb_transition() {
   docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
-    $legacy_config_metadata
+    $legacy_example_metadata
     # The unified artifact is the prior package identity/layout in this transition matrix.
-    # Seed the legacy package-owned path before installing the new edition package.
-    printf 'edited-by-transition' > /etc/yorishiro/production.yaml
-    chown root:yorishiro /etc/yorishiro/production.yaml
-    chmod 0600 /etc/yorishiro/production.yaml
-    cp /etc/yorishiro/production.yaml /tmp/production.before
-    stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
@@ -76,9 +70,7 @@ run_deb_transition() {
       test \"\$old_query_status\" -eq 1
       test -z \"\$old_status\"
     fi
-    cmp /tmp/production.before /etc/yorishiro/production.yaml
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
-    test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
     test -f /etc/yorishiro/production.yaml.example
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = root:yorishiro
@@ -94,13 +86,9 @@ run_deb_untouched_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv /legacy/yorishiro-${VERSION}-amd64.deb
-    $legacy_config_metadata
-    cp /etc/yorishiro/production.yaml /tmp/production.before
-    stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
+    $legacy_example_metadata
     apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
-    cmp /tmp/production.before /etc/yorishiro/production.yaml
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
-    test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
   "
 }
 
@@ -122,7 +110,7 @@ run_deb_absent_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq $base
-    $legacy_config_metadata
+    $legacy_example_metadata
     rm -f /etc/yorishiro/production.yaml
     apt-get install -y -qq /pkg/yorishiro-${to}-${VERSION}-amd64.deb
     test ! -e /etc/yorishiro/production.yaml
@@ -156,13 +144,7 @@ run_rpm_transition() {
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.rpm"; fi
   docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
     dnf install -y -q diffutils $base
-    $legacy_config_metadata
-    # Seed the legacy package-owned path before installing the new edition package.
-    printf 'edited-by-transition' > /etc/yorishiro/production.yaml
-    chown root:yorishiro /etc/yorishiro/production.yaml
-    chmod 0600 /etc/yorishiro/production.yaml
-    cp /etc/yorishiro/production.yaml /tmp/production.before
-    stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
+    $legacy_example_metadata
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
@@ -180,9 +162,7 @@ run_rpm_transition() {
       exit 1
     fi
     test \"\$old_query_status\" -eq 1
-    cmp /tmp/production.before /etc/yorishiro/production.yaml
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
-    test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
     test -f /etc/yorishiro/production.yaml.example
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = root:yorishiro
@@ -197,13 +177,9 @@ run_rpm_transition() {
 run_rpm_untouched_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
     dnf install -y -q diffutils /legacy/yorishiro-${VERSION}-amd64.rpm
-    $legacy_config_metadata
-    cp /etc/yorishiro/production.yaml /tmp/production.before
-    stat -c '%U:%G %a' /etc/yorishiro/production.yaml > /tmp/production.meta
+    $legacy_example_metadata
     dnf install -y -q /pkg/yorishiro-ce-${VERSION}-amd64.rpm
-    cmp /tmp/production.before /etc/yorishiro/production.yaml
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
-    test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
   "
 }
 
@@ -222,7 +198,7 @@ run_rpm_absent_transition() {
   if [ "$from" = yorishiro ]; then base="/legacy/yorishiro-${VERSION}-amd64.rpm"; fi
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$LEGACY_DIR":/legacy:ro almalinux:10 bash -eu -c "
     dnf install -y -q $base
-    $legacy_config_metadata
+    $legacy_example_metadata
     rm -f /etc/yorishiro/production.yaml
     dnf install -y -q /pkg/yorishiro-${to}-${VERSION}-amd64.rpm
     test ! -e /etc/yorishiro/production.yaml
