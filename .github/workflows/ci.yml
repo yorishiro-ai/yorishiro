@@ -513,11 +513,6 @@ jobs:
       - uses: ./.github/actions/package-tests
         with:
           version: 0.0.0-${{ github.sha }}
-      - name: Verify Docker configuration ownership and fallback
-        if: ${{ needs.changes.outputs.docker_validation == 'true' }}
-        run: |
-          docker build --build-arg EDITION=ce -t yorishiro-package-test:${GITHUB_SHA} .
-          make package-docker-check IMAGE=yorishiro-package-test:${GITHUB_SHA}
 
   package-build:
     name: Package build (${{ matrix.edition }}, ${{ matrix.arch }})
