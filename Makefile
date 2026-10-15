@@ -36,6 +36,10 @@ python-lint:
 	uv run ruff check scripts
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_ci_matrix.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_ci_matrix.py
+	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_classify_ci_changes.py
+	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_topology_self.py
+	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_package_ids.py
+	bash -n packaging/test-artifacts.sh packaging/test-artifacts-self.sh packaging/test-transitions.sh
 
 public-api-check:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_public_api.py

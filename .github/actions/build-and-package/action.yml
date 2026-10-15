@@ -50,8 +50,9 @@ runs:
         ARCH: ${{ inputs.arch }}
         EDITION: ${{ inputs.edition }}
       run: |
+        set -euo pipefail
         mkdir -p dist
-        case "$ARCH" in amd64) rpm_arch=x86_64 ;; arm64) rpm_arch=aarch64 ;; esac
+        case "$ARCH" in amd64) deb_arch=amd64; rpm_arch=x86_64 ;; arm64) deb_arch=arm64; rpm_arch=aarch64 ;; *) echo "unsupported package architecture: $ARCH" >&2; exit 2 ;; esac
         for pkg in deb rpm; do
           nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
           if [ "$pkg" = deb ]; then

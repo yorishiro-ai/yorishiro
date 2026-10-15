@@ -8,23 +8,9 @@ name: CI
 on:
   push:
     branches: [develop]
-    paths-ignore:
-      - "docs/**"
-      - "ee/docs/**"
-      - "**.md"
-      - ".github/dependabot.yml"
-      - ".github/workflows/release.yml"
-      - ".github/workflows/release_pre.yml"
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [develop]
-    paths-ignore:
-      - "docs/**"
-      - "ee/docs/**"
-      - "**.md"
-      - ".github/dependabot.yml"
-      - ".github/workflows/release.yml"
-      - ".github/workflows/release_pre.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -48,7 +34,34 @@ env:
   EMBEDDING_TOKENIZER_SIZE: "17082660"
 
 jobs:
+  changes:
+    name: Classify changed files
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.classify.outputs.full }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      rust_validation: ${{ steps.classify.outputs.rust_validation }}
+      package_validation: ${{ steps.classify.outputs.package_validation }}
+      package_build: ${{ steps.classify.outputs.package_build }}
+      docker_validation: ${{ steps.classify.outputs.docker_validation }}
+      doc_validation: ${{ steps.classify.outputs.doc_validation }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          args=(--base "$BASE_SHA" --head "$GITHUB_SHA" --output "$GITHUB_OUTPUT")
+          if [[ "$EVENT_NAME" != pull_request ]]; then args+=(--full); fi
+          python3 scripts/classify_ci_changes.py "${args[@]}"
+
   ce:
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    needs: changes
     name: Community edition
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -67,6 +80,8 @@ jobs:
       # Runtime topology tests run in the shared matrix below for both editions.
 
   check:
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    needs: changes
     name: Enterprise edition
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -96,7 +111,7 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_harden_generated_entities.py
 
       - name: Python lint
-        run: uv run ruff check scripts
+        run: make python-lint
 
       - name: Check test harness usage
         run: |
@@ -114,9 +129,7 @@ jobs:
         run: make debug-macro-check
 
       - name: Check the edition boundary
-        run: |
-          PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_edition_boundary.py
-          PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_edition_boundary.py
+        run: make edition-boundary-check
 
       - name: Check public API additions
         run: |
@@ -182,6 +195,8 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --features enterprise -- --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
 
   msrv:
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    needs: changes
     name: MSRV
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -198,6 +213,8 @@ jobs:
       - run: cargo +${{ steps.msrv.outputs.version }} check --locked --features enterprise --workspace
 
   prepare-embedding:
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    needs: changes
     name: Models
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -243,7 +260,8 @@ jobs:
 
   test:
     name: "Test (Edition: ${{ matrix.edition }}, DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})"
-    needs: prepare-embedding
+    needs: [changes, prepare-embedding]
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -475,3 +493,113 @@ jobs:
           MODEL_URL: unused
           TOKENIZER_URL: unused
         run: uv run scripts/embedding_cache.py verify
+
+  package-validation:
+    name: Package validation
+    needs: [changes, package-build]
+    if: ${{ always() && needs.changes.result == 'success' && needs.package-build.result == 'success' && needs.changes.outputs.package_validation == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: binary-linux-*-*
+          merge-multiple: true
+      - uses: ./.github/actions/package-tests
+        with:
+          version: 0.0.0-${{ github.sha }}
+
+  package-build:
+    name: Package build (${{ matrix.edition }}, ${{ matrix.arch }})
+    needs: [changes, ce, check, msrv]
+    if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.package_build == 'true' && (needs.changes.outputs.rust_validation != 'true' || (needs.ce.result == 'success' && needs.check.result == 'success' && needs.msrv.result == 'success')) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: ce
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+          - edition: ce
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - edition: ee
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+          - edition: ee
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/build-and-package
+        with:
+          edition: ${{ matrix.edition }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
+          version: 0.0.0-${{ github.sha }}
+          build-tag: ${{ github.sha }}
+
+  required-check:
+    name: Required validation
+    if: ${{ always() }}
+    needs: [changes, ce, check, msrv, prepare-embedding, test, package-build, package-validation]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected validation
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+          RUST: ${{ needs.changes.outputs.rust_validation }}
+          PACKAGE: ${{ needs.changes.outputs.package_validation }}
+          PACKAGE_BUILD_SELECTED: ${{ needs.changes.outputs.package_build }}
+          CE: ${{ needs.ce.result }}
+          EE: ${{ needs.check.result }}
+          MSRV: ${{ needs.msrv.result }}
+          MODEL: ${{ needs.prepare-embedding.result }}
+          TEST: ${{ needs.test.result }}
+          PACKAGE_RESULT: ${{ needs.package-validation.result }}
+          PACKAGE_BUILD: ${{ needs.package-build.result }}
+          CHANGES: ${{ needs.changes.result }}
+        run: |
+          set -euo pipefail
+          [[ "$CHANGES" == success ]] || { echo "classifier ended $CHANGES" >&2; exit 1; }
+          selected() { [[ "$1" == true ]]; }
+          require_success() {
+            local label=$1 result=$2 needed=$3
+            if selected "$needed"; then
+              [[ "$result" == success ]] || { echo "$label was selected but ended $result" >&2; exit 1; }
+            else
+              [[ "$result" == skipped ]] || { echo "$label was not selected but ended $result" >&2; exit 1; }
+            fi
+          }
+          if [[ "$FULL" == true || "$RUST" == true ]]; then
+            require_success CE "$CE" true
+            require_success EE "$EE" true
+            require_success MSRV "$MSRV" true
+            require_success MODEL "$MODEL" true
+            require_success TEST "$TEST" true
+          else
+            require_success CE "$CE" false
+            require_success EE "$EE" false
+            require_success MSRV "$MSRV" false
+            require_success MODEL "$MODEL" false
+            require_success TEST "$TEST" false
+          fi
+          require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"
+          require_success PACKAGE "$PACKAGE_RESULT" "$PACKAGE"
+          if selected "$PACKAGE_BUILD_SELECTED" && [[ "$FULL" == true || "$RUST" == true ]]; then
+            [[ "$CE" == success && "$EE" == success && "$MSRV" == success ]] || {
+              echo "package build prerequisites did not succeed" >&2
+              exit 1
+            }
+          fi

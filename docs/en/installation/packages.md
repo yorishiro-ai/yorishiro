@@ -7,7 +7,7 @@ They support Ubuntu 24.04 and AlmaLinux 10 (glibc 2.39+).
 Releases publish separate `yorishiro-ce` and `yorishiro-ee` packages.
 CE provides Community features, while EE includes Enterprise features and requires a licence for production use.
 The packages conflict with each other, so both editions cannot be installed at once.
-Installing the other edition replaces the current package and preserves the shared configuration and state paths.
+Installing the other edition replaces the current package.
 
 ## Install
 
@@ -31,9 +31,18 @@ CE does not install the enterprise licence file.
 
 ## Configuration
 
-The service uses production defaults from the package when `/etc/yorishiro/production.yaml` is absent.
+When `/etc/yorishiro/production.yaml` is absent, the service uses the packaged `/etc/yorishiro/production.yaml.example` defaults, including SQLite database and queue files under `/var/lib/yorishiro` by default.
+Tera `get_env` expressions let environment variables such as `DATABASE_URL`, `QUEUE_URL`, `HOST`, `PORT`, and `BINDING` override template defaults.
 Create `/etc/yorishiro/production.yaml` only when you need an administrator-owned override.
-Package upgrades always refresh `/etc/yorishiro/production.yaml.example` from the latest defaults and preserve the override; package removal also preserves the override.
+Package upgrades refresh `/etc/yorishiro/production.yaml.example` from the latest defaults.
+Review the packaged defaults before making or changing an administrator-owned override.
+If the file exists, make a backup before an upgrade:
+
+```console
+$ sudo cp -a /etc/yorishiro/production.yaml /etc/yorishiro/production.yaml.backup
+```
+
+CE/EE edition switches use the same package-owned example path and do not install or own the administrator override path.
 Community edition enforces a maximum of one tenant regardless of `YORISHIRO_MAX_TENANTS` or the YAML setting, and warns when either requests another value.
 Enterprise edition honors `YORISHIRO_MAX_TENANTS` only with a valid, unexpired licence; `0` means unlimited, and without a licence it warns and enforces one tenant.
 SQLite remains limited to one tenant in either edition.
