@@ -31,9 +31,13 @@ def main() -> int:
         text=True,
     )
     assert invalid.returncode == 2
-    assert "dpkg-query -W -f='\\\\${Status}' ${from_package}" in source
-    assert 'rpm -q ${from_package}' in source
-    assert 'test "\\$old_query_status" -eq 1' in source
+    assert source.count('from_package="$(current_package_id "$from")"') == 2
+    assert source.count('to_package="$(current_package_id "$to")"') == 2
+    assert 'old_package="$from_package"' in source
+    assert 'OLD_PACKAGE="$old_package"' in source
+    assert 'dpkg-query -W -f=' in source
+    assert 'dpkg-query -W -f=' in source and '\\$OLD_PACKAGE' in source
+    assert 'rpm -q \\"\\$OLD_PACKAGE\\"' in source
     for transition in (
         "run_deb_transition ce ee",
         "run_deb_transition ee ce",

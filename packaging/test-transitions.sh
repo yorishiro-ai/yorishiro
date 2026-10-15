@@ -25,10 +25,12 @@ current_package_id() {
 
 run_deb_transition() {
   local from="$1" to="$2"
-  local from_package="yorishiro-${from}"
-  local to_package="yorishiro-${to}"
+  local from_package to_package
+  from_package="$(current_package_id "$from")"
+  to_package="$(current_package_id "$to")"
+  local old_package="$from_package"
   local base="/pkg/${from_package}-${VERSION}-amd64.deb"
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
     test ! -e /etc/yorishiro/production.yaml
@@ -46,14 +48,14 @@ run_deb_transition() {
     apt-get install -y -qq /pkg/${to_package}-${VERSION}-amd64.deb
     test \"\$(dpkg-query -W -f='\${Status}' ${to_package})\" = 'install ok installed'
     set +e
-    old_status="\\$(dpkg-query -W -f='\\${Status}' ${from_package} 2>/dev/null)"
+    old_status=\"\$(dpkg-query -W -f='\${Status}' \"\$OLD_PACKAGE\" 2>/dev/null)\"
     old_query_status=\$?
     set -e
-    if [ "\$old_query_status" -eq 0 ]; then
-      test "\$old_status" != 'install ok installed'
+    if [ \"\$old_query_status\" -eq 0 ]; then
+      test \"\$old_status\" != 'install ok installed'
     else
-      test "\$old_query_status" -eq 1
-      test -z "\$old_status"
+      test \"\$old_query_status\" -eq 1
+      test -z \"\$old_status\"
     fi
     cmp /tmp/production.before /etc/yorishiro/production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
@@ -109,10 +111,12 @@ run_deb_fresh_install_without_admin_config() {
 
 run_rpm_transition() {
   local from="$1" to="$2"
-  local from_package="yorishiro-${from}"
-  local to_package="yorishiro-${to}"
+  local from_package to_package
+  from_package="$(current_package_id "$from")"
+  to_package="$(current_package_id "$to")"
+  local old_package="$from_package"
   local base="/pkg/${from_package}-${VERSION}-amd64.rpm"
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
+  docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro almalinux:10 bash -eu -c "
     dnf install -y -q diffutils $base
     test ! -e /etc/yorishiro/production.yaml
     cp /etc/yorishiro/production.yaml.example /etc/yorishiro/production.yaml
@@ -126,17 +130,24 @@ run_rpm_transition() {
     systemctl --root=/ enable yorishiro.service
     systemctl --root=/ enable yorishiro-worker.service
     systemctl --root=/ enable yorishiro-scheduler.service
-    dnf install -y -q /pkg/${to_package}-${VERSION}-amd64.rpm
-    rpm -q ${to_package}
     set +e
-    rpm -q ${from_package}
+    dnf install -y -q /pkg/${to_package}-${VERSION}-amd64.rpm
+    switch_install_status=\$?
+    set -e
+    test "\$switch_install_status" -eq 0
+    rpm -q ${to_package}
+    target_query_status=\$?
+    test "\$target_query_status" -eq 0
+    set +e
+    rpm -q \"\$OLD_PACKAGE\"
     old_query_status=\$?
     set -e
-    if [ "\$old_query_status" -eq 0 ]; then
-      echo "old package still installed: ${from_package}" >&2
+    if [ \"\$old_query_status\" -eq 0 ]; then
+      echo \"old package still installed: \$OLD_PACKAGE\" >&2
       exit 1
     fi
-    test "\$old_query_status" -eq 1
+    test \"\$old_query_status\" -eq 1
+    echo \"RPM_SWITCH_RESULT from=${from_package} to=${to_package} dnf_install=\$switch_install_status target_query=\$target_query_status source_query=\$old_query_status\"
     cmp /tmp/production.before /etc/yorishiro/production.yaml
     test \"\$(stat -c '%U:%G %a' /etc/yorishiro/production.yaml)\" = \"\$(cat /tmp/production.meta)\"
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
