@@ -50,6 +50,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          persist-credentials: false
       - id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -111,7 +112,7 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_harden_generated_entities.py
 
       - name: Python lint
-        run: uv run ruff check scripts
+        run: make python-lint
 
       - name: Check test harness usage
         run: |
@@ -129,9 +130,7 @@ jobs:
         run: make debug-macro-check
 
       - name: Check the edition boundary
-        run: |
-          PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_edition_boundary.py
-          PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_edition_boundary.py
+        run: make edition-boundary-check
 
       - name: Check public API additions
         run: |
