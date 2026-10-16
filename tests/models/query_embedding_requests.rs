@@ -34,9 +34,15 @@ async fn workspace(ctx: &AppContext, name: &str) -> (Uuid, Uuid) {
 async fn a_request_moves_from_pending_to_ready_and_is_consumed_once() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let (_, ws) = workspace(&ctx, "qe-ready").await;
-        let id = Entity::open(&ctx.db, ws, "quarterly roadmap", 60)
-            .await
-            .expect("open");
+        let id = Entity::open(
+            &ctx.db,
+            ws,
+            "quarterly roadmap",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .expect("open");
 
         let row = Entity::find_pending(&ctx.db, ws, id)
             .await
@@ -81,7 +87,15 @@ async fn a_request_moves_from_pending_to_ready_and_is_consumed_once() {
 async fn a_failed_request_reports_its_diagnostic_once() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let (_, ws) = workspace(&ctx, "qe-failed").await;
-        let id = Entity::open(&ctx.db, ws, "q", 60).await.unwrap();
+        let id = Entity::open(
+            &ctx.db,
+            ws,
+            "q",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         assert!(
             Entity::fail(&ctx.db, ws, id, "provider is down")
                 .await
@@ -105,7 +119,15 @@ async fn a_late_result_cannot_revive_an_expired_or_consumed_request() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let (_, ws) = workspace(&ctx, "qe-late").await;
 
-        let expired = Entity::open(&ctx.db, ws, "q", 60).await.unwrap();
+        let expired = Entity::open(
+            &ctx.db,
+            ws,
+            "q",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         assert!(Entity::expire(&ctx.db, ws, expired).await.unwrap());
         assert!(
             !Entity::complete(&ctx.db, ws, expired, &[1.0], "m")
@@ -119,7 +141,15 @@ async fn a_late_result_cannot_revive_an_expired_or_consumed_request() {
             Some(QueryOutcome::Expired)
         );
 
-        let consumed = Entity::open(&ctx.db, ws, "q", 60).await.unwrap();
+        let consumed = Entity::open(
+            &ctx.db,
+            ws,
+            "q",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         assert!(
             Entity::complete(&ctx.db, ws, consumed, &[1.0], "m")
                 .await
@@ -145,7 +175,15 @@ async fn a_late_result_cannot_revive_an_expired_or_consumed_request() {
 async fn concurrent_consumers_share_one_result() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let (_, ws) = workspace(&ctx, "qe-race").await;
-        let id = Entity::open(&ctx.db, ws, "q", 60).await.unwrap();
+        let id = Entity::open(
+            &ctx.db,
+            ws,
+            "q",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         assert!(
             Entity::complete(&ctx.db, ws, id, &[1.0, 2.0], "m")
                 .await
@@ -177,7 +215,15 @@ async fn a_malformed_stored_result_is_an_internal_error_and_is_consumed() {
             serde_json::json!({"not": "a vector"}),
             serde_json::json!([1.0, 2.0, 3.0]),
         ] {
-            let id = Entity::open(&ctx.db, ws, "q", 60).await.unwrap();
+            let id = Entity::open(
+                &ctx.db,
+                ws,
+                "q",
+                60,
+                chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+            )
+            .await
+            .unwrap();
             // The second case is well formed JSON whose length disagrees with `dimensions`.
             Entity::update_many()
                 .col_expr(
@@ -204,8 +250,24 @@ async fn a_malformed_stored_result_is_an_internal_error_and_is_consumed() {
 async fn expired_rows_are_purged_and_live_rows_are_kept() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let (_, ws) = workspace(&ctx, "qe-purge").await;
-        let stale = Entity::open(&ctx.db, ws, "stale", 60).await.unwrap();
-        let live = Entity::open(&ctx.db, ws, "live", 60).await.unwrap();
+        let stale = Entity::open(
+            &ctx.db,
+            ws,
+            "stale",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+        let live = Entity::open(
+            &ctx.db,
+            ws,
+            "live",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         Entity::update_many()
             .col_expr(
                 Column::ExpiresAt,
@@ -247,7 +309,15 @@ async fn a_request_is_invisible_to_another_workspace() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let (_, mine) = workspace(&ctx, "qe-mine").await;
         let (_, theirs) = workspace(&ctx, "qe-theirs").await;
-        let id = Entity::open(&ctx.db, mine, "private", 60).await.unwrap();
+        let id = Entity::open(
+            &ctx.db,
+            mine,
+            "private",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
 
         assert!(
             Entity::find_pending(&ctx.db, theirs, id)
@@ -274,7 +344,15 @@ async fn a_request_is_invisible_to_another_workspace() {
 async fn the_database_accepts_every_status_the_enum_defines_and_rejects_others() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let (_, ws) = workspace(&ctx, "qe-check").await;
-        let id = Entity::open(&ctx.db, ws, "q", 60).await.unwrap();
+        let id = Entity::open(
+            &ctx.db,
+            ws,
+            "q",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         for status in QueryEmbeddingStatus::ALL {
             Entity::update_many()
                 .col_expr(Column::Status, Expr::value(status.as_db_str()))
@@ -309,16 +387,40 @@ async fn postgres_row_level_security_scopes_requests_to_the_current_workspace() 
             .expect("tenant pool on PostgreSQL");
         let (tenant_a, ws_a) = workspace(&ctx, "qe-rls-a").await;
         let (tenant_b, ws_b) = workspace(&ctx, "qe-rls-b").await;
-        let b_id = Entity::open(&ctx.db, ws_b, "b's query", 60).await.unwrap();
+        let b_id = Entity::open(
+            &ctx.db,
+            ws_b,
+            "b's query",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
 
         let txn = db.tenant.begin_for_workspace(tenant_a, ws_a).await.unwrap();
-        let a_id = Entity::open(&txn, ws_a, "a's query", 60).await.unwrap();
+        let a_id = Entity::open(
+            &txn,
+            ws_a,
+            "a's query",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         assert!(
             Entity::find_by_id(b_id).one(&txn).await.unwrap().is_none(),
             "workspace A cannot read workspace B's request"
         );
         assert!(
-            Entity::open(&txn, ws_b, "forged", 60).await.is_err(),
+            Entity::open(
+                &txn,
+                ws_b,
+                "forged",
+                60,
+                chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1)
+            )
+            .await
+            .is_err(),
             "workspace A cannot insert a row for workspace B"
         );
         txn.rollback().await.unwrap();

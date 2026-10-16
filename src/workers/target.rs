@@ -15,10 +15,7 @@
 
 use std::fmt;
 
-use loco_rs::app::AppContext;
-use loco_rs::bgworker::BackgroundWorker;
 use sea_orm::ConnectionTrait;
-use serde::Serialize;
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
@@ -181,37 +178,4 @@ pub fn targets_for_start(tags: &[String]) -> Result<Vec<WorkerTarget>, InvalidWo
         }
     }
     Ok(targets)
-}
-
-/// Puts a job of worker type `W` on the queue for `target`.
-///
-/// This is not `BackgroundWorker::perform_later_with_priority`: that reads `W::tags()` before it has seen the arguments, so one worker type carries one fixed tag set, and a tenant's target is only known once the job is.
-/// `W` still names the handler the job runs, and the queue provider must be configured because this crate requires `BackgroundQueue` mode.
-///
-/// # Errors
-/// Returns an error when no queue provider is configured or the provider refuses the job.
-pub(crate) async fn enqueue<W, A>(
-    ctx: &AppContext,
-    target: WorkerTarget,
-    args: A,
-    priority: Option<i32>,
-) -> loco_rs::Result<String>
-where
-    W: BackgroundWorker<A>,
-    A: Serialize + Send + Sync + 'static,
-{
-    let queue = ctx
-        .queue_provider
-        .as_ref()
-        .ok_or(loco_rs::Error::QueueProviderMissing)?;
-    queue
-        .enqueue(
-            W::class_name(),
-            Some(target.queue()),
-            args,
-            Some(vec![target.tag()]),
-            priority,
-        )
-        .await
-        .map(|job_id| job_id.unwrap_or_else(|| Uuid::now_v7().to_string()))
 }

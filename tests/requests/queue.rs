@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use chrono::{TimeZone, Utc};
 use loco_rs::app::Hooks;
 use loco_rs::bgworker::{self, BackgroundWorker, Queue, sqlt};
 use loco_rs::boot::{self, BootResult};
@@ -164,6 +165,53 @@ where
     }
 }
 
+async fn remove_owned_redis_jobs(uri: &str, queue_name: &str, ids: &[String]) {
+    let client = loco_rs::bgworker::redis::RedisPool::open(uri).expect("open owned-key client");
+    let mut conn = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("connect owned-key client");
+    for id in ids {
+        let _: usize = redis::cmd("ZREM")
+            .arg(format!("queue:{queue_name}"))
+            .arg(id)
+            .query_async(&mut conn)
+            .await
+            .expect("remove owned queued member");
+        let _: usize = redis::cmd("SREM")
+            .arg(format!("processing:{queue_name}"))
+            .arg(id)
+            .query_async(&mut conn)
+            .await
+            .expect("remove owned processing member");
+        let _: usize = redis::cmd("DEL")
+            .arg(format!("job:{id}"))
+            .query_async(&mut conn)
+            .await
+            .expect("remove owned job key");
+    }
+}
+
+async fn enqueue_owned_redis_job(
+    queue: &Queue,
+    queue_name: &str,
+    args: CompetingArgs,
+    tags: Vec<String>,
+    priority: i32,
+) -> String {
+    queue
+        .enqueue(
+            CompetingWorker::class_name(),
+            Some(queue_name.to_owned()),
+            args,
+            Some(tags),
+            Some(priority),
+        )
+        .await
+        .expect("enqueue owned Redis job")
+        .expect("Redis job ID")
+}
+
 /// Boots a permitted SQLite/SQLite pair with separate temporary files and returns a pool onto the queue file.
 async fn with_sqlite_queue<F, Fut>(test: F)
 where
@@ -202,6 +250,13 @@ where
             .expect("boot with a sqlite queue");
         boot = Some(boot_res);
         let boot_res = boot.as_ref().expect("boot result");
+        if let Some(relay) = boot_res
+            .app_context
+            .shared_store
+            .get::<tokio::task::AbortHandle>()
+        {
+            relay.abort();
+        }
 
         let pool = sqlx::SqlitePool::connect(&queue_uri)
             .await
@@ -251,10 +306,16 @@ where
 fn args_for(class: WorkerClass, workspace_id: Uuid) -> EmbeddingSyncArgs {
     EmbeddingSyncArgs {
         lifecycle_id: None,
+        dispatch_id: None,
+        publishing_epoch: None,
         workspace_id,
         entity_id: Uuid::now_v7(),
         worker_class: class,
     }
+}
+
+async fn run_dispatch_relay(ctx: &AppContext) {
+    yorishiro::workers::dispatch::recover_pending_on(ctx, &ctx.db).await;
 }
 
 /// A job enqueued through `enqueue_for_class` reaches the configured queue.
@@ -268,10 +329,85 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
         embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Shared, workspace_id))
             .await
             .expect("enqueue");
+        assert!(
+            sqlt::get_jobs(&pool, None, None)
+                .await
+                .expect("queue remains untouched before the relay runs")
+                .is_empty(),
+            "the producer records durable intent but does not publish"
+        );
+        run_dispatch_relay(&ctx).await;
 
         let jobs = sqlt::get_jobs(&pool, None, None).await.expect("get_jobs");
         assert_eq!(jobs.len(), 1, "jobs: {jobs:?}");
         assert_eq!(jobs[0].name, "EmbeddingSyncWorker");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn accepted_enqueue_with_failed_provider_id_record_keeps_the_outbox_row() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+    with_sqlite_queue(|ctx, pool, workspace_id| async move {
+        ctx.db
+            .execute_unprepared(
+                "CREATE TRIGGER fail_provider_job_id BEFORE UPDATE OF provider_job_id ON queue_job_lifecycles \
+                 WHEN NEW.provider_job_id IS NOT NULL BEGIN \
+                 SELECT RAISE(FAIL, 'test provider ID write failure'); END",
+            )
+            .await
+            .expect("install temporary provider ID trigger");
+
+        embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Shared, workspace_id))
+            .await
+            .expect("dispatch reports the provider acceptance");
+        assert!(
+            sqlt::get_jobs(&pool, None, None)
+                .await
+                .expect("queue remains untouched before the relay runs")
+                .is_empty(),
+            "the producer does not publish directly"
+        );
+        run_dispatch_relay(&ctx).await;
+
+        let jobs = sqlt::get_jobs(&pool, None, None).await.expect("read queue");
+        assert_eq!(jobs.len(), 1, "provider accepted one queue message");
+        let lifecycle = queue_job_lifecycles::Entity::find()
+            .one(&ctx.db)
+            .await
+            .expect("read lifecycle")
+            .expect("lifecycle was recorded before enqueue");
+        assert_eq!(lifecycle.status, "queued");
+        assert_eq!(lifecycle.provider_job_id, None);
+        let outbox = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(
+            lifecycle.id,
+        )
+        .one(&ctx.db)
+        .await
+        .expect("read outbox")
+        .expect("outbox remains after failed correlation write");
+        assert!(
+            yorishiro::models::queue_job_dispatch_outbox::due(&ctx.db)
+                .await
+                .expect("read cooldown-filtered outbox")
+                .is_empty(),
+            "the dispatch cooldown temporarily hides the accepted job"
+        );
+        let mut outbox = outbox.into_active_model();
+        outbox.last_attempt_at = sea_orm::ActiveValue::Set(Some(
+            Utc.timestamp_opt(1_000, 0).unwrap().fixed_offset(),
+        ));
+        outbox.update(&ctx.db).await.expect("age attempt timestamp");
+
+        let due = yorishiro::models::queue_job_dispatch_outbox::due(&ctx.db)
+            .await
+            .expect("read recovered outbox");
+        assert_eq!(due.len(), 1, "the accepted dispatch becomes eligible again");
+        assert_eq!(due[0].lifecycle_id, Some(lifecycle.id));
+        assert_eq!(due[0].payload, jobs[0].data);
     })
     .await;
 }
@@ -302,6 +438,14 @@ async fn each_worker_class_is_sent_to_its_own_target() {
                 .await
                 .expect("enqueue");
         }
+        assert!(
+            sqlt::get_jobs(&pool, None, None)
+                .await
+                .expect("read queue before relay")
+                .is_empty(),
+            "producers do not publish worker jobs"
+        );
+        run_dispatch_relay(&ctx).await;
 
         let jobs = sqlt::get_jobs(&pool, None, None).await.expect("get_jobs");
         assert_eq!(jobs.len(), 3, "jobs: {jobs:?}");
@@ -364,6 +508,8 @@ async fn each_reindex_worker_class_is_sent_to_its_own_target() {
                 &ctx,
                 ReindexArgs {
                     lifecycle_id: None,
+                    dispatch_id: None,
+                    publishing_epoch: None,
                     workspace_id,
                     worker_class: class,
                     startup: false,
@@ -372,6 +518,14 @@ async fn each_reindex_worker_class_is_sent_to_its_own_target() {
             .await
             .expect("enqueue");
         }
+        assert!(
+            sqlt::get_jobs(&pool, None, None)
+                .await
+                .expect("read queue before relay")
+                .is_empty(),
+            "reindex producers do not publish worker jobs"
+        );
+        run_dispatch_relay(&ctx).await;
 
         let jobs = sqlt::get_jobs(&pool, None, None).await.expect("get_jobs");
         assert_eq!(jobs.len(), 3, "jobs: {jobs:?}");
@@ -427,6 +581,8 @@ async fn missing_billing_uses_free_policy_for_reindex_but_not_embedding() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -493,6 +649,8 @@ async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -552,6 +710,8 @@ async fn enterprise_billing_plan_uses_team_queue_policy() {
                 &ctx,
                 ReindexArgs {
                     lifecycle_id: None,
+                    dispatch_id: None,
+                    publishing_epoch: None,
                     workspace_id,
                     worker_class: class,
                     startup: false,
@@ -604,6 +764,8 @@ async fn enterprise_billing_plan_uses_team_queue_fallback_without_official_overr
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -653,6 +815,8 @@ async fn pro_plan_has_no_official_cap_when_policy_is_disabled() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -700,6 +864,8 @@ async fn disabled_policy_ignores_official_override_without_changing_metadata() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -744,6 +910,8 @@ async fn present_invalid_billing_plan_remains_diagnostic() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -793,7 +961,7 @@ async fn invalid_billing_does_not_affect_embedding_process_local_admission() {
 }
 
 #[tokio::test]
-#[serial_test::serial(queue_postgres)]
+#[serial_test::serial(queue_backend)]
 #[serial_test::serial(process_environment)]
 async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
     if !super::is_sqlite_queue() {
@@ -806,7 +974,7 @@ async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
     );
     let config = SqliteQueueConfig {
         uri,
-        dangerously_flush: true,
+        dangerously_flush: false,
         enable_logging: false,
         max_connections: 2,
         min_connections: 1,
@@ -828,7 +996,7 @@ async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
 }
 
 #[tokio::test]
-#[serial_test::serial(queue_postgres)]
+#[serial_test::serial(queue_backend)]
 #[serial_test::serial(process_environment)]
 async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
     if !super::super::require_postgres_backend() {
@@ -836,7 +1004,7 @@ async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
     }
     let config = PostgresQueueConfig {
         uri: std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL"),
-        dangerously_flush: true,
+        dangerously_flush: false,
         enable_logging: false,
         max_connections: 2,
         min_connections: 1,
@@ -858,7 +1026,7 @@ async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
 }
 
 #[tokio::test]
-#[serial_test::serial(queue_postgres)]
+#[serial_test::serial(queue_backend)]
 #[serial_test::serial(process_environment)]
 async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
     let Some(uri) = crate::valkey_test_url() else {
@@ -867,10 +1035,12 @@ async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
         );
         return;
     };
+    let queue_name = format!("bounded-scan:{}", Uuid::now_v7());
+    let cleanup_uri = uri.clone();
     let config = RedisQueueConfig {
         uri,
-        dangerously_flush: true,
-        queues: None,
+        dangerously_flush: false,
+        queues: Some(vec![queue_name.clone()]),
         num_workers: 1,
         reaper: None,
     };
@@ -879,112 +1049,124 @@ async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
             .await
             .expect("Redis queue"),
     );
-    with_queue_cleanup(queue, |queue| async move {
-        let result = std::panic::AssertUnwindSafe(async {
-            queue.setup().await.expect("set up Redis queue");
-            queue
-                .register(CompetingWorker)
-                .await
-                .expect("register competing worker");
-            let run_id = format!("bounded-redis-{}", Uuid::now_v7());
-            queue
-                .enqueue(
-                    CompetingWorker::class_name(),
-                    None,
+    let cleanup_ids = Arc::new(Mutex::new(Vec::<String>::new()));
+    let cleanup_ids_for_test = cleanup_ids.clone();
+    let worker_handle = Arc::new(tokio::sync::Mutex::new(None));
+    let worker_handle_for_test = worker_handle.clone();
+    let result = std::panic::AssertUnwindSafe(async {
+        queue.setup().await.expect("set up Redis queue");
+        queue
+            .register(CompetingWorker)
+            .await
+            .expect("register competing worker");
+        let run_id = format!("bounded-redis-{}", Uuid::now_v7());
+        let control_id = enqueue_owned_redis_job(
+            &queue,
+            &queue_name,
+            CompetingArgs {
+                run_id: run_id.clone(),
+                name: "in-window-control".to_owned(),
+            },
+            vec![COMPETING_TAG.to_owned()],
+            400,
+        )
+        .await;
+        let mut owned_ids = vec![control_id];
+        *cleanup_ids_for_test.lock().expect("owned ID lock") = owned_ids.clone();
+        let progress = COMPETING_PROGRESS.get_or_init(|| {
+            let (sender, _receiver) = tokio::sync::watch::channel(HashMap::new());
+            sender
+        });
+        let mut counts = progress.borrow().clone();
+        counts.insert(run_id.clone(), 0);
+        let _ = progress.send(counts);
+        let mut progress = progress.subscribe();
+        let running_queue = queue.clone();
+        let handle =
+            tokio::spawn(async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await });
+        *worker_handle_for_test.lock().await = Some(handle);
+        let run_result = std::panic::AssertUnwindSafe(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while progress.borrow().get(&run_id).copied().unwrap_or_default() < 1 {
+                    progress.changed().await.expect("Redis control progress");
+                }
+            })
+            .await
+            .expect("Redis in-window control completed");
+            for index in 0..1000 {
+                owned_ids.push(
+                    enqueue_owned_redis_job(
+                        &queue,
+                        &queue_name,
+                        CompetingArgs {
+                            run_id: run_id.clone(),
+                            name: format!("mismatch-{index}"),
+                        },
+                        vec!["queue-test:other".to_owned()],
+                        300,
+                    )
+                    .await,
+                );
+                *cleanup_ids_for_test.lock().expect("owned ID lock") = owned_ids.clone();
+            }
+            owned_ids.push(
+                enqueue_owned_redis_job(
+                    &queue,
+                    &queue_name,
                     CompetingArgs {
                         run_id: run_id.clone(),
-                        name: "in-window-control".to_owned(),
+                        name: "matching-beyond-scan".to_owned(),
                     },
-                    Some(vec![COMPETING_TAG.to_owned()]),
-                    Some(400),
+                    vec![COMPETING_TAG.to_owned()],
+                    200,
                 )
-                .await
-                .expect("enqueue Redis in-window control");
-            let progress = COMPETING_PROGRESS.get_or_init(|| {
-                let (sender, _receiver) = tokio::sync::watch::channel(HashMap::new());
-                sender
-            });
-            let mut counts = progress.borrow().clone();
-            counts.insert(run_id.clone(), 0);
-            let _ = progress.send(counts);
-            let mut progress = progress.subscribe();
-            let running_queue = queue.clone();
-            let handle =
-                tokio::spawn(
-                    async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await },
-                );
-            let run_result = std::panic::AssertUnwindSafe(async {
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    while progress.borrow().get(&run_id).copied().unwrap_or_default() < 1 {
-                        progress.changed().await.expect("Redis control progress");
+                .await,
+            );
+            *cleanup_ids_for_test.lock().expect("owned ID lock") = owned_ids.clone();
+            assert!(
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    loop {
+                        if progress.borrow().get(&run_id).copied().unwrap_or_default() > 1 {
+                            return;
+                        }
+                        progress
+                            .changed()
+                            .await
+                            .expect("Redis beyond-scan progress");
                     }
                 })
                 .await
-                .expect("Redis in-window control completed");
-                for index in 0..1000 {
-                    queue
-                        .enqueue(
-                            CompetingWorker::class_name(),
-                            None,
-                            CompetingArgs {
-                                run_id: run_id.clone(),
-                                name: format!("mismatch-{index}"),
-                            },
-                            Some(vec!["queue-test:other".to_owned()]),
-                            Some(300),
-                        )
-                        .await
-                        .expect("enqueue Redis scan filler");
-                }
-                queue
-                    .enqueue(
-                        CompetingWorker::class_name(),
-                        None,
-                        CompetingArgs {
-                            run_id: run_id.clone(),
-                            name: "matching-beyond-scan".to_owned(),
-                        },
-                        Some(vec![COMPETING_TAG.to_owned()]),
-                        Some(200),
-                    )
-                    .await
-                    .expect("enqueue Redis beyond-scan job");
-                assert!(
-                    tokio::time::timeout(Duration::from_secs(2), async {
-                        loop {
-                            if progress.borrow().get(&run_id).copied().unwrap_or_default() > 1 {
-                                return;
-                            }
-                            progress
-                                .changed()
-                                .await
-                                .expect("Redis beyond-scan progress");
-                        }
-                    })
-                    .await
-                    .is_err(),
-                    "matching job outside Redis bounded scan was processed"
-                );
-            })
-            .catch_unwind()
-            .await;
-            let _ = queue.shutdown();
-            let join_result = handle.await;
-            let clear_result = queue.clear().await;
-            if let Err(panic) = run_result {
-                std::panic::resume_unwind(panic);
-            }
-            join_result
-                .expect("join Redis worker")
-                .expect("run Redis worker");
-            clear_result.expect("clear Redis queue");
+                .is_err(),
+                "matching job outside Redis bounded scan was processed"
+            );
         })
         .catch_unwind()
         .await;
         let _ = queue.shutdown();
-        if let Err(panic) = result {
-            std::panic::resume_unwind(panic);
-        }
+        run_result
     })
+    .catch_unwind()
     .await;
+    let _ = queue.shutdown();
+    let join_result = if let Some(mut handle) = worker_handle.lock().await.take() {
+        match tokio::time::timeout(Duration::from_secs(3), &mut handle).await {
+            Ok(result) => Some(result),
+            Err(_) => {
+                handle.abort();
+                Some(handle.await)
+            }
+        }
+    } else {
+        None
+    };
+    let owned_ids = cleanup_ids.lock().expect("owned ID lock").clone();
+    remove_owned_redis_jobs(&cleanup_uri, &queue_name, &owned_ids).await;
+    match result {
+        Ok(Ok(())) => match join_result.expect("worker was started") {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => panic!("run Redis worker: {error}"),
+            Err(error) => panic!("join Redis worker: {error}"),
+        },
+        Ok(Err(panic)) | Err(panic) => std::panic::resume_unwind(panic),
+    }
 }

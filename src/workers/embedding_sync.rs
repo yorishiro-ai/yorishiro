@@ -81,6 +81,10 @@ pub(crate) fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
 pub struct EmbeddingSyncArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
+    #[serde(default)]
+    pub dispatch_id: Option<Uuid>,
+    #[serde(default)]
+    pub publishing_epoch: Option<i64>,
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
     pub worker_class: WorkerClass,
@@ -192,6 +196,17 @@ async fn perform_embedding_with_lifecycle(
     ctx: &AppContext,
     args: &EmbeddingSyncArgs,
 ) -> loco_rs::Result<()> {
+    if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
+        &ctx.db,
+        args.lifecycle_id,
+        args.dispatch_id,
+        args.publishing_epoch,
+    )
+    .await
+    .map_err(|e| loco_rs::Error::Message(e.to_string()))?
+    {
+        return Ok(());
+    }
     let concurrency = ctx
         .shared_store
         .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
@@ -265,7 +280,7 @@ async fn perform_embedding_with_lifecycle(
 
 /// The worker that embeds one entity.
 ///
-/// It declares no tags and no queue: a job's target is chosen when the job is enqueued ([`crate::workers::target::enqueue`]), and a worker process chooses which targets to serve when it starts.
+/// It declares no tags and no queue: the durable dispatcher records a job's resolved target, and a worker process chooses which targets to serve when it starts.
 pub struct EmbeddingSyncWorker {
     ctx: AppContext,
 }
@@ -290,7 +305,7 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loc
         .shared_store
         .get::<Arc<dyn EmbeddingSyncDispatcher>>()
         .ok_or_else(|| loco_rs::Error::Message("EmbeddingSyncDispatcher missing".into()))?;
-    enqueue_for_class_with_dispatcher(ctx, args, dispatcher.as_ref()).await
+    enqueue_for_class_with_dispatcher(ctx, args, None, dispatcher.as_ref()).await
 }
 
 ///
@@ -299,36 +314,17 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loc
 pub async fn enqueue_for_class_with_dispatcher(
     ctx: &AppContext,
     args: EmbeddingSyncArgs,
+    txn: Option<&sea_orm::DatabaseTransaction>,
     dispatcher: &dyn EmbeddingSyncDispatcher,
 ) -> loco_rs::Result<()> {
-    dispatcher.dispatch(ctx, args).await.map(|_job_id| ())
-}
-
-/// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
-/// The application uses the persistent queue mode, so `perform_later_with_priority` persists the job and returns before the embedding provider round trip begins.
-/// A process restart or forced kill leaves the job in the configured provider for the next worker run.
-/// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
-///
-/// This lives here rather than beside one transport's handlers because both of them need it: every entity write that does not call this leaves `entity_entities.embedding` NULL forever, and such an entity is reachable only through the `pg_trgm` fuzzy fallback, so the symptom is search quietly returning worse results rather than any error.
-pub(crate) async fn enqueue_after_write(ctx: &AppContext, workspace_id: Uuid, entity_id: Uuid) {
-    let dispatcher = match ctx.shared_store.get::<Arc<dyn EmbeddingSyncDispatcher>>() {
-        Some(dispatcher) => dispatcher,
-        None => {
-            tracing::warn!(entity_id = %entity_id, "EmbeddingSyncDispatcher missing");
-            return;
-        }
-    };
-    if let Err(err) =
-        enqueue_after_write_with_dispatcher(ctx, workspace_id, entity_id, dispatcher.as_ref()).await
-    {
-        tracing::warn!(entity_id = %entity_id, error = %err, "failed to enqueue embedding sync");
-    }
+    dispatcher.dispatch(ctx, args, txn).await.map(|_job_id| ())
 }
 
 pub(crate) async fn enqueue_after_write_with_dispatcher(
     ctx: &AppContext,
     workspace_id: Uuid,
     entity_id: Uuid,
+    txn: Option<&sea_orm::DatabaseTransaction>,
     dispatcher: &dyn EmbeddingSyncDispatcher,
 ) -> loco_rs::Result<()> {
     let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
@@ -342,9 +338,11 @@ pub(crate) async fn enqueue_after_write_with_dispatcher(
     };
     let args = EmbeddingSyncArgs {
         lifecycle_id: None,
+        dispatch_id: None,
+        publishing_epoch: None,
         workspace_id,
         entity_id,
         worker_class,
     };
-    enqueue_for_class_with_dispatcher(ctx, args, dispatcher).await
+    enqueue_for_class_with_dispatcher(ctx, args, txn, dispatcher).await
 }

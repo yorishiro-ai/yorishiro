@@ -232,6 +232,8 @@ mod concurrency {
             ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id,
                 worker_class: class,
                 startup: false,
@@ -353,6 +355,8 @@ mod concurrency {
                 &ctx,
                 ReindexArgs {
                     lifecycle_id: None,
+                    dispatch_id: None,
+                    publishing_epoch: None,
                     workspace_id: missing,
                     worker_class: WorkerClass::TenantPrivate,
                     startup: false,

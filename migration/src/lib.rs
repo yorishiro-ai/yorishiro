@@ -24,6 +24,9 @@ mod m20261005_000017_embedding_tables_tenant_read;
 mod m20261006_000018_embedding_queue_state;
 mod m20261009_000019_template_tags_json;
 mod m20261011_000020_inference_one_running_job_per_workspace;
+mod m20261015_160234_queue_publishing_epoch;
+mod m20261015_160332_query_embedding_deadline;
+mod m20261016_000021_queue_replay_snapshot_id;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -51,6 +54,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20261006_000018_embedding_queue_state::Migration),
             Box::new(m20261009_000019_template_tags_json::Migration),
             Box::new(m20261011_000020_inference_one_running_job_per_workspace::Migration),
+            Box::new(m20261015_160234_queue_publishing_epoch::Migration),
+            Box::new(m20261015_160332_query_embedding_deadline::Migration),
+            Box::new(m20261016_000021_queue_replay_snapshot_id::Migration),
             // inject-above (do not remove this comment)
         ]
     }

@@ -900,6 +900,7 @@ impl InferFillDispatcher for FailingInferFillDispatcher {
         &self,
         _ctx: &loco_rs::app::AppContext,
         args: InferFillArgs,
+        _txn: Option<&sea_orm::DatabaseTransaction>,
     ) -> loco_rs::Result<String> {
         *self.args.lock().unwrap() = Some(args);
         Err(loco_rs::Error::Message(
@@ -1031,6 +1032,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
 #[tokio::test]
 async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
     use loco_rs::bgworker::BackgroundWorker;
+    use sea_orm::{ConnectionTrait, TransactionTrait};
     use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
 
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1055,9 +1057,44 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
             .await
             .expect("create job");
 
+        let lifecycle_id = Uuid::now_v7();
+        let txn = ctx.db.begin().await.expect("begin lifecycle transaction");
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+            txn.execute_unprepared(&format!(
+                "SELECT set_config('app.current_tenant', '{}', true); SELECT set_config('app.current_workspace', '{}', true)",
+                setup.tenant_id, setup.workspace_id
+            ))
+            .await
+            .expect("set lifecycle RLS scope");
+        }
+        yorishiro::models::queue_job_dispatch_outbox::record_in_transaction(
+            &txn,
+            yorishiro::models::queue_job_lifecycles::Enqueue {
+                id: lifecycle_id,
+                job_name: "infer_fill",
+                worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
+                workspace_id: Some(setup.workspace_id),
+                plan: None,
+                concurrency_key: None,
+                concurrency_limit: None,
+            },
+            serde_json::json!({"job_id": job_id, "workspace_id": setup.workspace_id}),
+            InferFillWorker::class_name(),
+            Some(yorishiro::workers::target::WorkerTarget::Shared.queue()),
+            Some(vec![yorishiro::workers::target::WorkerTarget::Shared.tag()]),
+        )
+        .await
+        .expect("durable lifecycle dispatch");
+        txn.commit().await.expect("commit lifecycle dispatch");
+        let epoch = yorishiro::models::queue_job_dispatch_outbox::publishing_state(&ctx.db)
+            .await
+            .expect("publisher state")
+            .epoch;
         InferFillWorker::build(&ctx)
             .perform(InferFillArgs {
-                lifecycle_id: None,
+                lifecycle_id: Some(lifecycle_id),
+                dispatch_id: Some(lifecycle_id),
+                publishing_epoch: Some(epoch),
                 job_id,
                 workspace_id: setup.workspace_id,
                 schema_name: "note".into(),
@@ -1071,6 +1108,32 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
             .expect("job exists");
         assert_eq!(job.status, InferenceJobStatus::Completed, "{job:?}");
         assert_eq!(job.error, None);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn infer_fill_worker_rejects_unversioned_provider_delivery() {
+    use loco_rs::bgworker::BackgroundWorker;
+    use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
+
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let worker = InferFillWorker::build(&ctx);
+        for (dispatch_id, publishing_epoch) in
+            [(None, None), (Some(Uuid::new_v4()), None), (None, Some(1))]
+        {
+            let result = worker
+                .perform(InferFillArgs {
+                    lifecycle_id: None,
+                    dispatch_id,
+                    publishing_epoch,
+                    job_id: Uuid::new_v4(),
+                    workspace_id: Uuid::new_v4(),
+                    schema_name: "note".into(),
+                })
+                .await;
+            assert!(result.is_ok(), "rejected stale delivery is a no-op");
+        }
     })
     .await;
 }

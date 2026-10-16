@@ -128,6 +128,7 @@ serial_test.workspace = true
 tracing-subscriber = "0.3.23"
 # Used by queue and integration tests for isolated temporary databases.
 tempfile = { version = "3.27.0" }
+redis = { version = "=1.7.0", features = ["aio", "tokio-comp"] }
 # Used by the ee/ request tests folded into tests/requests/.
 axum-test = { version = "17.3.0" }
 # Required for catch_unwind on non-Send futures in boot_request wrapper.

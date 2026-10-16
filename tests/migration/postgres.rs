@@ -30,7 +30,7 @@ fn migrations_through(name: &str) -> u32 {
 /// A throwaway database, dropped and recreated so each run starts from nothing.
 ///
 /// A `DATABASE_URL` that is present but unusable panics rather than skipping.
-async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String) {
+async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String, String) {
     let base = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
 
     // Split the path from the query, so `?sslmode=require` and friends survive onto both derived
@@ -71,7 +71,7 @@ async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String) {
     let db = Database::connect(&target_url)
         .await
         .expect("connect to scratch database");
-    (db, unique_name)
+    (db, unique_name, target_url)
 }
 
 async fn close_scratch_db(db: sea_orm::DatabaseConnection, name: &str) -> Result<(), String> {
@@ -112,7 +112,7 @@ async fn with_scratch_db<F>(name: &str, test: F)
 where
     F: for<'a> FnOnce(&'a sea_orm::DatabaseConnection) -> futures::future::BoxFuture<'a, ()>,
 {
-    let (db, database_name) = scratch_db(name).await;
+    let (db, database_name, _target_url) = scratch_db(name).await;
     let result = AssertUnwindSafe(test(&db)).catch_unwind().await;
     let cleanup = close_scratch_db(db, &database_name).await;
     match (result, cleanup) {
@@ -148,6 +148,187 @@ async fn rls_enabled(db: &sea_orm::DatabaseConnection) -> bool {
     .expect("RLS state row")
     .try_get_by_index(0)
     .expect("read RLS state")
+}
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn publishing_state_is_select_only_for_tenant_and_shared_lock_is_callable() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_scratch_db("publishing_state_privileges", |db| {
+        async move {
+            Migrator::up(db, None).await.expect("migrations");
+            let privileges = db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres, "SELECT has_table_privilege('yorishiro_app', 'public.queue_publishing_state', 'UPDATE'), has_function_privilege('yorishiro_app', 'public.queue_publishing_epoch_shared_lock()', 'EXECUTE'), has_function_privilege('yorishiro_app', 'public.queue_publishing_epoch_exclusive_lock()', 'EXECUTE'), EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE p.oid = 'public.queue_publishing_epoch_exclusive_lock()'::regprocedure AND a.grantee = 0 AND a.privilege_type = 'EXECUTE')")).await.expect("check privileges").expect("privilege row");
+            assert!(!privileges.try_get_by_index::<bool>(0).expect("publisher update privilege"));
+            assert!(privileges.try_get_by_index::<bool>(1).expect("shared lock execute privilege"));
+            assert!(!privileges.try_get_by_index::<bool>(2).expect("exclusive lock execute privilege"));
+            assert!(!privileges.try_get_by_index::<bool>(3).expect("PUBLIC exclusive execute privilege"));
+            let role = db.begin().await.expect("begin role test");
+            role.execute_unprepared("SET ROLE yorishiro_app").await.expect("set application role");
+            let exclusive_call = role.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres, "SELECT public.queue_publishing_epoch_exclusive_lock()")).await;
+            assert!(exclusive_call.is_err(), "tenant role must not execute exclusive lock");
+            role.rollback().await.expect("release denied exclusive lock");
+            let txn = db.begin().await.expect("begin lock transaction");
+            txn.execute_unprepared("SET ROLE yorishiro_app")
+                .await
+                .expect("set role");
+            let result = txn
+                .execute_unprepared(
+                    "UPDATE public.queue_publishing_state SET epoch = epoch + 1 WHERE id = 1",
+                )
+                .await;
+            assert!(
+                result.is_err(),
+                "tenant role must not mutate publisher state"
+            );
+            txn.rollback().await.expect("rollback denied direct update");
+
+            let shared = db.begin().await.expect("begin shared-lock transaction");
+            shared.execute_unprepared("SET ROLE yorishiro_app").await.expect("set application role");
+            let _ = shared
+                .query_one_raw(Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    "SELECT public.queue_publishing_epoch_shared_lock()",
+                ))
+                .await
+                .expect("shared-lock function")
+                .expect("epoch row");
+            let blocked_db = db.clone();
+            let blocked = tokio::spawn(async move {
+                blocked_db
+                    .query_one_raw(Statement::from_string(
+                        sea_orm::DatabaseBackend::Postgres,
+                        "SELECT public.queue_publishing_epoch_exclusive_lock()",
+                    ))
+                    .await
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert!(!blocked.is_finished(), "exclusive lock must wait for shared lock");
+            shared.execute_unprepared("RESET ROLE")
+                .await
+                .expect("reset role");
+            shared.rollback().await.expect("release shared lock transaction");
+            blocked.await.expect("exclusive lock task").expect("exclusive lock query");
+        }
+        .boxed()
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    let (db, database_name, target_url) = scratch_db("tenant_outbox_insert").await;
+    let result = AssertUnwindSafe(async {
+            Migrator::up(&db, None).await.expect("migrations");
+            let lifecycle_privileges = db
+                .query_one_raw(Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    "SELECT has_table_privilege('yorishiro_app', 'public.queue_job_lifecycles', 'SELECT'), has_table_privilege('yorishiro_app', 'public.queue_job_lifecycles', 'INSERT'), has_table_privilege('yorishiro_app', 'public.queue_job_lifecycles', 'UPDATE'), has_table_privilege('yorishiro_app', 'public.queue_job_lifecycles', 'DELETE')",
+                ))
+                .await
+                .expect("check scoped lifecycle privileges")
+                .expect("lifecycle privilege row");
+            assert!(lifecycle_privileges.try_get_by_index::<bool>(0).unwrap());
+            assert!(lifecycle_privileges.try_get_by_index::<bool>(1).unwrap());
+            assert!(lifecycle_privileges.try_get_by_index::<bool>(2).unwrap());
+            assert!(!lifecycle_privileges.try_get_by_index::<bool>(3).unwrap());
+            let lock_function_present: bool = db
+                .query_one_raw(Statement::from_string(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT to_regprocedure('public.queue_publishing_epoch_shared_lock()') IS NOT NULL AS present",
+            ))
+            .await
+            .expect("check lock function")
+            .expect("lock function row")
+                .try_get_by_index(0)
+                .expect("read lock function presence");
+            assert!(lock_function_present, "publisher lock function was migrated");
+            let tenant_id = "11111111-1111-4111-8111-111111111111";
+            let workspace_id = "22222222-2222-4222-8222-222222222222";
+            db.execute_unprepared(&format!(
+                "INSERT INTO tenant_tenants (id, name) VALUES ('{tenant_id}', 'outbox-test'); \
+                 INSERT INTO workspace_workspaces (id, tenant_id, name, status) VALUES ('{workspace_id}', '{tenant_id}', 'outbox-test', 'active')"
+            ))
+            .await
+            .expect("seed workspace");
+
+            let tenant_pool = yorishiro::db::TenantDb::connect(
+                &target_url,
+                2,
+            )
+            .await
+            .expect("build non-superuser tenant pool");
+            let tenant = uuid::Uuid::parse_str(tenant_id).unwrap();
+            let workspace = uuid::Uuid::parse_str(workspace_id).unwrap();
+            let txn = tenant_pool
+                .begin_for_workspace(tenant, workspace)
+                .await
+                .expect("begin tenant transaction");
+            let id = uuid::Uuid::now_v7();
+            yorishiro::models::queue_job_dispatch_outbox::record_in_transaction(
+                &txn,
+                yorishiro::models::queue_job_lifecycles::Enqueue {
+                    id,
+                    job_name: "outbox_insert_probe",
+                    worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
+                    workspace_id: Some(workspace),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+                serde_json::json!({"workspace_id": workspace}),
+                "ProbeWorker".into(),
+                None,
+                None,
+            )
+            .await
+            .expect("tenant-scoped outbox write");
+            for (name, sql) in [
+                ("cross-workspace insert", "INSERT INTO queue_job_lifecycles (id, job_name, worker_class, workspace_id, status, attempt, enqueue_at, created_at, updated_at) VALUES (gen_random_uuid(), 'probe', 'shared', '33333333-3333-4333-8333-333333333333', 'queued', 1, NOW(), NOW(), NOW())"),
+                ("global insert", "INSERT INTO queue_job_lifecycles (id, job_name, worker_class, workspace_id, status, attempt, enqueue_at, created_at, updated_at) VALUES (gen_random_uuid(), 'probe', 'shared', NULL, 'queued', 1, NOW(), NOW(), NOW())"),
+                ("delete", "DELETE FROM queue_job_lifecycles"),
+            ] {
+                txn.execute_unprepared("SAVEPOINT lifecycle_probe")
+                    .await
+                    .expect("savepoint lifecycle probe");
+                let denied = txn.execute_unprepared(sql).await;
+                assert!(denied.is_err(), "tenant role must be denied {name}");
+                txn.execute_unprepared("ROLLBACK TO SAVEPOINT lifecycle_probe")
+                    .await
+                    .expect("restore transaction after denied statement");
+            }
+            let hidden = txn
+                .query_one_raw(Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    "SELECT count(*) AS count FROM queue_job_lifecycles WHERE workspace_id IS NULL OR workspace_id <> '22222222-2222-4222-8222-222222222222'",
+                ))
+                .await
+                .expect("read rows outside workspace")
+                .expect("count row")
+                .try_get_by_index::<i64>(0)
+                .expect("read count");
+            assert_eq!(hidden, 0, "tenant role cannot see global or cross-workspace lifecycles");
+            txn.commit().await.expect("commit tenant transaction");
+        })
+        .catch_unwind()
+        .await;
+    let cleanup = close_scratch_db(db, &database_name).await;
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(error)) => panic!("scratch database cleanup failed: {error}"),
+        (Err(panic), Ok(())) => std::panic::resume_unwind(panic),
+        (Err(panic), Err(error)) => {
+            eprintln!("scratch database cleanup also failed: {error}");
+            std::panic::resume_unwind(panic);
+        }
+    }
 }
 
 #[tokio::test]
@@ -192,30 +373,125 @@ async fn all_migrations_roll_back_and_reapply_on_postgres() {
 #[tokio::test]
 #[serial(postgres_cluster)]
 #[serial(process_environment)]
-async fn inference_job_attempt_migration_grants_update_to_app_role() {
+async fn queue_epoch_upgrade_grants_insert_to_existing_inference_job_installations() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    with_scratch_db("attempt_privileges", |db| {
+    with_scratch_db("queue_epoch_inference_insert", |db| {
         async move {
-            Migrator::up(db, None).await.expect("run all migrations");
-            assert!(privilege(db, "SELECT").await);
-            assert!(privilege(db, "UPDATE").await);
-            // Roll back through the privilege migration (file 000013) from the full applied list.
-            // The rollback steps back = total migrations minus the privilege migration's position.
-            let total = Migrator::migrations().len() as u32;
-            let priv_pos = migrations_through("m20260930_000013_inference_job_attempt_privileges");
-            let steps_back = total - priv_pos + 1;
-            Migrator::down(db, Some(steps_back))
+            let workspace_a = "11111111-1111-4111-8111-111111111111";
+            let workspace_b = "22222222-2222-4222-8222-222222222222";
+            let tenant = "33333333-3333-4333-8333-333333333333";
+            let existing_job = "44444444-4444-4444-8444-444444444444";
+            let new_job = "55555555-5555-4555-8555-555555555555";
+
+            let attempt_privilege =
+                migrations_through("m20260930_000013_inference_job_attempt_privileges");
+            Migrator::up(db, Some(attempt_privilege))
                 .await
-                .expect("roll back the api_key_name, starvation-index, and privilege migrations");
+                .expect("apply through the already-shipped inference privilege migration");
             assert!(privilege(db, "SELECT").await);
-            assert!(!privilege(db, "UPDATE").await);
-            assert!(!rls_enabled(db).await);
+            assert!(!privilege(db, "INSERT").await);
+            assert!(privilege(db, "UPDATE").await);
+
+            db.execute_unprepared(&format!(
+                "INSERT INTO tenant_tenants (id, name) VALUES ('{tenant}', 'queue-epoch-upgrade'); \
+                 INSERT INTO workspace_workspaces (id, tenant_id, name, status) VALUES ('{workspace_a}', '{tenant}', 'upgrade-a', 'active'), ('{workspace_b}', '{tenant}', 'upgrade-b', 'active'); \
+                 INSERT INTO inference_jobs (id, workspace_id, schema_name, status) VALUES ('{existing_job}', '{workspace_a}', 'existing-schema', 'queued')"
+            ))
+            .await
+            .expect("populate the existing installation before the new migration");
+
+            let denied = db.begin().await.expect("begin pre-upgrade tenant insert");
+            denied
+                .execute_unprepared("SET ROLE yorishiro_app")
+                .await
+                .expect("assume tenant role before upgrade");
+            denied
+                .execute_unprepared(&format!(
+                    "SELECT set_config('app.current_workspace', '{workspace_a}', false)"
+                ))
+                .await
+                .expect("scope the pre-upgrade insert");
+            assert!(
+                denied
+                    .execute_unprepared(&format!(
+                        "INSERT INTO inference_jobs (id, workspace_id, schema_name, status) VALUES ('{new_job}', '{workspace_a}', 'new-schema', 'queued')"
+                    ))
+                    .await
+                    .is_err(),
+                "an installation at migration 013 must not yet have INSERT privilege"
+            );
+            denied.rollback().await.expect("rollback denied insert");
+
             Migrator::up(db, None)
                 .await
-                .expect("reapply the privilege migration");
+                .expect("upgrade the populated installation through the queue migration");
             assert!(privilege(db, "SELECT").await);
+            assert!(privilege(db, "INSERT").await);
+            assert!(privilege(db, "UPDATE").await);
+            assert!(rls_enabled(db).await);
+            let preserved: i64 = db
+                .query_one_raw(Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    format!("SELECT COUNT(*) FROM inference_jobs WHERE id = '{existing_job}'"),
+                ))
+                .await
+                .expect("read populated inference jobs")
+                .expect("existing job count")
+                .try_get_by_index(0)
+                .expect("decode existing job count");
+            assert_eq!(preserved, 1, "the migration preserves existing jobs");
+
+            let tenant_txn = db.begin().await.expect("begin upgraded tenant write");
+            tenant_txn
+                .execute_unprepared("SET ROLE yorishiro_app")
+                .await
+                .expect("assume upgraded tenant role");
+            tenant_txn
+                .execute_unprepared(&format!(
+                    "SELECT set_config('app.current_workspace', '{workspace_a}', false)"
+                ))
+                .await
+                .expect("set upgraded tenant workspace");
+            tenant_txn
+                .execute_unprepared(&format!(
+                    "INSERT INTO inference_jobs (id, workspace_id, schema_name, status) VALUES ('{new_job}', '{workspace_a}', 'new-schema', 'queued')"
+                ))
+                .await
+                .expect("tenant can create an inference job after upgrade");
+            let cross_workspace: i64 = tenant_txn
+                .query_one_raw(Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    format!("SELECT COUNT(*) FROM inference_jobs WHERE workspace_id = '{workspace_b}'"),
+                ))
+                .await
+                .expect("RLS-scoped cross-workspace query")
+                .expect("cross-workspace count")
+                .try_get_by_index(0)
+                .expect("decode cross-workspace count");
+            assert_eq!(cross_workspace, 0, "INSERT grant must not weaken RLS");
+            tenant_txn
+                .rollback()
+                .await
+                .expect("rollback upgraded tenant fixture writes");
+
+            // Rolling back the queue migration restores migration 013's INSERT privilege state.
+            let total = Migrator::migrations().len() as u32;
+            let queue_epoch_pos = migrations_through("m20261015_160234_queue_publishing_epoch");
+            let steps_back = total - queue_epoch_pos + 1;
+            Migrator::down(db, Some(steps_back))
+                .await
+                .expect("roll back newer migrations through the queue epoch grant");
+            assert!(privilege(db, "SELECT").await);
+            assert!(!privilege(db, "INSERT").await);
+            assert!(privilege(db, "UPDATE").await);
+            assert!(rls_enabled(db).await);
+            Migrator::up(db, None)
+                .await
+                .expect("reapply the queue epoch insert grant");
+            assert!(privilege(db, "SELECT").await);
+            assert!(privilege(db, "INSERT").await);
             assert!(privilege(db, "UPDATE").await);
             assert!(rls_enabled(db).await);
         }

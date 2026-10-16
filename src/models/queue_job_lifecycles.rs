@@ -3,7 +3,7 @@ use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{
-    DatabaseBackend, DatabaseTransaction, ExprTrait, IntoActiveModel, PaginatorTrait, QuerySelect,
+    DatabaseBackend, DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect,
     SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use tokio::task::JoinHandle;
@@ -112,13 +112,20 @@ impl Entity {
         id: Uuid,
         provider_job_id: &str,
     ) -> Result<(), DbErr> {
-        let mut row = Entity::find_by_id(id)
-            .one(db)
-            .await?
-            .ok_or(DbErr::RecordNotFound("queue lifecycle".into()))?
-            .into_active_model();
-        row.provider_job_id = Set(Some(provider_job_id.to_owned()));
-        row.update(db).await.map(|_| ())
+        let result = Entity::update_many()
+            .col_expr(
+                Column::ProviderJobId,
+                Expr::value(Some(provider_job_id.to_owned())),
+            )
+            .filter(Column::Id.eq(id))
+            .filter(Column::Status.eq(LifecycleStatus::Queued.as_db_str()))
+            .exec(db)
+            .await?;
+        if result.rows_affected == 1 {
+            Ok(())
+        } else {
+            Err(DbErr::RecordNotFound("queued queue lifecycle".into()))
+        }
     }
 
     /// Whether `workspace_id` already has a `job_name` job that is queued, running or waiting for a retry.
@@ -159,6 +166,7 @@ impl Entity {
                 Expr::value(LifecycleStatus::Retrying.as_db_str()),
             )
             .col_expr(Column::RetryAt, Expr::value(now))
+            .col_expr(Column::ProviderJobId, Expr::value(None::<String>))
             .col_expr(
                 Column::LeaseUntil,
                 Expr::value(Option::<DateTimeWithTimeZone>::None),
@@ -371,16 +379,6 @@ impl Entity {
         let result = update.exec(db).await?;
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
-        }
-        if matches!(
-            status,
-            LifecycleStatus::Completed
-                | LifecycleStatus::Failed
-                | LifecycleStatus::Cancelled
-                | LifecycleStatus::Unavailable
-        ) && let Err(error) = crate::models::queue_job_dispatch_outbox::remove(db, id).await
-        {
-            tracing::warn!(lifecycle_id = %id, diagnostic = %error, "terminal lifecycle outbox cleanup failed");
         }
         Ok(())
     }

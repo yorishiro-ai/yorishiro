@@ -175,15 +175,45 @@ where
     W: BackgroundWorker<A>,
     A: Clone + Send + Sync + Serialize + 'static,
 {
-    crate::models::queue_job_dispatch_outbox::attempted(&ctx.db, lifecycle_id)
-        .await
-        .map_err(message)?;
-    let scheduling = crate::workers::queue::decide(class);
     let target = WorkerTarget::for_job(&ctx.db, class, workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    crate::workers::target::enqueue::<W, A>(ctx, target, args.clone(), Some(scheduling.priority))
-        .await?;
+    let mut payload =
+        serde_json::to_value(args).map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    if let serde_json::Value::Object(fields) = &mut payload {
+        fields.insert(
+            "lifecycle_id".into(),
+            serde_json::Value::String(lifecycle_id.to_string()),
+        );
+        fields.insert(
+            "dispatch_id".into(),
+            serde_json::Value::String(lifecycle_id.to_string()),
+        );
+        fields.insert(
+            "workspace_id".into(),
+            serde_json::Value::String(workspace_id.to_string()),
+        );
+    }
+    let tenant_id =
+        crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
+            .await
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    crate::models::queue_job_dispatch_outbox::record_lifecycle_payload(
+        &txn,
+        lifecycle_id,
+        payload,
+        W::class_name(),
+        Some(target.queue()),
+        Some(vec![target.tag()]),
+    )
+    .await
+    .map_err(message)?;
+    txn.commit()
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     Ok(())
 }
 

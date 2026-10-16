@@ -119,14 +119,33 @@ impl YorishiroMcpServer {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        authorized.commit().await?;
-        // Same enqueue the REST handler does, and for the same reason: an entity written without it keeps `embedding` NULL forever and is reachable only through the `pg_trgm` fuzzy fallback, so the transport a write arrived on must not decide whether it becomes searchable.
-        crate::workers::embedding_sync::enqueue_after_write(
+        // Same durable enqueue as REST, committed atomically with the entity.
+        let dispatcher = match self
+            .app_context()
+            .shared_store
+            .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
+        {
+            Some(value) => value,
+            None => {
+                return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
+                    anyhow::anyhow!("dispatcher missing"),
+                )));
+            }
+        };
+        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write_with_dispatcher(
             self.app_context(),
             workspace_id,
             record.id,
+            Some(authorized.txn()),
+            dispatcher.as_ref(),
         )
-        .await;
+        .await
+        {
+            return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
+                anyhow::anyhow!(err.to_string()),
+            )));
+        }
+        authorized.commit().await?;
         ok_json(record)
     }
 
@@ -178,14 +197,32 @@ impl YorishiroMcpServer {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        authorized.commit().await?;
-        // The data changed, so the stored vector no longer matches it; re-syncing is the same follow-up the REST update handler performs.
-        crate::workers::embedding_sync::enqueue_after_write(
+        let dispatcher = match self
+            .app_context()
+            .shared_store
+            .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
+        {
+            Some(value) => value,
+            None => {
+                return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
+                    anyhow::anyhow!("dispatcher missing"),
+                )));
+            }
+        };
+        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write_with_dispatcher(
             self.app_context(),
             workspace_id,
             record.id,
+            Some(authorized.txn()),
+            dispatcher.as_ref(),
         )
-        .await;
+        .await
+        {
+            return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
+                anyhow::anyhow!(err.to_string()),
+            )));
+        }
+        authorized.commit().await?;
         ok_json(record)
     }
 

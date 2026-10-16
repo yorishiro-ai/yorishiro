@@ -27,7 +27,12 @@ struct RecordingDispatcher(Mutex<Vec<ReindexArgs>>);
 
 #[async_trait]
 impl ReindexDispatcher for RecordingDispatcher {
-    async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: ReindexArgs,
+        _txn: Option<&sea_orm::DatabaseTransaction>,
+    ) -> loco_rs::Result<String> {
         Lifecycles::record_enqueue(
             &ctx.db,
             Enqueue {

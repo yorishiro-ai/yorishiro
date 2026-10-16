@@ -138,7 +138,7 @@ fn titles(hits: &serde_json::Value) -> Vec<String> {
 /// The whole semantic path with the model only in the worker: the server enqueues the query, a worker embeds it as `Query`, and the vector ranks the entities.
 /// Two searches run at once, and each must get the vector for its own text.
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
     let provider = Arc::new(KeywordProvider::new(768));
@@ -192,7 +192,7 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
 
 /// With no worker running the search must fail, loudly and boundedly: a lexical fallback would return results the caller did not ask for.
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
     let guard = crate::EnvGuard::capture(&[
@@ -234,7 +234,7 @@ async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fall
 /// A worker that answers after the search stopped waiting must not resurrect the request or fail.
 /// The queue polls once a second, so the timeout is long enough for the worker to claim the job and the provider slower than the timeout.
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn a_result_that_arrives_after_the_timeout_is_discarded() {
     let guard = crate::EnvGuard::capture(&[
@@ -273,7 +273,7 @@ async fn a_result_that_arrives_after_the_timeout_is_discarded() {
 
 /// A worker that cannot embed records why, and the search reports it as an unavailable service rather than a bad request.
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn a_worker_failure_reaches_the_caller_as_service_unavailable() {
     let provider = Arc::new(FailingProvider(|| YorishiroError::ProviderUnreachable {
@@ -308,7 +308,7 @@ async fn a_worker_failure_reaches_the_caller_as_service_unavailable() {
 
 /// A model whose width the workspace's vectors do not have is refused by the worker, against the same registry the writes use.
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn a_width_the_workspace_does_not_hold_is_refused_by_the_worker() {
     boot_with_query_worker(
@@ -340,7 +340,7 @@ async fn a_width_the_workspace_does_not_hold_is_refused_by_the_worker() {
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=none` on the worker is an accurate, immediate answer, not a timeout.
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn a_disabled_embedding_provider_is_reported_by_the_worker() {
     let settings: yorishiro::data::settings::Settings = serde_json::from_value(serde_json::json!({

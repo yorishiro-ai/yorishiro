@@ -30,6 +30,10 @@ use crate::workers::embedding_sync::WorkerClass;
 pub struct ReindexArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
+    #[serde(default)]
+    pub dispatch_id: Option<Uuid>,
+    #[serde(default)]
+    pub publishing_epoch: Option<i64>,
     pub workspace_id: Uuid,
     pub worker_class: WorkerClass,
     #[serde(default)]
@@ -119,7 +123,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
 
 /// The worker that reindexes one workspace.
 ///
-/// It declares no tags and no queue: the target is chosen when the job is enqueued ([`crate::workers::target::enqueue`]).
+/// It declares no tags and no queue: the durable dispatcher records the resolved target in the outbox.
 pub struct ReindexWorker {
     ctx: AppContext,
 }
@@ -131,6 +135,17 @@ impl BackgroundWorker<ReindexArgs> for ReindexWorker {
     }
 
     async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
+        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
+            &self.ctx.db,
+            args.lifecycle_id,
+            args.dispatch_id,
+            args.publishing_epoch,
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
+        {
+            return Ok(());
+        }
         crate::workers::lifecycle::perform_with_terminal_lifecycle::<Self, _, _, _>(
             &self.ctx,
             args.lifecycle_id,
@@ -152,7 +167,7 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: ReindexArgs) -> loco_rs::
         .shared_store
         .get::<Arc<dyn ReindexDispatcher>>()
         .ok_or_else(|| loco_rs::Error::Message("ReindexDispatcher missing".into()))?;
-    enqueue_for_class_with_dispatcher(ctx, args, dispatcher.as_ref()).await
+    enqueue_for_class_with_dispatcher(ctx, args, None, dispatcher.as_ref()).await
 }
 
 ///
@@ -161,9 +176,10 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: ReindexArgs) -> loco_rs::
 pub async fn enqueue_for_class_with_dispatcher(
     ctx: &AppContext,
     args: ReindexArgs,
+    txn: Option<&sea_orm::DatabaseTransaction>,
     dispatcher: &dyn ReindexDispatcher,
 ) -> loco_rs::Result<()> {
-    dispatcher.dispatch(ctx, args).await.map(|_job_id| ())
+    dispatcher.dispatch(ctx, args, txn).await.map(|_job_id| ())
 }
 
 /// Enqueue a reindex job with a substituted dispatcher.
@@ -173,6 +189,7 @@ pub async fn enqueue_for_class_with_dispatcher(
 pub async fn enqueue_reindex_with_dispatcher(
     ctx: &AppContext,
     workspace_id: Uuid,
+    txn: Option<&sea_orm::DatabaseTransaction>,
     dispatcher: &dyn ReindexDispatcher,
 ) -> loco_rs::Result<String> {
     if ctx.queue_provider.is_none() {
@@ -194,28 +211,14 @@ pub async fn enqueue_reindex_with_dispatcher(
         .dispatch(
             ctx,
             ReindexArgs {
+                dispatch_id: None,
+                publishing_epoch: None,
                 lifecycle_id: None,
                 workspace_id,
                 worker_class,
                 startup: false,
             },
+            txn,
         )
         .await
-}
-
-/// Enqueue a reindex job for `workspace_id` through Loco's queue.
-pub(crate) async fn enqueue_reindex(
-    ctx: &AppContext,
-    workspace_id: Uuid,
-) -> loco_rs::Result<String> {
-    if ctx.queue_provider.is_none() {
-        return Err(loco_rs::Error::Message(
-            "no queue provider configured".into(),
-        ));
-    }
-    let dispatcher = ctx
-        .shared_store
-        .get::<Arc<dyn ReindexDispatcher>>()
-        .ok_or_else(|| loco_rs::Error::Message("ReindexDispatcher missing".into()))?;
-    enqueue_reindex_with_dispatcher(ctx, workspace_id, dispatcher.as_ref()).await
 }

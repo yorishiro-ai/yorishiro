@@ -1,8 +1,3 @@
-use uuid::Uuid;
-use yorishiro::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
-use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
-use yorishiro::workers::target::WorkerTarget;
-
 /// What a provider swap must not change: a target keeps draining its own jobs however many another target has queued.
 ///
 /// Redis filters tags client-side over the first 1000 entries of a queue, where the SQL providers filter in the query, so every target has to get a queue of its own on Redis.
@@ -13,21 +8,56 @@ mod redis_routing {
 
     use loco_rs::bgworker::{self, BackgroundWorker};
     use loco_rs::config::RedisQueueConfig;
-    use sea_orm::EntityTrait;
+    use std::sync::Mutex;
+    use uuid::Uuid;
 
-    use super::*;
+    static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-    fn args(class: WorkerClass, lifecycle_id: Option<Uuid>) -> EmbeddingSyncArgs {
-        EmbeddingSyncArgs {
-            lifecycle_id,
-            workspace_id: Uuid::nil(),
-            entity_id: Uuid::nil(),
-            worker_class: class,
+    struct RoutingProbe;
+
+    #[async_trait::async_trait]
+    impl BackgroundWorker<serde_json::Value> for RoutingProbe {
+        fn build(_ctx: &loco_rs::app::AppContext) -> Self {
+            Self
+        }
+
+        async fn perform(&self, args: serde_json::Value) -> loco_rs::Result<()> {
+            SEEN.lock()
+                .expect("seen tags")
+                .push(args["tag"].as_str().unwrap_or_default().to_owned());
+            Ok(())
+        }
+    }
+
+    async fn remove_owned_jobs(uri: &str, jobs: &[(String, String)]) {
+        let client = loco_rs::bgworker::redis::RedisPool::open(uri).expect("open cleanup client");
+        let mut connection = client
+            .get_multiplexed_async_connection()
+            .await
+            .expect("connect cleanup client");
+        for (queue_name, id) in jobs {
+            let _: usize = redis::cmd("ZREM")
+                .arg(format!("queue:{queue_name}"))
+                .arg(id)
+                .query_async(&mut connection)
+                .await
+                .expect("remove owned queued member");
+            let _: usize = redis::cmd("SREM")
+                .arg(format!("processing:{queue_name}"))
+                .arg(id)
+                .query_async(&mut connection)
+                .await
+                .expect("remove owned processing member");
+            let _: usize = redis::cmd("DEL")
+                .arg(format!("job:{id}"))
+                .query_async(&mut connection)
+                .await
+                .expect("remove owned job key");
         }
     }
 
     #[tokio::test]
-    #[serial_test::serial(queue_postgres)]
+    #[serial_test::serial(queue_backend)]
     #[serial_test::serial(process_environment)]
     async fn a_target_drains_its_own_jobs_behind_a_backlog_of_another_target() {
         let Some(uri) = crate::valkey_test_url() else {
@@ -36,90 +66,80 @@ mod redis_routing {
             );
             return;
         };
-        crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-            // A worker process polls the queue of each target it serves, which `App::boot` configures from its tags.
-            let queue = Arc::new(
-                bgworker::redis::create_provider(&RedisQueueConfig {
-                    uri,
-                    dangerously_flush: false,
-                    queues: Some(vec![
-                        WorkerTarget::Shared.queue(),
-                        WorkerTarget::Official.queue(),
-                    ]),
-                    num_workers: 1,
-                    reaper: None,
-                })
-                .await
-                .expect("the worker's Redis queue provider"),
-            );
-            queue.setup().await.expect("set up Redis queue");
-            queue.clear().await.expect("clear Redis queue");
-            queue
-                .register(EmbeddingSyncWorker::build(&ctx))
-                .await
-                .expect("register the embedding worker");
+        let suffix = Uuid::now_v7();
+        let shared_tag = format!("worker-target:shared:test:{suffix}");
+        let official_tag = format!("worker-target:official:test:{suffix}");
+        let shared_queue = format!("queue-test:shared:{suffix}");
+        let official_queue = format!("queue-test:official:{suffix}");
+        let queue = Arc::new(
+            bgworker::redis::create_provider(&RedisQueueConfig {
+                uri: uri.clone(),
+                dangerously_flush: false,
+                queues: Some(vec![shared_queue.clone(), official_queue.clone()]),
+                num_workers: 1,
+                reaper: None,
+            })
+            .await
+            .expect("the worker's Redis queue provider"),
+        );
+        queue.setup().await.expect("set up Redis queue");
+        queue.register(RoutingProbe).await.expect("register probe");
 
-            // More than the 1000 entries Redis scans for a tag match.
-            queue
-                .enqueue_batch(
-                    EmbeddingSyncWorker::class_name(),
-                    Some(WorkerTarget::Official.queue()),
-                    (0..1100)
-                        .map(|_| (args(WorkerClass::Official, None), Some(200)))
-                        .collect(),
-                    Some(vec![WorkerTarget::Official.tag()]),
-                )
-                .await
-                .expect("enqueue the official backlog");
-
-            let id = Uuid::now_v7();
-            Entity::record_enqueue(
-                &ctx.db,
-                Enqueue {
-                    id,
-                    job_name: "redis-routing-test",
-                    worker_class: WorkerClass::Shared,
-                    workspace_id: None,
-                    plan: None,
-                    concurrency_key: None,
-                    concurrency_limit: None,
-                },
+        // More than the 1000 entries the Redis provider scans for one tag, isolated
+        // on this run's two named queues so unrelated DB15 backlog cannot enter it.
+        let backlog_ids = queue
+            .enqueue_batch(
+                RoutingProbe::class_name(),
+                Some(official_queue.clone()),
+                (0..1100)
+                    .map(|_| {
+                        (
+                            serde_json::json!({ "tag": official_tag.clone() }),
+                            Some(200),
+                        )
+                    })
+                    .collect(),
+                Some(vec![official_tag.clone()]),
             )
             .await
-            .unwrap();
-            queue
-                .enqueue(
-                    EmbeddingSyncWorker::class_name(),
-                    Some(WorkerTarget::Shared.queue()),
-                    args(WorkerClass::Shared, Some(id)),
-                    Some(vec![WorkerTarget::Shared.tag()]),
-                    Some(100),
-                )
-                .await
-                .expect("enqueue the shared job");
+            .expect("enqueue official backlog");
+        let mut owned_jobs: Vec<(String, String)> = backlog_ids
+            .into_iter()
+            .map(|id| (official_queue.clone(), id))
+            .collect();
+        let shared_id = queue
+            .enqueue(
+                RoutingProbe::class_name(),
+                Some(shared_queue.clone()),
+                serde_json::json!({ "tag": shared_tag.clone() }),
+                Some(vec![shared_tag.clone()]),
+                Some(100),
+            )
+            .await
+            .expect("enqueue shared probe")
+            .expect("provider returns shared job ID");
+        owned_jobs.push((shared_queue, shared_id));
 
-            let running = queue.clone();
-            let handle =
-                tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
-            let completed = tokio::time::timeout(Duration::from_secs(10), async {
-                loop {
-                    let row = Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
-                    if row.status == LifecycleStatus::Completed.as_db_str() {
-                        return;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+        let running = queue.clone();
+        let worker_tag = shared_tag.clone();
+        let handle = tokio::spawn(async move { running.run(vec![worker_tag]).await });
+        let completed = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if SEEN.lock().expect("seen tags").contains(&shared_tag) {
+                    return;
                 }
-            })
-            .await;
-            let _ = queue.shutdown();
-            let _ = handle.await;
-            let _ = queue.clear().await;
-
-            assert!(
-                completed.is_ok(),
-                "the shared job was never run behind the official backlog"
-            );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
         })
         .await;
+        let _ = queue.shutdown();
+        let _ = handle.await;
+        remove_owned_jobs(&uri, &owned_jobs).await;
+        assert!(completed.is_ok(), "the shared job was not run");
+        assert_eq!(
+            SEEN.lock().expect("seen tags").as_slice(),
+            [shared_tag.as_str()],
+            "only this target's job may run"
+        );
     }
 }

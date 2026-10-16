@@ -28,8 +28,28 @@ pub(crate) async fn create_entity(
     let input = body.into();
     let created_by = authorized.ctx.user_id;
     let record = entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
+    let dispatcher = ctx
+        .shared_store
+        .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
+        .ok_or_else(|| {
+            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+                "dispatcher missing"
+            )))
+        })?;
+    embedding_sync::enqueue_after_write_with_dispatcher(
+        &ctx,
+        workspace_id,
+        record.id,
+        Some(authorized.txn()),
+        dispatcher.as_ref(),
+    )
+    .await
+    .map_err(|e| {
+        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+            e.to_string()
+        )))
+    })?;
     authorized.commit().await?;
-    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id).await;
     Ok((StatusCode::CREATED, Json(record)))
 }
 
@@ -65,8 +85,28 @@ pub(crate) async fn update_entity(
         },
     )
     .await?;
+    let dispatcher = ctx
+        .shared_store
+        .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
+        .ok_or_else(|| {
+            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+                "dispatcher missing"
+            )))
+        })?;
+    embedding_sync::enqueue_after_write_with_dispatcher(
+        &ctx,
+        workspace_id,
+        record.id,
+        Some(authorized.txn()),
+        dispatcher.as_ref(),
+    )
+    .await
+    .map_err(|e| {
+        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+            e.to_string()
+        )))
+    })?;
     authorized.commit().await?;
-    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id).await;
     Ok(Json(record))
 }
 
@@ -170,16 +210,27 @@ pub(crate) async fn reindex_workspace(
         serde_json::json!({ "workspace_id": workspace_id }),
     )
     .await?;
-    authorized.commit().await?;
-
-    // The audit row is durable before the queue boundary is crossed.
-    let job_id = reindex::enqueue_reindex(&ctx, workspace_id)
-        .await
-        .map_err(|e| {
+    let dispatcher = ctx
+        .shared_store
+        .get::<std::sync::Arc<dyn crate::workers::dispatch::ReindexDispatcher>>()
+        .ok_or_else(|| {
             ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                e.to_string()
+                "dispatcher missing"
             )))
         })?;
+    let job_id = reindex::enqueue_reindex_with_dispatcher(
+        &ctx,
+        workspace_id,
+        Some(authorized.txn()),
+        dispatcher.as_ref(),
+    )
+    .await
+    .map_err(|e| {
+        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+            e.to_string()
+        )))
+    })?;
+    authorized.commit().await?;
 
     Ok(Json(ReindexResponse { job_id }))
 }

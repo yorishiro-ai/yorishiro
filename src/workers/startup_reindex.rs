@@ -115,6 +115,8 @@ async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
             }
         };
     let args = crate::workers::reindex::ReindexArgs {
+        dispatch_id: None,
+        publishing_epoch: None,
         lifecycle_id: None,
         workspace_id,
         worker_class,

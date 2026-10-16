@@ -69,6 +69,7 @@ impl Entity {
         workspace_id: Uuid,
         query_text: &str,
         retention_seconds: u64,
+        deadline_at: DateTimeWithTimeZone,
     ) -> Result<Uuid, DbErr> {
         let id = Uuid::now_v7();
         let ttl = Duration::seconds(i64::try_from(retention_seconds).unwrap_or(i64::MAX / 1000));
@@ -78,6 +79,7 @@ impl Entity {
             query_text: Set(query_text.to_owned()),
             status: Set(QueryEmbeddingStatus::Pending.as_db_str().to_owned()),
             expires_at: Set((Utc::now() + ttl).fixed_offset()),
+            deadline_at: Set(Some(deadline_at)),
             ..Default::default()
         }
         .insert(db)
@@ -98,6 +100,7 @@ impl Entity {
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.eq(QueryEmbeddingStatus::Pending.as_db_str()))
             .filter(Column::ExpiresAt.gt(Utc::now().fixed_offset()))
+            .filter(Column::DeadlineAt.gt(Utc::now().fixed_offset()))
             .one(db)
             .await
     }
