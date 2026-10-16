@@ -57,16 +57,22 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
     let tenant = TenantDb::connect(database_url, max_connections, timezone.clone())
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
+    let identity_timezone = timezone.clone();
+    let identity_release_timezone = identity_timezone.clone();
     let identity = PgPoolOptions::new()
         .max_connections(max_connections)
-        .after_release(|conn, _meta| {
+        .after_release(move |conn, _meta| {
+            let timezone = identity_release_timezone.clone();
             Box::pin(async move {
-                sqlx::query("RESET TIME ZONE").execute(conn).await?;
+                sqlx::query("SELECT set_config('TimeZone', $1, false)")
+                    .bind(timezone)
+                    .execute(conn)
+                    .await?;
                 Ok(true)
             })
         })
         .after_connect(move |conn, _meta| {
-            let timezone = timezone.clone();
+            let timezone = identity_timezone.clone();
             Box::pin(async move {
                 sqlx::query("SELECT set_config('TimeZone', $1, false)")
                     .bind(timezone)
@@ -168,7 +174,8 @@ impl TenantDb {
                     Ok(())
                 })
             })
-            .after_release(|conn, _meta| {
+            .after_release(move |conn, _meta| {
+                let timezone = timezone.clone();
                 Box::pin(async move {
                     sqlx::query("RESET app.current_tenant")
                         .execute(&mut *conn)
@@ -176,7 +183,10 @@ impl TenantDb {
                     sqlx::query("RESET app.current_workspace")
                         .execute(&mut *conn)
                         .await?;
-                    sqlx::query("RESET TIME ZONE").execute(&mut *conn).await?;
+                    sqlx::query("SELECT set_config('TimeZone', $1, false)")
+                        .bind(timezone)
+                        .execute(&mut *conn)
+                        .await?;
                     Ok(true)
                 })
             })

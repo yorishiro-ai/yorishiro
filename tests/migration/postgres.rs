@@ -268,25 +268,31 @@ async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
 
             let tenant_pool = yorishiro::db::TenantDb::connect(
                 &target_url,
-                2,
+                1,
                 "Asia/Tokyo".to_owned(),
             )
             .await
             .expect("build non-superuser tenant pool");
-            let mut scoped = tenant_pool.pool().acquire().await.expect("acquire tenant connection");
-            let zone: String = sqlx::query_scalar("SHOW TIME ZONE")
-                .fetch_one(scoped.as_mut())
+            let mut previous_pid = None;
+            for _ in 0..3 {
+                let mut conn = tenant_pool.pool().acquire().await.expect("acquire tenant connection");
+                let (zone, pid): (String, i32) = sqlx::query_as(
+                    "SELECT current_setting('TimeZone'), pg_backend_pid()",
+                )
+                .fetch_one(conn.as_mut())
                 .await
-                .expect("configured timezone on newly connected tenant connection");
-            assert_eq!(zone, "Asia/Tokyo");
-            drop(scoped);
-            let mut released = tenant_pool.pool().acquire().await.expect("reacquire released tenant connection");
-            let reset_zone: String = sqlx::query_scalar("SHOW TIME ZONE")
-                .fetch_one(released.as_mut())
-                .await
-                .expect("read timezone after tenant connection reset");
-            assert_eq!(reset_zone, "UTC");
-            drop(released);
+                .expect("read configured timezone and backend id");
+                assert_eq!(zone, "Asia/Tokyo");
+                if let Some(previous_pid) = previous_pid {
+                    assert_eq!(pid, previous_pid, "single-connection pool must reuse the same backend");
+                }
+                sqlx::query("SET TIME ZONE 'Europe/Paris'")
+                    .execute(conn.as_mut())
+                    .await
+                    .expect("change timezone before release");
+                previous_pid = Some(pid);
+                drop(conn);
+            }
             let tenant = uuid::Uuid::parse_str(tenant_id).unwrap();
             let workspace = uuid::Uuid::parse_str(workspace_id).unwrap();
             let txn = tenant_pool

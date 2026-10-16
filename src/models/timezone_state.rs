@@ -1,6 +1,19 @@
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, TransactionTrait};
+use sea_orm::{
+    ActiveModelBehavior, ActiveModelTrait, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait,
+    Set, TransactionTrait,
+};
 
 pub use super::_entities::timezone_state::{ActiveModel, Entity};
+
+#[async_trait::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    async fn before_save<C>(self, _db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        Ok(self)
+    }
+}
 
 /// Stores the process-configured zone without changing any persisted timestamp instant.
 ///

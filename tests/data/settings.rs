@@ -60,6 +60,7 @@ fn timezone_defaults_to_utc_and_accepts_strict_iana_names() {
 
 #[test]
 fn config_validation_rejects_invalid_timezone_and_accepts_valid_aliases() {
+    let _environment = crate::EnvironmentRead::enter();
     for valid in ["UTC", "Etc/UTC", "Asia/Tokyo", "America/New_York"] {
         assert!(yorishiro::data::config::validate(&config_for_timezone(valid)).is_ok());
     }
@@ -79,8 +80,12 @@ fn config_for_timezone(timezone: &str) -> loco_rs::config::Config {
         timezone,
     );
     fs::write(dir.join("test.yaml"), source).unwrap();
-    let config =
+    let mut config =
         Config::from_folder(&Environment::Any("test".into()), &PathBuf::from(&dir)).unwrap();
+    config.database.uri = "sqlite::memory:".into();
+    if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
+        queue.uri = "sqlite::memory:".into();
+    }
     fs::remove_dir_all(dir).unwrap();
     config
 }
