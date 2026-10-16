@@ -203,7 +203,7 @@ impl Entity {
         if let Err(err) = Entity::update_many()
             .col_expr(
                 Column::LastUsedAt,
-                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                sea_orm::sea_query::Expr::value(crate::time::now()),
             )
             .filter(Column::Id.eq(api_key_id))
             .exec(conn)

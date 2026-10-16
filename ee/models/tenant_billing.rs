@@ -72,7 +72,7 @@ pub async fn link_stripe_customer(
     let active = ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         stripe_customer_id: ActiveValue::Set(Some(stripe_customer_id.to_string())),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     // updated_at is set explicitly here rather than left to ActiveModelBehavior::before_save:
@@ -108,7 +108,7 @@ pub async fn set_plan(
     let active = ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         plan: ActiveValue::Set(Some(plan.to_string())),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

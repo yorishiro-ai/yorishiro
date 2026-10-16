@@ -2,7 +2,6 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::inference_jobs::{ActiveModel, Column, Entity, Model};
-use chrono::Utc;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
@@ -144,7 +143,7 @@ pub(crate) async fn claim_attempt(
             Expr::value(InferenceJobStatus::Running.as_db_str()),
         )
         .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Queued.as_db_str()));
     if let Some(attempt) = expected_attempt {
@@ -204,7 +203,7 @@ pub async fn reconcile_attempt(
                 Expr::value(InferenceJobStatus::Running.as_db_str()),
             )
             .col_expr(Column::Error, Expr::value(Option::<String>::None))
-            .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+            .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
             .filter(Column::Id.eq(id))
             .filter(Column::Status.eq(InferenceJobStatus::Failed.as_db_str()))
             .filter(Column::Attempt.eq(target_attempt))
@@ -225,7 +224,7 @@ pub async fn reconcile_attempt(
             Expr::value(InferenceJobStatus::Running.as_db_str()),
         )
         .col_expr(Column::Attempt, Expr::value(target_attempt))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Attempt.eq(target_attempt - 1))
         .filter(Column::Status.is_in([
@@ -256,7 +255,7 @@ pub async fn complete(
         )
         .col_expr(Column::Applied, Expr::value(applied))
         .col_expr(Column::Skipped, Expr::value(skipped))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .exec(conn)
@@ -287,7 +286,7 @@ pub async fn complete_proposals_attempt(
         .col_expr(Column::Applied, Expr::value(0))
         .col_expr(Column::Proposed, Expr::value(proposed))
         .col_expr(Column::Skipped, Expr::value(skipped))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .filter(Column::Attempt.eq(attempt))
@@ -314,7 +313,7 @@ pub async fn fail(
             Expr::value(InferenceJobStatus::Failed.as_db_str()),
         )
         .col_expr(Column::Error, Expr::value(message))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.is_in([
             InferenceJobStatus::Queued.as_db_str(),
@@ -351,7 +350,7 @@ pub async fn fail_attempt(
             Expr::value(InferenceJobStatus::Failed.as_db_str()),
         )
         .col_expr(Column::Error, Expr::value(message))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .filter(Column::Attempt.eq(attempt))
@@ -377,7 +376,7 @@ pub(crate) async fn retry(
             Expr::value(InferenceJobStatus::Queued.as_db_str()),
         )
         .col_expr(Column::Error, Expr::value(message))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .filter(Column::Attempt.eq(attempt))

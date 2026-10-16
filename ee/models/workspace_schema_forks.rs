@@ -499,7 +499,7 @@ pub async fn update<C: ConnectionTrait>(
     let mut active: ActiveModel = fork.into();
     active.fork_schema_id = ActiveValue::Set(head.id);
     active.customized = ActiveValue::Set(source_update.is_none());
-    active.updated_at = ActiveValue::Set(Utc::now().into());
+    active.updated_at = ActiveValue::Set(crate::time::now().into());
     if let Some(source) = source_update {
         active.source_schema_id = ActiveValue::Set(source.id);
         active.source_schema_version = ActiveValue::Set(source.version);

@@ -68,7 +68,7 @@ pub(crate) async fn set(
         base_url: ActiveValue::Set(base_url.to_string()),
         model: ActiveValue::Set(model.to_string()),
         api_key: ActiveValue::Set(api_key.to_string()),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

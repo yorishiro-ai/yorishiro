@@ -41,6 +41,51 @@ fn provider_is_typed_and_unknown_settings_are_rejected() {
 }
 
 #[test]
+fn timezone_defaults_to_utc_and_accepts_strict_iana_names() {
+    let parsed: Settings = serde_json::from_value(settings()).unwrap();
+    assert_eq!(parsed.timezone, "UTC");
+
+    let mut tokyo = settings();
+    tokyo["timezone"] = "Asia/Tokyo".into();
+    assert_eq!(
+        serde_json::from_value::<Settings>(tokyo).unwrap().timezone,
+        "Asia/Tokyo"
+    );
+
+    let mut invalid = settings();
+    invalid["timezone"] = "Not/A_Zone".into();
+    let invalid: Settings = serde_json::from_value(invalid).unwrap();
+    assert!(yorishiro::time::parse_timezone(&invalid.timezone).is_err());
+}
+
+#[test]
+fn config_validation_rejects_invalid_timezone_and_accepts_valid_aliases() {
+    for valid in ["UTC", "Etc/UTC", "Asia/Tokyo", "America/New_York"] {
+        assert!(yorishiro::data::config::validate(&config_for_timezone(valid)).is_ok());
+    }
+    for invalid in ["local", "PST", "+09:00", "Not/A_Zone"] {
+        assert!(yorishiro::data::config::validate(&config_for_timezone(invalid)).is_err());
+    }
+}
+
+fn config_for_timezone(timezone: &str) -> loco_rs::config::Config {
+    use loco_rs::{config::Config, environment::Environment};
+    use std::{fs, path::PathBuf};
+
+    let dir = std::env::temp_dir().join(format!("timezone-config-{}", uuid::Uuid::now_v7()));
+    fs::create_dir(&dir).unwrap();
+    let source = include_str!("../../config/test_sqlite.yaml").replace(
+        "<%= get_env(name=\"YORISHIRO_TIMEZONE\", default=\"UTC\") %>",
+        timezone,
+    );
+    fs::write(dir.join("test.yaml"), source).unwrap();
+    let config =
+        Config::from_folder(&Environment::Any("test".into()), &PathBuf::from(&dir)).unwrap();
+    fs::remove_dir_all(dir).unwrap();
+    config
+}
+
+#[test]
 fn query_embedding_section_is_optional_and_has_bounded_defaults() {
     use yorishiro::data::settings::QueryEmbedding;
 

@@ -155,7 +155,7 @@ async fn upsert_template(
                 .to_string(),
         ),
         author: ActiveValue::Set(Some(OFFICIAL_AUTHOR.to_string())),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     let row = Entity::insert(active)

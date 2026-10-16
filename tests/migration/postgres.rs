@@ -108,6 +108,13 @@ async fn close_scratch_db(db: sea_orm::DatabaseConnection, name: &str) -> Result
     }
 }
 
+pub(crate) async fn with_timezone_scratch_db<F>(test: F)
+where
+    F: for<'a> FnOnce(&'a sea_orm::DatabaseConnection) -> futures::future::BoxFuture<'a, ()> + Send,
+{
+    with_scratch_db("timezone_state", test).await;
+}
+
 async fn with_scratch_db<F>(name: &str, test: F)
 where
     F: for<'a> FnOnce(&'a sea_orm::DatabaseConnection) -> futures::future::BoxFuture<'a, ()>,
@@ -262,9 +269,24 @@ async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
             let tenant_pool = yorishiro::db::TenantDb::connect(
                 &target_url,
                 2,
+                "Asia/Tokyo".to_owned(),
             )
             .await
             .expect("build non-superuser tenant pool");
+            let mut scoped = tenant_pool.pool().acquire().await.expect("acquire tenant connection");
+            let zone: String = sqlx::query_scalar("SHOW TIME ZONE")
+                .fetch_one(scoped.as_mut())
+                .await
+                .expect("configured timezone on newly connected tenant connection");
+            assert_eq!(zone, "Asia/Tokyo");
+            drop(scoped);
+            let mut released = tenant_pool.pool().acquire().await.expect("reacquire released tenant connection");
+            let reset_zone: String = sqlx::query_scalar("SHOW TIME ZONE")
+                .fetch_one(released.as_mut())
+                .await
+                .expect("read timezone after tenant connection reset");
+            assert_eq!(reset_zone, "UTC");
+            drop(released);
             let tenant = uuid::Uuid::parse_str(tenant_id).unwrap();
             let workspace = uuid::Uuid::parse_str(workspace_id).unwrap();
             let txn = tenant_pool

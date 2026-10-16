@@ -28,7 +28,7 @@ pub async fn create_invite(
     role: MembershipRole,
     ttl: Duration,
 ) -> Result<(Model, String), YorishiroError> {
-    create_invite_at(conn, tenant_id, email, role, ttl, Utc::now()).await
+    create_invite_at(conn, tenant_id, email, role, ttl, crate::time::now()).await
 }
 
 /// [`create_invite`] with the issue time supplied by the caller, so expiry boundaries can be tested without a clock.
@@ -67,7 +67,7 @@ pub(crate) async fn redeem_invite(
     conn: &impl ConnectionTrait,
     raw_token: &str,
 ) -> Result<Option<RedeemedInvite>, YorishiroError> {
-    redeem_invite_at(conn, raw_token, Utc::now()).await
+    redeem_invite_at(conn, raw_token, crate::time::now()).await
 }
 
 /// [`redeem_invite`] with the redemption time supplied by the caller, so expiry boundaries can be tested without a clock.

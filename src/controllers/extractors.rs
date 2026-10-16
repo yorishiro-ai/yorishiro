@@ -235,13 +235,25 @@ where
 /// As `Authorized<R>`, but for the `audit` grant rather than a `RequiredScope`.
 /// Not generic over `R` the way `Authorized<R>` is: `audit` is one grant, not a family of scopes, so there is nothing for a type parameter to select between.
 pub(crate) struct AuditAuthorized {
+    app_ctx: AppContext,
     pub ctx: api_keys::AuthContext,
-    txn: sea_orm::DatabaseTransaction,
+    txn: std::sync::Arc<tokio::sync::Mutex<sea_orm::DatabaseTransaction>>,
 }
 
 impl AuditAuthorized {
-    pub fn txn(&self) -> &sea_orm::DatabaseTransaction {
-        &self.txn
+    pub(crate) async fn records(
+        &self,
+        workspace_id: Uuid,
+        page: crate::models::pagination::ListParams,
+    ) -> Result<Vec<crate::models::_entities::api_key_audit_log::Model>, ApiError> {
+        let txn = self.txn.lock().await;
+        crate::models::api_key_audit_log::list_for_workspace(&*txn, workspace_id, page)
+            .await
+            .map_err(ApiError)
+    }
+
+    pub(crate) fn timezone(&self) -> chrono_tz::Tz {
+        crate::time::configured(&self.app_ctx)
     }
 }
 
@@ -262,7 +274,11 @@ where
             let (ctx, txn) = auth::authorize_audit_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
-            return Ok(AuditAuthorized { ctx, txn });
+            return Ok(AuditAuthorized {
+                app_ctx,
+                ctx,
+                txn: std::sync::Arc::new(tokio::sync::Mutex::new(txn)),
+            });
         }
 
         let headers = auth::header_pairs(parts);
@@ -273,7 +289,11 @@ where
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
-        Ok(AuditAuthorized { ctx, txn })
+        Ok(AuditAuthorized {
+            app_ctx,
+            ctx,
+            txn: std::sync::Arc::new(tokio::sync::Mutex::new(txn)),
+        })
     }
 }
 

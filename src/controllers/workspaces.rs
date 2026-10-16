@@ -91,7 +91,7 @@ pub async fn get_workspace(
         name: workspace.name,
         max_entities: workspace.max_entities,
         schema_id: workspace.schema_id,
-        created_at: workspace.created_at.into(),
+        created_at: crate::time::render(&ctx, workspace.created_at),
         entity_count,
         relation_count,
         schema_count,

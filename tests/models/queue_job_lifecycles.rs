@@ -98,6 +98,53 @@ fn queue_start_latency_uses_recorded_timestamps() {
     );
 }
 
+#[tokio::test]
+async fn timezone_state_changes_without_rewriting_lifecycle_instants() {
+    let db = database().await;
+    let id = uuid::Uuid::now_v7();
+    enqueue(&db, id, None).await;
+    let before = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
+
+    yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
+        .await
+        .unwrap();
+    yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
+        .await
+        .unwrap();
+    let after = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
+    assert_eq!(before.enqueue_at, after.enqueue_at);
+    let state: String = db
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT active_timezone FROM timezone_state WHERE id = 1",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index(0)
+        .unwrap();
+    assert_eq!(state, "Asia/Tokyo");
+}
+
+#[tokio::test]
+async fn timezone_state_rejects_invalid_and_missing_singleton_without_inserting() {
+    let db = database().await;
+    assert!(
+        yorishiro::models::timezone_state::activate(&db, "Invalid/Zone")
+            .await
+            .is_err()
+    );
+    yorishiro::models::_entities::timezone_state::Entity::delete_many()
+        .exec(&db)
+        .await
+        .unwrap();
+    assert!(
+        yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
+            .await
+            .is_err()
+    );
+}
+
 #[test]
 fn live_lease_is_duplicate_but_expired_lease_is_recoverable() {
     let now = Utc.timestamp_opt(2_000, 0).single().unwrap().fixed_offset();

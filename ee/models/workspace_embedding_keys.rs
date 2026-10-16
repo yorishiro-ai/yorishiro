@@ -158,7 +158,7 @@ pub async fn set(
         api_key: ActiveValue::Set(api_key.to_string()),
         dimensions: ActiveValue::Set(dimensions),
         send_dimensions_param: ActiveValue::Set(send_dimensions_param),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

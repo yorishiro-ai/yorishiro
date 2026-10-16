@@ -46,17 +46,35 @@ impl AppContextBackend for loco_rs::app::AppContext {
 /// `match cli.command` that dispatches to `Start`/`create_app`/`H::boot`.  Every
 /// subcommand (`task`, `db`, `scheduler`) opens `ctx.db` there, before any `Hooks` method
 /// runs.
-/// Builds the tenant and identity pools on PostgreSQL and stores them as the [`DbHandle`] every authenticated path resolves through.
+/// Builds tenant and identity pools on PostgreSQL and stores them as the [`DbHandle`] every authenticated path resolves through.
 ///
-/// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI), so it needs no hooks: it never scopes to a workspace.
+/// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI).
+/// Both pools install the configured PostgreSQL session timezone per connection and reset it on release.
 pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Result<()> {
     let database_url = &ctx.config.database.uri;
     let max_connections = ctx.config.database.max_connections;
-    let tenant = TenantDb::connect(database_url, max_connections)
+    let timezone = crate::time::configured(ctx).to_string();
+    let tenant = TenantDb::connect(database_url, max_connections, timezone.clone())
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
     let identity = PgPoolOptions::new()
         .max_connections(max_connections)
+        .after_release(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("RESET TIME ZONE").execute(conn).await?;
+                Ok(true)
+            })
+        })
+        .after_connect(move |conn, _meta| {
+            let timezone = timezone.clone();
+            Box::pin(async move {
+                sqlx::query("SELECT set_config('TimeZone', $1, false)")
+                    .bind(timezone)
+                    .execute(conn)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(database_url)
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
@@ -129,12 +147,22 @@ impl TenantDb {
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
-    pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self, sqlx::Error> {
+    pub async fn connect(
+        database_url: &str,
+        max_connections: u32,
+        timezone: String,
+    ) -> Result<Self, sqlx::Error> {
+        let connect_timezone = timezone.clone();
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
-            .after_connect(|conn, _meta| {
+            .after_connect(move |conn, _meta| {
+                let timezone = connect_timezone.clone();
                 Box::pin(async move {
                     sqlx::query("SET ROLE yorishiro_app")
+                        .execute(&mut *conn)
+                        .await?;
+                    sqlx::query("SELECT set_config('TimeZone', $1, false)")
+                        .bind(timezone)
                         .execute(&mut *conn)
                         .await?;
                     Ok(())
@@ -148,6 +176,7 @@ impl TenantDb {
                     sqlx::query("RESET app.current_workspace")
                         .execute(&mut *conn)
                         .await?;
+                    sqlx::query("RESET TIME ZONE").execute(&mut *conn).await?;
                     Ok(true)
                 })
             })
@@ -215,6 +244,16 @@ impl TenantDb {
             .await?;
         Ok(conn)
     }
+}
+
+/// Sets a PostgreSQL session's timezone using an escaped IANA name.
+///
+/// # Errors
+/// Returns an error if the statement fails.
+pub async fn set_session_timezone(db: &DatabaseConnection, timezone: &str) -> Result<(), DbErr> {
+    db.execute_unprepared(&format!("SET TIME ZONE '{}'", timezone.replace('\'', "''")))
+        .await?;
+    Ok(())
 }
 
 /// Begins the transaction one workspace's request work runs in.
@@ -289,7 +328,7 @@ pub fn stamped_updated_at(
     current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,
 ) -> sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>> {
     if !insert && !current.is_set() {
-        sea_orm::ActiveValue::Set(chrono::Utc::now().into())
+        sea_orm::ActiveValue::Set(crate::time::now().into())
     } else {
         current
     }

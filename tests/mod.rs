@@ -10,11 +10,14 @@ mod integration;
 mod config;
 mod licence;
 mod metaschema;
-mod migration;
+pub(crate) mod migration;
 mod models;
 mod requests;
 mod services;
 mod tasks;
+mod time;
+mod timezone_cli;
+mod timezone_state;
 mod workers;
 
 /// Records the database and queue provider after Loco has booted the app.

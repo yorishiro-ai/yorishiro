@@ -45,7 +45,7 @@ pub async fn set(
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
         worker_class: ActiveValue::Set(worker_class.as_db_str().to_string()),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

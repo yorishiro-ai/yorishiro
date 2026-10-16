@@ -26,7 +26,7 @@ impl ActiveModelBehavior for ActiveModel {
         // SQLite refuses a non-constant default on `ADD COLUMN` for an existing table, so `schema_schemas.updated_at` has `now()` on PostgreSQL and nothing on SQLite, and an insert that relied on the default would be NULL there.
         // A caller that sets it deliberately (a backfill, an import preserving original timestamps) is still not overwritten.
         if !this.updated_at.is_set() {
-            this.updated_at = sea_orm::ActiveValue::Set(Some(chrono::Utc::now().into()));
+            this.updated_at = sea_orm::ActiveValue::Set(Some(crate::time::now().into()));
         }
         Ok(this)
     }
@@ -368,7 +368,7 @@ pub async fn create_schema(
             origin_template_id,
             origin_snapshot,
             if origin_template_id.is_some() {
-                Some(chrono::Utc::now())
+                Some(crate::time::now())
             } else {
                 None
             },
@@ -406,10 +406,7 @@ pub async fn create_schema(
                 Column::Status,
                 Expr::value(SchemaStatus::Archived.as_db_str()),
             )
-            .col_expr(
-                Column::UpdatedAt,
-                Expr::value(chrono::Utc::now().fixed_offset()),
-            )
+            .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Name.eq(&name))
             .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))

@@ -1,5 +1,19 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/app.rs	fn	cli_requires_timezone_gate	integration-test: external CLI argument tests verify pre-run worker-command gating and migration exemptions.
+src/app.rs	fn	cli_timezone_gate_result	integration-test: external CLI tests verify persisted-state gating while allowing database migration bootstrap.
+src/data/config.rs	fn	validate	integration-test: external settings tests exercise application configuration validation.
+src/data/settings.rs	field	Settings::timezone	integration-test: external configuration tests assert the validated timezone setting.
+src/db.rs	fn	set_session_timezone	integration-test: PostgreSQL integration tests verify configured session-zone behavior on real connections.
+src/initializers/mod.rs	mod	timezone_logger	integration-test: external formatter test verifies real timezone-rendered logger timestamps.
+src/initializers/timezone_logger.rs	struct	ConfiguredTimer	integration-test: formatter test invokes the production timer to check DST offsets and trailing-space behavior.
+src/initializers/timezone_logger.rs	fn	ConfiguredTimer::new	integration-test: formatter test supplies explicit IANA zones to the production timer.
+src/lib.rs	mod	time	integration-test: external tests verify shared timezone parsing and instant-preserving conversion.
+src/models/mod.rs	mod	timezone_state	integration-test: external backend tests exercise transactional singleton activation and rollback.
+src/models/timezone_state.rs	fn	activate	integration-test: external SQLite/PostgreSQL tests exercise the table-owned timezone state transition.
+src/models/timezone_state.rs	use	super::_entities::timezone_state::{ActiveModel,Entity}	integration-test: external bootstrap tests verify migration-seeded singleton presence through its generated entity.
+src/time.rs	fn	in_timezone	integration-test: external timezone tests verify daylight-saving conversion without changing the epoch.
+src/time.rs	fn	parse_timezone	integration-test: external config tests assert accepted and rejected IANA timezone names.
 ee/data/oauth.rs	fn	default_redirect_uri	integration-test: verify OAuth callback fallback uses the resolved listener and preserves the legacy override.
 src/models/workspace_invites.rs	struct	RedeemedInvite	seaorm-facade: invite result moved from the cross-table facade to the table-owning model.
 src/models/workspace_invites.rs	field	RedeemedInvite::tenant_id	seaorm-facade: invite result field moved with its existing public type.
