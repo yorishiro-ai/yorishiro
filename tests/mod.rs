@@ -303,7 +303,50 @@ pub(crate) fn valkey_test_url() -> Option<String> {
     let uri = std::env::var("YORISHIRO_VALKEY_TEST_URL")
         .or_else(|_| std::env::var("QUEUE_URL"))
         .ok()?;
-    let reserved = (uri.starts_with("redis://") || uri.starts_with("rediss://"))
-        && reqwest::Url::parse(&uri).is_ok_and(|url| url.path() == "/15");
-    reserved.then_some(uri)
+    let is_database_15 = |value: &str| {
+        (value.starts_with("redis://") || value.starts_with("rediss://"))
+            && reqwest::Url::parse(value).is_ok_and(|url| url.path() == "/15")
+    };
+    let active = std::env::var("QUEUE_URL").ok();
+    if let Some(active) = active.as_deref() {
+        if !is_database_15(active) {
+            return None;
+        }
+        if std::env::var("YORISHIRO_VALKEY_TEST_URL").is_ok() && active != uri {
+            return None;
+        }
+    }
+    is_database_15(&uri).then_some(uri)
+}
+
+#[cfg(test)]
+mod valkey_safety_tests {
+    use serial_test::serial;
+
+    #[test]
+    #[serial(process_environment)]
+    fn valkey_lane_accepts_only_database_fifteen() {
+        let original = std::env::var_os("YORISHIRO_VALKEY_TEST_URL");
+        let original_queue = std::env::var_os("QUEUE_URL");
+        unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", "redis://localhost:6379/14") };
+        assert!(super::valkey_test_url().is_none());
+        unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", "redis://localhost:6379/15") };
+        unsafe { std::env::set_var("QUEUE_URL", "redis://localhost:6379/14") };
+        assert!(super::valkey_test_url().is_none());
+        unsafe { std::env::set_var("QUEUE_URL", "redis://localhost:6379/15") };
+        assert_eq!(
+            super::valkey_test_url().as_deref(),
+            Some("redis://localhost:6379/15")
+        );
+        unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", "redis://localhost:6379/14") };
+        assert!(super::valkey_test_url().is_none());
+        match original {
+            Some(value) => unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", value) },
+            None => unsafe { std::env::remove_var("YORISHIRO_VALKEY_TEST_URL") },
+        }
+        match original_queue {
+            Some(value) => unsafe { std::env::set_var("QUEUE_URL", value) },
+            None => unsafe { std::env::remove_var("QUEUE_URL") },
+        }
+    }
 }

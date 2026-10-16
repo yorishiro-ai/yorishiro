@@ -3,11 +3,12 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "queue_job_dispatch_outbox")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub lifecycle_id: Uuid,
+    pub id: Uuid,
+    pub lifecycle_id: Option<Uuid>,
     #[sea_orm(column_type = "JsonBinary")]
     pub payload: Json,
     pub worker_name: String,
@@ -15,6 +16,15 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub tags: Option<Json>,
     pub last_attempt_at: Option<DateTimeWithTimeZone>,
+    pub publishing_epoch: i64,
+    pub deadline_at: Option<DateTimeWithTimeZone>,
+    pub published_at: Option<DateTimeWithTimeZone>,
+    #[serde(skip_serializing)]
+    pub claim_token: Option<String>,
+    pub claim_until: Option<DateTimeWithTimeZone>,
+    pub priority: Option<i32>,
+    pub workspace_id: Option<Uuid>,
+    pub legacy_quarantined: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

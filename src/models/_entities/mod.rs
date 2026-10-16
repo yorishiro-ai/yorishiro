@@ -17,6 +17,7 @@ pub mod inference_proposals;
 pub mod query_embedding_requests;
 pub mod queue_job_dispatch_outbox;
 pub mod queue_job_lifecycles;
+pub mod queue_publishing_state;
 pub mod schema_schemas;
 pub mod stripe_events;
 pub mod system_maintenance;

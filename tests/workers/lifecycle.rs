@@ -45,6 +45,8 @@ async fn queued(ctx: &AppContext) -> Uuid {
 fn args(lifecycle_id: Option<Uuid>) -> EmbeddingSyncArgs {
     EmbeddingSyncArgs {
         lifecycle_id,
+        dispatch_id: None,
+        publishing_epoch: None,
         workspace_id: Uuid::nil(),
         entity_id: Uuid::nil(),
         worker_class: WorkerClass::Shared,

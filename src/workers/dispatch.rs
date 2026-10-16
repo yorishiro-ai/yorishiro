@@ -1,8 +1,5 @@
-use std::future::Future;
-
 use async_trait::async_trait;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
-use sea_orm::TransactionTrait;
 use uuid::Uuid;
 
 use super::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
@@ -13,7 +10,12 @@ use crate::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
 /// The typed dispatch seam used by the selected application enqueue paths.
 #[async_trait]
 pub trait EmbeddingSyncDispatcher: Send + Sync {
-    async fn dispatch(&self, ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<String>;
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: EmbeddingSyncArgs,
+        txn: Option<&sea_orm::DatabaseTransaction>,
+    ) -> loco_rs::Result<String>;
 }
 
 /// The dispatch seam for reindex jobs.
@@ -22,7 +24,12 @@ pub trait EmbeddingSyncDispatcher: Send + Sync {
 /// A caller that needs a different dispatcher inserts its own `Arc<dyn ReindexDispatcher>` there afterwards.
 #[async_trait]
 pub trait ReindexDispatcher: Send + Sync {
-    async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String>;
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: ReindexArgs,
+        txn: Option<&sea_orm::DatabaseTransaction>,
+    ) -> loco_rs::Result<String>;
 }
 
 /// The single production adapter at Loco's worker integration point.
@@ -30,7 +37,12 @@ pub(crate) struct LocoJobDispatcher;
 
 #[async_trait]
 impl EmbeddingSyncDispatcher for LocoJobDispatcher {
-    async fn dispatch(&self, ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<String> {
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: EmbeddingSyncArgs,
+        txn: Option<&sea_orm::DatabaseTransaction>,
+    ) -> loco_rs::Result<String> {
         let spec = JobSpec {
             job_name: EmbeddingSyncArgs::JOB_NAME,
             workspace_id: args.workspace_id,
@@ -40,23 +52,18 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
             worker_name: EmbeddingSyncWorker::class_name(),
             use_queue_concurrency: false,
         };
-        dispatch_job(ctx, spec, |lifecycle_id, priority, target| {
-            let args = EmbeddingSyncArgs {
-                lifecycle_id: Some(lifecycle_id),
-                ..args
-            };
-            async move {
-                super::target::enqueue::<EmbeddingSyncWorker, _>(ctx, target, args, Some(priority))
-                    .await
-            }
-        })
-        .await
+        dispatch_job(ctx, spec, txn).await
     }
 }
 
 #[async_trait]
 impl ReindexDispatcher for LocoJobDispatcher {
-    async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: ReindexArgs,
+        txn: Option<&sea_orm::DatabaseTransaction>,
+    ) -> loco_rs::Result<String> {
         let spec = JobSpec {
             job_name: args.job_name(),
             workspace_id: args.workspace_id,
@@ -66,37 +73,43 @@ impl ReindexDispatcher for LocoJobDispatcher {
             worker_name: ReindexWorker::class_name(),
             use_queue_concurrency: true,
         };
-        dispatch_job(ctx, spec, |lifecycle_id, priority, target| {
-            let args = ReindexArgs {
-                lifecycle_id: Some(lifecycle_id),
-                ..args
-            };
-            async move {
-                super::target::enqueue::<ReindexWorker, _>(ctx, target, args, Some(priority)).await
-            }
-        })
-        .await
+        dispatch_job(ctx, spec, txn).await
     }
 }
 
 /// Re-enqueues durable dispatch records left queued after a process or provider failure.
-pub(crate) async fn recover_pending(ctx: &AppContext) {
-    let txn = match ctx.db.begin().await {
-        Ok(txn) => txn,
+pub async fn recover_pending(ctx: &AppContext) {
+    let db_handle = ctx.shared_store.get::<crate::db::DbHandle>();
+    let db = db_handle
+        .as_ref()
+        .map(crate::db::DbHandle::identity_connection);
+    recover_pending_on(ctx, db.as_ref().unwrap_or(&ctx.db)).await;
+}
+
+pub(crate) fn start_relay(ctx: &AppContext) {
+    if ctx.shared_store.get::<tokio::task::AbortHandle>().is_some() {
+        return;
+    }
+    let relay_ctx = ctx.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            recover_pending(&relay_ctx).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    });
+    ctx.shared_store.insert(task.abort_handle());
+}
+
+pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnection) {
+    let state = match crate::models::queue_job_dispatch_outbox::publishing_state(db).await {
+        Ok(state) if state.active => state,
+        Ok(_) => return,
         Err(error) => {
-            tracing::warn!(error = %error, "dispatch outbox: could not start recovery scan");
+            tracing::warn!(error = %error, "dispatch outbox: publishing state unavailable");
             return;
         }
     };
-    match crate::db::try_lock_for_update(&txn, "queue-dispatch-outbox").await {
-        Ok(true) => {}
-        Ok(false) => return,
-        Err(error) => {
-            tracing::warn!(error = %error, "dispatch outbox: could not acquire recovery lock");
-            return;
-        }
-    }
-    let pending = match crate::models::queue_job_dispatch_outbox::due(&ctx.db).await {
+    let pending = match crate::models::queue_job_dispatch_outbox::due(db).await {
         Ok(rows) => rows,
         Err(error) => {
             tracing::error!(error = %error, "dispatch outbox: recovery scan failed");
@@ -104,32 +117,77 @@ pub(crate) async fn recover_pending(ctx: &AppContext) {
         }
     };
     for row in pending {
-        match crate::models::queue_job_dispatch_outbox::claim_due(&ctx.db, row.lifecycle_id).await {
+        if row.publishing_epoch != state.epoch {
+            continue;
+        }
+        let claim = Uuid::now_v7();
+        match crate::models::queue_job_dispatch_outbox::claim_dispatch(
+            db,
+            row.id,
+            state.epoch,
+            claim,
+            30,
+        )
+        .await
+        {
             Ok(true) => {}
             Ok(false) => continue,
             Err(error) => {
-                tracing::warn!(lifecycle_id = %row.lifecycle_id, error = %error, "dispatch outbox: could not record attempt");
+                tracing::warn!(dispatch_id = %row.id, error = %error, "dispatch outbox: could not claim row");
                 continue;
             }
         }
-        match enqueue_pending(ctx, &row).await {
-            Ok(job_id) => {
-                if let Err(error) =
-                    Entity::mark_dispatched(&ctx.db, row.lifecycle_id, &job_id).await
+        if row.lifecycle_id.is_none()
+            && row.worker_name
+                != crate::workers::query_embedding::QueryEmbeddingWorker::class_name()
+        {
+            continue;
+        }
+        if let Some(deadline) = row.deadline_at
+            && deadline <= chrono::Utc::now().fixed_offset()
+        {
+            if let Err(error) = crate::models::queue_job_dispatch_outbox::expire(db, row.id).await {
+                tracing::warn!(dispatch_id = %row.id, error = %error, "could not expire deadline-bound dispatch");
+            }
+            continue;
+        }
+        let enqueue_result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            enqueue_pending(ctx, &row),
+        )
+        .await;
+        match &enqueue_result {
+            Err(_) => {
+                tracing::warn!(dispatch_id = %row.id, "publish timed out; provider outcome may be ambiguous")
+            }
+            Ok(Ok(provider_job_id)) => {
+                match crate::models::queue_job_dispatch_outbox::acknowledge_dispatch(
+                    db,
+                    row.id,
+                    state.epoch,
+                    claim,
+                    provider_job_id,
+                )
+                .await
                 {
-                    tracing::warn!(lifecycle_id = %row.lifecycle_id, error = %error, "dispatch outbox: enqueued job but could not update lifecycle");
+                    Ok(true) => {
+                        // The acknowledgement transaction also records lifecycle correlation.
+                    }
+                    Ok(false) => {
+                        tracing::warn!(dispatch_id = %row.id, "provider accepted dispatch after claim or epoch was fenced; duplicate risk retained")
+                    }
+                    Err(error) => {
+                        tracing::warn!(dispatch_id = %row.id, error = %error, "provider accepted dispatch but acknowledgement failed")
+                    }
                 }
             }
-            Err(error) => tracing::warn!(
-                lifecycle_id = %row.lifecycle_id,
+            Ok(Err(error)) => tracing::warn!(
+                dispatch_id = %row.id,
                 job_name = %row.job_name,
                 error = %error,
                 "dispatch outbox: enqueue failed and will be retried"
             ),
         }
-    }
-    if let Err(error) = txn.commit().await {
-        tracing::warn!(error = %error, "dispatch outbox: recovery lock transaction failed");
     }
 }
 
@@ -137,6 +195,23 @@ async fn enqueue_pending(
     ctx: &AppContext,
     row: &crate::models::queue_job_dispatch_outbox::PendingDispatch,
 ) -> loco_rs::Result<String> {
+    let mut payload = row.payload.clone();
+    if let serde_json::Value::Object(fields) = &mut payload {
+        fields.insert(
+            "dispatch_id".into(),
+            serde_json::Value::String(row.id.to_string()),
+        );
+        fields.insert(
+            "publishing_epoch".into(),
+            serde_json::Value::from(row.publishing_epoch),
+        );
+        if let Some(workspace_id) = row.workspace_id {
+            fields.insert(
+                "workspace_id".into(),
+                serde_json::Value::String(workspace_id.to_string()),
+            );
+        }
+    }
     let queue = ctx
         .queue_provider
         .as_ref()
@@ -145,9 +220,10 @@ async fn enqueue_pending(
         .enqueue(
             row.worker_name.clone(),
             row.queue_name.clone(),
-            row.payload.clone(),
+            payload,
             row.tags.clone(),
-            Some(crate::workers::queue::decide(row.worker_class).priority),
+            row.priority
+                .or_else(|| Some(crate::workers::queue::decide(row.worker_class).priority)),
         )
         .await
         .map(|id| id.unwrap_or_else(|| Uuid::now_v7().to_string()))
@@ -168,15 +244,11 @@ pub(crate) struct JobSpec {
 ///
 /// Every lookup fails closed.
 /// A job whose target, capacity or starvation policy cannot be determined is recorded as unavailable and refused, rather than enqueued under a guess that would let one class borrow another's reservation or send a tenant's work to the wrong workers.
-pub(crate) async fn dispatch_job<F, Fut>(
+pub(crate) async fn dispatch_job(
     ctx: &AppContext,
     spec: JobSpec,
-    enqueue: F,
-) -> loco_rs::Result<String>
-where
-    F: FnOnce(Uuid, i32, WorkerTarget) -> Fut,
-    Fut: Future<Output = loco_rs::Result<String>>,
-{
+    caller_txn: Option<&sea_orm::DatabaseTransaction>,
+) -> loco_rs::Result<String> {
     let lifecycle_id = Uuid::now_v7();
     let class = spec.class.as_db_str();
 
@@ -241,8 +313,38 @@ where
         "queue scheduling decision"
     );
 
-    crate::models::queue_job_dispatch_outbox::record(
-        &ctx.db,
+    let payload = match spec.dispatch_payload {
+        serde_json::Value::Object(mut fields) => {
+            fields.insert(
+                "lifecycle_id".into(),
+                serde_json::Value::String(lifecycle_id.to_string()),
+            );
+            fields.insert(
+                "workspace_id".into(),
+                serde_json::Value::String(spec.workspace_id.to_string()),
+            );
+            serde_json::Value::Object(fields)
+        }
+        value => value,
+    };
+    let owned_txn = if caller_txn.is_none() {
+        let tenant =
+            crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, spec.workspace_id)
+                .await
+                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        Some(
+            crate::db::begin_workspace(ctx, tenant, spec.workspace_id)
+                .await
+                .map_err(|e| loco_rs::Error::Message(e.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let txn = caller_txn
+        .or(owned_txn.as_ref())
+        .expect("one transaction exists");
+    crate::models::queue_job_dispatch_outbox::record_in_transaction(
+        txn,
         Enqueue {
             id: lifecycle_id,
             job_name: spec.job_name,
@@ -252,37 +354,21 @@ where
             concurrency_key: concurrency_key.as_deref(),
             concurrency_limit,
         },
-        spec.dispatch_payload.clone(),
+        payload,
         spec.worker_name,
         Some(target.queue()),
         Some(vec![target.tag()]),
     )
     .await
     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-
-    if let Err(error) =
-        crate::models::queue_job_dispatch_outbox::attempted(&ctx.db, lifecycle_id).await
-    {
-        tracing::warn!(lifecycle_id = %lifecycle_id, diagnostic = %error, "dispatch attempt timestamp could not be recorded");
+    if let Some(owned_txn) = owned_txn {
+        owned_txn
+            .commit()
+            .await
+            .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
     }
-    match enqueue(lifecycle_id, scheduling.priority, target).await {
-        Ok(job_id) => {
-            if let Err(error) = Entity::mark_dispatched(&ctx.db, lifecycle_id, &job_id).await {
-                tracing::error!(
-                    lifecycle_id = %lifecycle_id,
-                    provider_job_id = %job_id,
-                    diagnostic = %error,
-                    "provider job dispatched but lifecycle correlation write failed"
-                );
-            }
-            Ok(job_id)
-        }
-        Err(error) => {
-            let _ =
-                crate::models::queue_job_dispatch_outbox::attempted(&ctx.db, lifecycle_id).await;
-            Err(error)
-        }
-    }
+    let _ = (scheduling, target);
+    Ok(lifecycle_id.to_string())
 }
 
 /// Records a job that was refused before it reached the queue, so the refusal is visible next to the jobs that ran.

@@ -6,7 +6,7 @@ use chrono::Utc;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
-    QueryFilter, QuerySelect, Set, TransactionTrait,
+    QueryFilter, QuerySelect, Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -173,7 +173,16 @@ pub async fn reconcile_attempt(
     id: Uuid,
     target_attempt: i32,
 ) -> Result<bool, YorishiroError> {
-    let txn = conn.begin().await.internal()?;
+    let txn = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        conn.begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .internal()?
+    } else {
+        conn.begin().await.internal()?
+    };
     let Some(row) = Entity::find_by_id(id)
         .lock_exclusive()
         .one(&txn)
@@ -355,7 +364,7 @@ pub async fn fail_attempt(
     Ok(result.rows_affected == 1)
 }
 
-/// Returns a failed job to the claimable queue state for a durable retry.
+/// Returns the currently running job to the claimable queue state for a durable retry.
 pub(crate) async fn retry(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -370,7 +379,7 @@ pub(crate) async fn retry(
         .col_expr(Column::Error, Expr::value(message))
         .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(Column::Id.eq(id))
-        .filter(Column::Status.eq(InferenceJobStatus::Failed.as_db_str()))
+        .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .filter(Column::Attempt.eq(attempt))
         .exec(conn)
         .await

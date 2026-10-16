@@ -38,6 +38,7 @@ impl yorishiro::workers::dispatch::ReindexDispatcher for FailingDispatcher {
         &self,
         _ctx: &loco_rs::app::AppContext,
         _args: yorishiro::workers::reindex::ReindexArgs,
+        _txn: Option<&sea_orm::DatabaseTransaction>,
     ) -> loco_rs::Result<String> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         Err(loco_rs::Error::Message("dispatch failed".into()))
@@ -58,6 +59,8 @@ async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
                 Uuid::now_v7(),
                 yorishiro::workers::reindex::ReindexArgs {
                     lifecycle_id: None,
+                    dispatch_id: None,
+                    publishing_epoch: None,
                     workspace_id: Uuid::now_v7(),
                     worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
                     startup: false,

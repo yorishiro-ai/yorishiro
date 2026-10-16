@@ -23,11 +23,8 @@ use crate::error::YorishiroError;
 use crate::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
 use crate::models::search;
 use crate::services::embedding::EmbedKind;
-use crate::workers::embedding_sync::resolve_worker_provider;
+use crate::workers::embedding_sync::{WorkerClass, resolve_worker_provider};
 use crate::workers::target::WorkerTarget;
-
-/// Above every document class band in `workers::queue::priority`, so a waiting search is dequeued before document backlog.
-const PRIORITY: i32 = 1000;
 
 /// How long a client is told to wait before retrying a search no worker answered.
 const RETRY_AFTER: Duration = Duration::from_secs(1);
@@ -38,6 +35,8 @@ const RETRY_AFTER: Duration = Duration::from_secs(1);
 pub struct QueryEmbeddingArgs {
     pub request_id: Uuid,
     pub workspace_id: Uuid,
+    pub dispatch_id: Option<Uuid>,
+    pub publishing_epoch: Option<i64>,
 }
 
 /// The worker type for [`QueryEmbeddingArgs`].
@@ -52,6 +51,17 @@ impl BackgroundWorker<QueryEmbeddingArgs> for QueryEmbeddingWorker {
     }
 
     async fn perform(&self, args: QueryEmbeddingArgs) -> loco_rs::Result<()> {
+        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
+            &self.ctx.db,
+            None,
+            args.dispatch_id,
+            args.publishing_epoch,
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
+        {
+            return Ok(());
+        }
         // The message, not the HTTP-shaped conversion: Loco stores this text as the failed job's diagnostic, so an operator reads the cause in the queue.
         answer(&self.ctx, &args)
             .await
@@ -73,7 +83,7 @@ async fn answer(ctx: &AppContext, args: &QueryEmbeddingArgs) -> Result<(), Yoris
         return Ok(());
     };
 
-    match embed(ctx, workspace_id, &request.query_text).await {
+    match embed(ctx, workspace_id, &request.query_text, request.deadline_at).await {
         Ok((vector, model)) => {
             let stored = Requests::complete(&ctx.db, workspace_id, request.id, &vector, &model)
                 .await
@@ -98,7 +108,12 @@ async fn embed(
     ctx: &AppContext,
     workspace_id: Uuid,
     query_text: &str,
+    deadline_at: Option<chrono::DateTime<chrono::FixedOffset>>,
 ) -> Result<(Vec<f32>, String), YorishiroError> {
+    let deadline_at = deadline_at.ok_or_else(|| YorishiroError::ProviderBusy {
+        message: "legacy query request has no durable caller deadline".into(),
+        retry_after: RETRY_AFTER,
+    })?;
     let provider = resolve_worker_provider(ctx, workspace_id)
         .await?
         .ok_or_else(|| YorishiroError::BackendUnavailable {
@@ -114,6 +129,12 @@ async fn embed(
         .acquire()
         .await
         .map_err(|error| YorishiroError::Internal(error.into()))?;
+    if deadline_at <= chrono::Utc::now().fixed_offset() {
+        return Err(YorishiroError::ProviderBusy {
+            message: "query embedding caller deadline elapsed before provider start".into(),
+            retry_after: RETRY_AFTER,
+        });
+    }
     let vector = provider.embed_as(EmbedKind::Query, query_text).await?;
     search::check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     Ok((vector, provider.model_name()))
@@ -146,29 +167,18 @@ pub async fn embed_query(
         workspace_id,
     };
 
-    let request_id = scope.open(query_text, settings.retention_seconds).await?;
-    let job = QueryEmbeddingArgs {
-        request_id,
-        workspace_id,
-    };
-    if let Err(error) = crate::workers::target::enqueue::<QueryEmbeddingWorker, _>(
-        ctx,
-        WorkerTarget::Shared,
-        job,
-        Some(PRIORITY),
-    )
-    .await
-    {
-        // Nothing will answer this row, so remove it rather than leave it to expire.
-        if matches!(scope.expire(request_id).await, Ok(true)) {
-            let _ = scope.read(request_id).await;
-        }
-        return Err(YorishiroError::BackendUnavailable {
-            message: format!("the query could not be queued for embedding: {error}"),
-        });
-    }
+    let caller_started = Instant::now();
+    let deadline_at = chrono::Utc::now()
+        + chrono::Duration::milliseconds(i64::try_from(settings.timeout_ms).unwrap_or(i64::MAX));
+    let request_id = scope
+        .open(
+            query_text,
+            settings.retention_seconds,
+            deadline_at.fixed_offset(),
+        )
+        .await?;
 
-    wait(&scope, request_id, settings).await
+    wait(&scope, request_id, settings, caller_started).await
 }
 
 /// Polls until the request finishes or `timeout_ms` has passed, then expires it.
@@ -178,9 +188,10 @@ async fn wait(
     scope: &Scope<'_>,
     request_id: Uuid,
     settings: QueryEmbedding,
+    caller_started: Instant,
 ) -> Result<Vec<f32>, YorishiroError> {
     let interval = Duration::from_millis(settings.poll_interval_ms);
-    let deadline = Instant::now() + Duration::from_millis(settings.timeout_ms);
+    let deadline = caller_started + Duration::from_millis(settings.timeout_ms);
     loop {
         match scope.read(request_id).await? {
             Some(QueryOutcome::Pending) => {}
@@ -235,14 +246,57 @@ impl Scope<'_> {
         crate::db::begin_workspace(self.ctx, self.tenant_id, self.workspace_id).await
     }
 
-    async fn open(&self, query_text: &str, retention_seconds: u64) -> Result<Uuid, YorishiroError> {
+    async fn open(
+        &self,
+        query_text: &str,
+        retention_seconds: u64,
+        deadline_at: chrono::DateTime<chrono::FixedOffset>,
+    ) -> Result<Uuid, YorishiroError> {
         let txn = self.begin().await?;
         if let Err(error) = Requests::purge_expired(&txn).await {
             tracing::warn!(error = %error, "query embedding: could not purge expired requests");
         }
-        let id = Requests::open(&txn, self.workspace_id, query_text, retention_seconds)
-            .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
+        let id = Requests::open(
+            &txn,
+            self.workspace_id,
+            query_text,
+            retention_seconds,
+            deadline_at,
+        )
+        .await
+        .map_err(|error| YorishiroError::Internal(error.into()))?;
+        let dispatch_id = Uuid::now_v7();
+        let args = QueryEmbeddingArgs {
+            request_id: id,
+            workspace_id: self.workspace_id,
+            dispatch_id: Some(dispatch_id),
+            publishing_epoch: Some(
+                crate::models::queue_job_dispatch_outbox::publishing_state(&txn)
+                    .await
+                    .map_err(|error| YorishiroError::Internal(error.into()))?
+                    .epoch,
+            ),
+        };
+        let mut payload =
+            serde_json::to_value(&args).map_err(|error| YorishiroError::Internal(error.into()))?;
+        if let serde_json::Value::Object(fields) = &mut payload {
+            fields.insert(
+                "workspace_id".into(),
+                serde_json::Value::String(self.workspace_id.to_string()),
+            );
+        }
+        let target = WorkerTarget::for_job(&txn, WorkerClass::Shared, self.workspace_id).await?;
+        crate::models::queue_job_dispatch_outbox::record_query_in_transaction(
+            &txn,
+            dispatch_id,
+            deadline_at,
+            payload,
+            QueryEmbeddingWorker::class_name(),
+            Some(target.queue()),
+            Some(vec![target.tag()]),
+        )
+        .await
+        .map_err(|error| YorishiroError::Internal(error.into()))?;
         txn.commit()
             .await
             .map_err(|error| YorishiroError::Internal(error.into()))?;

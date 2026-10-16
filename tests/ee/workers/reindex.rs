@@ -12,6 +12,7 @@ use yorishiro::models::{entity_entities, entity_entities::CreateEntityInput, sch
 use yorishiro::services::embedding::{EmbeddingProvider, WorkspaceEmbeddingResolver};
 use yorishiro::workers::embedding_sync::WorkerClass;
 use yorishiro::workers::reindex::{ReindexArgs, ReindexWorker};
+use yorishiro::workers::target::WorkerTarget;
 
 struct Provider {
     model: &'static str,
@@ -84,6 +85,35 @@ impl WorkspaceEmbeddingResolver for Missing {
     }
 }
 
+async fn record_delivery(ctx: &loco_rs::app::AppContext, workspace_id: Uuid) -> (Uuid, i64) {
+    use yorishiro::models::queue_job_lifecycles::Enqueue;
+
+    let lifecycle_id = Uuid::now_v7();
+    yorishiro::models::queue_job_dispatch_outbox::record(
+        &ctx.db,
+        Enqueue {
+            id: lifecycle_id,
+            job_name: "reindex_embeddings",
+            worker_class: WorkerClass::Shared,
+            workspace_id: Some(workspace_id),
+            plan: None,
+            concurrency_key: None,
+            concurrency_limit: None,
+        },
+        serde_json::json!({ "workspace_id": workspace_id, "worker_class": WorkerClass::Shared, "startup": false }),
+        ReindexWorker::class_name(),
+        Some(WorkerTarget::Shared.queue()),
+        Some(vec![WorkerTarget::Shared.tag()]),
+    )
+    .await
+    .expect("record current-epoch reindex delivery");
+    let epoch = yorishiro::models::queue_job_dispatch_outbox::publishing_state(&ctx.db)
+        .await
+        .expect("read publisher state")
+        .epoch;
+    (lifecycle_id, epoch)
+}
+
 #[tokio::test]
 async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     let ctx = crate::workers::test_context().await;
@@ -144,8 +174,11 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
         .insert(Arc::new(Resolver(workspace_provider)) as Arc<dyn WorkspaceEmbeddingResolver>);
     ctx.shared_store
         .insert(default as Arc<dyn EmbeddingProvider>);
+    let (lifecycle_id, epoch) = record_delivery(&ctx, workspace.id).await;
     let args = ReindexArgs {
-        lifecycle_id: None,
+        lifecycle_id: Some(lifecycle_id),
+        dispatch_id: Some(lifecycle_id),
+        publishing_epoch: Some(epoch),
         workspace_id: workspace.id,
         worker_class: WorkerClass::Shared,
         startup: false,
@@ -182,9 +215,15 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
 
 #[tokio::test]
 async fn absent_and_disabled_providers_are_terminal_worker_errors() {
-    for provider in [
-        Arc::new(Missing) as Arc<dyn WorkspaceEmbeddingResolver>,
-        Arc::new(Resolver(Arc::new(Disabled))) as Arc<dyn WorkspaceEmbeddingResolver>,
+    for (provider, expected_error) in [
+        (
+            Arc::new(Missing) as Arc<dyn WorkspaceEmbeddingResolver>,
+            "embedding provider absent",
+        ),
+        (
+            Arc::new(Resolver(Arc::new(Disabled))) as Arc<dyn WorkspaceEmbeddingResolver>,
+            "embedding provider disabled",
+        ),
     ] {
         let ctx = crate::workers::test_context().await;
         Migrator::up(&ctx.db, None).await.expect("migrations");
@@ -205,14 +244,31 @@ async fn absent_and_disabled_providers_are_terminal_worker_errors() {
         .await
         .expect("workspace");
         ctx.shared_store.insert(provider);
+        let (lifecycle_id, epoch) = record_delivery(&ctx, workspace.id).await;
         let result = ReindexWorker::build(&ctx)
             .perform(ReindexArgs {
-                lifecycle_id: None,
+                lifecycle_id: Some(lifecycle_id),
+                dispatch_id: Some(lifecycle_id),
+                publishing_epoch: Some(epoch),
                 workspace_id: workspace.id,
                 worker_class: WorkerClass::Shared,
                 startup: false,
             })
             .await;
-        assert!(result.is_err());
+        result.expect("terminal worker errors are recorded on the lifecycle");
+        let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)
+            .one(&ctx.db)
+            .await
+            .expect("read terminal lifecycle")
+            .expect("lifecycle exists");
+        assert_eq!(lifecycle.status, "failed");
+        assert!(
+            lifecycle
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains(expected_error)),
+            "error={:?}, expected substring={expected_error}",
+            lifecycle.error
+        );
     }
 }

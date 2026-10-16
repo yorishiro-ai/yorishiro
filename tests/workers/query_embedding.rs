@@ -2,15 +2,17 @@ use std::sync::Arc;
 
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
-use sea_orm::ActiveModelTrait;
+use sea_orm::{ActiveModelTrait, EntityTrait, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
+use yorishiro::models::queue_job_dispatch_outbox;
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
+use yorishiro::workers::target::WorkerTarget;
 
 use crate::requests::boot_request;
 
@@ -35,10 +37,45 @@ async fn workspace(ctx: &AppContext) -> Uuid {
 }
 
 async fn perform(ctx: &AppContext, workspace_id: Uuid, request_id: Uuid) -> loco_rs::Result<()> {
+    let dispatch_id = Uuid::now_v7();
+    let deadline_at = Requests::find_by_id(request_id)
+        .one(&ctx.db)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .and_then(|request| request.deadline_at)
+        .unwrap_or_else(|| chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1));
+    let txn = ctx
+        .db
+        .begin()
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    queue_job_dispatch_outbox::record_query_in_transaction(
+        &txn,
+        dispatch_id,
+        deadline_at,
+        serde_json::json!({
+            "request_id": request_id,
+            "workspace_id": workspace_id,
+        }),
+        QueryEmbeddingWorker::class_name(),
+        Some(WorkerTarget::Shared.queue()),
+        Some(vec![WorkerTarget::Shared.tag()]),
+    )
+    .await
+    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    txn.commit()
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let epoch = queue_job_dispatch_outbox::publishing_state(&ctx.db)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .epoch;
     QueryEmbeddingWorker::build(ctx)
         .perform(QueryEmbeddingArgs {
             request_id,
             workspace_id,
+            dispatch_id: Some(dispatch_id),
+            publishing_epoch: Some(epoch),
         })
         .await
 }
@@ -56,11 +93,21 @@ fn the_job_payload_carries_ids_only() {
     let args = QueryEmbeddingArgs {
         request_id: Uuid::nil(),
         workspace_id: Uuid::nil(),
+        dispatch_id: None,
+        publishing_epoch: None,
     };
     let json = serde_json::to_value(&args).unwrap();
     let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
     keys.sort();
-    assert_eq!(keys, ["request_id", "workspace_id"]);
+    assert_eq!(
+        keys,
+        [
+            "dispatch_id",
+            "publishing_epoch",
+            "request_id",
+            "workspace_id"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -75,7 +122,15 @@ async fn a_job_for_a_request_that_is_gone_or_finished_does_nothing() {
             .await
             .expect("an unknown request is a late delivery");
 
-        let expired = Requests::open(&ctx.db, ws, "alpha", 60).await.unwrap();
+        let expired = Requests::open(
+            &ctx.db,
+            ws,
+            "alpha",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
         assert!(Requests::expire(&ctx.db, ws, expired).await.unwrap());
         perform(&ctx, ws, expired)
             .await
@@ -100,7 +155,15 @@ async fn the_worker_stores_a_vector_of_the_width_the_workspace_holds() {
             Arc::new(crate::requests::query_worker::KeywordProvider::new(768))
                 as Arc<dyn EmbeddingProvider>,
         );
-        let id = Requests::open(&ctx.db, ws, "beta", 60).await.unwrap();
+        let id = Requests::open(
+            &ctx.db,
+            ws,
+            "beta",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
 
         perform(&ctx, ws, id).await.expect("embedded");
 
@@ -127,7 +190,15 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
                     retry_after: std::time::Duration::from_secs(3),
                 }
             })) as Arc<dyn EmbeddingProvider>);
-        let id = Requests::open(&ctx.db, ws, "alpha", 60).await.unwrap();
+        let id = Requests::open(
+            &ctx.db,
+            ws,
+            "alpha",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
 
         let error = perform(&ctx, ws, id)
             .await
@@ -152,7 +223,15 @@ async fn a_worker_without_any_provider_records_an_accurate_failure() {
                 .is_none(),
             "a booted server holds no provider"
         );
-        let id = Requests::open(&ctx.db, ws, "alpha", 60).await.unwrap();
+        let id = Requests::open(
+            &ctx.db,
+            ws,
+            "alpha",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
 
         perform(&ctx, ws, id).await.expect_err("no provider");
         match Requests::take(&ctx.db, ws, id).await.unwrap() {

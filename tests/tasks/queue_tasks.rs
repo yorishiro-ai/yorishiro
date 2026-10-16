@@ -33,6 +33,7 @@ impl EmbeddingSyncDispatcher for Recorder {
         &self,
         _ctx: &AppContext,
         args: EmbeddingSyncArgs,
+        _txn: Option<&sea_orm::DatabaseTransaction>,
     ) -> loco_rs::Result<String> {
         self.documents.lock().unwrap().push(args);
         Ok("job".into())
@@ -41,7 +42,12 @@ impl EmbeddingSyncDispatcher for Recorder {
 
 #[async_trait]
 impl ReindexDispatcher for Recorder {
-    async fn dispatch(&self, _ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
+    async fn dispatch(
+        &self,
+        _ctx: &AppContext,
+        args: ReindexArgs,
+        _txn: Option<&sea_orm::DatabaseTransaction>,
+    ) -> loco_rs::Result<String> {
         self.reindexes.lock().unwrap().push(args);
         Ok("job".into())
     }
@@ -189,6 +195,73 @@ async fn the_tasks_reject_a_workspace_id_that_is_not_a_uuid() {
         }
         assert!(recorder.documents.lock().unwrap().is_empty());
         assert!(recorder.reindexes.lock().unwrap().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn replay_task_prepares_and_activates_the_next_publisher_epoch() {
+    use loco_rs::task::Vars;
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::queue_job_dispatch_outbox::{self, PublishingState};
+
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        let before = queue_job_dispatch_outbox::publishing_state(&ctx.db)
+            .await
+            .expect("initialized publishing state");
+        assert!(before.active);
+        let pause_txn = ctx.db.begin().await.expect("begin publisher pause");
+        let paused_epoch = queue_job_dispatch_outbox::change_publishing_state(
+            &pause_txn,
+            before.epoch,
+            false,
+            Some(chrono::Utc::now().fixed_offset()),
+        )
+        .await
+        .expect("pause publisher");
+        pause_txn.commit().await.expect("commit publisher pause");
+
+        let cutoff = chrono::Utc::now().fixed_offset();
+        let prepare_vars = Vars::from_cli_args(vec![
+            ("expected_epoch".to_owned(), paused_epoch.to_string()),
+            ("snapshot_id".to_owned(), "task-snapshot".to_owned()),
+            ("old_workers_exited".to_owned(), "true".to_owned()),
+            ("phase".to_owned(), "prepare".to_owned()),
+            ("cutoff_at".to_owned(), cutoff.to_rfc3339()),
+        ]);
+        loco_rs::boot::run_task::<App>(
+            &ctx,
+            Some(&"replay_queue_dispatch_snapshot".to_owned()),
+            &prepare_vars,
+        )
+        .await
+        .expect("prepare replay snapshot");
+        let prepared: PublishingState = queue_job_dispatch_outbox::publishing_state(&ctx.db)
+            .await
+            .expect("prepared publishing state");
+        assert_eq!(prepared.epoch, paused_epoch + 1);
+        assert!(!prepared.active);
+        assert_eq!(prepared.snapshot_id.as_deref(), Some("task-snapshot"));
+
+        let activate_vars = Vars::from_cli_args(vec![
+            ("expected_epoch".to_owned(), paused_epoch.to_string()),
+            ("snapshot_id".to_owned(), "task-snapshot".to_owned()),
+            ("old_workers_exited".to_owned(), "true".to_owned()),
+            ("phase".to_owned(), "activate".to_owned()),
+        ]);
+        loco_rs::boot::run_task::<App>(
+            &ctx,
+            Some(&"replay_queue_dispatch_snapshot".to_owned()),
+            &activate_vars,
+        )
+        .await
+        .expect("activate prepared epoch");
+        let active = queue_job_dispatch_outbox::publishing_state(&ctx.db)
+            .await
+            .expect("active publishing state");
+        assert_eq!(active.epoch, paused_epoch + 1);
+        assert!(active.active);
+        assert_eq!(active.snapshot_id.as_deref(), Some("task-snapshot"));
     })
     .await;
 }

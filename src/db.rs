@@ -254,6 +254,12 @@ pub struct DbHandle {
     pub identity: PgPool,
 }
 
+impl DbHandle {
+    pub(crate) fn identity_connection(&self) -> DatabaseConnection {
+        sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.identity.clone())
+    }
+}
+
 /// A UUIDv7 for a primary key `before_save` hook to set on SQLite, or `ActiveValue::NotSet` to leave the column alone.
 ///
 /// PostgreSQL's `id UUID PRIMARY KEY DEFAULT uuidv7()` (see `migration/src/helpers.rs::uuidv7_pk`) has no SQLite equivalent, so on that backend every insert must supply its own id or hit `NOT NULL constraint failed`.

@@ -33,7 +33,12 @@ mod unit {
 
     #[async_trait]
     impl ReindexDispatcher for RecordingDispatcher {
-        async fn dispatch(&self, _ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
+        async fn dispatch(
+            &self,
+            _ctx: &AppContext,
+            args: ReindexArgs,
+            _txn: Option<&sea_orm::DatabaseTransaction>,
+        ) -> loco_rs::Result<String> {
             self.args.lock().unwrap().push(args);
             if self.fail {
                 Err(loco_rs::Error::Message("dispatch failed".into()))
@@ -48,6 +53,8 @@ mod unit {
         let ctx = crate::workers::test_context().await;
         let args = ReindexArgs {
             lifecycle_id: None,
+            dispatch_id: None,
+            publishing_epoch: None,
             workspace_id: Uuid::now_v7(),
             worker_class: WorkerClass::TenantPrivate,
             startup: false,
@@ -57,7 +64,7 @@ mod unit {
             fail: false,
         };
 
-        enqueue_for_class_with_dispatcher(&ctx, args.clone(), &dispatcher)
+        enqueue_for_class_with_dispatcher(&ctx, args.clone(), None, &dispatcher)
             .await
             .expect("dispatch");
 
@@ -79,10 +86,13 @@ mod unit {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
+                dispatch_id: None,
+                publishing_epoch: None,
                 workspace_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,
                 startup: false,
             },
+            None,
             &dispatcher,
         )
         .await
@@ -99,7 +109,7 @@ mod unit {
             fail: false,
         };
 
-        let error = enqueue_reindex_with_dispatcher(&ctx, Uuid::now_v7(), &dispatcher)
+        let error = enqueue_reindex_with_dispatcher(&ctx, Uuid::now_v7(), None, &dispatcher)
             .await
             .expect_err("missing queue must fail");
 

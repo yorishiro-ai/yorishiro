@@ -1,6 +1,7 @@
 use super::boot_request;
 use async_trait::async_trait;
 use axum::http::StatusCode;
+use loco_rs::bgworker::BackgroundWorker;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -171,38 +172,63 @@ async fn undo_migration_job_is_recorded() {
 
 struct AuditBeforeDispatch {
     detail: Mutex<Option<serde_json::Value>>,
+    dispatch_id: Mutex<Option<Uuid>>,
 }
 
 #[async_trait]
 impl ReindexDispatcher for AuditBeforeDispatch {
     async fn dispatch(
         &self,
-        ctx: &loco_rs::app::AppContext,
+        _ctx: &loco_rs::app::AppContext,
         args: ReindexArgs,
+        txn: Option<&sea_orm::DatabaseTransaction>,
     ) -> loco_rs::Result<String> {
+        let txn = txn.expect("reindex audit and outbox share the caller transaction");
         let row = yorishiro::models::api_key_audit_log::Entity::find()
             .filter(
                 yorishiro::models::_entities::api_key_audit_log::Column::WorkspaceId
                     .eq(args.workspace_id),
             )
-            .one(&ctx.db)
+            .one(txn)
             .await
             .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-            .expect("reindex audit row must be committed before dispatch");
+            .expect("reindex audit row must be in the outbox transaction");
         *self.detail.lock().unwrap() = Some(row.detail);
-        Ok("fake-reindex-job".into())
+        let dispatch_id = Uuid::now_v7();
+        yorishiro::models::queue_job_dispatch_outbox::record_in_transaction(
+            txn,
+            yorishiro::models::queue_job_lifecycles::Enqueue {
+                id: dispatch_id,
+                job_name: "reindex_embeddings",
+                worker_class: args.worker_class,
+                workspace_id: Some(args.workspace_id),
+                plan: None,
+                concurrency_key: None,
+                concurrency_limit: None,
+            },
+            serde_json::to_value(&args)
+                .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
+            yorishiro::workers::reindex::ReindexWorker::class_name(),
+            Some(yorishiro::workers::target::WorkerTarget::Shared.queue()),
+            Some(vec![yorishiro::workers::target::WorkerTarget::Shared.tag()]),
+        )
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        *self.dispatch_id.lock().unwrap() = Some(dispatch_id);
+        Ok(dispatch_id.to_string())
     }
 }
 
 /// Reindex intentionally records workspace identity rather than the queue job ID.
-/// The audit row is append-only and commits before dispatch, while the queue assigns its job ID during dispatch.
+/// The audit row and dispatch outbox are written in the caller transaction, which commits before the relay publishes.
 /// The response still exposes the queue job ID returned by the dispatcher.
 #[tokio::test]
-async fn reindex_audit_detail_is_workspace_id_and_is_committed_before_dispatch() {
+async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publication() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "reindex-audit").await;
         let dispatcher = Arc::new(AuditBeforeDispatch {
             detail: Mutex::new(None),
+            dispatch_id: Mutex::new(None),
         });
         ctx.shared_store
             .insert(dispatcher.clone() as Arc<dyn yorishiro::workers::dispatch::ReindexDispatcher>);
@@ -219,11 +245,41 @@ async fn reindex_audit_detail_is_workspace_id_and_is_committed_before_dispatch()
         );
         assert_eq!(
             response.json::<serde_json::Value>()["job_id"],
-            "fake-reindex-job"
+            dispatcher
+                .dispatch_id
+                .lock()
+                .unwrap()
+                .expect("dispatcher wrote the outbox ID")
+                .to_string()
         );
 
         let expected = serde_json::json!({ "workspace_id": setup.workspace_id });
         assert_eq!(dispatcher.detail.lock().unwrap().as_ref(), Some(&expected));
+        let dispatch_id = dispatcher
+            .dispatch_id
+            .lock()
+            .unwrap()
+            .expect("dispatcher recorded an outbox row");
+        let committed_outbox =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(
+                dispatch_id,
+            )
+            .one(&ctx.db)
+            .await
+            .expect("relay reads committed outbox")
+            .expect("outbox committed with audit row");
+        assert_eq!(committed_outbox.lifecycle_id, Some(dispatch_id));
+        assert!(committed_outbox.published_at.is_none());
+        let committed_audit = yorishiro::models::api_key_audit_log::Entity::find()
+            .filter(
+                yorishiro::models::_entities::api_key_audit_log::Column::WorkspaceId
+                    .eq(setup.workspace_id),
+            )
+            .one(&ctx.db)
+            .await
+            .expect("relay reads committed audit row")
+            .expect("audit row committed with outbox");
+        assert_eq!(committed_audit.detail, expected);
         assert!(
             !dispatcher
                 .detail

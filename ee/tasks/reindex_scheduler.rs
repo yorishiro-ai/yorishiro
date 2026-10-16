@@ -362,6 +362,8 @@ impl TenantReindexScheduler {
                     }
                 };
                 let args = ReindexArgs {
+                    dispatch_id: None,
+                    publishing_epoch: None,
                     lifecycle_id: None,
                     workspace_id: ws.id,
                     worker_class,

@@ -939,7 +939,40 @@ src/models/mod.rs	mod	queue_job_dispatch_outbox	integration-test: tests/models/q
 src/models/queue_job_dispatch_outbox.rs	struct	PendingDispatch	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	fn	record	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	fn	due	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
-src/models/queue_job_dispatch_outbox.rs	fn	claim_due	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
+src/models/queue_job_dispatch_outbox.rs	fn	advance_publishing_epoch	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises pause fencing against active claims.
+src/models/queue_job_dispatch_outbox.rs	fn	set_cutover_cutoff	integration-test: replay tests verify cutoff evidence is persisted before retagging.
+src/models/queue_job_dispatch_outbox.rs	fn	prepare_replay_snapshot	integration-test: tests cover atomic replay retagging and epoch advance.
+src/models/queue_job_dispatch_outbox.rs	fn	activate_prepared_publishing_epoch	integration-test: tests verify the prepared epoch activates without another increment.
+src/models/queue_job_dispatch_outbox.rs	fn	publishing_state	integration-test: tests assert publisher state at each transition.
+src/models/queue_job_dispatch_outbox.rs	fn	change_publishing_state	integration-test: tests cover pause and activation transitions.
+src/models/queue_job_dispatch_outbox.rs	fn	claim_dispatch	integration-test: tests cover competing durable relay claims.
+src/models/queue_job_dispatch_outbox.rs	fn	acknowledge_dispatch	integration-test: tests cover stale acknowledgement fencing.
+src/models/queue_job_dispatch_outbox.rs	fn	claim_for_publish	integration-test: the due-row recovery test verifies attempted rows cannot be reclaimed immediately.
+src/models/queue_job_dispatch_outbox.rs	fn	retag_for_replay	integration-test: replay recovery tests exercise one-row epoch retagging.
+src/workers/dispatch.rs	fn	recover_pending_on	integration-test: tests exercise the production relay against an isolated SQLite queue.
+src/workers/dispatch.rs	fn	recover_pending	integration-test: request and worker tests invoke the production relay against their owned queue fixtures.
+src/models/queue_job_dispatch_outbox.rs	fn	delivery_epoch_allowed	integration-test: worker tests verify deliveries are fenced to the active epoch.
+src/models/queue_job_dispatch_outbox.rs	fn	record_in_transaction	integration-test: producer tests verify atomic lifecycle and outbox admission.
+src/models/queue_job_dispatch_outbox.rs	fn	record_lifecycle_payload	integration-test: producer tests verify atomic retry payload updates.
+src/models/queue_job_dispatch_outbox.rs	fn	record_query_in_transaction	integration-test: query worker tests verify deadline and priority persistence.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::id	integration-test: dispatch tests assert durable row identity.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::publishing_epoch	integration-test: dispatch tests assert epoch fencing.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::deadline_at	integration-test: query deadline tests assert expiry eligibility.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::workspace_id	integration-test: dispatch tests assert target workspace routing.
+src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::priority	integration-test: tests assert query search priority is preserved.
+src/models/queue_job_dispatch_outbox.rs	struct	PublishingState	integration-test: transition tests inspect paused and prepared state.
+src/models/queue_job_dispatch_outbox.rs	field	PublishingState::epoch	integration-test: transition tests assert monotonic publisher epochs.
+src/models/queue_job_dispatch_outbox.rs	field	PublishingState::active	integration-test: transition tests assert pause and activation state.
+src/models/queue_job_dispatch_outbox.rs	field	PublishingState::cutoff_at	integration-test: replay tests assert recorded cutoff evidence.
+src/models/queue_job_dispatch_outbox.rs	field	PublishingState::snapshot_id	integration-test: replay tests assert attested snapshot identity.
+ee/workers/infer_fill.rs	field	InferFillArgs::dispatch_id	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
+ee/workers/infer_fill.rs	field	InferFillArgs::publishing_epoch	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
+src/workers/embedding_sync.rs	field	EmbeddingSyncArgs::dispatch_id	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
+src/workers/embedding_sync.rs	field	EmbeddingSyncArgs::publishing_epoch	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
+src/workers/query_embedding.rs	field	QueryEmbeddingArgs::dispatch_id	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
+src/workers/query_embedding.rs	field	QueryEmbeddingArgs::publishing_epoch	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
+src/workers/reindex.rs	field	ReindexArgs::dispatch_id	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
+src/workers/reindex.rs	field	ReindexArgs::publishing_epoch	queue-protocol: delivery fencing metadata carried in serialized worker arguments and constructed by integration tests.
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::lifecycle_id	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::job_name	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	field	PendingDispatch::worker_class	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.

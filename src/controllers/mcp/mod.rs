@@ -203,7 +203,7 @@ pub(crate) struct Authorized {
 }
 
 impl Authorized {
-    pub(super) fn txn(&self) -> &DatabaseTransaction {
+    pub(crate) fn txn(&self) -> &DatabaseTransaction {
         &self.txn
     }
 

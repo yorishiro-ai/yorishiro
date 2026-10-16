@@ -57,28 +57,31 @@ fn seen() -> Vec<String> {
 
 type MakeQueue = Box<dyn Fn() -> Pin<Box<dyn Future<Output = Arc<bgworker::Queue>>>>>;
 
+type OwnedRedisJobs = Arc<Mutex<Vec<(String, String)>>>;
+
 /// How a job for `tag` is routed on a provider that honours a named queue: the Redis lane enqueues each target to its own queue, the SQL providers ignore the name.
 fn queue_for(named_queues: bool, tag: &str) -> Option<String> {
     named_queues.then(|| tag.to_owned())
 }
 
-async fn enqueue(queue: &bgworker::Queue, tag: &str, named_queues: bool) {
+async fn enqueue(queue: &bgworker::Queue, tag: &str, queue_name: Option<String>) -> String {
     queue
         .enqueue(
             TargetProbeWorker::class_name(),
-            queue_for(named_queues, tag),
+            queue_name,
             serde_json::json!({ "tag": tag }),
             Some(vec![tag.to_owned()]),
             None,
         )
         .await
-        .expect("enqueue a target job");
+        .expect("enqueue a target job")
+        .expect("queue provider returns a job ID")
 }
 
 async fn run_worker_for(
     queue: Arc<bgworker::Queue>,
-    tags: Vec<&str>,
-    expect: Vec<&str>,
+    tags: Vec<String>,
+    expect: Vec<String>,
     settle: Duration,
 ) {
     SEEN.lock().expect("seen lock").clear();
@@ -87,23 +90,24 @@ async fn run_worker_for(
         .await
         .expect("register probe");
     let running = queue.clone();
-    let tags: Vec<String> = tags.into_iter().map(str::to_owned).collect();
     let handle = tokio::spawn(async move { running.run(tags).await });
     let expected = expect.len();
-    tokio::time::timeout(Duration::from_secs(10), async {
+    let processed = tokio::time::timeout(Duration::from_secs(10), async {
         while SEEN.lock().expect("seen lock").len() < expected {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
-    .await
-    .expect("the worker takes the jobs of its own target");
+    .await;
     // Give a worker that matches too much time to take what is not its own.
-    tokio::time::sleep(settle).await;
+    if processed.is_ok() {
+        tokio::time::sleep(settle).await;
+    }
     let shutdown = queue.shutdown();
     let joined = handle.await;
     shutdown.expect("stop the worker");
     joined.expect("join the worker").expect("run the worker");
-    let mut expect: Vec<String> = expect.into_iter().map(str::to_owned).collect();
+    processed.expect("the worker takes the jobs of its own target");
+    let mut expect = expect;
     expect.sort();
     assert_eq!(seen(), expect);
 }
@@ -113,31 +117,72 @@ async fn each_worker_takes_only_its_own_target(
     first: Arc<bgworker::Queue>,
     next: MakeQueue,
     named_queues: bool,
+    redis_routes: Option<Vec<(String, Option<String>)>>,
+    owned_redis_jobs: Option<OwnedRedisJobs>,
 ) {
     let settle = Duration::from_millis(2500);
-    for tag in [SHARED, OFFICIAL, TENANT_A, TENANT_B, RETIRED] {
-        enqueue(&first, tag, named_queues).await;
+    let routes = redis_routes.unwrap_or_else(|| {
+        [SHARED, OFFICIAL, TENANT_A, TENANT_B, RETIRED]
+            .into_iter()
+            .map(|tag| (tag.to_owned(), queue_for(named_queues, tag)))
+            .collect()
+    });
+    assert_eq!(routes.len(), 5);
+    for (tag, queue_name) in &routes {
+        let queue_member = queue_name.clone().unwrap_or_else(|| "default".into());
+        let id = enqueue(&first, tag, queue_name.clone()).await;
+        if let Some(owned_ids) = &owned_redis_jobs {
+            owned_ids
+                .lock()
+                .expect("owned Redis jobs")
+                .push((queue_member, id));
+        }
     }
 
-    run_worker_for(first.clone(), vec![TENANT_A], vec![TENANT_A], settle).await;
-    run_worker_for(next().await, vec![SHARED], vec![SHARED], settle).await;
-    run_worker_for(next().await, vec![OFFICIAL], vec![OFFICIAL], settle).await;
+    let tags: Vec<String> = routes.iter().map(|(tag, _)| tag.clone()).collect();
+    let shared = tags[0].clone();
+    let official = tags[1].clone();
+    let tenant_a = tags[2].clone();
+    let tenant_b = tags[3].clone();
+    let retired = tags[4].clone();
+    run_worker_for(
+        first.clone(),
+        vec![tenant_a.clone()],
+        vec![tenant_a],
+        settle,
+    )
+    .await;
+    run_worker_for(
+        next().await,
+        vec![shared.clone()],
+        vec![shared.clone()],
+        settle,
+    )
+    .await;
+    run_worker_for(
+        next().await,
+        vec![official.clone()],
+        vec![official.clone()],
+        settle,
+    )
+    .await;
     // One process may serve several targets, and then takes exactly those.
     run_worker_for(
         next().await,
-        vec![TENANT_B, OFFICIAL],
-        vec![TENANT_B],
+        vec![tenant_b.clone(), official],
+        vec![tenant_b],
         settle,
     )
     .await;
     // The retired class tag matches no target, so nothing is left for a target worker to take.
     run_worker_for(
         next().await,
-        vec![SHARED, OFFICIAL, TENANT_A, TENANT_B],
+        vec![shared, tags[1].clone(), tags[2].clone(), tags[3].clone()],
         vec![],
         settle,
     )
     .await;
+    let _ = retired;
 }
 
 fn sqlite_config(path: &std::path::Path) -> SqliteQueueConfig {
@@ -176,11 +221,11 @@ async fn sqlite_queue_delivers_each_target_only_to_its_worker() {
         }
     };
     let first = make().await;
-    each_worker_takes_only_its_own_target(first, Box::new(make), false).await;
+    each_worker_takes_only_its_own_target(first, Box::new(make), false, None, None).await;
 }
 
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn postgres_queue_delivers_each_target_only_to_its_worker() {
     let is_postgres =
@@ -222,6 +267,8 @@ async fn postgres_queue_delivers_each_target_only_to_its_worker() {
         first.clone(),
         Box::new(make),
         false,
+        None,
+        None,
     ))
     .catch_unwind()
     .await;
@@ -233,14 +280,14 @@ async fn postgres_queue_delivers_each_target_only_to_its_worker() {
 }
 
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn redis_queue_delivers_each_target_only_to_its_worker() {
     redis_scenario(false).await;
 }
 
 #[tokio::test]
-#[serial(queue_postgres)]
+#[serial(queue_backend)]
 #[serial(process_environment)]
 async fn redis_queue_with_one_named_queue_per_target_delivers_only_to_its_worker() {
     redis_scenario(true).await;
@@ -250,23 +297,40 @@ async fn redis_scenario(named_queues: bool) {
     let Some(uri) = crate::valkey_test_url() else {
         return;
     };
+    let run_id = Uuid::now_v7();
+    let canonical_tags = [SHARED, OFFICIAL, TENANT_A, TENANT_B, RETIRED];
+    let tags: Vec<String> = canonical_tags
+        .iter()
+        .map(|tag| format!("{tag}:test:{run_id}"))
+        .collect();
+    let all_queue = format!("queue-test:target-routing:{run_id}");
+    let route_queues: Vec<String> = if named_queues {
+        (0..canonical_tags.len())
+            .map(|index| format!("{all_queue}:{index}"))
+            .collect()
+    } else {
+        vec![all_queue; canonical_tags.len()]
+    };
+    let routes: Vec<(String, Option<String>)> = tags
+        .iter()
+        .cloned()
+        .zip(route_queues.iter().cloned().map(Some))
+        .collect();
+    let queues: Vec<String> = route_queues
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let cleanup_uri = uri.clone();
     let make = move || {
         let uri = uri.clone();
+        let queues = queues.clone();
         Box::pin(async move {
-            // A worker polls only the queues its configuration names: the shared default queue, or the one queue per target it serves.
-            let queues = named_queues.then(|| {
-                vec![
-                    SHARED.to_owned(),
-                    OFFICIAL.to_owned(),
-                    TENANT_A.to_owned(),
-                    TENANT_B.to_owned(),
-                    RETIRED.to_owned(),
-                ]
-            });
             let config = RedisQueueConfig {
                 uri,
                 dangerously_flush: false,
-                queues,
+                queues: Some(queues),
                 num_workers: 1,
                 reaper: None,
             };
@@ -280,19 +344,44 @@ async fn redis_scenario(named_queues: bool) {
         }) as Pin<Box<dyn Future<Output = Arc<bgworker::Queue>>>>
     };
     let first = make().await;
-    first
-        .clear()
-        .await
-        .expect("clear the reserved Redis database");
+    // Redis clear is FLUSHDB; never use it on the shared DB15 service.
+    let owned_ids = Arc::new(Mutex::new(Vec::new()));
     let outcome = std::panic::AssertUnwindSafe(each_worker_takes_only_its_own_target(
         first.clone(),
         Box::new(make),
         named_queues,
+        Some(routes),
+        Some(owned_ids.clone()),
     ))
     .catch_unwind()
     .await;
-    let _ = first.clear().await;
     let _ = first.shutdown();
+    let client =
+        loco_rs::bgworker::redis::RedisPool::open(cleanup_uri).expect("open cleanup client");
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("connect cleanup client");
+    let owned_ids = owned_ids.lock().expect("owned Redis jobs").clone();
+    for (queue_name, id) in &owned_ids {
+        let _: usize = redis::cmd("ZREM")
+            .arg(format!("queue:{queue_name}"))
+            .arg(id)
+            .query_async(&mut connection)
+            .await
+            .expect("remove owned queued member");
+        let _: usize = redis::cmd("SREM")
+            .arg(format!("processing:{queue_name}"))
+            .arg(id)
+            .query_async(&mut connection)
+            .await
+            .expect("remove owned processing member");
+        let _: usize = redis::cmd("DEL")
+            .arg(format!("job:{id}"))
+            .query_async(&mut connection)
+            .await
+            .expect("remove owned job key");
+    }
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);
     }

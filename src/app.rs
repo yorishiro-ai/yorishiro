@@ -342,6 +342,7 @@ pub(crate) async fn connect_workers(
     install_embedding_provider(ctx).await?;
     refuse_retired_routes(ctx).await?;
     workers.connect(ctx, queue).await?;
+    crate::workers::dispatch::start_relay(ctx);
     crate::workers::startup_reindex::run(ctx).await;
     Ok(())
 }
@@ -398,10 +399,15 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::maintenance::Maintenance);
     tasks.register(tasks::maintenance_status::MaintenanceStatus);
     tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
+    tasks.register(tasks::set_queue_publishing_epoch::SetQueuePublishingEpoch);
+    tasks.register(tasks::replay_queue_dispatch_snapshot::ReplayQueueDispatchSnapshot);
     tasks.register(tasks::db_load_guard::DbLoadGuard);
 }
 
 pub(crate) async fn on_shutdown(ctx: &AppContext) {
+    if let Some(relay) = ctx.shared_store.get::<tokio::task::AbortHandle>() {
+        relay.abort();
+    }
     initializers::db_load_guard::shutdown(ctx).await;
     if let Some(db) = ctx.shared_store.get::<crate::db::DbHandle>() {
         db.identity.close().await;
