@@ -18,12 +18,12 @@ fn provider_of(ctx: &loco_rs::app::AppContext) -> Option<Arc<dyn EmbeddingProvid
 
 fn unknown_model_config(dir: &tempfile::TempDir) -> loco_rs::config::Config {
     let (uri, queue_uri) = sqlite_uris(dir);
-    serde_yaml::from_str(&minimal_config_with_unknown_model(
-        &uri,
-        &queue_uri,
-        UNKNOWN_MODEL,
-    ))
-    .unwrap()
+    let mut config: loco_rs::config::Config = serde_yaml::from_str(
+        &minimal_config_with_unknown_model(&uri, &queue_uri, UNKNOWN_MODEL),
+    )
+    .unwrap();
+    config.database.auto_migrate = true;
+    config
 }
 
 /// The server boots with a local provider that could never load, because it never builds one, and its liveness probe does not depend on a model.

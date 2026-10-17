@@ -13,7 +13,7 @@ use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::api_key_audit_log::{ActiveModel, Entity, Model};
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
     async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>

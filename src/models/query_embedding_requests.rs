@@ -7,7 +7,7 @@
 //!
 //! Every transition is fenced on the row's current status, so a late worker cannot overwrite a request the server already expired or consumed, and two consumers cannot both take one result.
 
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
@@ -46,7 +46,7 @@ pub enum QueryOutcome {
     Expired,
 }
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
@@ -78,7 +78,7 @@ impl Entity {
             workspace_id: Set(workspace_id),
             query_text: Set(query_text.to_owned()),
             status: Set(QueryEmbeddingStatus::Pending.as_db_str().to_owned()),
-            expires_at: Set((Utc::now() + ttl).fixed_offset()),
+            expires_at: Set(crate::time::database_instant(crate::time::now() + ttl)),
             deadline_at: Set(Some(deadline_at)),
             ..Default::default()
         }
@@ -99,8 +99,8 @@ impl Entity {
         Entity::find_by_id(id)
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.eq(QueryEmbeddingStatus::Pending.as_db_str()))
-            .filter(Column::ExpiresAt.gt(Utc::now().fixed_offset()))
-            .filter(Column::DeadlineAt.gt(Utc::now().fixed_offset()))
+            .filter(Column::ExpiresAt.gt(crate::time::now()))
+            .filter(Column::DeadlineAt.gt(crate::time::now()))
             .one(db)
             .await
     }
@@ -119,7 +119,7 @@ impl Entity {
     ) -> Result<bool, DbErr> {
         let dimensions = i32::try_from(vector.len())
             .map_err(|_| DbErr::Custom("query vector is too wide to store".into()))?;
-        let now = Utc::now().fixed_offset();
+        let now = crate::time::now();
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -149,7 +149,7 @@ impl Entity {
         id: Uuid,
         error: &str,
     ) -> Result<bool, DbErr> {
-        let now = Utc::now().fixed_offset();
+        let now = crate::time::now();
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -181,7 +181,7 @@ impl Entity {
                 Column::Status,
                 Expr::value(QueryEmbeddingStatus::Expired.as_db_str()),
             )
-            .col_expr(Column::UpdatedAt, Expr::value(Utc::now().fixed_offset()))
+            .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
             .filter(Column::Id.eq(id))
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.eq(QueryEmbeddingStatus::Pending.as_db_str()))
@@ -226,7 +226,7 @@ impl Entity {
     /// Returns an error if the delete fails.
     pub async fn purge_expired(db: &impl ConnectionTrait) -> Result<u64, DbErr> {
         let result = Entity::delete_many()
-            .filter(Column::ExpiresAt.lt(Utc::now().fixed_offset()))
+            .filter(Column::ExpiresAt.lt(crate::time::now()))
             .exec(db)
             .await?;
         Ok(result.rows_affected)

@@ -1,7 +1,7 @@
 //! The plan-driven rule for how many jobs of a class one workspace may run at once.
 
-use async_trait::async_trait;
 use loco_rs::app::AppContext;
+use loco_rs::prelude::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -67,7 +67,7 @@ async fn plan_for(ctx: &AppContext, workspace_id: Uuid) -> Result<Plan, String> 
         .shared_store
         .get::<std::sync::Arc<LicenceState>>()
         .ok_or_else(|| "queue policy unavailable: licence state is missing".to_owned())?;
-    if let Some(plan) = licence.active_plan_at(chrono::Utc::now().timestamp()) {
+    if let Some(plan) = licence.active_plan_at(crate::time::now().timestamp()) {
         return Ok(plan);
     }
 

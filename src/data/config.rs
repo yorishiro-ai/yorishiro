@@ -11,7 +11,7 @@ use loco_rs::{
     config::{Config, QueueConfig, WorkerMode},
     environment::Environment,
 };
-use sqlx::sqlite::SqliteConnectOptions;
+use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 
 use crate::error::YorishiroError;
 
@@ -73,8 +73,18 @@ fn test_environment(environment: &Environment) -> Environment {
     }
 }
 
-fn validate(config: &Config) -> Result<()> {
+/// Validates application-owned settings that are stricter than Loco's generic config.
+///
+/// # Errors
+/// Returns an error when a setting is invalid.
+pub fn validate(config: &Config) -> Result<()> {
     let settings = config.settings::<crate::data::settings::Settings>()?;
+    crate::time::parse_timezone(&settings.timezone).map_err(|_| {
+        Error::Message(format!(
+            "settings.timezone must be a valid IANA timezone, got {:?}",
+            settings.timezone
+        ))
+    })?;
     if settings.max_tenants < 0 {
         return Err(Error::Message(
             "settings.max_tenants must not be negative".into(),

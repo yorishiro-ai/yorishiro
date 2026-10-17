@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use reqwest::{Request, StatusCode, header::HeaderMap};
 use serde::{Deserialize, Serialize};
 

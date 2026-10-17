@@ -1,7 +1,7 @@
 use super::boot_request;
-use async_trait::async_trait;
 use axum::http::StatusCode;
 use chrono::Utc;
+use loco_rs::prelude::async_trait;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;

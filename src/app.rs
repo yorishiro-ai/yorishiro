@@ -44,6 +44,7 @@ pub(crate) fn app_version() -> String {
 /// Returns an error when the configuration is invalid, or when the command starts workers without a valid worker target.
 pub(crate) async fn load_config(env: &Environment) -> Result<Config> {
     let mut config = crate::data::config::load(env).await?;
+    crate::data::config::validate(&config)?;
     let start = crate::workers::start::worker_start_from_args(std::env::args_os())
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     serve_start(start, &mut config);
@@ -70,6 +71,7 @@ pub(crate) async fn boot<H: Hooks>(
     mut config: Config,
 ) -> Result<BootResult> {
     crate::data::config::validate_queue_policy(&config)?;
+    crate::data::config::validate(&config)?;
     let start = crate::workers::start::worker_start_from_mode(&mode)
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     serve_start(start, &mut config);
@@ -79,13 +81,54 @@ pub(crate) async fn boot<H: Hooks>(
     create_app::<H, Migrator>(mode, environment, config).await
 }
 
-/// Logs the advisories for the configured database and queue.
-///
-/// This runs from `Hooks::before_run`, which a command-line start reaches after the logger is set up; `load_config` runs before it, where nothing would be logged.
 pub(crate) fn before_run(ctx: &AppContext) {
     for advisory in crate::data::config::topology_advisories(&ctx.config) {
         tracing::warn!("{advisory}");
     }
+}
+
+/// Identifies CLI commands that execute application work before Loco's `before_run` hook.
+///
+/// `shortcut: Does not parse arbitrary subcommand option grammars; expand this if Loco changes its global CLI flags.`
+pub fn cli_requires_timezone_gate<I, T>(args: I) -> bool
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString>,
+{
+    let mut args = args.into_iter().map(Into::into).skip(1);
+    while let Some(raw) = args.next() {
+        let arg = raw.to_string_lossy();
+        if arg == "-e" || arg == "--environment" {
+            args.next();
+            continue;
+        }
+        if arg.starts_with("--environment=") || (arg.starts_with("-e") && arg.len() > 2) {
+            continue;
+        }
+        if arg.starts_with('-') {
+            continue;
+        }
+        return matches!(arg.as_ref(), "task" | "t" | "scheduler" | "jobs");
+    }
+    false
+}
+
+/// Checks whether a work command may proceed with the persisted active timezone.
+///
+/// # Errors
+/// Returns an error when a gated command has no persisted timezone state.
+pub fn cli_timezone_gate_result<I, T>(args: I, active_timezone: Option<&str>) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString>,
+{
+    if cli_requires_timezone_gate(args) && active_timezone.is_none() {
+        return Err(loco_rs::Error::Message(
+            "timezone_state singleton missing; run `db migrate` before executing tasks or workers"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
@@ -102,6 +145,16 @@ pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
     ctx.shared_store
         .insert(Arc::new(LocoJobDispatcher) as Arc<dyn ReindexDispatcher>);
     Ok(ctx)
+}
+
+pub(crate) async fn synchronize_timezone(ctx: &AppContext) -> Result<()> {
+    crate::models::timezone_state::activate(
+        &ctx.db,
+        &ctx.config
+            .settings::<crate::data::settings::Settings>()?
+            .timezone,
+    )
+    .await
 }
 
 /// The route tree under construction, together with the inventory that `validate` checks and swagger serves.

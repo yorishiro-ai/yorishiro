@@ -21,7 +21,6 @@ use crate::error::YorishiroError;
 pub mod inbound {
     use super::SIGNATURE_TOLERANCE_SECS;
     use axum::http::HeaderMap;
-    use chrono::Utc;
     use serde::Deserialize;
 
     use crate::edition::ee::controllers::hmac_sign;
@@ -53,7 +52,7 @@ pub mod inbound {
         payload: &[u8],
         secret: &str,
     ) -> Result<VerifiedStripeEvent, Error> {
-        verify_at(headers, payload, secret, Utc::now().timestamp())
+        verify_at(headers, payload, secret, crate::time::now().timestamp())
     }
 
     ///

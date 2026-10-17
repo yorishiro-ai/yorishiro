@@ -60,7 +60,7 @@ where
                         id,
                         attempt,
                         SATURATED,
-                        chrono::Utc::now().fixed_offset(),
+                        crate::time::now().fixed_offset(),
                     )
                     .await
                 }
@@ -128,7 +128,7 @@ where
                         id,
                         attempt,
                         SATURATED,
-                        chrono::Utc::now().fixed_offset(),
+                        crate::time::now().fixed_offset(),
                     )
                     .await
                 }

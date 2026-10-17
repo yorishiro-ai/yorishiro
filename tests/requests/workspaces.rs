@@ -1,5 +1,6 @@
-use super::boot_request;
+use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
+use chrono::{Offset, TimeZone};
 use yorishiro::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
@@ -47,7 +48,19 @@ async fn issue_key_for(
 
 #[tokio::test]
 async fn owner_can_create_list_view_and_delete_workspaces() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request_with_timezone::<App, _, _>("America/New_York", |request, ctx| async move {
+        let timezone = ctx
+            .config
+            .settings::<yorishiro::data::settings::Settings>()
+            .unwrap()
+            .timezone
+            .parse::<chrono_tz::Tz>()
+            .unwrap();
+        assert_ne!(
+            timezone,
+            chrono_tz::UTC,
+            "test must boot with a non-default zone"
+        );
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let owner = yorishiro::models::user_users::create_user(
             &ctx.db,
@@ -92,6 +105,16 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .collect();
         assert!(names.contains(&"main"));
         assert!(names.contains(&"staging"));
+        for workspace in body.as_array().unwrap() {
+            let created_at =
+                chrono::DateTime::parse_from_rfc3339(workspace["created_at"].as_str().unwrap())
+                    .unwrap();
+            let expected_offset = timezone
+                .offset_from_utc_datetime(&created_at.naive_utc())
+                .fix()
+                .local_minus_utc();
+            assert_eq!(created_at.offset().local_minus_utc(), expected_offset);
+        }
 
         let response = request
             .get(&format!("/api/workspaces/{staging_id}"))
@@ -102,6 +125,13 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
         assert_eq!(body["entity_count"], 0);
         assert_eq!(body["relation_count"], 0);
         assert_eq!(body["schema_count"], 0);
+        let created_at =
+            chrono::DateTime::parse_from_rfc3339(body["created_at"].as_str().unwrap()).unwrap();
+        let expected_offset = timezone
+            .offset_from_utc_datetime(&created_at.naive_utc())
+            .fix()
+            .local_minus_utc();
+        assert_eq!(created_at.offset().local_minus_utc(), expected_offset);
 
         let response = request
             .delete(&format!("/api/workspaces/{staging_id}"))

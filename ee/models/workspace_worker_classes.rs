@@ -7,7 +7,7 @@
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
 use crate::workers::embedding_sync::{WorkerClass, WorkerClassResolver};
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
@@ -45,7 +45,7 @@ pub async fn set(
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
         worker_class: ActiveValue::Set(worker_class.as_db_str().to_string()),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

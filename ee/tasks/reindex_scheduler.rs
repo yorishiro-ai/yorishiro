@@ -140,7 +140,7 @@ pub async fn set(
     }
 
     // The first run is one interval from now, and each tick schedules the next one interval after itself.
-    let expected: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now()
+    let expected: chrono::DateTime<chrono::FixedOffset> = crate::time::now()
         .checked_add_signed(every)
         .ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("interval {interval:?} is too long"),
@@ -154,7 +154,7 @@ pub async fn set(
         interval: ActiveValue::Set(interval.to_string()),
         timezone: ActiveValue::Set(timezone.map(|s| s.trim().to_string())),
         scheduled_for: ActiveValue::Set(Some(expected)),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)
@@ -241,7 +241,7 @@ impl Task for TenantReindexScheduler {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        self.run_at(app_context, vars, chrono::Utc::now()).await
+        self.run_at(app_context, vars, crate::time::now()).await
     }
 }
 

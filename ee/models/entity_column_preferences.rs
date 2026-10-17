@@ -91,7 +91,7 @@ pub(crate) async fn set(
         workspace_id: ActiveValue::Set(workspace_id),
         entity_type: ActiveValue::Set(entity_type.to_string()),
         columns: ActiveValue::Set(encoded),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

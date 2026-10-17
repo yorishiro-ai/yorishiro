@@ -6,8 +6,8 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{ConnectOptions, Connection, PgConnection, PgPool};
+use sea_orm::sqlx::sqlite::SqliteConnectOptions;
+use sea_orm::sqlx::{ConnectOptions, Connection, PgConnection, PgPool};
 
 use crate::db::{AppContextBackend, DbHandle};
 
@@ -41,7 +41,7 @@ impl SchedulerOwnership {
                 let Some(mut conn) = conn.take() else {
                     return Ok(());
                 };
-                let unlock = sqlx::query_scalar::<_, bool>(
+                let unlock = sea_orm::sqlx::query_scalar::<_, bool>(
                     "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
                 )
                 .bind(key.as_str())
@@ -114,11 +114,12 @@ pub async fn acquire_postgres_scheduler_lock(
         .acquire()
         .await
         .map_err(|err| format!("scheduler ownership connection: {err}"))?;
-    let locked =
-        sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_lock(hashtextextended($1, 0))")
-            .bind(key)
-            .fetch_one(conn.as_mut())
-            .await;
+    let locked = sea_orm::sqlx::query_scalar::<_, bool>(
+        "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
+    )
+    .bind(key)
+    .fetch_one(conn.as_mut())
+    .await;
     let locked = match locked {
         Ok(locked) => locked,
         Err(err) => {

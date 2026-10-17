@@ -1,5 +1,5 @@
 use crate::requests::boot_request;
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use yorishiro::App;
 use yorishiro::error::YorishiroError;

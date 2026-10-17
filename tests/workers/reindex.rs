@@ -15,8 +15,8 @@ fn the_reindex_worker_keeps_its_queue_class_name() {
 }
 
 mod unit {
-    use async_trait::async_trait;
     use loco_rs::app::AppContext;
+    use loco_rs::prelude::async_trait;
 
     use std::sync::Mutex;
     use uuid::Uuid;

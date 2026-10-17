@@ -73,7 +73,7 @@ pub fn hash_key(raw: &str) -> Vec<u8> {
 pub use crate::models::_entities::api_keys::{ActiveModel, Entity, Model};
 pub(crate) type IdentityApiKeys = Entity;
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
     async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
@@ -106,7 +106,7 @@ impl Entity {
         presented_key: &str,
     ) -> Result<AuthContext, YorishiroError> {
         let row: Option<(uuid::Uuid, uuid::Uuid, uuid::Uuid, String, Option<uuid::Uuid>, bool)> =
-            sqlx::query_as(
+            sea_orm::sqlx::query_as(
                 "SELECT id, workspace_id, tenant_id, scope, user_id, audit FROM authenticate_api_key($1)",
             )
             .bind(hash_key(presented_key))
@@ -161,10 +161,10 @@ impl Entity {
     ///
     /// This call receives a bare RLS-scoped `PgConnection`, not a SeaORM `ConnectionTrait`, so the write must use `sqlx` on that connection.
     pub(crate) async fn touch_last_used_on_connection(
-        conn: &mut sqlx::PgConnection,
+        conn: &mut sea_orm::sqlx::PgConnection,
         api_key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
-        sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
+        sea_orm::sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
             .bind(api_key_id)
             .execute(conn)
             .await
@@ -203,7 +203,7 @@ impl Entity {
         if let Err(err) = Entity::update_many()
             .col_expr(
                 Column::LastUsedAt,
-                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                sea_orm::sea_query::Expr::value(crate::time::now()),
             )
             .filter(Column::Id.eq(api_key_id))
             .exec(conn)

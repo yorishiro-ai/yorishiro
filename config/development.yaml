@@ -133,6 +133,7 @@ workers:
   mode: BackgroundQueue
 
 settings:
+  timezone: <%= get_env(name="YORISHIRO_TIMEZONE", default="UTC") %>
   max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="1") %>
   mcp:
     allowed_hosts: "<%= get_env(name="YORISHIRO_MCP_ALLOWED_HOSTS", default="") %>"

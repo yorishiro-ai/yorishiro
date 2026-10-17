@@ -6,7 +6,7 @@ mod operations;
 pub use operations::create_user;
 pub(crate) use operations::{get_user_by_email, verify_login};
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
     async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>

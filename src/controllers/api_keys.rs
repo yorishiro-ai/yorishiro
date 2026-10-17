@@ -61,7 +61,7 @@ pub(crate) async fn create(
             prefix: created.key_prefix,
             full_key: created.plaintext,
             name: created.name,
-            created_at: created.created_at.into(),
+            created_at: crate::time::render(&ctx, created.created_at),
         }),
     ))
 }
@@ -80,7 +80,7 @@ pub(crate) async fn list(
                 id: key.id,
                 prefix: key.key_prefix,
                 name: key.name,
-                created_at: key.created_at.into(),
+                created_at: crate::time::render(&ctx, key.created_at),
             })
             .collect(),
     }))

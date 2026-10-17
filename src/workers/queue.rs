@@ -4,9 +4,8 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use chrono::Utc;
 use loco_rs::app::AppContext;
+use loco_rs::prelude::async_trait;
 use uuid::Uuid;
 
 use crate::workers::embedding_sync::WorkerClass;
@@ -111,7 +110,7 @@ pub(crate) async fn decide_for_dispatch(
     db: &sea_orm::DatabaseConnection,
     class: WorkerClass,
 ) -> Result<Decision, sea_orm::DbErr> {
-    decide_for_dispatch_at(db, class, Utc::now().fixed_offset()).await
+    decide_for_dispatch_at(db, class, crate::time::now().fixed_offset()).await
 }
 
 ///

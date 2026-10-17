@@ -4,6 +4,6 @@
 //! After folding the migration crate into the root package, they live here under
 //! `tests/migration/` so Cargo still recognizes them as integration tests.
 
-mod postgres;
+pub(crate) mod postgres;
 mod sqlite;
 mod upgrade;

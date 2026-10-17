@@ -1,5 +1,4 @@
 pub use crate::models::_entities::queue_job_lifecycles::{ActiveModel, Column, Entity, Model};
-use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{
@@ -39,7 +38,7 @@ impl LifecycleStatus {
     }
 }
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
@@ -87,7 +86,7 @@ impl Entity {
             workspace_id: Set(enqueue.workspace_id),
             plan: Set(enqueue.plan.map(str::to_owned)),
             status: Set(LifecycleStatus::Queued.as_db_str().to_owned()),
-            enqueue_at: Set(Utc::now().fixed_offset()),
+            enqueue_at: Set(crate::time::database_instant(crate::time::now())),
             claim_at: Set(None),
             start_at: Set(None),
             retry_at: Set(None),
@@ -159,7 +158,7 @@ impl Entity {
         attempt: Option<i32>,
         error: &str,
     ) -> Result<(), DbErr> {
-        let now = Utc::now().fixed_offset();
+        let now = crate::time::database_instant(crate::time::now());
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -264,7 +263,14 @@ impl Entity {
                 tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
             ticker.tick().await;
             loop {
-                match Self::renew(&db, id, attempt, Utc::now().fixed_offset()).await {
+                match Self::renew(
+                    &db,
+                    id,
+                    attempt,
+                    crate::time::database_instant(crate::time::now()),
+                )
+                .await
+                {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(error) => {
@@ -278,14 +284,20 @@ impl Entity {
     }
 
     pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<Admission, DbErr> {
-        Self::start_at(db, id, Utc::now().fixed_offset()).await
+        Self::start_at(db, id, crate::time::database_instant(crate::time::now())).await
     }
 
     pub(crate) async fn start_ignoring_capacity(
         db: &DatabaseConnection,
         id: Uuid,
     ) -> Result<Admission, DbErr> {
-        Self::start_at_with_capacity_policy(db, id, Utc::now().fixed_offset(), true).await
+        Self::start_at_with_capacity_policy(
+            db,
+            id,
+            crate::time::database_instant(crate::time::now()),
+            true,
+        )
+        .await
     }
 
     ///
@@ -347,7 +359,7 @@ impl Entity {
         status: LifecycleStatus,
         error: Option<&str>,
     ) -> Result<(), DbErr> {
-        let now = Utc::now().fixed_offset();
+        let now = crate::time::now();
         let mut update = Entity::update_many()
             .col_expr(Column::Status, Expr::value(status.as_db_str()))
             .col_expr(

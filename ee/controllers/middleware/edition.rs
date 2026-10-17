@@ -129,7 +129,7 @@ impl LicenceState {
 
     /// Whether enterprise features are currently unlocked: a verified key that has not yet expired.
     pub fn is_active(&self) -> bool {
-        self.is_active_at(chrono::Utc::now().timestamp())
+        self.is_active_at(crate::time::now().timestamp())
     }
 
     /// The pure fold [`Self::is_active`] wraps, so expiry is testable without waiting for a clock or mocking one.

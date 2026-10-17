@@ -61,8 +61,8 @@ use axum_test::TestServer;
 use futures::FutureExt;
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
+use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 use serial_test::serial;
-use sqlx::sqlite::SqliteConnectOptions;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -213,6 +213,20 @@ where
         })
         .await;
     }
+}
+
+/// Boots a request app while temporarily overriding its configured timezone.
+#[allow(clippy::future_not_send)]
+pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
+    timezone: &'static str,
+    callback: F,
+) where
+    F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_TIMEZONE"]);
+    guard.set("YORISHIRO_TIMEZONE", timezone);
+    boot_request::<H, _, _>(callback).await;
 }
 
 /// SQLite variant of `boot_request`.

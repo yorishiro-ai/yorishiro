@@ -2,10 +2,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use futures::future::join_all;
 use loco_rs::app::AppContext;
 use loco_rs::environment::Environment;
+use loco_rs::prelude::async_trait;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::App;

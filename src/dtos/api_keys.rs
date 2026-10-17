@@ -1,4 +1,5 @@
-use chrono::{DateTime, Utc};
+use crate::time::Timezone;
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,7 +15,7 @@ pub(crate) struct ApiKeyRecord {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
     pub(crate) name: String,
-    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) created_at: DateTime<Timezone>,
 }
 
 #[derive(Serialize)]
@@ -24,7 +25,7 @@ pub(crate) struct CreateApiKeyResponse {
     pub(crate) prefix: String,
     pub(crate) full_key: String,
     pub(crate) name: String,
-    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) created_at: DateTime<Timezone>,
 }
 
 #[derive(Serialize)]

@@ -2,7 +2,6 @@
 
 pub mod infer_fill;
 
-use chrono::Utc;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
 use serde_json::Value;
@@ -29,7 +28,7 @@ pub(crate) async fn update_if_unchanged(
         .col_expr(Column::SchemaId, Expr::value(schema_id))
         .col_expr(Column::SchemaVersion, Expr::value(schema_version))
         .col_expr(Column::UpdatedBy, Expr::value(updated_by))
-        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Id.eq(existing.id));
     if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {

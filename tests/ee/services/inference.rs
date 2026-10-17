@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use reqwest::{Request, StatusCode, header::HeaderMap};
 use serde_json::Value;
 use std::sync::Arc;

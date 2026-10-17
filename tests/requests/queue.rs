@@ -11,13 +11,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use loco_rs::app::Hooks;
 use loco_rs::bgworker::{self, BackgroundWorker, Queue, sqlt};
 use loco_rs::boot::{self, BootResult};
 use loco_rs::config::{PostgresQueueConfig, QueueConfig, RedisQueueConfig, SqliteQueueConfig};
 use loco_rs::environment::Environment;
+use loco_rs::prelude::async_trait;
 use loco_rs::prelude::*;
 use uuid::Uuid;
 use yorishiro::App;
@@ -215,7 +215,7 @@ async fn enqueue_owned_redis_job(
 /// Boots a permitted SQLite/SQLite pair with separate temporary files and returns a pool onto the queue file.
 async fn with_sqlite_queue<F, Fut>(test: F)
 where
-    F: FnOnce(AppContext, sqlx::SqlitePool, Uuid) -> Fut,
+    F: FnOnce(AppContext, sea_orm::sqlx::SqlitePool, Uuid) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -224,7 +224,7 @@ where
 
     // Use Option so we can explicitly clean up even on panic.
     let mut boot: Option<BootResult> = None;
-    let mut queue_pool: Option<sqlx::SqlitePool> = None;
+    let mut queue_pool: Option<sea_orm::sqlx::SqlitePool> = None;
 
     let result = std::panic::AssertUnwindSafe(async {
         let database_uri = format!(
@@ -258,7 +258,7 @@ where
             relay.abort();
         }
 
-        let pool = sqlx::SqlitePool::connect(&queue_uri)
+        let pool = sea_orm::sqlx::SqlitePool::connect(&queue_uri)
             .await
             .expect("connect to the queue file");
         queue_pool = Some(pool.clone());

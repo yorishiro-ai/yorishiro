@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::fs;

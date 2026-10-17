@@ -366,7 +366,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             release: tokio::sync::Notify,
         }
 
-        #[async_trait::async_trait]
+        #[loco_rs::prelude::async_trait]
         impl yorishiro::edition::ee::models::schema_schemas::MergeReadHook for ReadBarrier {
             async fn after_revision_read(&self) {
                 self.ready.notify_one();

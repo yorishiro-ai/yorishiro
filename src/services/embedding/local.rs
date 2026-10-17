@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Activation, VarBuilder};
 use candle_transformers::models::xlm_roberta::{Config as XlmRobertaConfig, XLMRobertaModel};
+use loco_rs::prelude::async_trait;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 
 use super::EmbeddingProvider;
