@@ -1,7 +1,7 @@
 //! The production adapter that enqueues infer-fill jobs, beside the community dispatcher it shares a type with.
 
-use async_trait::async_trait;
 use loco_rs::app::AppContext;
+use loco_rs::prelude::async_trait;
 
 use crate::edition::ee::workers::infer_fill::{InferFillArgs, InferFillDispatcher};
 use crate::workers::dispatch::{JobSpec, LocoJobDispatcher, dispatch_job};

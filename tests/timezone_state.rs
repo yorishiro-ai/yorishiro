@@ -1,3 +1,4 @@
+use migration::MigratorTrait;
 use sea_orm::{ConnectionTrait, EntityTrait, Statement, TransactionTrait};
 use serial_test::serial;
 use std::{sync::Arc, time::Duration};
@@ -62,6 +63,12 @@ async fn sqlite_timezone_state_is_seeded_noop_safe_and_preserves_instants() {
     yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
         .await
         .unwrap();
+    yorishiro::models::timezone_state::activate(&db, "America/New_York")
+        .await
+        .unwrap();
+    yorishiro::models::timezone_state::activate(&db, "Europe/Paris")
+        .await
+        .unwrap();
     let after = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)
         .one(&db)
         .await
@@ -77,7 +84,7 @@ async fn sqlite_timezone_state_is_seeded_noop_safe_and_preserves_instants() {
         .unwrap()
         .unwrap();
     let name: String = row.try_get_by_index(0).unwrap();
-    assert_eq!(name, "Asia/Tokyo");
+    assert_eq!(name, "Europe/Paris");
 }
 
 #[tokio::test]
@@ -116,6 +123,95 @@ async fn sqlite_timezone_state_serializes_concurrent_activations() {
         .unwrap();
     let name: String = row.try_get_by_index(0).unwrap();
     assert!(name == "Asia/Tokyo" || name == "America/New_York");
+}
+
+#[tokio::test]
+async fn sqlite_timezone_state_serializes_writers_on_separate_connections() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+    let path = tempfile::tempdir()
+        .unwrap()
+        .keep()
+        .join("timezone-state-race.sqlite3");
+    let url = format!("sqlite://{}?mode=rwc", path.display());
+    let db = sqlite_connection(&url).await;
+    migration::Migrator::up(&db, None).await.unwrap();
+    let audit_db = sqlite_connection(&url).await;
+    let initial: String = audit_db
+        .query_one_raw(Statement::from_string(
+            sea_orm::DbBackend::Sqlite,
+            "SELECT active_timezone FROM timezone_state WHERE id = 1",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index(0)
+        .unwrap();
+    assert_eq!(initial, "UTC");
+    audit_db
+        .execute_unprepared("CREATE TABLE timezone_state_update_audit (zone TEXT NOT NULL)")
+        .await
+        .unwrap();
+    audit_db
+        .execute_unprepared(
+            "CREATE TRIGGER audit_timezone_state_update AFTER UPDATE ON timezone_state BEGIN INSERT INTO timezone_state_update_audit VALUES (NEW.active_timezone); END",
+        )
+        .await
+        .unwrap();
+    let first = sqlite_connection(&url).await;
+    let second = sqlite_connection(&url).await;
+    let first_task = tokio::spawn(async move {
+        yorishiro::models::timezone_state::activate(&first, "Asia/Tokyo").await
+    });
+    let second_task = tokio::spawn(async move {
+        yorishiro::models::timezone_state::activate(&second, "America/New_York").await
+    });
+    for task in [first_task, second_task] {
+        tokio::time::timeout(Duration::from_secs(15), task)
+            .await
+            .expect("separate SQLite writer finishes")
+            .unwrap()
+            .unwrap();
+    }
+    let zone = db
+        .query_one_raw(Statement::from_string(
+            sea_orm::DbBackend::Sqlite,
+            "SELECT active_timezone FROM timezone_state WHERE id = 1",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index::<String>(0)
+        .unwrap();
+    assert!(zone == "Asia/Tokyo" || zone == "America/New_York");
+    audit_db
+        .execute_unprepared("DELETE FROM timezone_state_update_audit")
+        .await
+        .unwrap();
+    let same_zone = sqlite_connection(&url).await;
+    yorishiro::models::timezone_state::activate(&same_zone, &zone)
+        .await
+        .unwrap();
+    let updates = audit_db
+        .query_one_raw(Statement::from_string(
+            sea_orm::DbBackend::Sqlite,
+            "SELECT count(*) FROM timezone_state_update_audit",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index::<i64>(0)
+        .unwrap();
+    assert_eq!(updates, 0, "same-zone activation must issue no UPDATE");
+    audit_db
+        .execute_unprepared("DROP TRIGGER audit_timezone_state_update")
+        .await
+        .unwrap();
+    audit_db
+        .execute_unprepared("DROP TABLE timezone_state_update_audit")
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -176,15 +272,20 @@ async fn postgres_timezone_state_serializes_concurrent_activations_without_dml_n
         return;
     }
     crate::require_sqlite_backend();
-    crate::migration::postgres::with_timezone_scratch_db(|db| {
-        Box::pin(async move { postgres_timezone_state_scenario(db).await.unwrap() })
+    crate::migration::postgres::with_timezone_scratch_db(|db, database_url| {
+        Box::pin(async move {
+            postgres_timezone_state_scenario(db, database_url)
+                .await
+                .unwrap()
+        })
     })
     .await;
 }
 
-async fn postgres_timezone_state_scenario(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
-    use migration::MigratorTrait;
-
+async fn postgres_timezone_state_scenario(
+    db: &sea_orm::DatabaseConnection,
+    database_url: &str,
+) -> Result<(), String> {
     migration::Migrator::up(db, None)
         .await
         .map_err(|error| error.to_string())?;
@@ -198,11 +299,53 @@ async fn postgres_timezone_state_scenario(db: &sea_orm::DatabaseConnection) -> R
     )
     .await
     .map_err(|error| error.to_string())?;
+    let mut timestamp_options = sea_orm::ConnectOptions::new(database_url.to_owned());
+    timestamp_options.max_connections(1).min_connections(1);
+    let timestamp_connection = sea_orm::Database::connect(timestamp_options)
+        .await
+        .map_err(|error| error.to_string())?;
+    timestamp_connection
+        .execute_unprepared("SET TIME ZONE 'UTC'")
+        .await
+        .map_err(|error| error.to_string())?;
     db.execute_unprepared("CREATE TABLE timezone_state_test_audit (at timestamptz NOT NULL)")
         .await
         .map_err(|error| error.to_string())?;
     let before = read_zone(db).await;
     let before_instant = read_probe_instant(db).await;
+    yorishiro::db::set_session_timezone(&timestamp_connection, "Asia/Tokyo")
+        .await
+        .map_err(|error| error.to_string())?;
+    let tokyo_rendered = timestamp_connection
+        .query_one_raw(Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT at::text FROM timezone_state_test_probe WHERE id = 1",
+        ))
+        .await
+        .map_err(|error| error.to_string())?
+        .unwrap()
+        .try_get_by_index::<String>(0)
+        .unwrap();
+    assert!(tokyo_rendered.ends_with("+09"), "{tokyo_rendered}");
+    yorishiro::db::set_session_timezone(&timestamp_connection, "America/New_York")
+        .await
+        .map_err(|error| error.to_string())?;
+    let new_york_rendered = timestamp_connection
+        .query_one_raw(Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT at::text FROM timezone_state_test_probe WHERE id = 1",
+        ))
+        .await
+        .map_err(|error| error.to_string())?
+        .unwrap()
+        .try_get_by_index::<String>(0)
+        .unwrap();
+    assert!(new_york_rendered.ends_with("-04"), "{new_york_rendered}");
+    assert_eq!(read_probe_instant(db).await, before_instant);
+    timestamp_connection
+        .close()
+        .await
+        .map_err(|error| error.to_string())?;
     db.execute_unprepared("CREATE FUNCTION audit_zone_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO timezone_state_test_audit VALUES (now()); RETURN NEW; END $$")
         .await.map_err(|error| error.to_string())?;
     db.execute_unprepared("CREATE TRIGGER audit_zone_update AFTER UPDATE ON timezone_state FOR EACH ROW EXECUTE FUNCTION audit_zone_update()")
@@ -222,6 +365,18 @@ async fn postgres_timezone_state_scenario(db: &sea_orm::DatabaseConnection) -> R
         .try_get_by_index(0)
         .unwrap();
     assert_eq!(retry_count, 0, "same-zone activation must issue no UPDATE");
+    yorishiro::models::timezone_state::activate(db, "Asia/Tokyo")
+        .await
+        .map_err(|error| error.to_string())?;
+    assert_eq!(read_probe_instant(db).await, before_instant);
+    yorishiro::models::timezone_state::activate(db, "America/New_York")
+        .await
+        .map_err(|error| error.to_string())?;
+    assert_eq!(read_probe_instant(db).await, before_instant);
+    yorishiro::models::timezone_state::activate(db, "Europe/Paris")
+        .await
+        .map_err(|error| error.to_string())?;
+    assert_eq!(read_probe_instant(db).await, before_instant);
     let barrier = Arc::new(Barrier::new(3));
     let left = db.clone();
     let left_barrier = barrier.clone();
@@ -270,7 +425,7 @@ async fn postgres_timezone_state_scenario(db: &sea_orm::DatabaseConnection) -> R
         .try_get_by_index(0)
         .unwrap();
     assert_eq!(
-        audit_count, 2,
+        audit_count, 5,
         "failed update must not fire the AFTER trigger"
     );
     db.execute_unprepared(
@@ -292,8 +447,8 @@ async fn postgres_timezone_state_scenario(db: &sea_orm::DatabaseConnection) -> R
         .try_get_by_index(0)
         .unwrap();
     assert_eq!(
-        audit_count, 3,
-        "two zone changes plus retry should issue three updates"
+        audit_count, 6,
+        "zone transitions plus retry should issue six updates"
     );
     yorishiro::models::timezone_state::activate(db, "Europe/Paris")
         .await
@@ -308,7 +463,7 @@ async fn postgres_timezone_state_scenario(db: &sea_orm::DatabaseConnection) -> R
         .unwrap()
         .try_get_by_index(0)
         .unwrap();
-    assert_eq!(retry_count, 3);
+    assert_eq!(retry_count, 6);
     Ok(())
 }
 
@@ -339,7 +494,6 @@ async fn read_probe_instant(db: &sea_orm::DatabaseConnection) -> chrono::DateTim
 }
 
 async fn sqlite_database() -> sea_orm::DatabaseConnection {
-    use migration::MigratorTrait;
     use sea_orm::Database;
 
     let path = tempfile::tempdir()
@@ -353,4 +507,13 @@ async fn sqlite_database() -> sea_orm::DatabaseConnection {
     let db = Database::connect(options).await.unwrap();
     migration::Migrator::up(&db, None).await.unwrap();
     db
+}
+
+async fn sqlite_connection(url: &str) -> sea_orm::DatabaseConnection {
+    use sea_orm::Database;
+
+    let mut options = sea_orm::ConnectOptions::new(url.to_owned());
+    options.max_connections(2);
+    options.map_sqlx_sqlite_opts(|opts| opts.busy_timeout(Duration::from_secs(5)));
+    Database::connect(options).await.unwrap()
 }

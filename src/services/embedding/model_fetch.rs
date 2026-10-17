@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use sha2::{Digest, Sha256};
 
 /// One file to fetch, with everything needed to verify it.

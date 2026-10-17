@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use loco_rs::app::AppContext;
+use loco_rs::prelude::async_trait;
 use uuid::Uuid;
 
 use crate::workers::embedding_sync::WorkerClass;

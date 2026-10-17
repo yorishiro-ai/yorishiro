@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use axum::http::request::Parts;
+use loco_rs::prelude::async_trait;
 use sea_orm::{DatabaseTransaction, TransactionTrait};
 
 use crate::db::DbHandle;

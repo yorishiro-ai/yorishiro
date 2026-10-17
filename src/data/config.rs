@@ -11,7 +11,7 @@ use loco_rs::{
     config::{Config, QueueConfig, WorkerMode},
     environment::Environment,
 };
-use sqlx::sqlite::SqliteConnectOptions;
+use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 
 use crate::error::YorishiroError;
 

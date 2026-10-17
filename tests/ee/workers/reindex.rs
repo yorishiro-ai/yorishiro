@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use loco_rs::bgworker::BackgroundWorker;
+use loco_rs::prelude::async_trait;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, Statement};
 use uuid::Uuid;

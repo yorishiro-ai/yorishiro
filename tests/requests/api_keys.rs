@@ -1,14 +1,22 @@
 use axum::http::StatusCode;
+use chrono::{Offset, TimeZone};
 use serde_json::Value;
 use uuid::Uuid;
 use yorishiro::App;
 
-use super::boot_request;
 use super::fixtures::{self, TenantArgs};
+use super::{boot_request, boot_request_with_timezone};
 
 #[tokio::test]
 async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request_with_timezone::<App, _, _>("Asia/Tokyo", |request, ctx| async move {
+        let timezone = ctx
+            .config
+            .settings::<yorishiro::data::settings::Settings>()
+            .unwrap()
+            .timezone;
+        assert_ne!(timezone, "UTC", "test must boot with a non-default zone");
+        let timezone = timezone.parse::<chrono_tz::Tz>().unwrap();
         let (tenant_id, workspace_id, owner_id, owner_key) =
             fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
 
@@ -29,6 +37,16 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         assert!(created_body["prefix"].as_str().unwrap().starts_with("ysr_"));
         assert!(created_body["id"].as_str().is_some());
         assert!(created_body["created_at"].as_str().is_some());
+        let created_at =
+            chrono::DateTime::parse_from_rfc3339(created_body["created_at"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(
+            created_at.offset().local_minus_utc(),
+            timezone
+                .offset_from_utc_datetime(&created_at.naive_utc())
+                .fix()
+                .local_minus_utc()
+        );
 
         let full_key = created_body["full_key"].as_str().unwrap().to_owned();
         let listed = request
@@ -41,6 +59,21 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         assert!(listed_body.to_string().contains("my-client"));
         assert!(!listed_body.to_string().contains(&full_key));
         assert!(!listed_body.to_string().contains("key_hash"));
+        for created_at in listed_body["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|key| key["created_at"].as_str())
+        {
+            let created_at = chrono::DateTime::parse_from_rfc3339(created_at).unwrap();
+            assert_eq!(
+                created_at.offset().local_minus_utc(),
+                timezone
+                    .offset_from_utc_datetime(&created_at.naive_utc())
+                    .fix()
+                    .local_minus_utc()
+            );
+        }
 
         let authenticated = request
             .get("/api/whoami")

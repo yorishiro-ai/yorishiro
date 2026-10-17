@@ -1,3 +1,4 @@
+use migration::MigratorTrait;
 use yorishiro::app::cli_requires_timezone_gate;
 
 #[test]
@@ -54,7 +55,6 @@ fn persisted_state_gate_only_applies_to_work_commands() {
 
 #[tokio::test]
 async fn migration_bootstrap_seeds_state_for_the_task_gate() {
-    use migration::MigratorTrait;
     use sea_orm::{Database, EntityTrait};
 
     let migration_args = ["app", "db", "migrate"];

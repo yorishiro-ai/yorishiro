@@ -17,14 +17,14 @@ use uuid::Uuid;
 use super::merge::{self, MergePlan};
 
 /// A narrow seam used to coordinate the merge read/acknowledgement race test.
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 pub trait MergeReadHook: Send + Sync {
     async fn after_revision_read(&self);
 }
 
 struct NoopMergeReadHook;
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl MergeReadHook for NoopMergeReadHook {
     async fn after_revision_read(&self) {}
 }

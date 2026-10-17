@@ -142,7 +142,7 @@ pub(crate) async fn missing_embeddings(
     .map(|rows| rows.into_iter().collect())
 }
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where

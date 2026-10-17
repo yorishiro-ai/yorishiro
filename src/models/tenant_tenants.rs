@@ -9,7 +9,7 @@ pub use operations::create_tenant;
 /// The nil UUID reserved for infrastructure tenants that own no members and no data of their own.
 pub(crate) const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
     async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>

@@ -335,5 +335,8 @@ Use the same value for every server and worker sharing a database.
 Workspace detail, API key, and API audit response timestamps, as well as log event timestamps, use the configured timezone.
 Changing this setting does not change when a recorded event occurred, when a job is scheduled to run, or when it expires.
 
-Currently, timestamps viewed directly in the database and timestamps inside the queue do not use this setting.
-Consistent timezone handling across these components is not yet complete.
+PostgreSQL application-pool timestamps use the configured session timezone.
+PostgreSQL `TIMESTAMPTZ` preserves each instant but renders it using the connection's session timezone; it does not store the IANA zone name.
+Built-in queue providers still use their existing timestamp behavior; timezone-aware queue handling is not complete.
+SQLite and Valkey queue timestamp formatting and due-time behavior are not changed by this setting.
+Use the same configured zone for every server and worker sharing a database, and treat queue/database values as instants rather than local civil times.

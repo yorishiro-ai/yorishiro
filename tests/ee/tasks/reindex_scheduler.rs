@@ -4,8 +4,8 @@ use std::sync::{
 };
 use uuid::Uuid;
 
-use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
+use loco_rs::prelude::async_trait;
 
 use yorishiro::edition::ee::tasks::reindex_scheduler::{
     dispatch_reindex_batch, is_due, scheduler_failure_message,

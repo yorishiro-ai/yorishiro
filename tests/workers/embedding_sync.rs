@@ -61,8 +61,8 @@ fn the_worker_keeps_its_queue_class_name() {
 }
 
 mod unit {
-    use async_trait::async_trait;
     use loco_rs::app::AppContext;
+    use loco_rs::prelude::async_trait;
 
     use std::sync::Mutex;
     use uuid::Uuid;
@@ -153,11 +153,11 @@ mod conflict {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    use async_trait::async_trait;
     use futures::FutureExt;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
     use loco_rs::config::{PostgresQueueConfig, RedisQueueConfig, SqliteQueueConfig};
+    use loco_rs::prelude::async_trait;
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
         Statement, TransactionTrait,
@@ -273,8 +273,8 @@ mod conflict {
     }
 
     enum BackendObservation {
-        Sqlite(sqlx::SqlitePool),
-        Postgres(sqlx::PgPool),
+        Sqlite(sea_orm::sqlx::SqlitePool),
+        Postgres(sea_orm::sqlx::PgPool),
         Redis(loco_rs::bgworker::redis::RedisPool),
     }
 
@@ -359,7 +359,7 @@ mod conflict {
             );
             queue.setup().await.expect("set up SQLite queue");
             let observation = BackendObservation::Sqlite(
-                sqlx::SqlitePool::connect(&queue_uri)
+                sea_orm::sqlx::SqlitePool::connect(&queue_uri)
                     .await
                     .expect("connect to SQLite queue"),
             );
@@ -405,7 +405,7 @@ mod conflict {
                 .await
                 .expect("clear reserved PostgreSQL test queue");
             let observation = BackendObservation::Postgres(
-                sqlx::PgPool::connect(&uri)
+                sea_orm::sqlx::PgPool::connect(&uri)
                     .await
                     .expect("connect to PostgreSQL queue"),
             );
@@ -1009,7 +1009,7 @@ mod conflict {
             queue.setup().await.expect("set up queue");
             let queue = Arc::new(queue);
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
-            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
+            let queue_pool = sea_orm::sqlx::SqlitePool::connect(&queue_uri)
                 .await
                 .expect("connect to the queue file");
 
@@ -2771,7 +2771,7 @@ mod conflict {
             queue.setup().await.expect("set up queue");
             let queue = Arc::new(queue);
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
-            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
+            let queue_pool = sea_orm::sqlx::SqlitePool::connect(&queue_uri)
                 .await
                 .expect("connect to the queue file");
 

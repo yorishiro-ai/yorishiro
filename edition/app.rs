@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use loco_rs::{
     Result,
     app::{AppContext, Hooks, Initializer},

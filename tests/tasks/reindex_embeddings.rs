@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::requests::boot_request;
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use sea_orm::FromQueryResult;
 use yorishiro::App;
 use yorishiro::error::YorishiroError;

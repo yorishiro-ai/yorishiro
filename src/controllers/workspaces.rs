@@ -38,11 +38,19 @@ async fn get_workspace_in_tenant(
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
-    AuthContext(auth): AuthContext,
+    authorized: Authorized<ReadScope>,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
-    Ok(Json(
-        crate::models::workspace_workspaces::list_for_tenant(&ctx.db, auth.tenant_id).await?,
-    ))
+    let records =
+        crate::models::workspace_workspaces::list_for_tenant(&ctx.db, authorized.ctx.tenant_id)
+            .await?
+            .into_iter()
+            .map(|record| WorkspaceRecord {
+                created_at: crate::time::in_timezone(record.created_at, authorized.timezone())
+                    .fixed_offset(),
+                ..record
+            })
+            .collect();
+    Ok(Json(records))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = crate::dtos::workspaces::CreateWorkspaceRequest, responses((status = 201, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
@@ -85,13 +93,14 @@ pub async fn get_workspace(
     let relation_count = entity_relations::count(authorized.txn(), workspace.id).await?;
     let schema_count = schema_schemas::count_active(authorized.txn(), workspace.id).await?;
 
+    let timezone = authorized.timezone();
     Ok(Json(WorkspaceDetail {
         id: workspace.id,
         tenant_id: workspace.tenant_id,
         name: workspace.name,
         max_entities: workspace.max_entities,
         schema_id: workspace.schema_id,
-        created_at: crate::time::render(&ctx, workspace.created_at),
+        created_at: crate::time::in_timezone(workspace.created_at, timezone),
         entity_count,
         relation_count,
         schema_count,

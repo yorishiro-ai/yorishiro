@@ -7,7 +7,7 @@
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
 use crate::workers::embedding_sync::{WorkerClass, WorkerClassResolver};
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;

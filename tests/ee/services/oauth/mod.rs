@@ -6,8 +6,8 @@ use yorishiro::YorishiroError;
 use yorishiro::edition::ee::controllers::oauth::state_token;
 use yorishiro::edition::ee::data::oauth::OAuthConfig;
 
-use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
+use loco_rs::prelude::async_trait;
 
 use yorishiro::edition::ee::services::oauth::*;
 

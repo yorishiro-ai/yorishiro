@@ -9,10 +9,10 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use futures::FutureExt;
 use loco_rs::bgworker::{self, BackgroundWorker};
 use loco_rs::config::{PostgresQueueConfig, RedisQueueConfig, SqliteQueueConfig};
+use loco_rs::prelude::async_trait;
 use loco_rs::prelude::*;
 use serial_test::serial;
 use yorishiro::workers::target::WorkerTarget;

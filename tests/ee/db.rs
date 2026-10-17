@@ -1,5 +1,5 @@
-use sqlx::Connection;
-use sqlx::sqlite::SqliteConnectOptions;
+use sea_orm::sqlx::Connection;
+use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 use std::fs::OpenOptions;
 use std::io::BufRead;
 use std::io::Write;
@@ -8,8 +8,8 @@ use std::str::FromStr;
 use std::time::Duration;
 use tempfile::tempdir;
 
+use sea_orm::sqlx::postgres::PgPoolOptions;
 use serial_test::serial;
-use sqlx::postgres::PgPoolOptions;
 use yorishiro::edition::ee::db::{
     acquire_sqlite_scheduler_lock, lock_sqlite_scheduler_file, sqlite_scheduler_lock_path,
     unlock_sqlite_scheduler_file,

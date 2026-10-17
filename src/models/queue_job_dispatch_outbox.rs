@@ -50,7 +50,7 @@ struct DispatchRow {
     publishing_epoch: i64,
 }
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for crate::models::_entities::queue_job_dispatch_outbox::ActiveModel {}
 
 #[derive(Clone)]

@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
 use uuid::Uuid;
 

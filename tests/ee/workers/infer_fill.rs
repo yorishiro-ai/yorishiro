@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use loco_rs::bgworker::BackgroundWorker;
+use loco_rs::prelude::async_trait;
 use loco_rs::prelude::*;
 use migration::MigratorTrait;
 use std::sync::{Arc, Mutex};
@@ -310,14 +310,18 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     txn.commit().await.unwrap();
 
     yorishiro::workers::dispatch::recover_pending_on(&ctx, &db).await;
-    let queue_db = sqlx::SqlitePool::connect(&queue_uri).await.unwrap();
-    let queued = sqlx::query("SELECT name, task_data FROM sqlt_loco_queue WHERE status = 'queued'")
-        .fetch_all(&queue_db)
+    let queue_db = sea_orm::sqlx::SqlitePool::connect(&queue_uri)
         .await
         .unwrap();
+    let queued =
+        sea_orm::sqlx::query("SELECT name, task_data FROM sqlt_loco_queue WHERE status = 'queued'")
+            .fetch_all(&queue_db)
+            .await
+            .unwrap();
     assert!(!queued.is_empty());
-    let name: String = sqlx::Row::try_get(&queued[0], "name").unwrap();
-    let task_data: serde_json::Value = sqlx::Row::try_get(&queued[0], "task_data").unwrap();
+    let name: String = sea_orm::sqlx::Row::try_get(&queued[0], "name").unwrap();
+    let task_data: serde_json::Value =
+        sea_orm::sqlx::Row::try_get(&queued[0], "task_data").unwrap();
     assert_eq!(name, InferFillWorker::class_name());
     assert_eq!(task_data["dispatch_id"], lifecycle_id.to_string());
     assert_eq!(task_data["publishing_epoch"], 1);
@@ -326,7 +330,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     let runner = tokio::spawn(async move { provider.run(vec![WorkerTarget::Shared.tag()]).await });
     tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-            let row: Option<(String, i64)> = sqlx::query_as(
+            let row: Option<(String, i64)> = sea_orm::sqlx::query_as(
                 "SELECT status, COUNT(*) OVER () FROM sqlt_loco_queue WHERE name = ? ORDER BY created_at DESC LIMIT 1",
             )
             .bind(InferFillWorker::class_name())

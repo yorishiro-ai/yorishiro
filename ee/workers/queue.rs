@@ -1,7 +1,7 @@
 //! The plan-driven rule for how many jobs of a class one workspace may run at once.
 
-use async_trait::async_trait;
 use loco_rs::app::AppContext;
+use loco_rs::prelude::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
