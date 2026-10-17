@@ -139,6 +139,9 @@ pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
 ///
 /// An edition that brings its own rule for a seam inserts its own `Arc<dyn Trait>` afterwards: the store is keyed by `TypeId`, so the later insert wins without changing any call site.
 pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
+    let mut ctx = ctx;
+    crate::db::replace_postgres_app_pool(&mut ctx).await?;
+    crate::db::replace_sqlite_app_pool(&mut ctx).await?;
     let ctx = install_services(ctx).await?;
     ctx.shared_store
         .insert(Arc::new(LocoJobDispatcher) as Arc<dyn EmbeddingSyncDispatcher>);

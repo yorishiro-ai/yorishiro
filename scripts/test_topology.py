@@ -31,13 +31,30 @@ def main() -> int:
         return 2
     feature_args = ["--no-default-features", "--features", "community"] if edition == "ce" else ["--features", "enterprise"]
     database, queue = topology.split("-", 1)
-    with tempfile.TemporaryDirectory(prefix="yorishiro-topology-markers-") as marker_dir:
+    with tempfile.TemporaryDirectory(prefix="yorishiro-topology-") as temp_dir:
         env = os.environ.copy()
+        if database == "sqlite" and queue == "sqlite" and not env.get("QUEUE_URL"):
+            queue_path = Path(temp_dir) / "environment-queue.sqlite3"
+            env["QUEUE_URL"] = f"sqlite://{queue_path}?mode=rwc"
+        marker_dir = Path(temp_dir) / "markers"
+        marker_dir.mkdir()
+        app_url = env.get("DATABASE_URL", "")
+        postgres_url = env.get("YORISHIRO_POSTGRES_TEST_URL")
+        if postgres_url:
+            env["YORISHIRO_POSTGRES_TEST_URL"] = postgres_url
+        elif app_url.startswith(("postgres://", "postgresql://")):
+            env["YORISHIRO_POSTGRES_TEST_URL"] = app_url
+        else:
+            env.pop("YORISHIRO_POSTGRES_TEST_URL", None)
         env.update(
             YORISHIRO_TOPOLOGY_MARKER_DIR=marker_dir,
             YORISHIRO_TEST_TOPOLOGY=topology,
             YORISHIRO_TEST_QUEUE=queue,
         )
+        if queue == "valkey":
+            valkey_url = env.get("YORISHIRO_VALKEY_TEST_URL") or env.get("QUEUE_URL")
+            if valkey_url:
+                env["YORISHIRO_VALKEY_TEST_URL"] = valkey_url
         result = subprocess.run(
             ["cargo", "test", "--locked", "--workspace", *feature_args, *cargo_args],
             cwd=ROOT,

@@ -71,6 +71,197 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
     Ok(())
 }
 
+/// Replaces Loco's PostgreSQL application pool with one that initializes the
+/// configured session timezone on every physical connection.
+///
+/// # Errors
+/// Returns an error if the configured application pool cannot be opened.
+pub(crate) async fn replace_postgres_app_pool(
+    ctx: &mut loco_rs::app::AppContext,
+) -> loco_rs::Result<()> {
+    if !ctx.is_postgres() {
+        return Ok(());
+    }
+
+    let config = &ctx.config.database;
+    let mut options = sea_orm::ConnectOptions::new(config.uri.clone());
+    options
+        .max_connections(config.max_connections)
+        .min_connections(config.min_connections)
+        .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
+        .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
+        .sqlx_logging(config.enable_logging);
+    if let Some(acquire_timeout) = config.acquire_timeout {
+        options.acquire_timeout(std::time::Duration::from_millis(acquire_timeout));
+    }
+
+    let timezone = crate::time::configured(ctx).to_string();
+    let connect_timezone = timezone.clone();
+    let release_timezone = timezone;
+    options.map_sqlx_postgres_pool_opts(move |pool| {
+        let connect_timezone = connect_timezone.clone();
+        let release_timezone = release_timezone.clone();
+        let pool = pool.after_connect(move |conn, _meta| {
+            let timezone = connect_timezone.clone();
+            Box::pin(async move {
+                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
+                    .bind(timezone)
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        });
+        pool.after_release(move |conn, _meta| {
+            let timezone = release_timezone.clone();
+            Box::pin(async move {
+                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
+                    .bind(timezone)
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(true)
+            })
+        })
+    });
+
+    let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
+        loco_rs::Error::Message(format!("failed to build application pool: {error}"))
+    })?;
+    let previous = std::mem::replace(&mut ctx.db, replacement);
+    previous.close_by_ref().await.map_err(|error| {
+        loco_rs::Error::Message(format!(
+            "failed to close Loco's default application pool: {error}"
+        ))
+    })?;
+    Ok(())
+}
+
+/// Replaces Loco's SQLite application pool with one whose timestamp default uses the configured zone.
+///
+/// SQLite's special keyword is shadowed by a per-connection scalar so each app context owns its zone.
+///
+/// # Errors
+/// Returns an error when a replacement connection or per-connection callback fails.
+pub(crate) async fn replace_sqlite_app_pool(
+    ctx: &mut loco_rs::app::AppContext,
+) -> loco_rs::Result<()> {
+    if !ctx.is_sqlite() {
+        return Ok(());
+    }
+    let zone = crate::time::configured(ctx);
+    let config = &ctx.config.database;
+    let mut options = sea_orm::ConnectOptions::new(config.uri.clone());
+    options
+        .max_connections(config.max_connections)
+        .min_connections(config.min_connections)
+        .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
+        .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
+        .sqlx_logging(config.enable_logging);
+    let run_on_start = config.run_on_start.clone();
+    if let Some(timeout) = config.acquire_timeout {
+        options.acquire_timeout(std::time::Duration::from_millis(timeout));
+    }
+    ctx.db.close_by_ref().await.map_err(|error| {
+        loco_rs::Error::Message(format!(
+            "failed to close Loco's default SQLite app pool: {error}"
+        ))
+    })?;
+    options.map_sqlx_sqlite_pool_opts(move |pool| {
+        let run_on_start = run_on_start.clone();
+        pool.after_connect(move |conn, _meta| {
+            let run_on_start = run_on_start.clone();
+            Box::pin(async move {
+                register_sqlite_timestamp(conn, zone).await?;
+                if let Some(sql) = run_on_start.as_deref() {
+                    sea_orm::sqlx::raw_sql(sea_orm::sqlx::AssertSqlSafe(sql))
+                        .execute(&mut *conn)
+                        .await?;
+                }
+                Ok(())
+            })
+        })
+    });
+    let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
+        loco_rs::Error::Message(format!("failed to build SQLite app pool: {error}"))
+    })?;
+    ctx.db = replacement;
+    Ok(())
+}
+
+async fn register_sqlite_timestamp(
+    conn: &mut sea_orm::sqlx::SqliteConnection,
+    timezone: chrono_tz::Tz,
+) -> Result<(), sea_orm::sqlx::Error> {
+    let mut handle = conn.lock_handle().await?;
+    // SQLite owns this allocation after the call and invokes xDestroy on success or failure.
+    let timezone = Box::into_raw(Box::new(timezone)).cast();
+    // SAFETY: SQLx's locked handle excludes worker-thread SQLite calls; static C strings and valid
+    // callbacks are supplied, and SQLite owns `timezone` through xDestroy after invocation.
+    let result = unsafe {
+        libsqlite3_sys::sqlite3_create_function_v2(
+            handle.as_raw_handle().as_ptr(),
+            c"current_timestamp".as_ptr(),
+            0,
+            libsqlite3_sys::SQLITE_UTF8,
+            timezone,
+            Some(sqlite_current_timestamp),
+            None,
+            None,
+            Some(drop_sqlite_timezone),
+        )
+    };
+    if result == libsqlite3_sys::SQLITE_OK {
+        Ok(())
+    } else {
+        Err(sea_orm::sqlx::Error::Protocol(format!(
+            "failed to register SQLite CURRENT_TIMESTAMP: {result}"
+        )))
+    }
+}
+
+unsafe extern "C" fn drop_sqlite_timezone(value: *mut std::ffi::c_void) {
+    // SAFETY: SQLite calls xDestroy exactly once with the Box pointer transferred at registration.
+    unsafe { drop(Box::from_raw(value.cast::<chrono_tz::Tz>())) };
+}
+
+unsafe extern "C" fn sqlite_current_timestamp(
+    context: *mut libsqlite3_sys::sqlite3_context,
+    _argument_count: std::ffi::c_int,
+    _arguments: *mut *mut libsqlite3_sys::sqlite3_value,
+) {
+    // SAFETY: SQLite provides a live function context whose user data is the owned timezone
+    // allocation. The pointer is read only and never retained beyond this callback.
+    let result = std::panic::catch_unwind(|| {
+        // SAFETY: the context is live for this callback, and its user data was installed above.
+        let timezone = unsafe {
+            libsqlite3_sys::sqlite3_user_data(context)
+                .cast::<chrono_tz::Tz>()
+                .as_ref()
+        }
+        .copied()
+        .unwrap_or(chrono_tz::UTC);
+        crate::time::sqlite_timestamp(chrono::Utc::now(), timezone)
+    });
+    match result {
+        // SAFETY: `timestamp` remains live for the call and SQLITE_TRANSIENT copies it immediately.
+        Ok(timestamp) => unsafe {
+            libsqlite3_sys::sqlite3_result_text(
+                context,
+                timestamp.as_ptr().cast(),
+                timestamp.len() as std::ffi::c_int,
+                libsqlite3_sys::SQLITE_TRANSIENT(),
+            );
+        },
+        // SAFETY: the static error string is NUL-terminated and remains valid for the call.
+        Err(_) => unsafe {
+            libsqlite3_sys::sqlite3_result_error(
+                context,
+                c"timestamp conversion failed".as_ptr(),
+                -1,
+            );
+        },
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Builds a PostgreSQL pool through SeaORM with the application's session hooks.
 ///
@@ -163,6 +354,8 @@ pub fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
 }
 
 /// Public entry point for `main.rs` and `App::boot` to call.
+///
+/// The configured-zone timestamp function is installed separately per app-pool connection.
 pub fn register_sqlite_extensions() {
     use std::mem::transmute;
 

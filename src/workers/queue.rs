@@ -5,6 +5,8 @@
 use std::sync::Arc;
 
 use loco_rs::app::AppContext;
+use loco_rs::bgworker::Queue;
+use loco_rs::config::QueueConfig;
 use loco_rs::prelude::async_trait;
 use uuid::Uuid;
 
@@ -161,3 +163,27 @@ pub fn decide(class: WorkerClass) -> Decision {
         fallback: false,
     }
 }
+
+/// Builds the queue configured for this application, retaining Loco's queue
+/// contract while storing application-owned timestamps in the configured zone.
+pub(crate) async fn timezone_queue(ctx: &AppContext) -> loco_rs::Result<Option<Queue>> {
+    let timezone = crate::time::configured(ctx);
+    let queue = match ctx.config.queue.as_ref() {
+        Some(QueueConfig::Postgres(config)) => Some(Queue::from_provider(Arc::new(
+            postgres::PostgresTimezoneQueue::connect(config, timezone).await?,
+        ))),
+        Some(QueueConfig::Sqlite(config)) => Some(Queue::from_provider(Arc::new(
+            sqlite::SqliteTimezoneQueue::connect(config, timezone).await?,
+        ))),
+        Some(QueueConfig::Redis(config)) => Some(Queue::from_provider(Arc::new(
+            valkey::ValkeyTimezoneQueue::connect(config, timezone).await?,
+        ))),
+        None => return Ok(None),
+        Some(_) => return Err(loco_rs::Error::Message("unsupported queue kind".into())),
+    };
+    Ok(queue)
+}
+
+pub mod postgres;
+pub mod sqlite;
+pub mod valkey;

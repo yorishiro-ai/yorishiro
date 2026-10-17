@@ -891,21 +891,27 @@ src/workers/embedding_sync.rs	fn	enqueue_for_class_with_dispatcher	integration-t
 src/workers/lifecycle.rs	fn	perform_with_lifecycle	integration-test: tests/workers/lifecycle.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	lifecycle	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	queue	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	mod	postgres	integration-test: tests/workers/queue/postgres.rs imports the real provider through the supported module.
+src/workers/queue.rs	mod	sqlite	integration-test: tests/workers/queue/sqlite.rs imports the real provider through the supported module.
+src/workers/queue.rs	mod	valkey	integration-test: tests/workers/queue/valkey.rs imports the real provider through the supported module.
 src/workers/queue.rs	const	STARVATION_PRIORITY	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	const	STARVATION_WAIT_SECONDS	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	ConcurrencyPolicy::limit	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	ConcurrencyPolicy::plan	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	Decision::class	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	Decision::fallback	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	Decision::priority	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	concurrency_for	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	decide	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	decide_for_dispatch_at	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	default_queue_policy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	priority	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	struct	ConcurrencyPolicy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	struct	Decision	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	trait	QueuePolicy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue/postgres.rs	struct	PostgresTimezoneQueue	integration-test: tests/workers/queue/postgres.rs exercises the configured concrete provider.
+src/workers/queue/postgres.rs	fn	PostgresTimezoneQueue::connect	integration-test: tests/workers/queue/postgres.rs creates a real provider from configuration.
+src/workers/queue/postgres.rs	field	PostgresTimezoneQueue::pool	integration-test: tests/workers/queue/postgres.rs inspects persisted queue timestamps and metadata through the provider's configured pool.
+src/workers/queue/postgres.rs	fn	PostgresTimezoneQueue::enqueue_with_id	integration-test: tests/workers/queue/postgres.rs verifies collision handling for a deterministic existing job ID.
+src/workers/queue/sqlite.rs	struct	SqliteTimezoneQueue	integration-test: tests/workers/queue/sqlite.rs exercises the configured concrete provider.
+src/workers/queue/sqlite.rs	fn	SqliteTimezoneQueue::connect	integration-test: tests/workers/queue/sqlite.rs creates isolated provider databases.
+src/workers/queue/sqlite.rs	fn	clear_jobs_through	integration-test: tests/workers/queue/sqlite.rs checks exact cleanup semantics with captured cutoff boundaries.
+src/workers/queue/sqlite.rs	fn	get_jobs_at_cutoff	integration-test: tests/workers/queue/sqlite.rs checks exact age-listing semantics with captured cutoff boundaries.
+src/workers/queue/sqlite.rs	fn	requeue_through	integration-test: tests/workers/queue/sqlite.rs checks exact reaper semantics with captured cutoff boundaries.
+src/workers/queue/sqlite.rs	fn	dequeue	integration-test: tests/workers/queue/sqlite.rs verifies exact legacy instant backfill and due-claim behavior through the production dequeue operation.
+src/workers/queue/sqlite.rs	field	SqliteTimezoneQueue::pool	integration-test: tests/workers/queue/sqlite.rs checks persisted timestamp representation and migration behavior against the isolated provider database.
+src/workers/queue/sqlite.rs	field	SqliteTimezoneQueue::timezone	integration-test: tests/workers/queue/sqlite.rs constructs fixtures in the provider's configured timezone.
+src/workers/queue/sqlite.rs	fn	exact_parts	integration-test: tests/workers/queue/sqlite.rs checks exact stored epochs around timestamp cutoffs.
+src/workers/queue/valkey.rs	struct	ValkeyTimezoneQueue	integration-test: tests/workers/queue/valkey.rs exercises the configured concrete provider.
+src/workers/queue/valkey.rs	fn	ValkeyTimezoneQueue::connect	integration-test: tests/workers/queue/valkey.rs creates real providers from test configuration.
+src/time.rs	type	Timezone	integration-test: provider integration tests configure concrete queue providers with parsed IANA zones.
+src/time.rs	fn	queue_storage	integration-test: tests/workers/queue/sqlite.rs writes deterministic configured-zone lifecycle fixture timestamps.
 src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/lib.rs	mod	edition	ce-ee-composition: the only Hooks implementation lives in this module, which sits outside src/ so that nothing under src/ names an edition overlay.

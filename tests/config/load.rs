@@ -35,6 +35,25 @@ async fn development_uses_loco_environment_config_and_typed_settings() {
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn sqlite_test_config_preserves_loco_application_pragmas() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
+    guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
+    guard.set(
+        "QUEUE_URL",
+        "sqlite:///tmp/config-load-queue.sqlite3?mode=rwc",
+    );
+    guard.remove("YORISHIRO_QUEUE_KIND");
+    let config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
+    assert_eq!(
+        config.database.run_on_start.as_deref(),
+        Some(
+            "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA mmap_size = 134217728; PRAGMA journal_size_limit = 67108864; PRAGMA cache_size = 2000; PRAGMA busy_timeout = 5000;"
+        )
+    );
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn the_topology_picks_the_queue_provider_for_one_database() {
     let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
     guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
@@ -73,6 +92,7 @@ async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
         postgres.queue,
         Some(QueueConfig::Postgres(queue)) if queue.uri == "postgres://db/app"
     ));
+    assert_eq!(postgres.database.uri, "postgres://db/app");
 }
 
 #[tokio::test]

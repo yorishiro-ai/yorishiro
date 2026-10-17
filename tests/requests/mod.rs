@@ -278,6 +278,10 @@ where
         .await
         .expect("load sqlite config");
     config.database.uri = format!("sqlite://{}?mode=rwc", db_path);
+    let settings = config.settings.get_or_insert_with(|| serde_json::json!({}));
+    settings["timezone"] = serde_json::Value::String(
+        std::env::var("YORISHIRO_TIMEZONE").unwrap_or_else(|_| "UTC".to_owned()),
+    );
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
         let queue_path = std::path::Path::new(&db_path)
             .with_file_name(format!("{}_queue.sqlite3", uuid::Uuid::new_v4()))
