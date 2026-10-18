@@ -17,6 +17,7 @@ def run_gate(
     evidence: bool = True,
     queue_url: str | None = None,
     valkey_url: str | None = None,
+    extra_env: dict[str, str] | None = None,
     topology: str = "postgres-valkey",
 ) -> tuple[int, str, str, dict[str, str]]:
     captured_env: dict[str, str] = {}
@@ -38,6 +39,7 @@ def run_gate(
             "os.environ",
             {
                 "YORISHIRO_TEST_EDITION": "ee",
+                **(extra_env or {}),
                 **({"QUEUE_URL": queue_url} if queue_url else {}),
                 **({"YORISHIRO_VALKEY_TEST_URL": valkey_url} if valkey_url else {}),
             },
@@ -61,25 +63,43 @@ def main() -> int:
         if validate_marker_layout(root, "sqlite-valkey"):
             return 1
     # Regression: wrong marker directories leave configured_app=0, before the empty-count branch is reached.
-    status, stdout, stderr, _ = run_gate("sqlite-valkey", valkey_url="redis://127.0.0.1:6379/15")
+    status, stdout, stderr, _ = run_gate("sqlite-valkey", valkey_url="redis://localhost:6380/2")
     assert status != 0
     assert "configured_app=0" in stdout
     assert "unexpected topology marker directories" in stderr
     assert MISMATCH_TOKEN in stderr.splitlines()
 
-    status, _, stderr, _ = run_gate(None, valkey_url="redis://127.0.0.1:6379/15")
+    status, _, stderr, _ = run_gate(None, valkey_url="redis://localhost:6380/2")
     assert status != 0 and MISMATCH_TOKEN in stderr.splitlines()
 
-    status, stdout, stderr, _ = run_gate("postgres-valkey", evidence=False, valkey_url="redis://127.0.0.1:6379/15")
+    # Valkey tests accept explicit non-local endpoints without connecting during the runner gate.
+    status, _, stderr, env = run_gate(
+        "postgres-valkey",
+        valkey_url="rediss://cache.example.test:7443/6",
+        extra_env={"YORISHIRO_TOPOLOGY_MARKER_DIR": "/not-created-yet"},
+    )
+    assert status == 0 and env["YORISHIRO_VALKEY_TEST_URL"] == "rediss://cache.example.test:7443/6"
+    assert env["YORISHIRO_TEST_QUEUE"] == "valkey"
+
+    status, _, stderr, env = run_gate(
+        "sqlite-sqlite",
+        queue_url="sqlite:///caller/queue.sqlite3?mode=rwc",
+        topology="sqlite-sqlite",
+    )
+    assert status == 0 and env["YORISHIRO_TEST_QUEUE"] == "sqlite"
+    assert "YORISHIRO_VALKEY_TEST_URL" not in env
+
+    status, stdout, stderr, _ = run_gate("postgres-valkey", evidence=False, valkey_url="redis://localhost:6379/15")
     assert status != 0 and "configured_app=0" in stdout
     assert "zero topology-specific tests" in stderr
     assert MISMATCH_TOKEN in stderr.splitlines()
 
-    status, _, stderr, _ = run_gate("postgres-valkey", valkey_url="redis://127.0.0.1:6379/15")
+    status, _, stderr, env = run_gate("postgres-valkey", valkey_url="redis://localhost:6379/15")
     assert status == 0 and MISMATCH_TOKEN not in stderr
+    assert env["YORISHIRO_TEST_QUEUE"] == "valkey"
 
     # A build/test failure must never satisfy CI's dedicated mismatch-token check.
-    status, _, stderr, _ = run_gate("sqlite-valkey", cargo_status=101, valkey_url="redis://127.0.0.1:6379/15")
+    status, _, stderr, _ = run_gate("sqlite-valkey", cargo_status=101, valkey_url="redis://localhost:6380/2")
     assert status == 101 and MISMATCH_TOKEN not in stderr
 
     # Explicit queue configuration must remain untouched; generated SQLite URLs stay within the runner tempdir.
@@ -90,6 +110,9 @@ def main() -> int:
     )
     assert status == 0
     assert env["QUEUE_URL"] == "sqlite:///caller/isolated-queue.sqlite3?mode=rwc"
+    assert "YORISHIRO_VALKEY_TEST_URL" not in env
+    assert env["YORISHIRO_TEST_TOPOLOGY"] == "sqlite-sqlite"
+    assert env["YORISHIRO_TEST_QUEUE"] == "sqlite"
 
     with patch.dict("os.environ", {}, clear=True):
         status, _, _, env = run_gate("sqlite-sqlite", topology="sqlite-sqlite")
@@ -97,6 +120,25 @@ def main() -> int:
     generated_queue_path = Path(env["QUEUE_URL"].removeprefix("sqlite://").split("?", 1)[0])
     assert generated_queue_path.parent.name.startswith("yorishiro-topology-")
     assert not generated_queue_path.parent.is_dir()
+
+    # Non-Valkey cells must discard CI's matrix QUEUE_URL masquerading as a Valkey URL.
+    status, _, _, env = run_gate(
+        "sqlite-sqlite",
+        queue_url="sqlite:///caller/isolated-queue.sqlite3?mode=rwc",
+        valkey_url="sqlite:///tmp/queue.sqlite3?mode=rwc",
+        topology="sqlite-sqlite",
+    )
+    assert status == 0 and "YORISHIRO_VALKEY_TEST_URL" not in env
+    assert env["YORISHIRO_TEST_TOPOLOGY"] == "sqlite-sqlite"
+
+    # A Valkey cell with a non-Redis test URL is a configuration error, not a silent skip.
+    status, _, stderr, _ = run_gate(
+        "sqlite-valkey",
+        queue_url="sqlite:///queue.sqlite3?mode=rwc",
+        valkey_url="sqlite:///queue.sqlite3?mode=rwc",
+        topology="sqlite-valkey",
+    )
+    assert status == 2 and "explicit Redis URL" in stderr
     return 0
 
 

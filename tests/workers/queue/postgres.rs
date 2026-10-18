@@ -1,13 +1,32 @@
 use chrono::Utc;
 use loco_rs::bgworker::{JobStatus, QueueProvider};
 use loco_rs::config::PostgresQueueConfig;
-use sea_orm::sqlx;
+use sea_orm::sqlx::{self, AssertSqlSafe, PgPool};
 use yorishiro::workers::queue::postgres::PostgresTimezoneQueue;
 
-async fn provider() -> Option<PostgresTimezoneQueue> {
+async fn provider() -> Option<(PostgresTimezoneQueue, PgPool, String)> {
     let url = postgres_test_url()?;
+    let schema = format!("queue_test_{}", ulid().to_string().to_lowercase());
+    let admin = PgPool::connect(&url).await.unwrap();
+    sqlx::query(AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let mut queue_url = reqwest::Url::parse(&url).unwrap();
+    let existing_options = queue_url
+        .query_pairs()
+        .find(|(key, _)| key == "options")
+        .map(|(_, value)| value.into_owned());
+    let search_path_option = format!(
+        "{}{}-csearch_path={schema},public",
+        existing_options.as_deref().unwrap_or_default(),
+        if existing_options.is_some() { " " } else { "" },
+    );
+    queue_url
+        .query_pairs_mut()
+        .append_pair("options", &search_path_option);
     let config = PostgresQueueConfig {
-        uri: url,
+        uri: queue_url.to_string(),
         dangerously_flush: false,
         enable_logging: false,
         max_connections: 3,
@@ -23,7 +42,7 @@ async fn provider() -> Option<PostgresTimezoneQueue> {
         .await
         .unwrap();
     provider.setup().await.unwrap();
-    Some(provider)
+    Some((provider, admin, schema))
 }
 
 fn ulid() -> String {
@@ -63,7 +82,7 @@ fn postgres_test_url() -> Option<String> {
 
 #[tokio::test]
 async fn postgres_provider_lifecycle_metadata_admin_and_collision_contract() {
-    let Some(provider) = provider().await else {
+    let Some((provider, admin, schema)) = provider().await else {
         return;
     };
     let prefix = format!("tztest-{}", ulid());
@@ -215,11 +234,17 @@ async fn postgres_provider_lifecycle_metadata_admin_and_collision_contract() {
         .execute(queue)
         .await
         .unwrap();
+    provider.pool.close().await;
+    sqlx::query(AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
 }
 
 #[tokio::test]
 async fn postgres_subsecond_due_claim_is_preserved() {
-    let Some(provider) = provider().await else {
+    let Some((provider, admin, schema)) = provider().await else {
         return;
     };
     let pool = &provider.pool;
@@ -256,6 +281,13 @@ async fn postgres_subsecond_due_claim_is_preserved() {
         .execute(pool)
         .await
         .unwrap();
+    provider.shutdown().unwrap();
+    provider.pool.close().await;
+    sqlx::query(AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
 }
 
 #[tokio::test]

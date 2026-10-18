@@ -42,11 +42,15 @@ fn test_client() -> Client {
     let uri = std::env::var("YORISHIRO_VALKEY_TEST_URL")
         .expect("YORISHIRO_VALKEY_TEST_URL must explicitly select a Valkey test database");
     let parsed = reqwest::Url::parse(&uri).expect("valid Valkey test URL");
-    assert_eq!(parsed.scheme(), "redis");
-    assert_eq!(parsed.host_str(), Some("127.0.0.1"));
-    assert_eq!(parsed.port(), Some(6379));
-    assert_eq!(parsed.path(), "/15");
+    assert!(parsed.scheme() == "redis" || parsed.scheme() == "rediss");
     Client::open(uri).unwrap()
+}
+
+fn skip_without_valkey_topology() -> bool {
+    match std::env::var("YORISHIRO_TEST_TOPOLOGY") {
+        Ok(topology) => !topology.ends_with("-valkey"),
+        Err(_) => std::env::var("YORISHIRO_TEST_QUEUE").is_ok_and(|queue| queue != "valkey"),
+    }
 }
 
 static VALKEY_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -75,6 +79,9 @@ async fn delete_job_with_memberships(c: &mut redis::aio::MultiplexedConnection, 
 
 #[tokio::test]
 async fn forced_duplicate_job_id_does_not_overwrite_or_enqueue_existing_job() {
+    if skip_without_valkey_topology() {
+        return;
+    }
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -105,6 +112,9 @@ async fn forced_duplicate_job_id_does_not_overwrite_or_enqueue_existing_job() {
 
 #[tokio::test]
 async fn batch_collision_is_atomic_and_failed_clear_matches_provider_membership_rules() {
+    if skip_without_valkey_topology() {
+        return;
+    }
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -185,6 +195,9 @@ async fn batch_collision_is_atomic_and_failed_clear_matches_provider_membership_
 
 #[tokio::test]
 async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
+    if skip_without_valkey_topology() {
+        return;
+    }
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -456,6 +469,9 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
 
 #[tokio::test]
 async fn valkey_worker_missing_handler_and_shutdown_keep_processing_membership() {
+    if skip_without_valkey_topology() {
+        return;
+    }
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
     let queue_name = format!("worker-{}", ulid::Ulid::new());
