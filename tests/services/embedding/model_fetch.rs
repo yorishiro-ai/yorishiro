@@ -59,7 +59,13 @@ fn artifact(bytes: &[u8]) -> Artifact {
     Artifact {
         remote_path: "test.bin",
         local_name: "test.bin",
-        sha256: Box::leak(hex::encode(Sha256::digest(bytes)).into_boxed_str()),
+        sha256: Box::leak(
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+                .into_boxed_str(),
+        ),
         size: bytes.len() as u64,
         description: "test artifact",
     }

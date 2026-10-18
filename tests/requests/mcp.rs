@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
-use axum_test::{TestResponse, TestServer};
 use chrono::Utc;
+use loco_rs::TestServer;
 use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -14,8 +14,7 @@ use super::boot_request;
 use super::fixtures::{self, TenantArgs, issue_api_key};
 use crate::EnvGuard;
 
-fn rpc_body(response: &TestResponse) -> Value {
-    let text = response.text();
+fn rpc_body(text: &str) -> Value {
     let payload = text
         .lines()
         .filter_map(|line| line.strip_prefix("data:").map(str::trim))
@@ -45,7 +44,7 @@ async fn initialize(request: &TestServer) -> String {
         "response: {}",
         response.text()
     );
-    let _ = rpc_body(&response);
+    let _ = rpc_body(&response.text());
     let session = response
         .headers()
         .get("mcp-session-id")
@@ -92,7 +91,7 @@ async fn mcp_call(
         "response: {}",
         response.text()
     );
-    rpc_body(&response)
+    rpc_body(&response.text())
 }
 
 fn tool_inventory(response: &Value) -> Vec<Value> {
@@ -805,7 +804,7 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
             }))
             .await;
         assert_eq!(missing.status_code(), StatusCode::OK, "{}", missing.text());
-        assert!(rpc_body(&missing).get("error").is_some());
+        assert!(rpc_body(&missing.text()).get("error").is_some());
 
         let denied = mcp_call(
             &request,

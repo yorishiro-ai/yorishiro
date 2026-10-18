@@ -11,7 +11,7 @@ fn exact_parts(at: DateTime<Utc>) -> (i64, i32) {
 use yorishiro::workers::queue::sqlite::SqliteTimezoneQueue;
 
 fn ulid_id() -> String {
-    ulid::Ulid::new().to_string()
+    ulid::Ulid::generate().to_string()
 }
 
 fn config(path: &std::path::Path) -> SqliteQueueConfig {

@@ -95,7 +95,7 @@ impl QueueProvider for SqliteTimezoneQueue {
         let now = crate::time::queue_now(self.timezone).with_timezone(&Utc);
         let (sec, nanos) = exact_parts(now);
         let now_local = crate::time::queue_storage(now, self.timezone);
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         let tags = tags.map(serde_json::to_value).transpose()?;
         sqlx::query("INSERT INTO sqlt_loco_queue (id, task_data, name, run_at, run_at_epoch_seconds, run_at_epoch_nanos, interval, tags, priority, created_at, created_at_epoch_seconds, created_at_epoch_nanos, created_at_legacy_checked, updated_at, updated_at_epoch_seconds, updated_at_epoch_nanos, updated_at_legacy_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 1)")
             .bind(&id).bind(args).bind(class).bind(&now_local).bind(sec).bind(nanos).bind(None::<i64>).bind(tags).bind(priority.unwrap_or(0)).bind(&now_local).bind(sec).bind(nanos).bind(&now_local).bind(sec).bind(nanos).execute(&self.pool).await?;
@@ -120,7 +120,7 @@ impl QueueProvider for SqliteTimezoneQueue {
         let mut ids = Vec::with_capacity(jobs.len());
         let mut unique_ids = std::collections::HashSet::with_capacity(jobs.len());
         for _ in &jobs {
-            let id = ulid::Ulid::new().to_string();
+            let id = ulid::Ulid::generate().to_string();
             if !unique_ids.insert(id.clone()) {
                 return Err(loco_rs::Error::Message(
                     "duplicate ULID generated within SQLite batch".into(),

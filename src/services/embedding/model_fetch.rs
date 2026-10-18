@@ -440,7 +440,7 @@ pub async fn download_verified(
         );
     }
 
-    let digest = hex::encode(hasher.finalize());
+    let digest = crate::models::api_keys::to_hex(hasher.finalize());
     if digest != artifact.sha256 {
         anyhow::bail!(
             "{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",

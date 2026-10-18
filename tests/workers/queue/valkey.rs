@@ -85,8 +85,8 @@ async fn forced_duplicate_job_id_does_not_overwrite_or_enqueue_existing_job() {
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
-    let id = ulid::Ulid::new().to_string();
-    let queue = format!("queue:collision-{}", ulid::Ulid::new());
+    let id = ulid::Ulid::generate().to_string();
+    let queue = format!("queue:collision-{}", ulid::Ulid::generate());
     let job_key = format!("{JOB}{id}");
     let sentinel = serde_json::json!({"id":id,"name":"sentinel","task_data":{},"status":"queued","run_at":"2020-01-01T00:00:00Z","interval":null,"created_at":null,"updated_at":null,"tags":null,"priority":0}).to_string();
     let _: () = conn.set(&job_key, &sentinel).await.unwrap();
@@ -118,8 +118,8 @@ async fn batch_collision_is_atomic_and_failed_clear_matches_provider_membership_
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
-    let queue = format!("queue:batch-collision-{}", ulid::Ulid::new());
-    let collision_id = ulid::Ulid::new().to_string();
+    let queue = format!("queue:batch-collision-{}", ulid::Ulid::generate());
+    let collision_id = ulid::Ulid::generate().to_string();
     let sentinel = serde_json::json!({"id":collision_id,"name":"sentinel","task_data":{},"status":"queued","run_at":"2020-01-01T00:00:00Z","interval":null,"created_at":null,"updated_at":null,"tags":null,"priority":0}).to_string();
     let _: () = conn
         .set(format!("{JOB}{collision_id}"), &sentinel)
@@ -132,7 +132,7 @@ async fn batch_collision_is_atomic_and_failed_clear_matches_provider_membership_
     let mut invoker = script.key(&queue);
     let committed: i32 = invoker
         .arg(2)
-        .arg(format!("{JOB}{}", ulid::Ulid::new()))
+        .arg(format!("{JOB}{}", ulid::Ulid::generate()))
         .arg("first")
         .arg(0)
         .arg(format!("{JOB}{collision_id}"))
@@ -147,7 +147,7 @@ async fn batch_collision_is_atomic_and_failed_clear_matches_provider_membership_
     let saved: String = conn.get(format!("{JOB}{collision_id}")).await.unwrap();
     assert_eq!(saved, sentinel);
 
-    let id = ulid::Ulid::new().to_string();
+    let id = ulid::Ulid::generate().to_string();
     let job = job_json(
         id.clone(),
         "clear-me".into(),
@@ -201,8 +201,8 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
-    let queue_name = format!("lifecycle-{}", ulid::Ulid::new());
-    let id = ulid::Ulid::new().to_string();
+    let queue_name = format!("lifecycle-{}", ulid::Ulid::generate());
+    let id = ulid::Ulid::generate().to_string();
     let instant = Utc::now() - chrono::Duration::minutes(20);
     let old = instant - chrono::Duration::minutes(10);
     let mut job = Job {
@@ -250,7 +250,7 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
     assert_eq!(retried.status, JobStatus::Queued);
     assert_eq!(job.run_at.timestamp_nanos_opt(), original_epoch);
     assert_ne!(retried.run_at.timestamp(), instant.timestamp());
-    let reaper_id = ulid::Ulid::new().to_string();
+    let reaper_id = ulid::Ulid::generate().to_string();
     let mut reaper_job = retried.clone();
     reaper_job.id = reaper_id.clone();
     reaper_job.status = JobStatus::Processing;
@@ -276,7 +276,7 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
     let recovered = recovered.unwrap();
     let recovered: Job = serde_json::from_str(&recovered).unwrap();
     assert_eq!(recovered.status, JobStatus::Queued);
-    let terminal_id = ulid::Ulid::new().to_string();
+    let terminal_id = ulid::Ulid::generate().to_string();
     let mut terminal = job.clone();
     terminal.id = terminal_id.clone();
     terminal.status = JobStatus::Completed;
@@ -298,7 +298,7 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
             .unwrap()
             .is_none()
     );
-    let aged_id = ulid::Ulid::new().to_string();
+    let aged_id = ulid::Ulid::generate().to_string();
     let mut aged = job.clone();
     aged.id = aged_id.clone();
     aged.status = JobStatus::Failed;
@@ -322,7 +322,7 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
     let aged_payload: Option<String> = conn.get(format!("{JOB}{aged_id}")).await.unwrap();
     assert!(aged_payload.is_none());
     let _: usize = conn.zrem(&aged_key, &aged_id).await.unwrap();
-    let cancel_id = ulid::Ulid::new().to_string();
+    let cancel_id = ulid::Ulid::generate().to_string();
     let cancel_name = format!("cancel-class-{queue_name}");
     let (cancel_job, cancel_json) = job_json(
         cancel_id.clone(),
@@ -351,7 +351,7 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
         serde_json::from_str::<Job>(&cancelled).unwrap().status,
         JobStatus::Cancelled
     );
-    let failed_id = ulid::Ulid::new().to_string();
+    let failed_id = ulid::Ulid::generate().to_string();
     let failed_job = job_json(
         failed_id.clone(),
         "failed-case".into(),
@@ -387,7 +387,7 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
         .await
         .unwrap();
     assert!(visible.iter().any(|j| j.id == failed_id));
-    let clear_id = ulid::Ulid::new().to_string();
+    let clear_id = ulid::Ulid::generate().to_string();
     let mut clear_job = failed_job.clone();
     clear_job.id = clear_id.clone();
     let _: () = conn
@@ -429,7 +429,7 @@ async fn retry_reaper_admin_and_zone_restart_preserve_job_instant() {
         let parsed: Job = serde_json::from_str(&original_job_json).unwrap();
         assert_eq!(parsed.run_at.timestamp_nanos_opt(), original_epoch);
         let _: String = serde_json::to_string(&parsed).unwrap();
-        let restart_id = ulid::Ulid::new().to_string();
+        let restart_id = ulid::Ulid::generate().to_string();
         let mut restart_job = job.clone();
         restart_job.id = restart_id.clone();
         restart_job.status = JobStatus::Queued;
@@ -474,8 +474,8 @@ async fn valkey_worker_missing_handler_and_shutdown_keep_processing_membership()
     }
     let _guard = VALKEY_TEST_LOCK.lock().await;
     let client = test_client();
-    let queue_name = format!("worker-{}", ulid::Ulid::new());
-    let id = ulid::Ulid::new().to_string();
+    let queue_name = format!("worker-{}", ulid::Ulid::generate());
+    let id = ulid::Ulid::generate().to_string();
     let (job, json) = job_json(
         id.clone(),
         format!("missing-{queue_name}"),
@@ -556,7 +556,7 @@ async fn clear_removes_queue_namespace_keys_but_preserves_unrelated_data() {
         "global queue clear test requires a dedicated Valkey database, not reserved DB 15"
     );
     let client = Client::open(uri.clone()).unwrap();
-    let unique_queue = format!("clear-test-{}", ulid::Ulid::new());
+    let unique_queue = format!("clear-test-{}", ulid::Ulid::generate());
     let config: RedisQueueConfig = serde_json::from_value(serde_json::json!({
         "uri":uri, "queues":[unique_queue.clone()], "dangerously_flush":false
     }))
@@ -565,8 +565,8 @@ async fn clear_removes_queue_namespace_keys_but_preserves_unrelated_data() {
         .await
         .unwrap();
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
-    let unrelated = format!("application-sentinel:{}", ulid::Ulid::new());
-    let owned_id = ulid::Ulid::new().to_string();
+    let unrelated = format!("application-sentinel:{}", ulid::Ulid::generate());
+    let owned_id = ulid::Ulid::generate().to_string();
     let _: () = conn.set(&unrelated, "preserve").await.unwrap();
     let _: () = conn
         .set(format!("{JOB}{owned_id}"), "owned-test-payload")
@@ -583,8 +583,8 @@ async fn clear_removes_queue_namespace_keys_but_preserves_unrelated_data() {
     assert!(!queue_exists);
     let job: Option<String> = conn.get(format!("{JOB}{owned_id}")).await.unwrap();
     assert!(job.is_none());
-    let unowned_id = ulid::Ulid::new().to_string();
-    let unowned_queue = format!("{QUEUE}clear-test-other-{}", ulid::Ulid::new());
+    let unowned_id = ulid::Ulid::generate().to_string();
+    let unowned_queue = format!("{QUEUE}clear-test-other-{}", ulid::Ulid::generate());
     let _: () = conn
         .set(format!("{JOB}{unowned_id}"), "other-queue-job")
         .await

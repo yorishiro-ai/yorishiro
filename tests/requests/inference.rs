@@ -256,7 +256,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 }
 
 /// Creates one schema and one entity for the infer-fill request tests.
-pub(crate) async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
+pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &Setup) -> Uuid {
     let create_schema = request
         .post("/api/schemas")
         .add_header("Authorization", format!("Bearer {}", setup.key))

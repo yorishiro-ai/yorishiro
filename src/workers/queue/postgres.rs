@@ -102,7 +102,7 @@ impl QueueProvider for PostgresTimezoneQueue {
         tags: Option<Vec<String>>,
         priority: Option<i32>,
     ) -> loco_rs::Result<Option<String>> {
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         Ok(Some(
             self.enqueue_with_id(class, args, tags, priority, id)
                 .await?,
@@ -126,7 +126,7 @@ impl QueueProvider for PostgresTimezoneQueue {
         let mut ids = Vec::with_capacity(jobs.len());
         let mut unique_ids = std::collections::HashSet::with_capacity(jobs.len());
         for _ in &jobs {
-            let id = ulid::Ulid::new().to_string();
+            let id = ulid::Ulid::generate().to_string();
             if !unique_ids.insert(id.clone()) {
                 return Err(loco_rs::Error::Message(
                     "duplicate ULID generated within PostgreSQL batch".into(),

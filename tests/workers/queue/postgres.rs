@@ -27,7 +27,7 @@ async fn provider() -> Option<PostgresTimezoneQueue> {
 }
 
 fn ulid() -> String {
-    ulid::Ulid::new().to_string()
+    ulid::Ulid::generate().to_string()
 }
 
 async fn configured_provider() -> Option<PostgresTimezoneQueue> {

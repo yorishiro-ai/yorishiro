@@ -169,7 +169,7 @@ impl QueueProvider for ValkeyTimezoneQueue {
             args,
             tags,
             priority,
-            ulid::Ulid::new().to_string(),
+            ulid::Ulid::generate().to_string(),
         )
         .await
     }
@@ -190,7 +190,7 @@ impl QueueProvider for ValkeyTimezoneQueue {
         let mut ids = Vec::with_capacity(jobs.len());
         let mut expected = Vec::with_capacity(jobs.len());
         for (data, priority) in jobs {
-            let id = ulid::Ulid::new().to_string();
+            let id = ulid::Ulid::generate().to_string();
             let (job, json) = job_json(
                 id.clone(),
                 class.clone(),

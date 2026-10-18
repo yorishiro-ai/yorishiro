@@ -57,8 +57,8 @@ pub(crate) async fn with_max_tenants<T>(
     fut.await
 }
 
-use axum_test::TestServer;
 use futures::FutureExt;
+use loco_rs::TestServer;
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
 use sea_orm::sqlx::sqlite::SqliteConnectOptions;
