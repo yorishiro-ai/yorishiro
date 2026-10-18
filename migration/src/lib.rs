@@ -27,6 +27,7 @@ mod m20261011_000020_inference_one_running_job_per_workspace;
 mod m20261015_160234_queue_publishing_epoch;
 mod m20261015_160332_query_embedding_deadline;
 mod m20261016_000021_queue_replay_snapshot_id;
+mod m20261016_000022_timezone_state;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -57,6 +58,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_160234_queue_publishing_epoch::Migration),
             Box::new(m20261015_160332_query_embedding_deadline::Migration),
             Box::new(m20261016_000021_queue_replay_snapshot_id::Migration),
+            Box::new(m20261016_000022_timezone_state::Migration),
             // inject-above (do not remove this comment)
         ]
     }

@@ -7,7 +7,7 @@
 //! A partial unique index on running inference jobs serializes one infer-fill per workspace.
 //! Workspace snapshots and proposal writes use short transactions; external LLM calls run outside them.
 
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use loco_rs::prelude::*;
 use sea_orm::{DatabaseBackend, SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use serde::{Deserialize, Serialize};

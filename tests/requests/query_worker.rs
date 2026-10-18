@@ -10,10 +10,10 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use axum_test::TestServer;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
+use loco_rs::prelude::async_trait;
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};

@@ -3,6 +3,8 @@ use serde::Deserialize;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
     #[serde(default = "default_max_tenants")]
     pub(crate) max_tenants: i32,
     #[serde(default)]
@@ -12,6 +14,10 @@ pub struct Settings {
     pub(crate) db_load_guard: DbLoadGuard,
     #[serde(default)]
     pub query_embedding: QueryEmbedding,
+}
+
+fn default_timezone() -> String {
+    "UTC".into()
 }
 
 fn default_max_tenants() -> i32 {

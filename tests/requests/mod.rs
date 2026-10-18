@@ -61,8 +61,8 @@ use axum_test::TestServer;
 use futures::FutureExt;
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
+use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 use serial_test::serial;
-use sqlx::sqlite::SqliteConnectOptions;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -215,6 +215,20 @@ where
     }
 }
 
+/// Boots a request app while temporarily overriding its configured timezone.
+#[allow(clippy::future_not_send)]
+pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
+    timezone: &'static str,
+    callback: F,
+) where
+    F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_TIMEZONE"]);
+    guard.set("YORISHIRO_TIMEZONE", timezone);
+    boot_request::<H, _, _>(callback).await;
+}
+
 /// SQLite variant of `boot_request`.
 ///
 /// Boots the app through `request_with_create_sqlite`, then wraps the callback in
@@ -264,6 +278,10 @@ where
         .await
         .expect("load sqlite config");
     config.database.uri = format!("sqlite://{}?mode=rwc", db_path);
+    let settings = config.settings.get_or_insert_with(|| serde_json::json!({}));
+    settings["timezone"] = serde_json::Value::String(
+        std::env::var("YORISHIRO_TIMEZONE").unwrap_or_else(|_| "UTC".to_owned()),
+    );
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
         let queue_path = std::path::Path::new(&db_path)
             .with_file_name(format!("{}_queue.sqlite3", uuid::Uuid::new_v4()))

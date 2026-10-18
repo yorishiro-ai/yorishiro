@@ -1,7 +1,8 @@
-use super::boot_request;
-use async_trait::async_trait;
+use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
+use chrono::{Offset, TimeZone};
 use loco_rs::bgworker::BackgroundWorker;
+use loco_rs::prelude::async_trait;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -45,7 +46,19 @@ async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
 /// all) can read the row back; the acting key's own scope never had to be raised for this.
 #[tokio::test]
 async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request_with_timezone::<App, _, _>("Asia/Tokyo", |request, ctx| async move {
+        let timezone = ctx
+            .config
+            .settings::<yorishiro::data::settings::Settings>()
+            .unwrap()
+            .timezone
+            .parse::<chrono_tz::Tz>()
+            .unwrap();
+        assert_ne!(
+            timezone,
+            chrono_tz::UTC,
+            "test must boot with a non-default zone"
+        );
         let setup = setup(&ctx, "acme").await;
 
         let set = request
@@ -86,6 +99,18 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
         assert_eq!(body[1]["action"], "set_maintenance");
         assert_eq!(body[1]["detail"]["mode"], "read_only");
         assert_eq!(body[1]["detail"]["reason"], "audit-log test");
+        for event in &body {
+            let created_at =
+                chrono::DateTime::parse_from_rfc3339(event["created_at"].as_str().unwrap())
+                    .unwrap();
+            assert_eq!(
+                created_at.offset().local_minus_utc(),
+                timezone
+                    .offset_from_utc_datetime(&created_at.naive_utc())
+                    .fix()
+                    .local_minus_utc()
+            );
+        }
     })
     .await;
 }

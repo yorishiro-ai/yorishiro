@@ -1,4 +1,5 @@
-use chrono::{DateTime, Utc};
+use crate::time::Timezone;
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,7 +24,7 @@ pub struct WorkspaceDetail {
     pub name: String,
     pub max_entities: Option<i32>,
     pub schema_id: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: DateTime<Timezone>,
     pub entity_count: i64,
     pub relation_count: i64,
     /// Currently *active* schemas only (one per distinct schema name), not a raw row count, which would also include archived versions.

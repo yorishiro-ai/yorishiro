@@ -515,7 +515,7 @@ pub(crate) async fn upsert_review(
         rating: sea_orm::ActiveValue::Set(request.rating),
         comment: sea_orm::ActiveValue::Set(request.comment.clone()),
         created_by: sea_orm::ActiveValue::Set(user_id),
-        updated_at: sea_orm::ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: sea_orm::ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     let row = Entity::insert(active)

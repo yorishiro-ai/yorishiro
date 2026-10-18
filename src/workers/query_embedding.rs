@@ -10,9 +10,9 @@
 
 use std::time::Duration;
 
-use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
+use loco_rs::prelude::async_trait;
 use sea_orm::DatabaseTransaction;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -129,7 +129,7 @@ async fn embed(
         .acquire()
         .await
         .map_err(|error| YorishiroError::Internal(error.into()))?;
-    if deadline_at <= chrono::Utc::now().fixed_offset() {
+    if deadline_at <= crate::time::now().fixed_offset() {
         return Err(YorishiroError::ProviderBusy {
             message: "query embedding caller deadline elapsed before provider start".into(),
             retry_after: RETRY_AFTER,
@@ -168,7 +168,7 @@ pub async fn embed_query(
     };
 
     let caller_started = Instant::now();
-    let deadline_at = chrono::Utc::now()
+    let deadline_at = crate::time::now()
         + chrono::Duration::milliseconds(i64::try_from(settings.timeout_ms).unwrap_or(i64::MAX));
     let request_id = scope
         .open(

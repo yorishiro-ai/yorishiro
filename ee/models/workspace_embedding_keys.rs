@@ -11,7 +11,7 @@ use crate::models::_entities::workspace_embedding_keys::{ActiveModel, Column, En
 use crate::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider, WorkspaceEmbeddingResolver,
 };
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
@@ -158,7 +158,7 @@ pub async fn set(
         api_key: ActiveValue::Set(api_key.to_string()),
         dimensions: ActiveValue::Set(dimensions),
         send_dimensions_param: ActiveValue::Set(send_dimensions_param),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

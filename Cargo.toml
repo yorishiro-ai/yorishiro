@@ -43,9 +43,9 @@ sea-orm-migration = { version = "2.0.4", features = [
 # It is not loco-rs's own default and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust).
 loco-rs = { version = "=1.2.0", features = ["worker_redis"] }
 anyhow = { version = "1.0.104" }
-async-trait = { version = "0.1.92" }
 axum = { version = "0.8.9" }
 chrono = { version = "0.4.45" }
+chrono-tz = "0.10.4"
 rand = { version = "0.10.2" }
 reqwest = { version = "0.13.5", features = ["json", "rustls", "form"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -53,8 +53,9 @@ serde_json = { version = "1.0.151" }
 serial_test = { version = "4.0.1" }
 sha2 = { version = "0.11.0" }
 hex = "0.4.3"
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono", "json"] }
 tracing = { version = "0.1.44" }
+tracing-subscriber = { version = "0.3.23", features = ["time"] }
+tracing-appender = "0.2.5"
 # sea-orm and uuid take different feature sets on each side (root needs sqlx-sqlite/postgres-vector and uuid's v7 that ee/ does not use directly), so the table carries the union of what either side needs.
 sea-orm = { version = "2.0.4", features = [
   "sqlx-sqlite",
@@ -64,6 +65,8 @@ sea-orm = { version = "2.0.4", features = [
   "postgres-vector",
 ] }
 uuid = { version = "1.26.1", features = ["v4", "v7"] }
+ulid = "=1.2.1"
+redis = { version = "=1.7.0", features = ["aio", "tokio-comp"] }
 
 [dependencies]
 loco-rs = { workspace = true }
@@ -74,17 +77,17 @@ migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.53.1", features = ["rt", "time", "macros", "sync"] }
-async-trait.workspace = true
 axum.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
 regex = { version = "1.13.1" }
 sea-orm.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 uuid.workspace = true
-# Raw pool for RLS session-state handling: Loco's standard database bootstrap
-# does not expose the session hooks needed to reset tenant state on release.
-# See https://github.com/yorishiro-ai/yorishiro/issues/221.
-sqlx.workspace = true
+ulid.workspace = true
+redis.workspace = true
 thiserror = { version = "2.0.20" }
 anyhow.workspace = true
 rand.workspace = true
@@ -103,6 +106,7 @@ reqwest.workspace = true
 candle-core = { version = "0.11.0" }
 candle-nn = { version = "0.11.0" }
 candle-transformers = { version = "0.11.0" }
+# Current upstream Candle and Swagger UI releases constrain ZIP to 8.x; see the security follow-up before upgrading this group.
 tokenizers = { version = "0.23.2", features = ["onig"] }
 sqlite-vec = "=0.1.9"
 # Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
@@ -125,10 +129,8 @@ required-features = []
 [dev-dependencies]
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
-tracing-subscriber = "0.3.23"
 # Used by queue and integration tests for isolated temporary databases.
 tempfile = { version = "3.27.0" }
-redis = { version = "=1.7.0", features = ["aio", "tokio-comp"] }
 # Used by the ee/ request tests folded into tests/requests/.
 axum-test = { version = "17.3.0" }
 # Required for catch_unwind on non-Send futures in boot_request wrapper.

@@ -316,3 +316,29 @@ After setup, tenant owners and admins can create, list, and revoke workspace API
 `GET /api/api-keys` returns names, prefixes, identifiers, and creation times, but never hashes or plaintext secrets.
 `DELETE /api/api-keys/{id}` revokes a key immediately and returns `404` when the identifier is absent or belongs to another tenant.
 Revoking the key used for the request is permitted intentionally, so an administrator can revoke an old key without needing a second credential.
+
+## Application timezone
+
+The default timezone is `UTC`.
+To use Japan Standard Time, change `settings.timezone` in the `config/<environment>.yaml` file you use, then restart the application.
+
+```yaml
+settings:
+  timezone: Asia/Tokyo
+```
+
+To set the same value through an environment variable, keep the existing environment-variable expression in the configuration file and start with `YORISHIRO_TIMEZONE=Asia/Tokyo`.
+Use an IANA timezone name such as `Asia/Tokyo` or `America/New_York`.
+Invalid names prevent startup.
+Use the same value for every server and worker sharing a database.
+
+Workspace detail, API key, and API audit response timestamps, as well as log event timestamps, use the configured timezone.
+Changing this setting does not change when a recorded event occurred, when a job is scheduled to run, or when it expires.
+
+PostgreSQL `TIMESTAMPTZ` preserves each instant and renders it using the connection's session timezone; it does not store the IANA zone name. The application, identity, and tenant pools initialize their session timezone from this setting.
+SQLite has no session timezone. Application-pool connections provide `CURRENT_TIMESTAMP` in the configured IANA timezone with an explicit offset, preserving the instant when parsed. The function is installed separately on each application-pool connection; queue database connections are not changed. Existing timestamp strings are not rewritten when the configured zone changes. SQLite pool replacement applies the configured `database.run_on_start` SQL on each physical connection only when it is set; otherwise no startup SQL is applied by the replacement pool.
+Queue timestamps are written with the configured zone while retaining their absolute instants; PostgreSQL due claims compare those instants.
+SQLite stores configured-zone queue timestamps and keeps an exact epoch key for scheduling, including legacy rows with offsets.
+Valkey stores job instants and uses configured-zone formatting for new state transitions.
+SQLite queue database operations do not change the application database's connection defaults; Loco's test SQLite configuration retains its normal PRAGMA setup.
+Use the same configured zone for every server and worker sharing a database, and treat queue/database values as instants rather than local civil times.

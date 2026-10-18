@@ -1,8 +1,8 @@
 //! The crate's only `Hooks` implementation.
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use loco_rs::{
     Result,
     app::{AppContext, Hooks, Initializer},
@@ -35,6 +35,10 @@ impl Hooks for App {
         env!("CARGO_CRATE_NAME")
     }
 
+    fn init_logger(ctx: &AppContext) -> Result<bool> {
+        crate::initializers::timezone_logger::init::<Self>(ctx)
+    }
+
     async fn load_config(env: &Environment) -> Result<Config> {
         base::load_config(env).await
     }
@@ -57,16 +61,30 @@ impl Hooks for App {
 
     async fn before_run(ctx: &AppContext) -> Result<()> {
         base::before_run(ctx);
+        crate::app::synchronize_timezone(ctx).await?;
         Ok(())
     }
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
-        let ctx = base::after_context(ctx).await?;
+        let mut ctx = base::after_context(ctx).await?;
+        let args: Vec<_> = std::env::args_os().collect();
+        if crate::app::cli_requires_timezone_gate(&args) {
+            crate::app::synchronize_timezone(&ctx).await?;
+        }
         active::compose_context(&ctx)?;
         let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
         let cap = active::tenant_creation_cap(settings.max_tenants, &ctx);
         ctx.shared_store
             .insert(crate::data::tenant_policy::TenantCap::new(cap));
+        if ctx.config.workers.mode == loco_rs::config::WorkerMode::BackgroundQueue
+            && let Some(queue) = crate::workers::queue::timezone_queue(&ctx).await?
+        {
+            if let Some(old) = ctx.queue_provider.as_ref() {
+                old.shutdown()?;
+            }
+            let replaced = ctx.queue_provider.replace(Arc::new(queue));
+            drop(replaced);
+        }
         Ok(ctx)
     }
 

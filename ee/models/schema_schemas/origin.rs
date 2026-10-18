@@ -17,14 +17,14 @@ use uuid::Uuid;
 use super::merge::{self, MergePlan};
 
 /// A narrow seam used to coordinate the merge read/acknowledgement race test.
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 pub trait MergeReadHook: Send + Sync {
     async fn after_revision_read(&self);
 }
 
 struct NoopMergeReadHook;
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl MergeReadHook for NoopMergeReadHook {
     async fn after_revision_read(&self) {}
 }
@@ -205,7 +205,7 @@ pub async fn merge_apply_with_read_hook(
     use crate::models::_entities::schema_schemas::{Column, Entity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
     Entity::update_many()
-        .col_expr(Column::OriginUpdatedAt, Expr::val(chrono::Utc::now()))
+        .col_expr(Column::OriginUpdatedAt, Expr::val(crate::time::now()))
         .filter(Column::Id.eq(schema.id))
         .exec(schema_conn)
         .await

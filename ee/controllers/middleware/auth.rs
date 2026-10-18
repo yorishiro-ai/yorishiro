@@ -5,7 +5,7 @@ use crate::controllers::middleware::auth::{self as base_auth, Authenticator};
 use crate::db::DbHandle;
 use crate::error::ResultExt;
 use crate::models::api_keys::{ApiKeyScope, AuthContext, hash_key};
-use async_trait::async_trait;
+use loco_rs::prelude::async_trait;
 use uuid::Uuid;
 
 /// The header naming which workspace a tenant-scoped API key should act on.
@@ -63,7 +63,7 @@ impl Authenticator for TenantScopedAuthenticator {
 
         // The two-argument overload of the `authenticate_api_key` SECURITY DEFINER function the schema migration creates.
         // `p_requested_workspace` is only consulted for a key with no workspace of its own, and resolves only when the named workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
-        let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>, bool)> = sqlx::query_as(
+        let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>, bool)> = sea_orm::sqlx::query_as(
             "SELECT id, workspace_id, tenant_id, scope, user_id, audit \
              FROM authenticate_api_key($1, $2)",
         )

@@ -61,8 +61,8 @@ fn the_worker_keeps_its_queue_class_name() {
 }
 
 mod unit {
-    use async_trait::async_trait;
     use loco_rs::app::AppContext;
+    use loco_rs::prelude::async_trait;
 
     use std::sync::Mutex;
     use uuid::Uuid;
@@ -153,11 +153,11 @@ mod conflict {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    use async_trait::async_trait;
     use futures::FutureExt;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
     use loco_rs::config::{PostgresQueueConfig, RedisQueueConfig, SqliteQueueConfig};
+    use loco_rs::prelude::async_trait;
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
         Statement, TransactionTrait,
@@ -273,12 +273,33 @@ mod conflict {
     }
 
     enum BackendObservation {
-        Sqlite(sqlx::SqlitePool),
-        Postgres(sqlx::PgPool),
+        Sqlite(sea_orm::sqlx::SqlitePool),
+        Postgres(sea_orm::sqlx::PgPool),
         Redis(loco_rs::bgworker::redis::RedisPool),
     }
 
     impl BackendObservation {
+        async fn owned_statuses(
+            &self,
+            ids: &[String],
+        ) -> Vec<(String, loco_rs::bgworker::JobStatus)> {
+            let jobs = match self {
+                Self::Sqlite(pool) => sqlt::get_jobs(pool, None, None)
+                    .await
+                    .expect("read SQLite jobs"),
+                Self::Postgres(pool) => loco_rs::bgworker::pg::get_jobs(pool, None, None)
+                    .await
+                    .expect("read PostgreSQL jobs"),
+                Self::Redis(client) => loco_rs::bgworker::redis::get_jobs(client, None, None)
+                    .await
+                    .expect("read Valkey jobs"),
+            };
+            jobs.into_iter()
+                .filter(|job| ids.contains(&job.id))
+                .map(|job| (job.id, job.status))
+                .collect()
+        }
+
         async fn owned_count(
             &self,
             ids: &[String],
@@ -359,7 +380,7 @@ mod conflict {
             );
             queue.setup().await.expect("set up SQLite queue");
             let observation = BackendObservation::Sqlite(
-                sqlx::SqlitePool::connect(&queue_uri)
+                sea_orm::sqlx::SqlitePool::connect(&queue_uri)
                     .await
                     .expect("connect to SQLite queue"),
             );
@@ -405,7 +426,7 @@ mod conflict {
                 .await
                 .expect("clear reserved PostgreSQL test queue");
             let observation = BackendObservation::Postgres(
-                sqlx::PgPool::connect(&uri)
+                sea_orm::sqlx::PgPool::connect(&uri)
                     .await
                     .expect("connect to PostgreSQL queue"),
             );
@@ -1009,7 +1030,7 @@ mod conflict {
             queue.setup().await.expect("set up queue");
             let queue = Arc::new(queue);
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
-            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
+            let queue_pool = sea_orm::sqlx::SqlitePool::connect(&queue_uri)
                 .await
                 .expect("connect to the queue file");
 
@@ -1194,28 +1215,40 @@ mod conflict {
                     .await;
                 queue_ids.push(queue_id);
             }
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 while provider.calls.load(Ordering::SeqCst) == 0 {
                     tokio::task::yield_now().await;
                 }
             })
             .await
             .expect("first provider call entered");
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while harness
-                    .observation
-                    .owned_count(
-                        &queue_ids,
-                        Some(vec![loco_rs::bgworker::JobStatus::Processing]),
-                    )
-                    .await
-                    < 3
-                {
+            let processing = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let count = harness
+                        .observation
+                        .owned_count(
+                            &queue_ids,
+                            Some(vec![loco_rs::bgworker::JobStatus::Processing]),
+                        )
+                        .await;
+                    if count == 3 {
+                        break count;
+                    }
                     tokio::task::yield_now().await;
                 }
             })
-            .await
-            .expect("all consumers must have dequeued a job");
+            .await;
+            let processing = match processing {
+                Ok(count) => count,
+                Err(_) => panic!(
+                    "expected all 3 owned jobs processing; jobs={:?}, provider calls={}, active={}, max_active={}",
+                    harness.observation.owned_statuses(&queue_ids).await,
+                    provider.calls.load(Ordering::SeqCst),
+                    provider.active.load(Ordering::SeqCst),
+                    provider.max_active.load(Ordering::SeqCst),
+                ),
+            };
+            assert_eq!(processing, 3);
             assert_eq!(provider.active.load(Ordering::SeqCst), 1);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             let rows = Entity::find().all(&ctx.db).await.expect("read lifecycles");
@@ -2771,7 +2804,7 @@ mod conflict {
             queue.setup().await.expect("set up queue");
             let queue = Arc::new(queue);
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
-            let queue_pool = sqlx::SqlitePool::connect(&queue_uri)
+            let queue_pool = sea_orm::sqlx::SqlitePool::connect(&queue_uri)
                 .await
                 .expect("connect to the queue file");
 

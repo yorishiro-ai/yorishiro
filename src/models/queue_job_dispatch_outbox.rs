@@ -50,7 +50,7 @@ struct DispatchRow {
     publishing_epoch: i64,
 }
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for crate::models::_entities::queue_job_dispatch_outbox::ActiveModel {}
 
 #[derive(Clone)]
@@ -856,7 +856,7 @@ pub async fn claim_dispatch(
         return Ok(false);
     }
     let backend = txn.get_database_backend();
-    let lease_until = chrono::Utc::now().fixed_offset() + chrono::Duration::seconds(lease_seconds);
+    let lease_until = crate::time::now() + chrono::Duration::seconds(lease_seconds);
     let result = txn.execute_raw(Statement::from_sql_and_values(
         backend,
         "UPDATE queue_job_dispatch_outbox SET last_attempt_at = CURRENT_TIMESTAMP, claim_token = $3, claim_until = $4 WHERE id = $1 AND publishing_epoch = $2 AND published_at IS NULL AND (claim_until IS NULL OR claim_until <= CURRENT_TIMESTAMP)",
@@ -939,7 +939,7 @@ async fn retag_for_replay_locked(
             || row.workspace_id.is_none()
             || row
                 .deadline_at
-                .is_none_or(|deadline| deadline <= chrono::Utc::now().fixed_offset())
+                .is_none_or(|deadline| deadline <= crate::time::now())
             || row.legacy_quarantined
         {
             return Ok(None);
@@ -962,7 +962,7 @@ async fn retag_for_replay_locked(
         let Some(query_request) = query_request else {
             return Ok(None);
         };
-        let now = chrono::Utc::now().fixed_offset();
+        let now = crate::time::now();
         if query_request.status != "pending"
             || query_request.expires_at <= now
             || query_request

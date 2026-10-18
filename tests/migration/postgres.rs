@@ -108,6 +108,30 @@ async fn close_scratch_db(db: sea_orm::DatabaseConnection, name: &str) -> Result
     }
 }
 
+pub(crate) async fn with_timezone_scratch_db<F>(test: F)
+where
+    F: for<'a> FnOnce(
+            &'a sea_orm::DatabaseConnection,
+            &'a str,
+        ) -> futures::future::BoxFuture<'a, ()>
+        + Send,
+{
+    let (db, database_name, target_url) = scratch_db("timezone_state").await;
+    let result = AssertUnwindSafe(test(&db, &target_url))
+        .catch_unwind()
+        .await;
+    let cleanup = close_scratch_db(db, &database_name).await;
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(error)) => panic!("scratch database cleanup failed: {error}"),
+        (Err(panic), Ok(())) => std::panic::resume_unwind(panic),
+        (Err(panic), Err(error)) => {
+            eprintln!("scratch database cleanup also failed: {error}");
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
 async fn with_scratch_db<F>(name: &str, test: F)
 where
     F: for<'a> FnOnce(&'a sea_orm::DatabaseConnection) -> futures::future::BoxFuture<'a, ()>,
@@ -261,14 +285,122 @@ async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
 
             let tenant_pool = yorishiro::db::TenantDb::connect(
                 &target_url,
-                2,
+                1,
+                "Asia/Tokyo".to_owned(),
             )
             .await
-            .expect("build non-superuser tenant pool");
-            let tenant = uuid::Uuid::parse_str(tenant_id).unwrap();
-            let workspace = uuid::Uuid::parse_str(workspace_id).unwrap();
+            .expect("build production tenant pool");
+            let identity = yorishiro::db::connect_postgres_pool(
+                &target_url,
+                1,
+                "Asia/Tokyo".to_owned(),
+                false,
+                false,
+                Some(1),
+                Some(std::time::Duration::from_secs(5)),
+                None,
+            )
+            .await
+            .expect("build production identity pool");
+            let mut identity_conn = identity
+                .get_postgres_connection_pool()
+                .acquire()
+                .await
+                .expect("acquire identity backend");
+            let (identity_zone, identity_pid): (String, i32) = sea_orm::sqlx::query_as(
+                "SELECT current_setting('TimeZone'), pg_backend_pid()",
+            )
+            .fetch_one(identity_conn.as_mut())
+            .await
+            .expect("read identity session");
+            assert_eq!(identity_zone, "Asia/Tokyo");
+            sea_orm::sqlx::query("SET TIME ZONE 'Europe/Paris'")
+                .execute(identity_conn.as_mut())
+                .await
+                .expect("change identity timezone");
+            drop(identity_conn);
+            let mut identity_conn = identity
+                .get_postgres_connection_pool()
+                .acquire()
+                .await
+                .expect("reacquire identity backend");
+            let (identity_zone_after, identity_pid_after): (String, i32) =
+                sea_orm::sqlx::query_as("SELECT current_setting('TimeZone'), pg_backend_pid()")
+                    .fetch_one(identity_conn.as_mut())
+                    .await
+                    .expect("read released identity session");
+            assert_eq!(identity_pid_after, identity_pid);
+            assert_eq!(identity_zone_after, "Asia/Tokyo");
+            drop(identity_conn);
+            let mut previous_pid = None;
+            let tenant_a = uuid::Uuid::parse_str(tenant_id).unwrap();
+            let workspace_a = uuid::Uuid::parse_str(workspace_id).unwrap();
+            for _ in 0..3 {
+                let mut conn = tenant_pool.pool().acquire().await.expect("acquire tenant connection");
+                let (zone, pid): (String, i32) = sea_orm::sqlx::query_as(
+                    "SELECT current_setting('TimeZone'), pg_backend_pid()",
+                )
+                .fetch_one(conn.as_mut())
+                .await
+                .expect("read configured timezone and backend id");
+                assert_eq!(zone, "Asia/Tokyo");
+                sea_orm::sqlx::query("SELECT set_config('app.current_tenant', $1, false), set_config('app.current_workspace', $2, false)")
+                    .bind(tenant_id)
+                    .bind(workspace_id)
+                    .execute(conn.as_mut())
+                    .await
+                    .expect("set session-level tenant state");
+                if let Some(previous_pid) = previous_pid {
+                    assert_eq!(pid, previous_pid, "single-connection pool must reuse the same backend");
+                }
+                sea_orm::sqlx::query("SET TIME ZONE 'Europe/Paris'")
+                    .execute(conn.as_mut())
+                    .await
+                    .expect("change timezone before release");
+                previous_pid = Some(pid);
+                drop(conn);
+            }
+            let mut reused = tenant_pool.pool().acquire().await.expect("reacquire tenant connection");
+            let (pid, tenant_state, workspace_state): (i32, Option<String>, Option<String>) =
+                sea_orm::sqlx::query_as("SELECT pg_backend_pid(), current_setting('app.current_tenant', true), current_setting('app.current_workspace', true)")
+                    .fetch_one(reused.as_mut())
+                    .await
+                    .expect("check released session state");
+            assert_eq!(Some(pid), previous_pid, "release cleanup should reuse the backend");
+            assert!(tenant_state.is_none_or(|value| value.is_empty()));
+            assert!(workspace_state.is_none_or(|value| value.is_empty()));
+            drop(reused);
+            let mut rollback = tenant_pool.pool()
+                .acquire()
+                .await
+                .expect("acquire tenant session for rollback verification");
+            sea_orm::sqlx::query("BEGIN")
+                .execute(&mut *rollback)
+                .await
+                .expect("begin scoped rollback transaction");
+            sea_orm::sqlx::query("SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true)")
+                .bind(tenant_id)
+                .bind(workspace_id)
+                .execute(&mut *rollback)
+                .await
+                .expect("set transaction-local scope");
+            sea_orm::sqlx::query("ROLLBACK")
+                .execute(&mut *rollback)
+                .await
+                .expect("rollback scoped transaction");
+            drop(rollback);
+            let mut reused = tenant_pool.pool().acquire().await.expect("reacquire after rollback");
+            let (pid, tenant_state, workspace_state): (i32, Option<String>, Option<String>) =
+                sea_orm::sqlx::query_as("SELECT pg_backend_pid(), current_setting('app.current_tenant', true), current_setting('app.current_workspace', true)")
+                    .fetch_one(reused.as_mut())
+                    .await
+                    .expect("verify rollback state cleanup");
+            assert_eq!(Some(pid), previous_pid);
+            assert!(tenant_state.is_none_or(|value| value.is_empty()));
+            assert!(workspace_state.is_none_or(|value| value.is_empty()));
+            drop(reused);
             let txn = tenant_pool
-                .begin_for_workspace(tenant, workspace)
+                .begin_for_workspace(tenant_a, workspace_a)
                 .await
                 .expect("begin tenant transaction");
             let id = uuid::Uuid::now_v7();
@@ -278,12 +410,12 @@ async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
                     id,
                     job_name: "outbox_insert_probe",
                     worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
-                    workspace_id: Some(workspace),
+                    workspace_id: Some(workspace_a),
                     plan: None,
                     concurrency_key: None,
                     concurrency_limit: None,
                 },
-                serde_json::json!({"workspace_id": workspace}),
+                serde_json::json!({"workspace_id": workspace_a}),
                 "ProbeWorker".into(),
                 None,
                 None,
@@ -316,6 +448,7 @@ async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
                 .expect("read count");
             assert_eq!(hidden, 0, "tenant role cannot see global or cross-workspace lifecycles");
             txn.commit().await.expect("commit tenant transaction");
+            identity.close().await.expect("close identity pool");
         })
         .catch_unwind()
         .await;

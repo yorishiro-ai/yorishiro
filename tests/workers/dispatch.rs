@@ -15,7 +15,7 @@ mod redis_routing {
 
     struct RoutingProbe;
 
-    #[async_trait::async_trait]
+    #[loco_rs::prelude::async_trait]
     impl BackgroundWorker<serde_json::Value> for RoutingProbe {
         fn build(_ctx: &loco_rs::app::AppContext) -> Self {
             Self

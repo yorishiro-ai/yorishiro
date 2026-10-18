@@ -97,8 +97,8 @@ async fn insert_row(
         workspace_id: ActiveValue::Set(workspace_id),
         amount: ActiveValue::Set(amount),
         transaction_type: ActiveValue::Set(transaction_type.as_db_str().to_string()),
-        created_at: ActiveValue::Set(chrono::Utc::now().into()),
-        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        created_at: ActiveValue::Set(crate::time::now().into()),
+        updated_at: ActiveValue::Set(crate::time::now().into()),
     };
     Entity::insert(active).exec(conn).await.internal()?;
     Ok(())

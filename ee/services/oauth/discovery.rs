@@ -6,8 +6,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
+use loco_rs::prelude::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 

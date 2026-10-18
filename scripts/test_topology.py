@@ -31,13 +31,46 @@ def main() -> int:
         return 2
     feature_args = ["--no-default-features", "--features", "community"] if edition == "ce" else ["--features", "enterprise"]
     database, queue = topology.split("-", 1)
-    with tempfile.TemporaryDirectory(prefix="yorishiro-topology-markers-") as marker_dir:
+    app_url = os.environ.get("DATABASE_URL", "")
+    mismatch = (database == "sqlite" and app_url.startswith(("postgres://", "postgresql://"))) or (
+        database == "postgres" and app_url.startswith("sqlite:")
+    )
+    if mismatch:
+        print(MISMATCH_TOKEN, file=sys.stderr)
+        print(f"ERROR: requested {database} database topology does not match DATABASE_URL", file=sys.stderr)
+        return 1
+    with tempfile.TemporaryDirectory(prefix="yorishiro-topology-") as temp_dir:
         env = os.environ.copy()
+        if database == "sqlite" and queue == "sqlite" and not env.get("QUEUE_URL"):
+            queue_path = Path(temp_dir) / "environment-queue.sqlite3"
+            env["QUEUE_URL"] = f"sqlite://{queue_path}?mode=rwc"
+        marker_dir = Path(temp_dir) / "markers"
+        marker_dir.mkdir()
+        app_url = env.get("DATABASE_URL", "")
+        postgres_url = env.get("YORISHIRO_POSTGRES_TEST_URL")
+        if postgres_url:
+            env["YORISHIRO_POSTGRES_TEST_URL"] = postgres_url
+        elif app_url.startswith(("postgres://", "postgresql://")):
+            env["YORISHIRO_POSTGRES_TEST_URL"] = app_url
+        else:
+            env.pop("YORISHIRO_POSTGRES_TEST_URL", None)
         env.update(
             YORISHIRO_TOPOLOGY_MARKER_DIR=marker_dir,
             YORISHIRO_TEST_TOPOLOGY=topology,
             YORISHIRO_TEST_QUEUE=queue,
         )
+        valkey_url = env.get("YORISHIRO_VALKEY_TEST_URL", "")
+        queue_url = env.get("QUEUE_URL", "")
+        if queue == "valkey":
+            if not valkey_url.startswith(("redis://", "rediss://")) and queue_url.startswith(("redis://", "rediss://")):
+                valkey_url = queue_url
+            if not valkey_url.startswith(("redis://", "rediss://")):
+                print("YORISHIRO_VALKEY_TEST_URL must be an explicit Redis URL for Valkey topology", file=sys.stderr)
+                return 2
+            env["YORISHIRO_VALKEY_TEST_URL"] = valkey_url
+        else:
+            # The CI matrix also sets this variable in SQLite/PostgreSQL cells; do not feed those URLs to Valkey tests.
+            env.pop("YORISHIRO_VALKEY_TEST_URL", None)
         result = subprocess.run(
             ["cargo", "test", "--locked", "--workspace", *feature_args, *cargo_args],
             cwd=ROOT,

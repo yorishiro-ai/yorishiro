@@ -27,7 +27,7 @@ pub struct ApiErrorDetail {
     pub retry_after_seconds: Option<u32>,
 }
 
-#[derive(ToSchema)]
+#[derive(serde::Serialize, ToSchema)]
 pub struct AuditLogRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,

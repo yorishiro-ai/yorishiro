@@ -28,6 +28,7 @@ pub mod tenant_billing;
 pub mod tenant_memberships;
 pub mod tenant_reindex_schedules;
 pub mod tenant_tenants;
+pub mod timezone_state;
 pub mod user_users;
 pub mod workspace_embedding_keys;
 pub mod workspace_invites;

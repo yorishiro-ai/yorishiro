@@ -1,7 +1,7 @@
 pub use crate::models::_entities::stripe_events::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
     where

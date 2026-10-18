@@ -218,7 +218,7 @@ async fn transition_pending(
 ) -> Result<i64, YorishiroError> {
     let result = Entity::update_many()
         .col_expr(Column::Status, Expr::value(status.as_db_str()))
-        .col_expr(Column::UpdatedAt, Expr::value(chrono::Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
         .filter(Column::Status.eq(ProposalStatus::Pending.as_db_str()))
@@ -475,7 +475,7 @@ async fn ensure_entity_marked(
 ) -> Result<(), YorishiroError> {
     let result = Entity::update_many()
         .col_expr(Column::Status, Expr::value(status))
-        .col_expr(Column::UpdatedAt, Expr::value(chrono::Utc::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
         .filter(Column::EntityId.eq(entity_id))

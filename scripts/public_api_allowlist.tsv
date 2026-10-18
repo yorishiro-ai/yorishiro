@@ -1,5 +1,20 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/app.rs	fn	cli_requires_timezone_gate	integration-test: external CLI argument tests verify pre-run worker-command gating and migration exemptions.
+src/app.rs	fn	cli_timezone_gate_result	integration-test: external CLI tests verify persisted-state gating while allowing database migration bootstrap.
+src/data/config.rs	fn	validate	integration-test: external settings tests exercise application configuration validation.
+src/data/settings.rs	field	Settings::timezone	integration-test: external configuration tests assert the validated timezone setting.
+src/db.rs	fn	set_session_timezone	integration-test: PostgreSQL integration tests verify configured session-zone behavior on real connections.
+src/db.rs	fn	connect_postgres_pool	integration-test: PostgreSQL integration tests exercise the production SeaORM identity pool factory and verify timezone reset on backend reuse.
+src/initializers/mod.rs	mod	timezone_logger	integration-test: external formatter test verifies real timezone-rendered logger timestamps.
+src/initializers/timezone_logger.rs	struct	ConfiguredTimer	integration-test: formatter test invokes the production timer to check DST offsets and trailing-space behavior.
+src/initializers/timezone_logger.rs	fn	ConfiguredTimer::new	integration-test: formatter test supplies explicit IANA zones to the production timer.
+src/lib.rs	mod	time	integration-test: external tests verify shared timezone parsing and instant-preserving conversion.
+src/models/mod.rs	mod	timezone_state	integration-test: external backend tests exercise transactional singleton activation and rollback.
+src/models/timezone_state.rs	fn	activate	integration-test: external SQLite/PostgreSQL tests exercise the table-owned timezone state transition.
+src/models/timezone_state.rs	use	super::_entities::timezone_state::{ActiveModel,Entity}	integration-test: external bootstrap tests verify migration-seeded singleton presence through its generated entity.
+src/time.rs	fn	in_timezone	integration-test: external timezone tests verify daylight-saving conversion without changing the epoch.
+src/time.rs	fn	parse_timezone	integration-test: external config tests assert accepted and rejected IANA timezone names.
 ee/data/oauth.rs	fn	default_redirect_uri	integration-test: verify OAuth callback fallback uses the resolved listener and preserves the legacy override.
 src/models/workspace_invites.rs	struct	RedeemedInvite	seaorm-facade: invite result moved from the cross-table facade to the table-owning model.
 src/models/workspace_invites.rs	field	RedeemedInvite::tenant_id	seaorm-facade: invite result field moved with its existing public type.
@@ -876,21 +891,27 @@ src/workers/embedding_sync.rs	fn	enqueue_for_class_with_dispatcher	integration-t
 src/workers/lifecycle.rs	fn	perform_with_lifecycle	integration-test: tests/workers/lifecycle.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	lifecycle	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	queue	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue.rs	mod	postgres	integration-test: tests/workers/queue/postgres.rs imports the real provider through the supported module.
+src/workers/queue.rs	mod	sqlite	integration-test: tests/workers/queue/sqlite.rs imports the real provider through the supported module.
+src/workers/queue.rs	mod	valkey	integration-test: tests/workers/queue/valkey.rs imports the real provider through the supported module.
 src/workers/queue.rs	const	STARVATION_PRIORITY	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	const	STARVATION_WAIT_SECONDS	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	ConcurrencyPolicy::limit	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	ConcurrencyPolicy::plan	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	Decision::class	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	Decision::fallback	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	field	Decision::priority	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	concurrency_for	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	decide	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	decide_for_dispatch_at	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	default_queue_policy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	fn	priority	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	struct	ConcurrencyPolicy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	struct	Decision	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
-src/workers/queue.rs	trait	QueuePolicy	integration-test: tests/workers/queue.rs exercises it now that the unit tests moved out of src/.
+src/workers/queue/postgres.rs	struct	PostgresTimezoneQueue	integration-test: tests/workers/queue/postgres.rs exercises the configured concrete provider.
+src/workers/queue/postgres.rs	fn	PostgresTimezoneQueue::connect	integration-test: tests/workers/queue/postgres.rs creates a real provider from configuration.
+src/workers/queue/postgres.rs	field	PostgresTimezoneQueue::pool	integration-test: tests/workers/queue/postgres.rs inspects persisted queue timestamps and metadata through the provider's configured pool.
+src/workers/queue/postgres.rs	fn	PostgresTimezoneQueue::enqueue_with_id	integration-test: tests/workers/queue/postgres.rs verifies collision handling for a deterministic existing job ID.
+src/workers/queue/sqlite.rs	struct	SqliteTimezoneQueue	integration-test: tests/workers/queue/sqlite.rs exercises the configured concrete provider.
+src/workers/queue/sqlite.rs	fn	SqliteTimezoneQueue::connect	integration-test: tests/workers/queue/sqlite.rs creates isolated provider databases.
+src/workers/queue/sqlite.rs	fn	clear_jobs_through	integration-test: tests/workers/queue/sqlite.rs checks exact cleanup semantics with captured cutoff boundaries.
+src/workers/queue/sqlite.rs	fn	get_jobs_at_cutoff	integration-test: tests/workers/queue/sqlite.rs checks exact age-listing semantics with captured cutoff boundaries.
+src/workers/queue/sqlite.rs	fn	requeue_through	integration-test: tests/workers/queue/sqlite.rs checks exact reaper semantics with captured cutoff boundaries.
+src/workers/queue/sqlite.rs	fn	dequeue	integration-test: tests/workers/queue/sqlite.rs verifies exact legacy instant backfill and due-claim behavior through the production dequeue operation.
+src/workers/queue/sqlite.rs	field	SqliteTimezoneQueue::pool	integration-test: tests/workers/queue/sqlite.rs checks persisted timestamp representation and migration behavior against the isolated provider database.
+src/workers/queue/sqlite.rs	field	SqliteTimezoneQueue::timezone	integration-test: tests/workers/queue/sqlite.rs constructs fixtures in the provider's configured timezone.
+src/workers/queue/sqlite.rs	fn	exact_parts	integration-test: tests/workers/queue/sqlite.rs checks exact stored epochs around timestamp cutoffs.
+src/workers/queue/valkey.rs	struct	ValkeyTimezoneQueue	integration-test: tests/workers/queue/valkey.rs exercises the configured concrete provider.
+src/workers/queue/valkey.rs	fn	ValkeyTimezoneQueue::connect	integration-test: tests/workers/queue/valkey.rs creates real providers from test configuration.
+src/time.rs	type	Timezone	integration-test: provider integration tests configure concrete queue providers with parsed IANA zones.
+src/time.rs	fn	queue_storage	integration-test: tests/workers/queue/sqlite.rs writes deterministic configured-zone lifecycle fixture timestamps.
 src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/lib.rs	mod	edition	ce-ee-composition: the only Hooks implementation lives in this module, which sits outside src/ so that nothing under src/ names an edition overlay.

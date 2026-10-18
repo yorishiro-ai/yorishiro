@@ -12,7 +12,7 @@ use crate::error::{ResultExt, YorishiroError};
 
 pub(crate) const DEFAULT_RETRY_AFTER_SECONDS: u32 = 300;
 
-#[async_trait::async_trait]
+#[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
