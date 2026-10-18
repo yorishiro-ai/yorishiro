@@ -33,7 +33,7 @@ def classify_path(path: str) -> set[str]:
 
     if s.startswith("src/"):
         groups |= {"rust"}
-    if s.startswith("ee/"):
+    if s.startswith("ee/") and not p.name.endswith(".md"):
         groups |= {"ee"}
     if s.startswith("edition/"):
         groups |= {"shared", "rust", "ee"}
@@ -61,6 +61,7 @@ def classify_path(path: str) -> set[str]:
         ".github/workflows/ci.yml": {"shared", "rust", "ee"},
         ".github/workflows/release.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/release_pre.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
+        ".github/workflows/doc-check.yml": set(),
         ".github/workflows/security.yml": {"deps"},
         ".github/workflows/dep-audit.yml": {"deps"},
         ".github/workflows/coverage.yml": {"rust", "ee"},

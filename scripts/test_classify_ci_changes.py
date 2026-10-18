@@ -12,6 +12,7 @@ def test_unknown_defaults_to_full() -> None:
 
 def test_docs_are_lightweight() -> None:
     assert classify_path("README.md") == {"docs"}
+    assert classify_path("ee/docs/configuration.md") == {"docs"}
     assert classify(["README.md", "CONTRIBUTING.md"])["docs_only"]
     assert classify_path("ee/models/example.rs") == {"ee"}
     result = classify(["CONTRIBUTING.md", "AGENTS.md"])
@@ -41,6 +42,7 @@ def test_manual_full_run_selects_every_group() -> None:
 def test_misc_workflow_change_does_not_force_package_matrix() -> None:
     result = classify([".github/workflows/stale.yml"])
     assert not result["package_build"]
+    assert not classify([".github/workflows/doc-check.yml"])["full"]
     assert not result["package_validation"]
 
 

@@ -87,6 +87,7 @@ Enterprise の機能にはライセンスキーが必要です。
 
 バックグラウンドキューを使うソースチェックアウトでは、サーバーとタグ付きワーカーを別々に起動します。
 `cargo loco start` と `cargo loco start --worker=worker-target:shared` を実行してください。
+他のターゲットについては、[ワーカーのターゲット](https://yorishiro-ai.github.io/wiki/ja/configuration/workers-and-queues/#ワーカーのターゲット)を参照してください。
 
 インストール手順は [インストール](https://yorishiro-ai.github.io/wiki/ja/installation/) を参照してください。
 
