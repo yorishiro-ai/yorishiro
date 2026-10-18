@@ -33,7 +33,7 @@ def classify_path(path: str) -> set[str]:
 
     if s.startswith("src/"):
         groups |= {"rust"}
-    if s.startswith("ee/") and not s.startswith("ee/docs/"):
+    if s.startswith("ee/"):
         groups |= {"ee"}
     if s.startswith("edition/"):
         groups |= {"shared", "rust", "ee"}
@@ -55,13 +55,12 @@ def classify_path(path: str) -> set[str]:
         groups |= {"release"}
     if s in {"Cargo.toml", "Cargo.lock", "migration/Cargo.toml"} or (p.name in {"Cargo.toml", "Cargo.lock"}):
         groups |= {"deps", "rust", "ee"}
-    if s.startswith(("docs/", "ee/docs/")) or p.name.endswith(".md"):
+    if p.name.endswith(".md"):
         groups |= {"docs"}
     workflow_groups = {
         ".github/workflows/ci.yml": {"shared", "rust", "ee"},
         ".github/workflows/release.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/release_pre.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
-        ".github/workflows/doc-check.yml": {"docs"},
         ".github/workflows/security.yml": {"deps"},
         ".github/workflows/dep-audit.yml": {"deps"},
         ".github/workflows/coverage.yml": {"rust", "ee"},
@@ -103,7 +102,6 @@ def classify(paths: list[str], force_full: bool = False) -> dict[str, bool]:
     selected["package_validation"] = force_full or package_related
     selected["docker_validation"] = force_full or bool(groups & {"docker", "release"})
     selected["rust_validation"] = force_full or bool(groups & {"rust", "ee", "shared", "config", "migration", "topology", "deps"})
-    selected["doc_validation"] = force_full or bool(groups & {"docs"}) or any(p.startswith(".github/workflows/doc-check.yml") for p in paths)
     selected["security_validation"] = force_full or "deps" in groups
     return selected
 

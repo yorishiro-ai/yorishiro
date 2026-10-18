@@ -2,8 +2,6 @@
 
 **English** | [日本語](README.jp.md)
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/yorishiro-ai/yorishiro)
-
 A knowledge store where you define your own data structures and search by meaning, not just keywords.
 
 ## What it does
@@ -72,9 +70,9 @@ Enterprise features require a licence key.
 
 ### MCP tools
 
-See [MCP tools](docs/en/mcp-tools.md) for available tools and their inputs.
+See [MCP tools](https://yorishiro-ai.github.io/wiki/reference/mcp-tools/) for available tools and their inputs.
 
-A licensed enterprise deployment adds the origin-template tools shown in that document.
+A licensed enterprise deployment adds the origin-template tools shown on that page.
 Those tools are not advertised or callable through MCP in community mode.
 
 ## Quick start
@@ -86,8 +84,9 @@ The default configuration uses SQLite, so no external database is required.
 
 For a source checkout using a background queue, run the server and tagged worker separately:
 `cargo loco start` and `cargo loco start --worker=worker-target:shared`.
+See [worker targets](https://yorishiro-ai.github.io/wiki/configuration/workers-and-queues/#worker-targets) for the other targets.
 
-For installation instructions, see [docs/en/installation.md](docs/en/installation.md).
+For installation instructions, see [Installation](https://yorishiro-ai.github.io/wiki/installation/).
 
 ## Configuration
 
@@ -102,10 +101,11 @@ With no backend variables set, package and Docker installations store the SQLite
 
 | Document | Contents |
 |---|---|
-| [docs/en/installation.md](docs/en/installation.md) | Docker, Docker Compose, deb/rpm, and build from source |
-| [docs/en/configuration.md](docs/en/configuration.md) | All settings: embedding, search quotas, logging, queue backends |
-| [docs/en/sqlite.md](docs/en/sqlite.md) | SQLite mode: capabilities and limitations |
-| [docs/en/templates.md](docs/en/templates.md) | Built-in templates and the deprecated `worldbuilding` template |
+| [Installation](https://yorishiro-ai.github.io/wiki/installation/) | Docker, Docker Compose, deb/rpm, and build from source |
+| [Configuration](https://yorishiro-ai.github.io/wiki/configuration/) | All settings: embedding, search quotas, logging, queue backends |
+| [Queue publisher cutover](https://yorishiro-ai.github.io/wiki/operations/queue-publisher-cutover/) | Moving queued work to a new publisher epoch |
+| [SQLite mode](https://yorishiro-ai.github.io/wiki/guides/sqlite/) | Capabilities and limitations |
+| [Templates](https://yorishiro-ai.github.io/wiki/guides/templates/) | Built-in templates and the deprecated `worldbuilding` template |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributing guidelines |
 | [AGENTS.md](AGENTS.md) | Notes for AI agents |
 

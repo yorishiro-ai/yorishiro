@@ -131,7 +131,7 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - Branch from latest `develop`. Merge commits preferred.
 - Run `make check-all` for CE changes and `make check-all-ee` for EE changes or shared API compatibility.
 - Run the PostgreSQL or SQLite suites relevant to the change before pushing.
-- Every PR updates English + Japanese docs.
+- User-facing docs live in the wiki (`yorishiro-ai/wiki`), in English and Japanese. A change to behavior, configuration, or MCP tools needs a matching wiki PR.
 
 ## Rules
 

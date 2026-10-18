@@ -73,7 +73,7 @@ Enterprise の機能にはライセンスキーが必要です。
 
 ### MCPツール
 
-利用できるツールと入力項目は [MCPツール](docs/ja/mcp-tools.md) を参照してください。
+利用できるツールと入力項目は [MCPツール](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/) を参照してください。
 
 ライセンスが有効なエンタープライズ環境では、同ドキュメントに示すoriginテンプレート用ツールが追加されます。
 コミュニティモードでは、これらのツールはMCP上に表示されず、呼び出すこともできません。
@@ -88,7 +88,7 @@ Enterprise の機能にはライセンスキーが必要です。
 バックグラウンドキューを使うソースチェックアウトでは、サーバーとタグ付きワーカーを別々に起動します。
 `cargo loco start` と `cargo loco start --worker=worker-target:shared` を実行してください。
 
-インストール手順は [docs/ja/installation.md](docs/ja/installation.md) を参照してください。
+インストール手順は [インストール](https://yorishiro-ai.github.io/wiki/ja/installation/) を参照してください。
 
 ## 設定
 
@@ -105,11 +105,11 @@ Yorishiro の設定には `config/<environment>.yaml` と、その設定ファ�
 
 | ドキュメント | 内容 |
 |---|---|
-| [docs/ja/installation.md](docs/ja/installation.md) | Docker、Docker Compose、deb/rpm、ソースからビルド |
-| [docs/ja/configuration.md](docs/ja/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
-| [docs/ja/sqlite.md](docs/ja/sqlite.md) | SQLiteモード：機能と制限 |
-| [docs/ja/templates.md](docs/ja/templates.md) | 組み込みテンプレートと非推奨の `worldbuilding` テンプレート |
-| [開発に参加する](docs/ja/contributing.md) | 開発とテストの手順 |
+| [インストール](https://yorishiro-ai.github.io/wiki/ja/installation/) | Docker、Docker Compose、deb/rpm、ソースからビルド |
+| [設定](https://yorishiro-ai.github.io/wiki/ja/configuration/) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
+| [キューのパブリッシャーの切り替え](https://yorishiro-ai.github.io/wiki/ja/operations/queue-publisher-cutover/) | 待機中の作業を新しいパブリッシャーのエポックへ移す |
+| [SQLiteモード](https://yorishiro-ai.github.io/wiki/ja/guides/sqlite/) | 機能と制限 |
+| [組み込みテンプレート](https://yorishiro-ai.github.io/wiki/ja/guides/templates/) | 組み込みテンプレートと非推奨の `worldbuilding` テンプレート |
 | [AGENTS.md](AGENTS.md) | AI エージェント向けの開発規約 |
 
 ## ライセンス

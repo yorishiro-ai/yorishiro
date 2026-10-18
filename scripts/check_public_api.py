@@ -14,7 +14,6 @@ from dataclasses import dataclass
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ALLOWLIST = ROOT / "scripts" / "public_api_allowlist.tsv"
-POLICY_DOC = "docs/en/public-api.md"
 WORKTREE = "WORKTREE"
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 KINDS = {"const", "enum", "fn", "mod", "static", "struct", "trait", "type", "use", "field"}
@@ -534,7 +533,6 @@ def failure_message(findings: list[PublicItem], allowlist_path: pathlib.Path) ->
             f"    Narrow it to pub(crate), pub(super), or private visibility, or add this exact item to "
             f"{allowlist_path} with a specific reason."
         )
-    lines.append(f"Policy guidance: {POLICY_DOC}")
     return "\n".join(lines)
 
 

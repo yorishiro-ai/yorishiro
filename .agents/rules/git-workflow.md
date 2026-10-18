@@ -76,7 +76,7 @@ When unclear, prefer a merge commit: losing an empirical record is the more expe
 
 ## Docs
 
-Every PR that changes source code must update docs (English + Japanese). The `doc-check` workflow warns if this is missing.
+User-facing docs live in the wiki (`yorishiro-ai/wiki`), in English and Japanese. A PR that changes user-facing behavior, configuration, or MCP tools needs a matching wiki PR.
 
 ## Versioning
 

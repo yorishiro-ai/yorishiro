@@ -31,7 +31,7 @@ pub(crate) struct LlmKeyDescription {
 /// The value is interpolated into a request URL, so a `file://` or `gopher://` there points reqwest at something that is not an HTTP conversation at all, and a scheme-less string silently becomes a relative path.
 /// Checked here, at the point a person types it, so the refusal names the field rather than surfacing later as a failed inference run.
 ///
-/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a policy question for the operator; see `ee/docs/api.md`.
+/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a policy question for the operator.
 /// This only rules out URLs that could never be a chat-completions endpoint.
 fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
     if base_url.starts_with("http://") || base_url.starts_with("https://") {

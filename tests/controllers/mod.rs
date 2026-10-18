@@ -5,7 +5,7 @@ mod swagger;
 
 use rmcp::model::Tool;
 
-/// One `## <title>` section of the MCP tool inventory document, as `docs/en/mcp-tools.md` lists it.
+/// One `## <title>` section of the MCP tool inventory document, as `tests/fixtures/mcp-inventory.md` lists it.
 pub(crate) fn render_inventory_section(title: &str, tools: &[Tool]) -> String {
     let mut output = String::new();
     output.push_str("## ");

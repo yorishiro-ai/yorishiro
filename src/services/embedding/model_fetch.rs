@@ -110,7 +110,7 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
 /// `multilingual-e5-base` is used instead of `nomic-embed-text-v1.5` because this codebase's search and recall are not English-only.
 /// The write-time model check (`models/entity_embeddings/write.rs`) refuses a write whose vector doesn't match the workspace's stamped model, and the `reindex_embeddings` task moves a workspace between models: together these prevent the "stamp says one model, data holds another" failure.
 /// A workspace with no stamp (both `embedding_model` and `embedding_dimensions` are `NULL`) inherits the deployment default, so it is also protected: writes go through the stamp that `sync_embedding` sets on the first embed, and the model check compares against that stamp.
-/// `docs/configuration.md`'s "Moving a workspace between embedding models" section documents the procedure for every other workspace: change configuration, restart, then reindex.
+/// Every other workspace follows the procedure of changing configuration, restarting, then reindexing.
 pub const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);

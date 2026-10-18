@@ -179,7 +179,7 @@ fn community_inventory_contract_and_documentation_are_current() {
     let community = community_tool_router().list_all();
     assert_inventory_contract("community", &community);
 
-    let docs = include_str!("../../../docs/en/mcp-tools.md");
+    let docs = include_str!("../../fixtures/mcp-inventory.md");
     let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
     let end = "## Enterprise-only tools\n";
     let generated_community = docs

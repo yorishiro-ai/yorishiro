@@ -54,7 +54,7 @@ fn enterprise_inventory_contract_is_disjoint_and_contains_community() {
         assert_eq!(schema["type"], "object");
         assert!(jsonschema::meta::options().is_valid(&schema));
     }
-    let docs = include_str!("../../../../docs/en/mcp-tools.md");
+    let docs = include_str!("../../../fixtures/mcp-inventory.md");
     let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
     let end = "<!-- END GENERATED MCP INVENTORY -->";
     let generated = docs

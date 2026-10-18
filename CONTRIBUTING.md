@@ -1,6 +1,6 @@
 # Contributing
 
-**English** | [日本語](docs/ja/contributing.md)
+**English**
 
 ## Code layout
 
@@ -71,7 +71,7 @@ Tests need PostgreSQL with `vector` and `pg_trgm` in `template1`, and a non-supe
 
 ## Git workflow
 
-Branch from `develop`. Merge commits preferred. Every PR updates English + Japanese docs.
+Branch from `develop`. Merge commits preferred. User-facing docs live in the [wiki](https://github.com/yorishiro-ai/wiki) (English and Japanese). A change to behavior, configuration, or MCP tools needs a matching wiki PR.
 
 ## Rules
 

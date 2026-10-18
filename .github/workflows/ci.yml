@@ -42,7 +42,6 @@ jobs:
       package_validation: ${{ steps.classify.outputs.package_validation }}
       package_build: ${{ steps.classify.outputs.package_build }}
       docker_validation: ${{ steps.classify.outputs.docker_validation }}
-      doc_validation: ${{ steps.classify.outputs.doc_validation }}
     steps:
       - uses: actions/checkout@v7
         with:

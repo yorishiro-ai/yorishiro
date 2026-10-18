@@ -1755,7 +1755,7 @@ async fn create_functions_and_credentials(manager: &SchemaManager<'_>) -> Result
     // **PostgreSQL only.** SQLite's `ALTER TABLE` cannot add a CHECK to an existing
     // table, and the only way to gain it there is to rebuild the table and copy every
     // row.  That is a large, risky migration to close a gap on the tier documented as
-    // "trying Yorishiro out or personal use" (`docs/sqlite.md`), so it is not done
+    // "trying Yorishiro out or personal use", so it is not done
     // there: on SQLite this column still accepts any string.
 
     manager
