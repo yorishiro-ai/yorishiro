@@ -1,5 +1,8 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/workers/mod.rs	mod	fill_defaults	integration-test: request tests register the production migration worker on the configured queue provider.
+src/workers/fill_defaults.rs	struct	FillDefaultsWorker	integration-test: REST and MCP tests prove migration waits for and executes on the selected Loco queue provider.
+src/workers/fill_defaults.rs	struct	FillDefaultsArgs	loco-task-worker: public BackgroundWorker implementation names this serializable job payload type; fields remain crate-private.
 src/app.rs	fn	cli_requires_timezone_gate	integration-test: external CLI argument tests verify pre-run worker-command gating and migration exemptions.
 src/app.rs	fn	cli_timezone_gate_result	integration-test: external CLI tests verify persisted-state gating while allowing database migration bootstrap.
 src/data/config.rs	fn	validate	integration-test: external settings tests exercise application configuration validation.
@@ -764,9 +767,9 @@ ee/services/oauth/mod.rs	mod	discovery	integration-test: tests/ee/services/oauth
 ee/services/oauth/mod.rs	struct	AuthorizeRedirect	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
 ee/services/oauth/mod.rs	struct	CallbackIdentity	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
 ee/tasks/reindex_scheduler.rs	fn	TenantReindexScheduler::run_at	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
-ee/tasks/reindex_scheduler.rs	fn	dispatch_reindex_batch	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
-ee/tasks/reindex_scheduler.rs	fn	is_due	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
-ee/tasks/reindex_scheduler.rs	fn	scheduler_failure_message	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
+ee/models/tenant_reindex_schedules.rs	fn	dispatch_reindex_batch	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
+ee/models/tenant_reindex_schedules.rs	fn	is_due	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
+ee/models/tenant_reindex_schedules.rs	fn	scheduler_failure_message	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
 ee/workers/infer_fill.rs	field	InferFillArgs::lifecycle_id	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
 ee/workers/infer_fill.rs	fn	enqueue_infer_fill_with_dispatcher	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
 ee/workers/infer_fill.rs	fn	open_workspace_scope	integration-test: tests/requests/inference.rs asserts the tenant the worker's scope carries.
@@ -1014,3 +1017,6 @@ src/workers/target.rs	fn	WorkerTarget::queue	integration-test: tests/workers/tar
 src/workers/target.rs	fn	WorkerTarget::tag	integration-test: tests/workers/target.rs and tests/workers/target_routing.rs exercise it.
 src/workers/target.rs	fn	targets_for_start	integration-test: tests/workers/target.rs exercises how a start resolves its tags.
 src/workers/target.rs	struct	InvalidWorkerTarget	integration-test: tests/workers/target.rs exercises the error a refused tag reports.
+ee/models/mod.rs	mod	tenant_reindex_schedules	integration-test: schedule model operations are exercised by scheduler integration tests.
+ee/models/tenant_reindex_schedules.rs	fn	set	integration-test: validates and persists intervals on both database backends.
+ee/models/tenant_reindex_schedules.rs	fn	get	integration-test: reads persisted advancement after a scheduler tick.

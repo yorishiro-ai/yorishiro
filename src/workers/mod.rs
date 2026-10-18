@@ -1,5 +1,6 @@
 pub mod dispatch;
 pub mod embedding_sync;
+pub mod fill_defaults;
 pub mod lifecycle;
 pub mod query_embedding;
 pub mod queue;

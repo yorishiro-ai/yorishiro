@@ -151,7 +151,7 @@ Input schema:
 
 ### `fill_defaults`
 
-Fill absent required fields in entities behind a schema's active version (requires migration scope). Takes a snapshot so the operation can be undone with the migration undo endpoint.
+Enqueue a fill-defaults job (requires migration scope). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log.
 
 Input schema:
 

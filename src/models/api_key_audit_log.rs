@@ -35,6 +35,35 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
+/// A committed completion record makes redelivery a no-op without replacing original undo snapshots.
+pub(crate) async fn fill_defaults_completed(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<bool, YorishiroError> {
+    use crate::models::_entities::api_key_audit_log::Column;
+    use sea_orm::QuerySelect;
+    // JSON extraction differs between the two supported backends.
+    let predicate = match conn.get_database_backend() {
+        sea_orm::DatabaseBackend::Postgres => "detail->>'job_id' = $1",
+        _ => "json_extract(detail, '$.job_id') = ?",
+    };
+    Ok(Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Action.eq(AuditAction::FillDefaults.as_db_str()))
+        .filter(sea_orm::sea_query::Expr::cust_with_values(
+            predicate,
+            [job_id.to_string()],
+        ))
+        .select_only()
+        .column(Column::Id)
+        .into_tuple::<Uuid>()
+        .one(conn)
+        .await
+        .internal()?
+        .is_some())
+}
+
 db_enum! {
     /// The closed set of operations this table records.
     /// Matches `action`'s CHECK constraint string-for-string; a variant added here without a matching value in the constraint fails every insert at the database, not silently.

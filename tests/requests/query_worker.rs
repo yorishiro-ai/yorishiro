@@ -95,7 +95,7 @@ impl EmbeddingProvider for FailingProvider {
 ///
 /// A Redis worker polls only the queues its configuration names, which `yorishiro start --worker=...` fills in from the targets it serves.
 /// The booted test app is a server, so for Redis this builds the provider a worker process would have, over the same database.
-async fn shared_target_queue(ctx: &AppContext) -> Arc<loco_rs::bgworker::Queue> {
+pub(crate) async fn shared_target_queue(ctx: &AppContext) -> Arc<loco_rs::bgworker::Queue> {
     if let Some(loco_rs::config::QueueConfig::Redis(redis)) = ctx.config.queue.clone() {
         let mut redis = redis;
         redis.dangerously_flush = false;

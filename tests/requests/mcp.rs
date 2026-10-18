@@ -422,6 +422,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// writes and snapshot, and leave an audit record. A lower-scope key receives an isError result
 /// and cannot change the entity.
 #[tokio::test]
+#[serial_test::serial(process_environment, queue_backend)]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, owner_id, migration_key) =
@@ -521,8 +522,13 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         .expect("serialized fill_defaults report");
         assert_eq!(report["schema_name"], "note");
         assert!(report["job_id"].as_str().is_some());
-        assert_eq!(report["entities_updated"], 1);
-        assert_eq!(report["fields_filled"], 1);
+        assert!(report.get("entities_updated").is_none());
+        let job_id: Uuid = report["job_id"].as_str().unwrap().parse().unwrap();
+        let pending = entity_entities::get(&ctx.db, workspace_id, entity.id)
+            .await
+            .unwrap();
+        assert_eq!(pending.data, json!({"title": "before"}));
+        super::fill_defaults::finish(&ctx, job_id).await;
 
         let updated = entity_entities::get(&ctx.db, workspace_id, entity.id)
             .await

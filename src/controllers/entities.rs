@@ -237,52 +237,29 @@ pub(crate) async fn reindex_workspace(
 
 /// Fills absent required fields in entities that fall behind the active schema version.
 ///
-/// `POST /api/migration-jobs/fill-defaults` runs the same logic `migration_dry_run` describes:
-/// for every entity on an older schema version that is missing a required field the active version
-/// defines, it fills that field with the schema's `default` value or a type-appropriate empty
-/// value, takes a snapshot (so the batch can be undone via `undo_migration_job`), and writes the
-/// updated data.
-///
-/// Returns 409 when the workspace has no entities behind the active version.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = crate::dtos::entities::FillDefaultsRequest, responses((status = 200, body = crate::dtos::entities::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+/// Accepts a durable fill-defaults job and returns its ID before migration starts.
+/// The worker records completed counts in the audit log and uses this ID for undo snapshots.
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = crate::dtos::entities::FillDefaultsRequest, responses((status = 202, body = crate::dtos::entities::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub(crate) async fn fill_defaults(
+    State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
     Json(body): Json<FillDefaultsRequest>,
-) -> Result<Json<FillDefaultsResponse>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let job_id = Uuid::now_v7();
-    let updated_by = authorized.ctx.user_id;
-
-    let report = entity_entities::fill_defaults(
+) -> Result<(StatusCode, Json<FillDefaultsResponse>), ApiError> {
+    let job_id = crate::workers::fill_defaults::enqueue(
+        &ctx,
         authorized.txn(),
-        workspace_id,
-        &body.schema_name,
-        job_id,
-        updated_by,
-    )
-    .await?;
-
-    // Audit log the batch operation.
-    api_key_audit_log::record(
-        authorized.txn(),
-        api_key_audit_log::AuditActor {
-            workspace_id,
-            tenant_id: authorized.ctx.tenant_id,
-            api_key_id: authorized.ctx.api_key_id,
-            user_id: authorized.ctx.user_id,
-        },
-        api_key_audit_log::AuditAction::FillDefaults,
-        serde_json::json!({ "schema_name": body.schema_name, "job_id": job_id, "entities_updated": report.entities_updated, "fields_filled": report.fields_filled }),
+        &authorized.ctx,
+        body.schema_name.clone(),
     )
     .await?;
     authorized.commit().await?;
-
-    Ok(Json(FillDefaultsResponse {
-        schema_name: body.schema_name,
-        job_id,
-        entities_updated: report.entities_updated,
-        fields_filled: report.fields_filled,
-    }))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(FillDefaultsResponse {
+            schema_name: body.schema_name,
+            job_id,
+        }),
+    ))
 }
 
 pub fn routes() -> Routes {

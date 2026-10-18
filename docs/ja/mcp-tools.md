@@ -13,3 +13,8 @@
 
 英語版の生成済みインベントリには、ランタイムから取得した名前、説明、入力スキーマが含まれます。
 詳細は [docs/en/mcp-tools.md](../en/mcp-tools.md) を参照してください。
+
+`fill_defaults`はリクエスト内で全件処理せず、設定されたLocoキューへ永続ジョブを投入し、`schema_name`と`job_id`を返します。
+RESTの`POST /api/migration-jobs/fill-defaults`も同じ経路を使い、202で受付結果を返します。
+完了時の`entities_updated`と`fields_filled`は監査ログで確認してください。
+実行前にはエンティティを変更せず、完了後の取り消しには返された`job_id`を使います。

@@ -2,6 +2,23 @@
 
 Yorishiro はワーカーに投入するジョブごとに実行記録を保存します。
 
+## ジョブ実行とバックエンド切替
+
+embedding sync、起動時と定期実行を含むworkspace reindex、query embedding、fill-defaults、Enterpriseのinfer-fillはLocoの`BackgroundWorker`として実行します。
+選択されたPostgreSQL、SQLite、Valkeyのqueue providerがジョブを保存し、Locoのhandlerへ配送します。
+DBのoutboxは業務データの更新と同じトランザクションで配送要求を記録するためのもので、業務ジョブ自体を実行する場所ではありません。
+Valkeyへ切り替えると配送とキューのポーリングがSQLキューテーブルから移りますが、業務データ、監査ログ、実行枠の管理、outboxはDBに残ります。
+エンティティを読み書きするジョブのDBアクセスまでなくなるわけではありません。
+
+`POST /api/migration-jobs/fill-defaults`は処理完了を待たず、202で`schema_name`と`job_id`を返します。
+MCPも同じ受付結果を返します。
+完了時の件数は監査ログで確認し、取り消しには受付時の`job_id`を使います。
+
+結果を待つ運用CLIはTaskのままにします。
+reindex schedulerは薄いTaskからスケジュールモデルを呼び、埋め込み処理はreindexジョブへ渡します。
+queue consumer、outbox送信、lease更新、DB負荷監視は基盤処理として残します。
+これらを支えるキュー自身に依存させると、キュー障害時に復旧できなくなるためです。
+
 ## 意味
 
 `enqueue_at` は、ジョブをキューに登録する前に記録する時刻です。

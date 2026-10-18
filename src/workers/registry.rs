@@ -16,6 +16,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker};
+use crate::workers::fill_defaults::{FillDefaultsArgs, FillDefaultsWorker};
 use crate::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
 use crate::workers::reindex::{ReindexArgs, ReindexWorker};
 
@@ -53,6 +54,7 @@ impl WorkerRegistry {
             .register::<EmbeddingSyncArgs, EmbeddingSyncWorker>()
             .register::<ReindexArgs, ReindexWorker>()
             .register::<QueryEmbeddingArgs, QueryEmbeddingWorker>()
+            .register::<FillDefaultsArgs, FillDefaultsWorker>()
     }
 
     /// Adds worker type `W`.

@@ -3,11 +3,12 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use uuid::Uuid;
+use yorishiro::edition::ee::tasks::reindex_scheduler::TenantReindexScheduler;
 
 use chrono::{TimeZone, Utc};
 use loco_rs::prelude::async_trait;
 
-use yorishiro::edition::ee::tasks::reindex_scheduler::{
+use yorishiro::edition::ee::models::tenant_reindex_schedules::{
     dispatch_reindex_batch, is_due, scheduler_failure_message,
 };
 
@@ -203,7 +204,7 @@ async fn scheduler_context() -> (loco_rs::app::AppContext, Uuid, tempfile::TempD
 
 #[tokio::test]
 async fn intervals_that_cannot_be_scheduled_are_refused() {
-    use yorishiro::edition::ee::tasks::reindex_scheduler::set;
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::set;
 
     let (ctx, tenant_id, _dir) = scheduler_context().await;
     for bad in [
@@ -237,7 +238,7 @@ async fn intervals_that_cannot_be_scheduled_are_refused() {
 /// The first run is one interval after the schedule is set, and every tick schedules the next run one interval after itself.
 #[tokio::test]
 async fn a_schedule_advances_by_its_own_interval() {
-    use yorishiro::edition::ee::tasks::reindex_scheduler::{TenantReindexScheduler, get, set};
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
     let (ctx, tenant_id, _dir) = scheduler_context().await;
     let before = Utc::now();
@@ -279,7 +280,7 @@ async fn a_schedule_advances_by_its_own_interval() {
 #[tokio::test]
 async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
     use sea_orm::ConnectionTrait;
-    use yorishiro::edition::ee::tasks::reindex_scheduler::{TenantReindexScheduler, get, set};
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
     let (ctx, tenant_id, _dir) = scheduler_context().await;
     for (interval, seconds) in [

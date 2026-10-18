@@ -40,6 +40,65 @@ async fn provider() -> (TempDir, SqliteTimezoneQueue) {
     (dir, provider)
 }
 
+#[tokio::test]
+async fn later_worker_panic_is_observed_while_an_earlier_handler_is_busy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(&dir.path().join("supervision.sqlite"));
+    config.num_workers = 2;
+    let provider = SqliteTimezoneQueue::connect(&config, "UTC".parse().unwrap())
+        .await
+        .unwrap();
+    let started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let signal = started.clone();
+    provider
+        .register_handler(
+            "busy".into(),
+            Box::new(move |_, _| {
+                let signal = signal.clone();
+                Box::pin(async move {
+                    signal.notify_one();
+                    std::future::pending::<loco_rs::Result<()>>().await
+                })
+            }),
+        )
+        .await
+        .unwrap();
+    provider
+        .register_handler(
+            "panic".into(),
+            Box::new(|_, _| {
+                Box::pin(async {
+                    panic!("supervision probe");
+                })
+            }),
+        )
+        .await
+        .unwrap();
+    provider
+        .enqueue("busy".into(), None, serde_json::json!({}), None, None)
+        .await
+        .unwrap();
+    let running = provider.clone();
+    let mut task = tokio::spawn(async move { running.run(vec![]).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), started.notified())
+        .await
+        .unwrap();
+    provider
+        .enqueue("panic".into(), None, serde_json::json!({}), None, None)
+        .await
+        .unwrap();
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), &mut task).await;
+    provider.shutdown().unwrap();
+    task.abort();
+    assert!(
+        outcome
+            .expect("later worker panic must surface promptly")
+            .unwrap_err()
+            .is_panic()
+    );
+    provider.pool.close().await;
+}
+
 async fn enqueue(
     provider: &SqliteTimezoneQueue,
     class: &str,

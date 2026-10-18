@@ -241,9 +241,12 @@ pub(crate) async fn fill_defaults(
         };
 
         // Take a snapshot before modifying.
-        #[allow(clippy::redundant_pattern_matching)]
-        if let Err(_) = super::snapshots::snapshot(conn, workspace_id, record.id, job_id).await {
-            continue; // Entity deleted since dry run; skip silently.
+        if let Err(error) = super::snapshots::snapshot(conn, workspace_id, record.id, job_id).await
+        {
+            if matches!(error, YorishiroError::NotFound { .. }) {
+                continue;
+            }
+            return Err(error);
         }
 
         let mut data = record.data.clone();

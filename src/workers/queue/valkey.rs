@@ -152,6 +152,55 @@ fn job_json(
 }
 
 #[async_trait]
+impl super::runtime::Backend for ValkeyTimezoneQueue {
+    async fn claim(
+        &self,
+        tags: &[String],
+        stop: &mut watch::Receiver<bool>,
+    ) -> loco_rs::Result<Option<super::runtime::Delivery>> {
+        Ok(
+            dequeue(&self.client, &self.queues, tags, self.timezone, stop)
+                .await?
+                .map(|(job, queue)| super::runtime::Delivery {
+                    job,
+                    queue: Some(queue),
+                }),
+        )
+    }
+
+    async fn complete(&self, delivery: &super::runtime::Delivery) -> loco_rs::Result<()> {
+        finish(
+            &self.client,
+            &delivery.job,
+            delivery
+                .queue
+                .as_deref()
+                .expect("Valkey delivery has a queue"),
+            self.timezone,
+        )
+        .await
+    }
+
+    async fn fail(
+        &self,
+        delivery: &super::runtime::Delivery,
+        error: &loco_rs::Error,
+    ) -> loco_rs::Result<()> {
+        fail(
+            &self.client,
+            &delivery.job,
+            delivery
+                .queue
+                .as_deref()
+                .expect("Valkey delivery has a queue"),
+            error,
+            self.timezone,
+        )
+        .await
+    }
+}
+
+#[async_trait]
 impl QueueProvider for ValkeyTimezoneQueue {
     async fn enqueue(
         &self,
@@ -240,85 +289,16 @@ impl QueueProvider for ValkeyTimezoneQueue {
         Ok(())
     }
     async fn run(&self, tags: Vec<String>) -> loco_rs::Result<()> {
-        let reaper_handle = if let Some(reaper) = self.reaper.clone() {
-            let client = self.client.clone();
-            let mut token = self.token.subscribe();
-            let timezone = self.timezone;
-            Some(tokio::spawn(async move {
-                loop {
-                    tokio::select! {changed=token.changed()=>if changed.is_err()||*token.borrow(){break},()=tokio::time::sleep(Duration::from_secs(reaper.interval_seconds))=>{if let Err(e)=requeue(&client,reaper.age_minutes,timezone).await{tracing::error!(%e,"Valkey reaper failed")}}}
-                }
-            }))
-        } else {
-            None
-        };
-        let token = self.token.subscribe();
-        let mut workers = Vec::new();
-        for worker in 0..self.num_workers {
-            let client = self.client.clone();
-            let handlers = self.handlers.clone();
-            let queues = self.queues.clone();
-            let tags = tags.clone();
-            let mut token = token.clone();
-            let timezone = self.timezone;
-            let poll_interval = Duration::from_secs(1);
-            tracing::debug!(worker, queues=?queues, "starting Valkey queue worker");
-            workers.push(tokio::spawn(async move {
-                while !*token.borrow() {
-                    match dequeue(&client, &queues, &tags, timezone, &mut token).await {
-                        Ok(Some((job, queue))) => {
-                            let handler = handlers.lock().await.get(&job.name).cloned();
-                            let Some(handler) = handler else {
-                                tracing::error!(worker, job_name=%job.name, "no handler registered for job");
-                                tokio::select! {
-                                    biased;
-                                    changed = token.changed() => if changed.is_err() || *token.borrow() { break; },
-                                    () = tokio::time::sleep(poll_interval) => {},
-                                }
-                                continue;
-                            };
-                            let result=handler(job.id.clone(), job.data.clone()).await;
-                            match result {
-                                Ok(()) => if let Err(error) = finish(&client, &job, &queue, timezone).await {
-                                    tracing::error!(%error, job_id=%job.id, "valkey completion failed");
-                                },
-                                Err(error) => if let Err(failure) = fail(&client, &job, &queue, &error, timezone).await {
-                                    tracing::error!(%failure, job_id=%job.id, "valkey failure update failed");
-                                },
-                            }
-                        }
-                        Ok(None) => tokio::select! {
-                            biased;
-                            changed = token.changed() => if changed.is_err() || *token.borrow() { break; },
-                            () = tokio::time::sleep(poll_interval) => {},
-                        },
-                        Err(_) if *token.borrow() => break,
-                        Err(error) => {
-                            tracing::error!(%error, "valkey dequeue failed");
-                            tokio::select! {
-                                biased;
-                                changed = token.changed() => if changed.is_err() || *token.borrow() { break; },
-                                () = tokio::time::sleep(Duration::from_secs(1)) => {},
-                            }
-                        }
-                    }
-                }
-            }));
-        }
-        for w in workers {
-            match w.await {
-                Ok(()) => {}
-                Err(error) if error.is_cancelled() => {
-                    tracing::debug!("Valkey worker task cancelled")
-                }
-                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-                Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
-            }
-        }
-        if let Some(handle) = reaper_handle {
-            let _ = handle.await;
-        }
-        Ok(())
+        super::runtime::run(
+            self.clone(),
+            self.handlers.clone(),
+            self.num_workers,
+            Duration::from_secs(1),
+            self.reaper.clone(),
+            self.token.clone(),
+            tags,
+        )
+        .await
     }
     async fn setup(&self) -> loco_rs::Result<()> {
         Ok(())

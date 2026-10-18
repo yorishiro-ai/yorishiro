@@ -22,8 +22,6 @@ pub struct FillDefaultsRequest {
 pub struct FillDefaultsResponse {
     pub schema_name: String,
     pub job_id: Uuid,
-    pub entities_updated: i64,
-    pub fields_filled: i64,
 }
 
 #[derive(Deserialize)]

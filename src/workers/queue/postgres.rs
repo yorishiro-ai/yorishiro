@@ -93,6 +93,37 @@ impl PostgresTimezoneQueue {
 }
 
 #[async_trait]
+impl super::runtime::Backend for PostgresTimezoneQueue {
+    async fn claim(
+        &self,
+        tags: &[String],
+        _stop: &mut watch::Receiver<bool>,
+    ) -> loco_rs::Result<Option<super::runtime::Delivery>> {
+        Ok(dequeue(&self.pool, tags, self.timezone)
+            .await?
+            .map(|job| super::runtime::Delivery { job, queue: None }))
+    }
+
+    async fn complete(&self, delivery: &super::runtime::Delivery) -> loco_rs::Result<()> {
+        complete(
+            &self.pool,
+            &delivery.job.id,
+            delivery.job.interval,
+            self.timezone,
+        )
+        .await
+    }
+
+    async fn fail(
+        &self,
+        delivery: &super::runtime::Delivery,
+        error: &loco_rs::Error,
+    ) -> loco_rs::Result<()> {
+        fail(&self.pool, &delivery.job.id, error, self.timezone).await
+    }
+}
+
+#[async_trait]
 impl QueueProvider for PostgresTimezoneQueue {
     async fn enqueue(
         &self,
@@ -163,63 +194,16 @@ impl QueueProvider for PostgresTimezoneQueue {
         Ok(())
     }
     async fn run(&self, tags: Vec<String>) -> loco_rs::Result<()> {
-        let reaper_handle = if let Some(reaper) = self.reaper.clone() {
-            let pool = self.pool.clone();
-            let mut token = self.token.subscribe();
-            let timezone = self.timezone;
-            Some(tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        changed = token.changed() => if changed.is_err() || *token.borrow() { break; },
-                        () = tokio::time::sleep(Duration::from_secs(reaper.interval_seconds)) => {
-                            if let Err(err) = requeue(&pool, reaper.age_minutes, timezone).await { tracing::error!(%err, "queue reaper failed"); }
-                        }
-                    }
-                }
-            }))
-        } else {
-            None
-        };
-        let mut workers = Vec::new();
-        for worker_index in 0..self.num_workers {
-            let pool = self.pool.clone();
-            let handlers = self.handlers.clone();
-            let tags = tags.clone();
-            let mut token = self.token.subscribe();
-            let poll = self.poll_seconds;
-            let timezone = self.timezone;
-            workers.push(tokio::spawn(async move {
-                loop {
-                    if *token.borrow() { break; }
-                    match dequeue(&pool, &tags, timezone).await {
-                        Ok(Some(job)) => if let Some(handler) = handlers.lock().await.get(&job.name).cloned() {
-                            match handler(job.id.clone(), job.data.clone()).await {
-                                Ok(()) => if let Err(err) = complete(&pool, &job.id, job.interval, timezone).await { tracing::error!(%err, job_id=%job.id, "queue completion failed"); },
-                                Err(err) => if let Err(fail_err) = fail(&pool, &job.id, &err, timezone).await { tracing::error!(%fail_err, job_id=%job.id, "queue failure failed"); },
-                            }
-                        } else {
-                            tracing::error!(worker_index, job_name=%job.name, "no handler registered for job");
-                        },
-                        Ok(None) => tokio::select! { biased; changed = token.changed() => if changed.is_err() || *token.borrow() { break; }, () = tokio::time::sleep(Duration::from_secs(poll.into())) => {} },
-                        Err(err) => { tracing::error!(%err, "queue dequeue failed"); tokio::select! { () = tokio::time::sleep(Duration::from_secs(1)) => {}, changed = token.changed() => if changed.is_err() || *token.borrow() { break; } } },
-                    }
-                }
-            }));
-        }
-        for worker in workers {
-            match worker.await {
-                Ok(()) => {}
-                Err(error) if error.is_cancelled() => {
-                    tracing::debug!("PostgreSQL queue worker cancelled")
-                }
-                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-                Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
-            }
-        }
-        if let Some(handle) = reaper_handle {
-            let _ = handle.await;
-        }
-        Ok(())
+        super::runtime::run(
+            self.clone(),
+            self.handlers.clone(),
+            self.num_workers,
+            Duration::from_secs(self.poll_seconds.into()),
+            self.reaper.clone(),
+            self.token.clone(),
+            tags,
+        )
+        .await
     }
     async fn setup(&self) -> loco_rs::Result<()> {
         loco_rs::bgworker::pg::initialize_database(&self.pool).await?;

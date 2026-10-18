@@ -14,6 +14,7 @@ use serde_json::Value as JsonValue;
 
 type SqlitePool = sqlx::SqlitePool;
 
+#[derive(Clone)]
 pub struct SqliteTimezoneQueue {
     pub pool: SqlitePool,
     handlers: Arc<tokio::sync::Mutex<HashMap<String, Arc<JobHandler>>>>,
@@ -80,6 +81,37 @@ fn parse_storage(value: &str) -> Option<DateTime<Utc>> {
             .find_map(|format| chrono::NaiveDateTime::parse_from_str(value, format).ok())
             .map(|at| at.and_utc())
         })
+}
+
+#[async_trait]
+impl super::runtime::Backend for SqliteTimezoneQueue {
+    async fn claim(
+        &self,
+        tags: &[String],
+        _stop: &mut tokio::sync::watch::Receiver<bool>,
+    ) -> loco_rs::Result<Option<super::runtime::Delivery>> {
+        Ok(dequeue(&self.pool, tags, self.timezone)
+            .await?
+            .map(|job| super::runtime::Delivery { job, queue: None }))
+    }
+
+    async fn complete(&self, delivery: &super::runtime::Delivery) -> loco_rs::Result<()> {
+        complete(
+            &self.pool,
+            &delivery.job.id,
+            delivery.job.interval,
+            self.timezone,
+        )
+        .await
+    }
+
+    async fn fail(
+        &self,
+        delivery: &super::runtime::Delivery,
+        error: &loco_rs::Error,
+    ) -> loco_rs::Result<()> {
+        fail(&self.pool, &delivery.job.id, error, self.timezone).await
+    }
 }
 
 #[async_trait]
@@ -165,75 +197,16 @@ impl QueueProvider for SqliteTimezoneQueue {
         Ok(())
     }
     async fn run(&self, tags: Vec<String>) -> loco_rs::Result<()> {
-        let reaper_handle = if let Some(reaper) = self.reaper.clone() {
-            let pool = self.pool.clone();
-            let timezone = self.timezone;
-            let stop = self.token.subscribe();
-            Some(tokio::spawn(async move {
-                let mut stop = stop;
-                loop {
-                    tokio::select! {
-                        changed = stop.changed() => if changed.is_err() || *stop.borrow() { break; },
-                        () = tokio::time::sleep(Duration::from_secs(reaper.interval_seconds)) => {
-                            let now = crate::time::queue_now(timezone).with_timezone(&Utc);
-                            let (cutoff_sec, cutoff_nanos) = exact_parts(now - chrono::Duration::minutes(reaper.age_minutes));
-                            let (now_sec, now_nanos) = exact_parts(now);
-                            let updated_at = crate::time::queue_storage(now, timezone);
-                            if let Err(error) = async {
-                                backfill_lifecycle_epochs(&pool).await?;
-                                sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1 WHERE status=? AND updated_at_epoch_seconds IS NOT NULL AND (updated_at_epoch_seconds < ? OR (updated_at_epoch_seconds = ? AND updated_at_epoch_nanos <= ?))")
-                                    .bind(JobStatus::Queued.to_string()).bind(updated_at).bind(now_sec).bind(now_nanos).bind(JobStatus::Processing.to_string()).bind(cutoff_sec).bind(cutoff_sec).bind(cutoff_nanos).execute(&pool).await?;
-                                Ok::<_, loco_rs::Error>(())
-                            }.await { tracing::error!(%error, "queue reaper failed"); }
-                        }
-                    }
-                }
-            }))
-        } else {
-            None
-        };
-        let mut workers = Vec::new();
-        for worker_index in 0..self.num_workers {
-            let pool = self.pool.clone();
-            let handlers = self.handlers.clone();
-            let tags = tags.clone();
-            let mut stop = self.token.subscribe();
-            let poll = self.poll_seconds;
-            let timezone = self.timezone;
-            workers.push(tokio::spawn(async move {
-                while !*stop.borrow() {
-                    match dequeue(&pool, &tags, timezone).await {
-                        Ok(Some(job)) => {
-                            if let Some(handler) = handlers.lock().await.get(&job.name).cloned() {
-                                match handler(job.id.clone(), job.data.clone()).await {
-                                    Ok(()) => if let Err(error) = complete(&pool, &job.id, job.interval, timezone).await { tracing::error!(%error, job_id=%job.id, "queue completion failed"); },
-                                    Err(error) => if let Err(fail_error) = fail(&pool, &job.id, &error, timezone).await { tracing::error!(%fail_error, job_id=%job.id, "queue failure update failed"); },
-                                }
-                            } else { tracing::error!(worker_index, job_name=%job.name, "no handler registered for job"); }
-                            if *stop.borrow() { break; }
-                        }
-                        Ok(None) => tokio::select! { biased; changed = stop.changed() => if changed.is_err() || *stop.borrow() { break; }, () = tokio::time::sleep(Duration::from_secs(poll.into())) => {} },
-                        Err(error) => { tracing::error!(%error, "queue dequeue failed"); tokio::select! { biased; changed = stop.changed() => if changed.is_err() || *stop.borrow() { break; }, () = tokio::time::sleep(Duration::from_secs(1)) => {} } }
-                    }
-                }
-            }));
-        }
-        for worker in workers {
-            match worker.await {
-                Ok(()) => {}
-                Err(error) if error.is_cancelled() => {
-                    tracing::debug!("SQLite queue worker cancelled")
-                }
-                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-                Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
-            }
-        }
-        if let Some(handle) = reaper_handle {
-            handle
-                .await
-                .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-        }
-        Ok(())
+        super::runtime::run(
+            self.clone(),
+            self.handlers.clone(),
+            self.num_workers,
+            Duration::from_secs(self.poll_seconds.into()),
+            self.reaper.clone(),
+            self.token.clone(),
+            tags,
+        )
+        .await
     }
     async fn setup(&self) -> loco_rs::Result<()> {
         initialize_schema(&self.pool, self.timezone).await?;

@@ -9,6 +9,7 @@ mod embedding;
 mod entities;
 #[cfg(feature = "enterprise")]
 mod entity_columns;
+mod fill_defaults;
 mod fixtures;
 mod import;
 #[cfg(feature = "enterprise")]
