@@ -15,6 +15,7 @@ mod inference_proposals;
 mod maintenance;
 #[cfg(feature = "enterprise")]
 mod marketplace;
+mod pagination;
 mod recall;
 mod search;
 mod template_templates;

@@ -61,7 +61,7 @@ impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
             entity_type: params.entity_type,
             filter: crate::dtos::common::parse_filter_param(params.filter)?,
             schema_version: params.schema_version,
-            page: params.page.into(),
+            page: params.page.try_into()?,
         })
     }
 }

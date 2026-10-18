@@ -12,7 +12,7 @@ type HmacSha256 = Hmac<Sha256>;
 pub fn sign(key: &[u8], payload: &[u8]) -> String {
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts a key of any length");
     mac.update(payload);
-    crate::models::api_keys::to_hex(mac.finalize().into_bytes())
+    crate::data::encoding::hex(mac.finalize().into_bytes())
 }
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {

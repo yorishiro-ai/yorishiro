@@ -41,7 +41,8 @@ pub async fn list_members(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MembershipRecord>>, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-    let members = tenant_memberships::list_members(&ctx.db, auth.tenant_id, page.into()).await?;
+    let members =
+        tenant_memberships::list_members(&ctx.db, auth.tenant_id, page.try_into()?).await?;
     Ok(Json(members))
 }
 

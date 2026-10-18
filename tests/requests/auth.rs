@@ -6,6 +6,55 @@ use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn failed_invited_registration_does_not_consume_the_invite() {
+    use sea_orm::EntityTrait;
+    use yorishiro::models::{tenant_tenants, user_users, workspace_invites};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = sea_orm::ActiveModelTrait::insert(
+            tenant_tenants::ActiveModel {
+                name: sea_orm::ActiveValue::Set("invite-rollback".into()),
+                ..Default::default()
+            },
+            &ctx.db,
+        )
+        .await
+        .expect("tenant");
+        user_users::create_user(&ctx.db, "exists@example.com", "password", None)
+            .await
+            .expect("existing user");
+        let (invite, token) = workspace_invites::create_invite(
+            &ctx.db,
+            tenant.id,
+            "exists@example.com",
+            MembershipRole::Member,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .expect("invite");
+
+        let response = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({
+                "invite_token": token, "password": "password"
+            }))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::CONFLICT);
+        let stored = workspace_invites::Entity::find_by_id(invite.id)
+            .one(&ctx.db)
+            .await
+            .expect("lookup")
+            .expect("stored invite");
+        assert!(
+            stored.used_at.is_none(),
+            "failed signup must roll back invite consumption"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn signup_then_login_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = yorishiro::models::_entities::tenant_tenants::ActiveModel {

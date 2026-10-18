@@ -93,7 +93,8 @@ mod input_parity_tests {
                     page_size: 5,
                 }),
             }
-            .into();
+            .try_into()
+            .expect("REST relation query");
         let mcp_query: entity_relations::ListRelationsQuery = relations::ListRelationsArgs {
             source_id: Some(source_id),
             target_id: Some(target_id),

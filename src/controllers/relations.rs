@@ -51,7 +51,7 @@ pub(crate) async fn list_relations(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListRelationsParams>,
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
-    let query = params.into();
+    let query = params.try_into()?;
 
     let workspace_id = authorized.ctx.workspace_id;
     let records = entity_relations::list(authorized.txn(), workspace_id, query).await?;

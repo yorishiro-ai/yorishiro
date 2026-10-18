@@ -46,6 +46,7 @@ anyhow = { version = "1.0.104" }
 axum = { version = "0.8.9" }
 chrono = { version = "0.4.45", features = ["serde"] }
 chrono-tz = "0.10.4"
+rand = "0.10.3"
 reqwest = { version = "0.13.5", features = ["json", "rustls", "form"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
@@ -83,9 +84,9 @@ sea-orm.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
+rand.workspace = true
 ulid.workspace = true
 redis.workspace = true
-thiserror = { version = "2.0.20" }
 anyhow.workspace = true
 sha2.workspace = true
 jsonschema = { version = "=0.59.0" }

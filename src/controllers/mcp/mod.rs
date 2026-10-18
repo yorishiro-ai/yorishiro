@@ -210,10 +210,7 @@ impl Authorized {
     /// Commits the transaction.
     /// Every write handler must call this before returning `Ok`.
     pub(super) async fn commit(self) -> Result<(), ErrorData> {
-        self.txn
-            .commit()
-            .await
-            .map_err(|err| ErrorData::internal_error(err.to_string(), None))
+        self.txn.commit().await.map_err(crate::error::mcp_internal)
     }
 
     pub(crate) fn auth_context(&self) -> &AuthContext {
@@ -269,13 +266,12 @@ pub(crate) async fn authorize(
             Err(YorishiroError::Unauthenticated) => {
                 Err(ErrorData::invalid_request("authentication failed", None))
             }
-            Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+            Err(err) => Err(crate::error::mcp_internal(err)),
         };
     }
 
-    let db = db_handle(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
-    let auth_impl =
-        authenticator(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
+    let db = db_handle(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
+    let auth_impl = authenticator(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
 
     match auth::authorize(&db, auth_impl.as_ref(), presented_key, required, &headers).await {
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
@@ -285,7 +281,7 @@ pub(crate) async fn authorize(
         Err(YorishiroError::Unauthenticated) => {
             Err(ErrorData::invalid_request("authentication failed", None))
         }
-        Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+        Err(err) => Err(crate::error::mcp_internal(err)),
     }
 }
 
@@ -311,13 +307,12 @@ pub(super) async fn verify(
             Err(YorishiroError::Unauthenticated) => {
                 Err(ErrorData::invalid_request("authentication failed", None))
             }
-            Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+            Err(err) => Err(crate::error::mcp_internal(err)),
         };
     }
 
-    let db = db_handle(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
-    let auth_impl =
-        authenticator(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
+    let db = db_handle(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
+    let auth_impl = authenticator(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
 
     match auth::authorize_scope(&db, auth_impl.as_ref(), presented_key, required, &headers).await {
         Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
@@ -327,7 +322,7 @@ pub(super) async fn verify(
         Err(YorishiroError::Unauthenticated) => {
             Err(ErrorData::invalid_request("authentication failed", None))
         }
-        Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+        Err(err) => Err(crate::error::mcp_internal(err)),
     }
 }
 
@@ -335,10 +330,7 @@ pub(super) async fn verify(
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     let message = match err {
-        YorishiroError::Internal(err) => {
-            tracing::error!(error = %err, "internal error in mcp tool handler");
-            "internal server error".to_string()
-        }
+        YorishiroError::Internal(err) => crate::error::report_internal(&err).to_string(),
         YorishiroError::ValidationFailed {
             message,
             details,
@@ -363,8 +355,7 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
 }
 
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
-    let text = serde_json::to_string(&value)
-        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+    let text = serde_json::to_string(&value).map_err(crate::error::mcp_internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 

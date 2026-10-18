@@ -35,7 +35,7 @@ async fn list_upstream_changes(
 
     // ctx.db: this joins template_templates, which the request role cannot read.
     let changes =
-        origin_model::list_with_upstream_changes(&ctx.db, auth_ctx.workspace_id, page.into())
+        origin_model::list_with_upstream_changes(&ctx.db, auth_ctx.workspace_id, page.try_into()?)
             .await?;
     Ok(Json(changes))
 }

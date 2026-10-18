@@ -1,3 +1,7 @@
+//! Application errors and their rendering policy at REST, MCP and Loco boundaries.
+//!
+//! Internal details are logged once at the boundary, never returned to clients.
+
 use serde::{Serialize, Serializer};
 
 /// Every application-level error that flows to an HTTP response or tool result.
@@ -5,13 +9,12 @@ use serde::{Serialize, Serializer};
 /// Adding a variant requires two things: a variant in this enum and a matching
 /// arm in `YorishiroErrorCode::from_variant`.  A new variant without a code
 /// fails to compile.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum YorishiroError {
     /// The request body or parameters do not conform to the expected schema.
     /// Includes per-field [`ValidationDetail`] so clients can render precise
     /// messages.
-    #[error("validation failed: {message}")]
     ValidationFailed {
         message: String,
         details: Vec<ValidationDetail>,
@@ -19,23 +22,18 @@ pub enum YorishiroError {
     },
 
     /// The requested resource does not exist.
-    #[error("not found: {message}")]
     NotFound { message: String },
 
     /// The authenticated principal lacks the required scope or role.
-    #[error("scope insufficient: {message}")]
     ScopeInsufficient { message: String, hint: String },
 
     /// The request would create a duplicate or contradict an existing resource.
-    #[error("conflict: {message}")]
     Conflict { message: String },
 
     /// The relation type does not match the expected category.
-    #[error("relation type mismatch: {message}")]
     RelationTypeMismatch { message: String },
 
     /// No valid authentication credentials were provided.
-    #[error("unauthenticated")]
     Unauthenticated,
 
     /// The deployment is in maintenance mode.
@@ -43,7 +41,6 @@ pub enum YorishiroError {
     /// `read_only` refuses writes (423), `full_lock` refuses everything (503);
     /// `retry_after` is seconds, and reaches the caller as a header as well as
     /// in the body, since agents retry on the header.
-    #[error("maintenance: {message}")]
     Maintenance {
         message: String,
         read_only: bool,
@@ -51,18 +48,15 @@ pub enum YorishiroError {
     },
 
     /// The backend provider (e.g. LLM, embedding) responded with a busy / retry-after signal.
-    #[error("provider busy: {message}")]
     ProviderBusy {
         message: String,
         retry_after: std::time::Duration,
     },
 
     /// The embedding provider HTTP endpoint is unreachable.
-    #[error("embedding provider unreachable at {url}: {message}")]
     ProviderUnreachable { url: String, message: String },
 
     /// The requested feature is not supported on the current backend.
-    #[error("not implemented for backend: {message}")]
     BackendUnsupported { message: String },
 
     /// A required backend component (queue provider, embedding provider) is not configured.
@@ -71,12 +65,68 @@ pub enum YorishiroError {
     /// `ProviderBusy` (503, provider is busy): this variant covers the "not
     /// configured at all" case where no backend component exists to contact or
     /// wait for.
-    #[error("backend unavailable: {message}")]
     BackendUnavailable { message: String },
 
     /// An unexpected internal error occurred.
-    #[error("internal error: {0}")]
-    Internal(#[from] anyhow::Error),
+    Internal(anyhow::Error),
+}
+
+impl std::fmt::Display for YorishiroError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ValidationFailed { message, .. } => {
+                write!(formatter, "validation failed: {message}")
+            }
+            Self::NotFound { message } => write!(formatter, "not found: {message}"),
+            Self::ScopeInsufficient { message, .. } => {
+                write!(formatter, "scope insufficient: {message}")
+            }
+            Self::Conflict { message } => write!(formatter, "conflict: {message}"),
+            Self::RelationTypeMismatch { message } => {
+                write!(formatter, "relation type mismatch: {message}")
+            }
+            Self::Unauthenticated => formatter.write_str("unauthenticated"),
+            Self::Maintenance { message, .. } => write!(formatter, "maintenance: {message}"),
+            Self::ProviderBusy { message, .. } => write!(formatter, "provider busy: {message}"),
+            Self::ProviderUnreachable { url, message } => write!(
+                formatter,
+                "embedding provider unreachable at {url}: {message}"
+            ),
+            Self::BackendUnsupported { message } => {
+                write!(formatter, "not implemented for backend: {message}")
+            }
+            Self::BackendUnavailable { message } => {
+                write!(formatter, "backend unavailable: {message}")
+            }
+            Self::Internal(error) => write!(formatter, "internal error: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for YorishiroError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Internal(error) => Some(error.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl From<anyhow::Error> for YorishiroError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Internal(error)
+    }
+}
+
+/// Reports an internal failure at its transport boundary and returns the safe client message.
+pub(crate) fn report_internal(error: &anyhow::Error) -> &'static str {
+    tracing::error!(error = %error, "internal error");
+    "internal server error"
+}
+
+/// Applies the same internal-error redaction to MCP protocol failures as REST and tool results.
+pub(crate) fn mcp_internal(error: impl Into<anyhow::Error>) -> rmcp::ErrorData {
+    rmcp::ErrorData::internal_error(report_internal(&error.into()), None)
 }
 
 /// Machine-readable error code for every `YorishiroError` variant.
@@ -367,13 +417,13 @@ impl YorishiroError {
                 }),
             ),
             Self::Internal(ref err) => {
-                tracing::error!(error = %err, "internal error");
+                let message = report_internal(err);
                 (
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     serde_json::json!({
                         "error": {
                             "code": "internal",
-                            "message": "internal server error",
+                            "message": message,
                             "hint": "this is an unexpected error; check server logs",
                         }
                     }),

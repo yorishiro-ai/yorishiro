@@ -124,6 +124,36 @@ fn tool_result_json(response: &Value) -> Value {
     .expect("JSON tool result")
 }
 
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn mcp_authentication_database_failure_is_redacted() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+    use sea_orm::ConnectionTrait;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let session = initialize(&request).await;
+        ctx.db
+            .execute_unprepared("ALTER TABLE api_keys RENAME TO private_auth_diagnostic")
+            .await
+            .expect("break authentication lookup in this isolated test database");
+        let response = mcp_call(
+            &request,
+            &session,
+            "not-a-real-key",
+            2,
+            "tools/call",
+            json!({"name": "list_entities", "arguments": {}}),
+        )
+        .await;
+        assert_eq!(response["error"]["message"], "internal server error");
+        assert!(!response.to_string().contains("api_keys"));
+        assert!(!response.to_string().contains("private_auth_diagnostic"));
+    })
+    .await;
+}
+
 /// Transport compatibility regressions from the MCP HTTP issues.
 #[tokio::test]
 async fn mcp_transport_rejects_unconfigured_host_by_default() {

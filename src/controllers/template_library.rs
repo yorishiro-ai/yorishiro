@@ -29,7 +29,7 @@ pub async fn list_templates(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateRecord>>, ApiError> {
     let templates =
-        template_templates::list_templates(&ctx.db, auth.tenant_id, page.into()).await?;
+        template_templates::list_templates(&ctx.db, auth.tenant_id, page.try_into()?).await?;
     Ok(Json(templates))
 }
 

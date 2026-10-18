@@ -53,25 +53,13 @@ async fn signup_with_invite(
         .into());
     }
 
-    let invite = workspace_invites::redeem_invite(&ctx.db, token)
-        .await?
-        .ok_or_else(|| YorishiroError::ValidationFailed {
-            message: "invite token is invalid, expired, or already used".into(),
-            details: vec![],
-            hint: "ask a tenant admin for a fresh invite".into(),
-        })?;
-
-    // create_user + add_member run in one transaction: see user_users::create_user's doc comment.
-    let txn = ctx.db.begin().await.internal()?;
-    let user = user_users::create_user(
-        &txn,
-        &invite.email,
+    let (user, invite) = workspace_invites::register_user(
+        &ctx.db,
+        token,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenant_memberships::add_member(&txn, invite.tenant_id, user.id, invite.role).await?;
-    txn.commit().await.internal()?;
 
     let workspaces = workspace_workspaces::list_workspaces(
         &ctx.db,

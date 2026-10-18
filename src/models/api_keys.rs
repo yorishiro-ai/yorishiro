@@ -1,3 +1,4 @@
+use rand::Rng;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect, TransactionTrait};
 use sha2::{Digest, Sha256};
@@ -57,24 +58,11 @@ pub struct CreatedApiKey {
     pub plaintext: String,
 }
 
-/// Encodes `bytes` as lowercase hex; the one hex encoder in the crate, used for digests and tokens alike.
-pub(crate) fn to_hex(bytes: impl AsRef<[u8]>) -> String {
-    use std::fmt::Write;
-    bytes.as_ref().iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
-}
-
-/// Returns `byte_len` random bytes as lowercase hex.
-/// Each UUIDv4 contributes 32 hex digits from the operating system's CSPRNG, so the fixed version and variant bits only cost 6 of every 128 bits.
+/// Returns `byte_len` CSPRNG bytes as lowercase hex without identifier version bits.
 pub(crate) fn random_hex(byte_len: usize) -> String {
-    let mut out = String::with_capacity(byte_len * 2 + 32);
-    while out.len() < byte_len * 2 {
-        out.push_str(&Uuid::new_v4().simple().to_string());
-    }
-    out.truncate(byte_len * 2);
-    out
+    let mut bytes = vec![0u8; byte_len];
+    rand::rng().fill_bytes(&mut bytes);
+    crate::data::encoding::hex(bytes)
 }
 
 /// Hashes a presented key into the form stored in `api_keys.key_hash`.

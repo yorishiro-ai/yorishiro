@@ -5,7 +5,7 @@ use crate::models::tenant_memberships::MembershipRole;
 
 mod operations;
 
-pub(crate) use operations::redeem_invite;
+pub(crate) use operations::register_user;
 pub use operations::{create_invite, create_invite_at, redeem_invite_at};
 
 pub struct RedeemedInvite {

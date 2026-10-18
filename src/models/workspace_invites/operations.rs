@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    QueryFilter, TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -60,17 +61,30 @@ pub async fn create_invite_at(
     Ok((invite, token))
 }
 
-/// Redeems an invite token: atomically marks it used and returns the tenant/email/role it grants, or `None` if the token doesn't match any invite, is already used, or has expired.
-///
-/// The lookup and the `used_at` update happen in a single statement (`UpdateMany` with all three conditions in its `WHERE`), so two concurrent redemptions of the same token can't both succeed: whichever commits first's `used_at IS NULL` no longer holds for the loser.
-pub(crate) async fn redeem_invite(
-    conn: &impl ConnectionTrait,
+/// Registers an invited user and consumes the invite only if registration and membership both succeed.
+pub(crate) async fn register_user(
+    db: &DatabaseConnection,
     raw_token: &str,
-) -> Result<Option<RedeemedInvite>, YorishiroError> {
-    redeem_invite_at(conn, raw_token, crate::time::now()).await
+    password: &str,
+    display_name: Option<&str>,
+) -> Result<(crate::models::user_users::Model, RedeemedInvite), YorishiroError> {
+    let txn = db.begin().await.internal()?;
+    let invite = redeem_invite_at(&txn, raw_token, crate::time::now())
+        .await?
+        .ok_or_else(|| YorishiroError::ValidationFailed {
+            message: "invite token is invalid, expired, or already used".into(),
+            details: vec![],
+            hint: "ask a tenant admin for a fresh invite".into(),
+        })?;
+    let user =
+        crate::models::user_users::create_user(&txn, &invite.email, password, display_name).await?;
+    crate::models::tenant_memberships::add_member(&txn, invite.tenant_id, user.id, invite.role)
+        .await?;
+    txn.commit().await.internal()?;
+    Ok((user, invite))
 }
 
-/// [`redeem_invite`] with the redemption time supplied by the caller, so expiry boundaries can be tested without a clock.
+/// Atomically consumes an unused, unexpired invite at the supplied time.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
