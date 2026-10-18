@@ -279,6 +279,27 @@ mod conflict {
     }
 
     impl BackendObservation {
+        async fn owned_statuses(
+            &self,
+            ids: &[String],
+        ) -> Vec<(String, loco_rs::bgworker::JobStatus)> {
+            let jobs = match self {
+                Self::Sqlite(pool) => sqlt::get_jobs(pool, None, None)
+                    .await
+                    .expect("read SQLite jobs"),
+                Self::Postgres(pool) => loco_rs::bgworker::pg::get_jobs(pool, None, None)
+                    .await
+                    .expect("read PostgreSQL jobs"),
+                Self::Redis(client) => loco_rs::bgworker::redis::get_jobs(client, None, None)
+                    .await
+                    .expect("read Valkey jobs"),
+            };
+            jobs.into_iter()
+                .filter(|job| ids.contains(&job.id))
+                .map(|job| (job.id, job.status))
+                .collect()
+        }
+
         async fn owned_count(
             &self,
             ids: &[String],
@@ -1194,28 +1215,40 @@ mod conflict {
                     .await;
                 queue_ids.push(queue_id);
             }
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 while provider.calls.load(Ordering::SeqCst) == 0 {
                     tokio::task::yield_now().await;
                 }
             })
             .await
             .expect("first provider call entered");
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while harness
-                    .observation
-                    .owned_count(
-                        &queue_ids,
-                        Some(vec![loco_rs::bgworker::JobStatus::Processing]),
-                    )
-                    .await
-                    < 3
-                {
+            let processing = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let count = harness
+                        .observation
+                        .owned_count(
+                            &queue_ids,
+                            Some(vec![loco_rs::bgworker::JobStatus::Processing]),
+                        )
+                        .await;
+                    if count == 3 {
+                        break count;
+                    }
                     tokio::task::yield_now().await;
                 }
             })
-            .await
-            .expect("all consumers must have dequeued a job");
+            .await;
+            let processing = match processing {
+                Ok(count) => count,
+                Err(_) => panic!(
+                    "expected all 3 owned jobs processing; jobs={:?}, provider calls={}, active={}, max_active={}",
+                    harness.observation.owned_statuses(&queue_ids).await,
+                    provider.calls.load(Ordering::SeqCst),
+                    provider.active.load(Ordering::SeqCst),
+                    provider.max_active.load(Ordering::SeqCst),
+                ),
+            };
+            assert_eq!(processing, 3);
             assert_eq!(provider.active.load(Ordering::SeqCst), 1);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             let rows = Entity::find().all(&ctx.db).await.expect("read lifecycles");

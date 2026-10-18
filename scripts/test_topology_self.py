@@ -139,6 +139,17 @@ def main() -> int:
         topology="sqlite-valkey",
     )
     assert status == 2 and "explicit Redis URL" in stderr
+
+    # Match CI's negative check: reject the SQLite app URL for a PostgreSQL topology before requiring Redis.
+    status, _, stderr, _ = run_gate(
+        None,
+        topology="postgres-valkey",
+        extra_env={"DATABASE_URL": "sqlite:///tmp/yorishiro-gate-check.sqlite3?mode=rwc"},
+    )
+    assert status == 1 and stderr.splitlines() == [
+        MISMATCH_TOKEN,
+        "ERROR: requested postgres database topology does not match DATABASE_URL",
+    ]
     return 0
 
 

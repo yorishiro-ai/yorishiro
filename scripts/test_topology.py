@@ -31,6 +31,14 @@ def main() -> int:
         return 2
     feature_args = ["--no-default-features", "--features", "community"] if edition == "ce" else ["--features", "enterprise"]
     database, queue = topology.split("-", 1)
+    app_url = os.environ.get("DATABASE_URL", "")
+    mismatch = (database == "sqlite" and app_url.startswith(("postgres://", "postgresql://"))) or (
+        database == "postgres" and app_url.startswith("sqlite:")
+    )
+    if mismatch:
+        print(MISMATCH_TOKEN, file=sys.stderr)
+        print(f"ERROR: requested {database} database topology does not match DATABASE_URL", file=sys.stderr)
+        return 1
     with tempfile.TemporaryDirectory(prefix="yorishiro-topology-") as temp_dir:
         env = os.environ.copy()
         if database == "sqlite" and queue == "sqlite" and not env.get("QUEUE_URL"):
