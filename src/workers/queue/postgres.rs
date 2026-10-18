@@ -79,8 +79,15 @@ impl PostgresTimezoneQueue {
         let now = crate::time::database_instant(
             crate::time::queue_now(self.timezone).with_timezone(&Utc),
         );
-        sqlx::query("INSERT INTO pg_loco_queue (id,task_data,name,run_at,interval,tags,priority,created_at,updated_at) VALUES ($1,$2,$3,$4,NULL,$5,$6,$4,$4)")
+        let inserted = sqlx::query("INSERT INTO pg_loco_queue (id,task_data,name,run_at,interval,tags,priority,created_at,updated_at) VALUES ($1,$2,$3,$4,NULL,$5,$6,$4,$4) ON CONFLICT (id) DO NOTHING")
             .bind(&id).bind(args).bind(class).bind(now).bind(tags.map(serde_json::to_value).transpose()?).bind(priority.unwrap_or(0)).execute(&self.pool).await?;
+        if inserted.rows_affected() == 0 {
+            return Err(loco_rs::Error::from(
+                crate::error::YorishiroError::Conflict {
+                    message: format!("queue job ID already exists: {id}"),
+                },
+            ));
+        }
         Ok(id)
     }
 }
@@ -216,6 +223,9 @@ impl QueueProvider for PostgresTimezoneQueue {
     }
     async fn setup(&self) -> loco_rs::Result<()> {
         loco_rs::bgworker::pg::initialize_database(&self.pool).await?;
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS pg_loco_queue_id_key ON pg_loco_queue (id)")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
     async fn clear(&self) -> loco_rs::Result<()> {

@@ -4,29 +4,10 @@ use loco_rs::config::PostgresQueueConfig;
 use sea_orm::sqlx::{self, AssertSqlSafe, PgPool};
 use yorishiro::workers::queue::postgres::PostgresTimezoneQueue;
 
-async fn provider() -> Option<(PostgresTimezoneQueue, PgPool, String)> {
+async fn provider() -> Option<PostgresTimezoneQueue> {
     let url = postgres_test_url()?;
-    let schema = format!("queue_test_{}", ulid().to_string().to_lowercase());
-    let admin = PgPool::connect(&url).await.unwrap();
-    sqlx::query(AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
-        .execute(&admin)
-        .await
-        .unwrap();
-    let mut queue_url = reqwest::Url::parse(&url).unwrap();
-    let existing_options = queue_url
-        .query_pairs()
-        .find(|(key, _)| key == "options")
-        .map(|(_, value)| value.into_owned());
-    let search_path_option = format!(
-        "{}{}-csearch_path={schema},public",
-        existing_options.as_deref().unwrap_or_default(),
-        if existing_options.is_some() { " " } else { "" },
-    );
-    queue_url
-        .query_pairs_mut()
-        .append_pair("options", &search_path_option);
     let config = PostgresQueueConfig {
-        uri: queue_url.to_string(),
+        uri: url,
         dangerously_flush: false,
         enable_logging: false,
         max_connections: 3,
@@ -42,7 +23,7 @@ async fn provider() -> Option<(PostgresTimezoneQueue, PgPool, String)> {
         .await
         .unwrap();
     provider.setup().await.unwrap();
-    Some((provider, admin, schema))
+    Some(provider)
 }
 
 fn ulid() -> String {
@@ -81,8 +62,90 @@ fn postgres_test_url() -> Option<String> {
 }
 
 #[tokio::test]
+async fn postgres_fresh_queue_schema_rejects_duplicate_ids_without_replacing_rows() {
+    let Some(url) = postgres_test_url() else {
+        return;
+    };
+    let schema = format!("queue_test_{}", ulid().to_lowercase());
+    let admin = PgPool::connect(&url).await.unwrap();
+    sqlx::query(AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let mut queue_url = reqwest::Url::parse(&url).unwrap();
+    queue_url
+        .query_pairs_mut()
+        .append_pair("options", &format!("-csearch_path={schema},public"));
+    let config = PostgresQueueConfig {
+        uri: queue_url.to_string(),
+        dangerously_flush: false,
+        enable_logging: false,
+        max_connections: 2,
+        min_connections: 1,
+        connect_timeout: 5_000,
+        idle_timeout: 5_000,
+        poll_interval_sec: 1,
+        num_workers: 0,
+        reaper: None,
+    };
+    let provider = PostgresTimezoneQueue::connect(&config, "Asia/Tokyo".parse().unwrap())
+        .await
+        .unwrap();
+    provider.setup().await.unwrap();
+    let constraints: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_constraint WHERE conrelid='pg_loco_queue'::regclass AND contype IN ('p','u')",
+    )
+    .fetch_one(&provider.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        constraints, 0,
+        "Loco's fresh queue table has no ID constraint"
+    );
+
+    let id = ulid();
+    provider
+        .enqueue_with_id(
+            "original".into(),
+            serde_json::json!({"original":true}),
+            None,
+            None,
+            id.clone(),
+        )
+        .await
+        .unwrap();
+    let collision = provider
+        .enqueue_with_id(
+            "replacement".into(),
+            serde_json::json!({"replacement":true}),
+            None,
+            None,
+            id.clone(),
+        )
+        .await;
+    assert!(collision.is_err());
+    let row: (String, serde_json::Value) =
+        sqlx::query_as("SELECT name,task_data FROM pg_loco_queue WHERE id=$1")
+            .bind(&id)
+            .fetch_one(&provider.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        row,
+        ("original".into(), serde_json::json!({"original":true}))
+    );
+
+    provider.pool.close().await;
+    sqlx::query(AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
+}
+
+#[tokio::test]
 async fn postgres_provider_lifecycle_metadata_admin_and_collision_contract() {
-    let Some((provider, admin, schema)) = provider().await else {
+    let Some(provider) = provider().await else {
         return;
     };
     let prefix = format!("tztest-{}", ulid());
@@ -126,7 +189,6 @@ async fn postgres_provider_lifecycle_metadata_admin_and_collision_contract() {
         .await
         .unwrap();
     assert_eq!(unchanged, format!("{prefix}-job"));
-
     let batch_ids = provider
         .enqueue_batch(
             "batch-test".into(),
@@ -234,17 +296,11 @@ async fn postgres_provider_lifecycle_metadata_admin_and_collision_contract() {
         .execute(queue)
         .await
         .unwrap();
-    provider.pool.close().await;
-    sqlx::query(AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
-        .execute(&admin)
-        .await
-        .unwrap();
-    admin.close().await;
 }
 
 #[tokio::test]
 async fn postgres_subsecond_due_claim_is_preserved() {
-    let Some((provider, admin, schema)) = provider().await else {
+    let Some(provider) = provider().await else {
         return;
     };
     let pool = &provider.pool;
@@ -282,12 +338,6 @@ async fn postgres_subsecond_due_claim_is_preserved() {
         .await
         .unwrap();
     provider.shutdown().unwrap();
-    provider.pool.close().await;
-    sqlx::query(AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
-        .execute(&admin)
-        .await
-        .unwrap();
-    admin.close().await;
 }
 
 #[tokio::test]
