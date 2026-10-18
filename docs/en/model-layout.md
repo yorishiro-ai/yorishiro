@@ -7,6 +7,12 @@ This page describes how the source tree follows Loco 1.2.0's generator layout, a
 Every entry point authenticates, parses input, calls a model operation, and renders the result.
 None of them owns domain logic or builds ordinary queries.
 
+Use SeaORM for ordinary persistence and SeaQuery for atomic statements such as snapshot inserts and guarded embedding upserts.
+Atomicity alone is not a reason to use handwritten SQL.
+Database-specific transaction setup belongs in `src/db.rs`, not in individual workers.
+Tests call production operations instead of rebuilding enqueue or persistence logic in fixture helpers.
+Fixtures for old persisted formats still test current compatibility code and are not obsolete merely because the input format is old.
+
 | Directory | Role | Laravel counterpart |
 | --- | --- | --- |
 | `src/controllers/` | Entry points: REST handlers, MCP tools (`controllers/mcp/`), request middleware (`controllers/middleware/`), extractors | Controllers, Middleware |

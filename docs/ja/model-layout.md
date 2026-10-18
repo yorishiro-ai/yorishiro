@@ -7,6 +7,12 @@
 すべてのエントリポイントは、認証し、入力を解析し、モデルの操作を呼び出し、結果を返します。
 ドメインロジックを持つことも、通常のクエリを組み立てることもしません。
 
+通常の永続化にはSeaORMを使い、snapshotの作成や競合防止付きupsertなどの単一文にはSeaQueryを使います。
+原子性が必要という理由だけではRaw SQLを使いません。
+DB固有のトランザクション設定は個々のworkerではなく`src/db.rs`に集約します。
+テストのhelperでenqueueや永続化を再実装せず、本体の操作を呼びます。
+旧形式データのfixtureでも、現行の互換処理を検証していれば不要なテストではありません。
+
 | ディレクトリ | 役割 | Laravel での対応 |
 | --- | --- | --- |
 | `src/controllers/` | エントリポイント。REST ハンドラー、MCP ツール（`controllers/mcp/`）、リクエストミドルウェア（`controllers/middleware/`）、エクストラクター | Controllers、Middleware |

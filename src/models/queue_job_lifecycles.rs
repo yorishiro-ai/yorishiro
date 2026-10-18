@@ -1,10 +1,7 @@
 pub use crate::models::_entities::queue_job_lifecycles::{ActiveModel, Column, Entity, Model};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::{
-    DatabaseBackend, DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
-};
+use sea_orm::{DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect};
 use tokio::task::JoinHandle;
 
 use crate::db_enum::db_enum;
@@ -308,15 +305,7 @@ impl Entity {
         id: Uuid,
         now: DateTimeWithTimeZone,
     ) -> Result<Admission, DbErr> {
-        let txn = if db.get_database_backend() == DatabaseBackend::Sqlite {
-            db.begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await?
-        } else {
-            db.begin().await?
-        };
+        let txn = crate::db::begin_write(db).await?;
         let admission = admit(&txn, id, now, false).await?;
         // Only an admission wrote anything; every other outcome leaves the row as it found it.
         match admission {
@@ -332,15 +321,7 @@ impl Entity {
         now: DateTimeWithTimeZone,
         ignore_capacity: bool,
     ) -> Result<Admission, DbErr> {
-        let txn = if db.get_database_backend() == DatabaseBackend::Sqlite {
-            db.begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await?
-        } else {
-            db.begin().await?
-        };
+        let txn = crate::db::begin_write(db).await?;
         let admission = admit(&txn, id, now, ignore_capacity).await?;
         match admission {
             Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,

@@ -106,13 +106,11 @@ async fn enqueue(
     tags: Option<Vec<String>>,
     priority: i32,
 ) -> String {
-    let now = chrono::Utc::now();
-    let (sec, nanos) = exact_parts(now);
-    let id = ulid_id();
-    let tags = tags.map(serde_json::to_value).transpose().unwrap();
-    sqlx::query("INSERT INTO sqlt_loco_queue (id,task_data,name,status,run_at,run_at_epoch_seconds,run_at_epoch_nanos,interval,tags,priority,created_at,updated_at) VALUES (?,?,?,'queued',?,?,?,?,?,?,?,?)")
-    .bind(&id).bind(data).bind(class).bind(now.with_timezone(&provider.timezone).to_rfc3339()).bind(sec).bind(nanos).bind(None::<i64>).bind(tags).bind(priority).bind(now.with_timezone(&provider.timezone).to_rfc3339()).bind(now.with_timezone(&provider.timezone).to_rfc3339()).execute(&provider.pool).await.unwrap();
-    id
+    provider
+        .enqueue(class.to_owned(), None, data, tags, Some(priority))
+        .await
+        .expect("production provider enqueue")
+        .expect("provider job ID")
 }
 
 async fn insert_raw(pool: &SqlitePool, id: &str, run_at: &str) {
@@ -149,59 +147,6 @@ async fn enqueue_and_batch_store_tokyo_wall_time_and_exact_instant_key() {
             .iter()
             .all(|(created, updated)| created.ends_with("+09:00") && updated.ends_with("+09:00"))
     );
-}
-
-#[tokio::test]
-async fn historical_utc_and_offset_instants_are_keyed_without_changing_run_at() {
-    let (_dir, provider) = provider().await;
-    let instant = chrono::Utc::now() - chrono::Duration::seconds(30);
-    let utc = instant.to_rfc3339_opts(SecondsFormat::AutoSi, true);
-    let offset = instant
-        .with_timezone(&"America/New_York".parse::<chrono_tz::Tz>().unwrap())
-        .to_rfc3339_opts(SecondsFormat::AutoSi, false);
-    insert_raw(&provider.pool, "old-utc", &utc).await;
-    insert_raw(&provider.pool, "old-offset", &offset).await;
-    let before = [utc, offset];
-    let provider_pool = provider.pool.clone();
-    let timezone = provider.timezone;
-    let instant_key = exact_parts(instant);
-    let job = yorishiro::workers::queue::sqlite::dequeue(&provider_pool, &[], timezone)
-        .await
-        .unwrap()
-        .unwrap();
-    let after: Vec<(String, Option<i64>, Option<i32>)> = sqlx::query_as("SELECT quote(run_at),run_at_epoch_seconds,run_at_epoch_nanos FROM sqlt_loco_queue WHERE id IN ('old-utc','old-offset') ORDER BY id")
-        .fetch_all(&provider.pool).await.unwrap();
-    assert_eq!(after[0].0, format!("'{}'", before[1]));
-    assert_eq!(after[1].0, format!("'{}'", before[0]));
-    assert_eq!(after.iter().filter(|(_, sec, _)| sec.is_some()).count(), 2);
-    assert!(
-        after
-            .iter()
-            .all(|(_, sec, nanos)| sec.zip(*nanos) == Some(instant_key))
-    );
-    assert_eq!(job.id, "old-offset");
-    let next = yorishiro::workers::queue::sqlite::dequeue(&provider_pool, &[], timezone)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(next.id, "old-utc");
-    let unkeyed: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlt_loco_queue WHERE run_at_epoch_seconds IS NULL AND run_at_legacy_checked=0")
-        .fetch_one(&provider.pool).await.unwrap();
-    assert_eq!(unkeyed, 0);
-}
-
-#[tokio::test]
-async fn malformed_legacy_run_at_stays_queued_and_unmodified() {
-    let (_dir, provider) = provider().await;
-    insert_raw(&provider.pool, "bad", "not-a-timestamp").await;
-    assert!(provider.get_jobs(None, None).await.unwrap().is_empty());
-    let row: (String, String, Option<i64>, i64) = sqlx::query_as(
-        "SELECT status,run_at,run_at_epoch_seconds,run_at_legacy_checked FROM sqlt_loco_queue WHERE id='bad'",
-    )
-    .fetch_one(&provider.pool)
-    .await
-    .unwrap();
-    assert_eq!(row, ("queued".into(), "not-a-timestamp".into(), None, 0));
 }
 
 #[tokio::test]
@@ -324,17 +269,21 @@ async fn queue_state_transitions_write_tokyo_timestamps() {
 }
 
 #[tokio::test]
-async fn age_based_admin_and_reaper_comparisons_accept_offset_timestamps() {
+async fn age_based_admin_and_reaper_use_provider_epoch_timestamps() {
     let (_dir, provider) = provider().await;
     let timezone: chrono_tz::Tz = "Asia/Tokyo".parse().unwrap();
     let id = enqueue(&provider, "old", serde_json::json!({}), None, 0).await;
     let old = chrono::Utc::now() - chrono::Duration::days(5);
     let old_local = old.with_timezone(&timezone).to_rfc3339();
     sqlx::query(
-        "UPDATE sqlt_loco_queue SET created_at=?, updated_at=?, status='processing' WHERE id=?",
+        "UPDATE sqlt_loco_queue SET created_at=?, updated_at=?, created_at_epoch_seconds=?, created_at_epoch_nanos=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, status='processing' WHERE id=?",
     )
     .bind(&old_local)
     .bind(&old_local)
+    .bind(old.timestamp())
+    .bind(old.timestamp_subsec_nanos() as i32)
+    .bind(old.timestamp())
+    .bind(old.timestamp_subsec_nanos() as i32)
     .bind(&id)
     .execute(&provider.pool)
     .await
@@ -360,8 +309,10 @@ async fn age_based_admin_and_reaper_comparisons_accept_offset_timestamps() {
     assert_eq!(count, 0);
 
     let second = enqueue(&provider, "reaper", serde_json::json!({}), None, 0).await;
-    sqlx::query("UPDATE sqlt_loco_queue SET updated_at=?, status='processing' WHERE id=?")
+    sqlx::query("UPDATE sqlt_loco_queue SET updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, status='processing' WHERE id=?")
         .bind(&old_local)
+        .bind(old.timestamp())
+        .bind(old.timestamp_subsec_nanos() as i32)
         .bind(&second)
         .execute(&provider.pool)
         .await
@@ -596,26 +547,6 @@ async fn exact_epoch_due_query_uses_priority_ordered_index_without_table_scan() 
 }
 
 #[tokio::test]
-async fn legacy_offset_after_utc_lexical_cutoff_is_keyed_and_eventually_dequeued() {
-    let (_dir, provider) = provider().await;
-    let instant = chrono::Utc::now() - chrono::Duration::seconds(30);
-    let stored = instant
-        .with_timezone(&"Pacific/Kiritimati".parse::<chrono_tz::Tz>().unwrap())
-        .to_rfc3339_opts(SecondsFormat::AutoSi, false);
-    assert!(stored > chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string());
-    insert_raw(&provider.pool, "offset-late", &stored).await;
-    let job = yorishiro::workers::queue::sqlite::dequeue(&provider.pool, &[], provider.timezone)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(job.id, "offset-late");
-    let saved: (String, i64, i32) = sqlx::query_as("SELECT quote(run_at),run_at_epoch_seconds,run_at_epoch_nanos FROM sqlt_loco_queue WHERE id='offset-late'")
-        .fetch_one(&provider.pool).await.unwrap();
-    assert_eq!(saved.0, format!("'{}'", stored));
-    assert_eq!((saved.1, saved.2), exact_parts(instant));
-}
-
-#[tokio::test]
 async fn setup_migrates_legacy_schema_idempotently_and_contract_admin_methods_work() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("legacy.sqlite");
@@ -722,4 +653,77 @@ async fn setup_migrates_legacy_schema_idempotently_and_contract_admin_methods_wo
     provider.ping().await.unwrap();
     assert_eq!(provider.describe(), "sqlite queue");
     provider.shutdown().unwrap();
+}
+
+#[tokio::test]
+async fn historical_utc_and_offset_instants_are_keyed_without_changing_run_at() {
+    let (_dir, provider) = provider().await;
+    let instant = chrono::Utc::now() - chrono::Duration::seconds(30);
+    let utc = instant.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+    let offset = instant
+        .with_timezone(&"America/New_York".parse::<chrono_tz::Tz>().unwrap())
+        .to_rfc3339_opts(SecondsFormat::AutoSi, false);
+    insert_raw(&provider.pool, "old-utc", &utc).await;
+    insert_raw(&provider.pool, "old-offset", &offset).await;
+    let before = [utc, offset];
+    let provider_pool = provider.pool.clone();
+    let timezone = provider.timezone;
+    let instant_key = exact_parts(instant);
+    let job = yorishiro::workers::queue::sqlite::dequeue(&provider_pool, &[], timezone)
+        .await
+        .unwrap()
+        .unwrap();
+    let after: Vec<(String, Option<i64>, Option<i32>)> = sqlx::query_as("SELECT quote(run_at),run_at_epoch_seconds,run_at_epoch_nanos FROM sqlt_loco_queue WHERE id IN ('old-utc','old-offset') ORDER BY id")
+        .fetch_all(&provider.pool).await.unwrap();
+    assert_eq!(after[0].0, format!("'{}'", before[1]));
+    assert_eq!(after[1].0, format!("'{}'", before[0]));
+    assert_eq!(after.iter().filter(|(_, sec, _)| sec.is_some()).count(), 2);
+    assert!(
+        after
+            .iter()
+            .all(|(_, sec, nanos)| sec.zip(*nanos) == Some(instant_key))
+    );
+    assert_eq!(job.id, "old-offset");
+    let next = yorishiro::workers::queue::sqlite::dequeue(&provider_pool, &[], timezone)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.id, "old-utc");
+    let unkeyed: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlt_loco_queue WHERE run_at_epoch_seconds IS NULL AND run_at_legacy_checked=0")
+        .fetch_one(&provider.pool).await.unwrap();
+    assert_eq!(unkeyed, 0);
+}
+
+#[tokio::test]
+async fn malformed_legacy_run_at_stays_queued_and_unmodified() {
+    let (_dir, provider) = provider().await;
+    insert_raw(&provider.pool, "bad", "not-a-timestamp").await;
+    assert!(provider.get_jobs(None, None).await.unwrap().is_empty());
+    let row: (String, String, Option<i64>, i64) = sqlx::query_as(
+        "SELECT status,run_at,run_at_epoch_seconds,run_at_legacy_checked FROM sqlt_loco_queue WHERE id='bad'",
+    )
+    .fetch_one(&provider.pool)
+    .await
+    .unwrap();
+    assert_eq!(row, ("queued".into(), "not-a-timestamp".into(), None, 0));
+}
+
+#[tokio::test]
+async fn legacy_offset_after_utc_lexical_cutoff_is_keyed_and_eventually_dequeued() {
+    let (_dir, provider) = provider().await;
+    let instant = chrono::Utc::now() - chrono::Duration::seconds(30);
+    let stored = instant
+        .with_timezone(&"Pacific/Kiritimati".parse::<chrono_tz::Tz>().unwrap())
+        .to_rfc3339_opts(SecondsFormat::AutoSi, false);
+    assert!(stored > chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string());
+    insert_raw(&provider.pool, "offset-late", &stored).await;
+    let job = yorishiro::workers::queue::sqlite::dequeue(&provider.pool, &[], provider.timezone)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(job.id, "offset-late");
+    let saved: (String, i64, i32) = sqlx::query_as("SELECT quote(run_at),run_at_epoch_seconds,run_at_epoch_nanos FROM sqlt_loco_queue WHERE id='offset-late'")
+        .fetch_one(&provider.pool).await.unwrap();
+    assert_eq!(saved.0, format!("'{}'", stored));
+    assert_eq!((saved.1, saved.2), exact_parts(instant));
 }

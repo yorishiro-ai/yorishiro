@@ -9,7 +9,6 @@
 
 use loco_rs::prelude::async_trait;
 use loco_rs::prelude::*;
-use sea_orm::{DatabaseBackend, SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -83,23 +82,13 @@ async fn open_workspace_write_scope(
     ctx: &AppContext,
     workspace_id: Uuid,
 ) -> loco_rs::Result<sea_orm::DatabaseTransaction> {
-    if ctx.db.get_database_backend() != DatabaseBackend::Sqlite {
-        let tenant_id =
-            crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
-                .await
-                .internal()?;
-        return db::begin_workspace(ctx, tenant_id, workspace_id)
+    let tenant_id =
+        crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()));
-    }
-    Ok(ctx
-        .db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
+            .internal()?;
+    db::begin_workspace_write(ctx, tenant_id, workspace_id)
         .await
-        .internal()?)
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))
 }
 
 /// Shared implementation of the infer-fill worker's perform body.

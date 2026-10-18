@@ -84,18 +84,7 @@ pub struct PublishingState {
 pub(crate) async fn lock_publisher_shared(txn: &impl ConnectionTrait) -> Result<i64, DbErr> {
     let backend = txn.get_database_backend();
     if backend == sea_orm::DatabaseBackend::Sqlite {
-        txn.execute_unprepared("UPDATE queue_publishing_state SET epoch = epoch WHERE id = 1")
-            .await?;
-    }
-    if backend == sea_orm::DatabaseBackend::Sqlite {
-        let row = txn
-            .query_one_raw(Statement::from_string(
-                txn.get_database_backend(),
-                "SELECT epoch FROM queue_publishing_state WHERE id = 1",
-            ))
-            .await?
-            .ok_or_else(|| DbErr::RecordNotFound("queue publishing state".into()))?;
-        row.try_get("", "epoch")
+        reserve_publisher_write(txn).await
     } else {
         let row = txn
             .query_one_raw(Statement::from_string(
@@ -114,8 +103,8 @@ pub(crate) async fn lock_publisher_shared(txn: &impl ConnectionTrait) -> Result<
 pub(crate) async fn lock_publisher_exclusive(txn: &impl ConnectionTrait) -> Result<(), DbErr> {
     let backend = txn.get_database_backend();
     if backend == sea_orm::DatabaseBackend::Sqlite {
-        txn.execute_unprepared("UPDATE queue_publishing_state SET epoch = epoch WHERE id = 1")
-            .await?;
+        reserve_publisher_write(txn).await?;
+        return Ok(());
     }
     let row = txn
         .query_one_raw(Statement::from_string(
@@ -130,6 +119,21 @@ pub(crate) async fn lock_publisher_exclusive(txn: &impl ConnectionTrait) -> Resu
         .ok_or_else(|| DbErr::RecordNotFound("queue publishing state".into()))?;
     let _: i64 = row.try_get("", "epoch")?;
     Ok(())
+}
+
+/// SQLite has no row locks; a no-op write reserves its writer before reading the epoch.
+async fn reserve_publisher_write(txn: &impl ConnectionTrait) -> Result<i64, DbErr> {
+    use crate::models::_entities::queue_publishing_state::{Column, Entity};
+    Entity::update_many()
+        .col_expr(Column::Epoch, Expr::col(Column::Epoch))
+        .filter(Column::Id.eq(1))
+        .exec(txn)
+        .await?;
+    Entity::find_by_id(1)
+        .one(txn)
+        .await?
+        .map(|row| row.epoch)
+        .ok_or_else(|| DbErr::RecordNotFound("queue publishing state".into()))
 }
 
 ///
@@ -614,29 +618,31 @@ pub async fn prepare_replay_snapshot(
             "replay snapshot has already been prepared for this epoch".into(),
         ));
     }
-    let table = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        "public.queue_publishing_state"
-    } else {
-        "queue_publishing_state"
-    };
-    let cutoff = txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        format!("UPDATE {table} SET cutoff_at = $1, snapshot_id = $2 WHERE id = 1 AND epoch = $3 AND active = FALSE"),
-        [cutoff_at.into(), snapshot_id.to_owned().into(), expected_epoch.into()],
-    )).await?;
-    if cutoff.rows_affected() != 1 {
+    use crate::models::_entities::queue_publishing_state::{Column, Entity};
+    let cutoff = Entity::update_many()
+        .col_expr(Column::CutoffAt, Expr::val(cutoff_at))
+        .col_expr(Column::SnapshotId, Expr::val(snapshot_id))
+        .filter(Column::Id.eq(1))
+        .filter(Column::Epoch.eq(expected_epoch))
+        .filter(Column::Active.eq(false))
+        .exec(txn)
+        .await?;
+    if cutoff.rows_affected != 1 {
         return Err(DbErr::RecordNotFound(
             "paused publisher state changed".into(),
         ));
     }
     let replayed =
         replay_snapshot_locked(txn, expected_epoch, old_workers_exited, snapshot_id).await?;
-    let advanced = txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        format!("UPDATE {table} SET epoch = $1 WHERE id = 1 AND epoch = $2 AND active = FALSE AND snapshot_id = $3"),
-        [(expected_epoch + 1).into(), expected_epoch.into(), snapshot_id.to_owned().into()],
-    )).await?;
-    if advanced.rows_affected() != 1 {
+    let advanced = Entity::update_many()
+        .col_expr(Column::Epoch, Expr::val(expected_epoch + 1))
+        .filter(Column::Id.eq(1))
+        .filter(Column::Epoch.eq(expected_epoch))
+        .filter(Column::Active.eq(false))
+        .filter(Column::SnapshotId.eq(snapshot_id))
+        .exec(txn)
+        .await?;
+    if advanced.rows_affected != 1 {
         return Err(DbErr::RecordNotFound(
             "prepared publisher epoch changed".into(),
         ));
@@ -662,17 +668,16 @@ pub async fn activate_prepared_publishing_epoch(
             "activation requires the matching prepared next epoch and snapshot evidence".into(),
         ));
     }
-    let table = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        "public.queue_publishing_state"
-    } else {
-        "queue_publishing_state"
-    };
-    let result = txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        format!("UPDATE {table} SET active = TRUE WHERE id = 1 AND epoch = $1 AND active = FALSE AND snapshot_id = $2"),
-        [(expected_epoch + 1).into(), snapshot_id.to_owned().into()],
-    )).await?;
-    if result.rows_affected() != 1 {
+    use crate::models::_entities::queue_publishing_state::{Column, Entity};
+    let result = Entity::update_many()
+        .col_expr(Column::Active, Expr::val(true))
+        .filter(Column::Id.eq(1))
+        .filter(Column::Epoch.eq(expected_epoch + 1))
+        .filter(Column::Active.eq(false))
+        .filter(Column::SnapshotId.eq(snapshot_id))
+        .exec(txn)
+        .await?;
+    if result.rows_affected != 1 {
         return Err(DbErr::RecordNotFound(
             "prepared publishing epoch changed".into(),
         ));
@@ -706,23 +711,16 @@ pub async fn retag_for_replay(
 /// # Errors
 /// Returns an error if the database operation fails.
 pub async fn publishing_state(db: &impl ConnectionTrait) -> Result<PublishingState, DbErr> {
-    let row = db
-        .query_one_raw(Statement::from_string(
-            db.get_database_backend(),
-            if db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-                "SELECT epoch, active, cutoff_at, snapshot_id FROM public.queue_publishing_state WHERE id = 1"
-            } else {
-                "SELECT epoch, active, cutoff_at, snapshot_id FROM queue_publishing_state WHERE id = 1"
-            }
-            .to_owned(),
-        ))
+    use crate::models::_entities::queue_publishing_state::Entity;
+    let row = Entity::find_by_id(1)
+        .one(db)
         .await?
         .ok_or_else(|| DbErr::RecordNotFound("queue publishing state".into()))?;
     Ok(PublishingState {
-        epoch: row.try_get("", "epoch")?,
-        active: row.try_get("", "active")?,
-        cutoff_at: row.try_get("", "cutoff_at")?,
-        snapshot_id: row.try_get("", "snapshot_id")?,
+        epoch: row.epoch,
+        active: row.active,
+        cutoff_at: row.cutoff_at,
+        snapshot_id: row.snapshot_id,
     })
 }
 
@@ -739,17 +737,17 @@ pub async fn change_publishing_state(
     cutoff_at: Option<chrono::DateTime<chrono::FixedOffset>>,
 ) -> Result<i64, DbErr> {
     lock_publisher_exclusive(txn).await?;
-    let state_table = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        "public.queue_publishing_state"
-    } else {
-        "queue_publishing_state"
-    };
-    let result = txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        format!("UPDATE {state_table} SET epoch = epoch + 1, active = $1, cutoff_at = $2, snapshot_id = NULL WHERE id = 1 AND epoch = $3"),
-        [active.into(), cutoff_at.into(), expected_epoch.into()],
-    )).await?;
-    if result.rows_affected() != 1 {
+    use crate::models::_entities::queue_publishing_state::{Column, Entity};
+    let result = Entity::update_many()
+        .col_expr(Column::Epoch, Expr::col(Column::Epoch).add(1))
+        .col_expr(Column::Active, Expr::val(active))
+        .col_expr(Column::CutoffAt, Expr::val(cutoff_at))
+        .col_expr(Column::SnapshotId, Expr::val(None::<String>))
+        .filter(Column::Id.eq(1))
+        .filter(Column::Epoch.eq(expected_epoch))
+        .exec(txn)
+        .await?;
+    if result.rows_affected != 1 {
         return Err(DbErr::RecordNotFound(
             "queue publishing epoch changed".into(),
         ));
@@ -770,12 +768,15 @@ pub async fn claim_for_publish(
     if !state.active || state.epoch != expected_epoch {
         return Ok(false);
     }
-    let result = txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        "UPDATE queue_job_dispatch_outbox SET last_attempt_at = CURRENT_TIMESTAMP WHERE id = $1 AND publishing_epoch = $2 AND published_at IS NULL",
-        [id.into(), expected_epoch.into()],
-    )).await?;
-    Ok(result.rows_affected() == 1)
+    use crate::models::_entities::queue_job_dispatch_outbox::{Column, Entity};
+    let result = Entity::update_many()
+        .col_expr(Column::LastAttemptAt, Expr::current_timestamp())
+        .filter(Column::Id.eq(id))
+        .filter(Column::PublishingEpoch.eq(expected_epoch))
+        .filter(Column::PublishedAt.is_null())
+        .exec(txn)
+        .await?;
+    Ok(result.rows_affected == 1)
 }
 
 /// Advances the publisher epoch while applying the requested pause or activation state.
@@ -788,23 +789,11 @@ pub async fn advance_publishing_epoch(
     active: bool,
     cutoff_at: Option<&str>,
 ) -> Result<i64, DbErr> {
-    lock_publisher_exclusive(txn).await?;
-    let table = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        "public.queue_publishing_state"
-    } else {
-        "queue_publishing_state"
-    };
-    let result = txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        format!("UPDATE {table} SET epoch = epoch + 1, active = $1, cutoff_at = $2, snapshot_id = NULL WHERE id = 1 AND epoch = $3"),
-        [active.into(), cutoff_at.into(), expected_epoch.into()],
-    )).await?;
-    if result.rows_affected() != 1 {
-        return Err(DbErr::RecordNotFound(
-            "queue publishing epoch changed".into(),
-        ));
-    }
-    Ok(expected_epoch + 1)
+    let cutoff = cutoff_at
+        .map(chrono::DateTime::parse_from_rfc3339)
+        .transpose()
+        .map_err(|error| DbErr::Custom(format!("invalid cutover timestamp: {error}")))?;
+    change_publishing_state(txn, expected_epoch, active, cutoff).await
 }
 
 /// Records the operator-attested queue cutoff for a paused epoch.
@@ -817,21 +806,15 @@ pub async fn set_cutover_cutoff(
     cutoff_at: chrono::DateTime<chrono::FixedOffset>,
 ) -> Result<(), DbErr> {
     lock_publisher_exclusive(txn).await?;
-    let table = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        "public.queue_publishing_state"
-    } else {
-        "queue_publishing_state"
-    };
-    let result = txn
-        .execute_raw(Statement::from_sql_and_values(
-            txn.get_database_backend(),
-            format!(
-                "UPDATE {table} SET cutoff_at = $1 WHERE id = 1 AND epoch = $2 AND active = FALSE"
-            ),
-            [cutoff_at.into(), expected_epoch.into()],
-        ))
+    use crate::models::_entities::queue_publishing_state::{Column, Entity};
+    let result = Entity::update_many()
+        .col_expr(Column::CutoffAt, Expr::val(cutoff_at))
+        .filter(Column::Id.eq(1))
+        .filter(Column::Epoch.eq(expected_epoch))
+        .filter(Column::Active.eq(false))
+        .exec(txn)
         .await?;
-    if result.rows_affected() != 1 {
+    if result.rows_affected != 1 {
         return Err(DbErr::RecordNotFound(
             "paused publishing epoch changed".into(),
         ));
@@ -855,14 +838,23 @@ pub async fn claim_dispatch(
         txn.rollback().await?;
         return Ok(false);
     }
-    let backend = txn.get_database_backend();
+    use crate::models::_entities::queue_job_dispatch_outbox::{Column, Entity};
     let lease_until = crate::time::now() + chrono::Duration::seconds(lease_seconds);
-    let result = txn.execute_raw(Statement::from_sql_and_values(
-        backend,
-        "UPDATE queue_job_dispatch_outbox SET last_attempt_at = CURRENT_TIMESTAMP, claim_token = $3, claim_until = $4 WHERE id = $1 AND publishing_epoch = $2 AND published_at IS NULL AND (claim_until IS NULL OR claim_until <= CURRENT_TIMESTAMP)",
-        [id.into(), expected_epoch.into(), claim_token.to_string().into(), lease_until.into()],
-    )).await?;
-    let claimed = result.rows_affected() == 1;
+    let result = Entity::update_many()
+        .col_expr(Column::LastAttemptAt, Expr::current_timestamp())
+        .col_expr(Column::ClaimToken, Expr::val(claim_token.to_string()))
+        .col_expr(Column::ClaimUntil, Expr::val(lease_until))
+        .filter(Column::Id.eq(id))
+        .filter(Column::PublishingEpoch.eq(expected_epoch))
+        .filter(Column::PublishedAt.is_null())
+        .filter(
+            Column::ClaimUntil
+                .is_null()
+                .or(Expr::col(Column::ClaimUntil).lte(Expr::current_timestamp())),
+        )
+        .exec(&txn)
+        .await?;
+    let claimed = result.rows_affected == 1;
     txn.commit().await?;
     if !claimed {
         return Ok(false);
@@ -887,12 +879,22 @@ pub async fn acknowledge_dispatch(
         txn.rollback().await?;
         return Ok(false);
     }
-    let result = txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        "UPDATE queue_job_dispatch_outbox SET published_at = CURRENT_TIMESTAMP, claim_token = NULL, claim_until = NULL WHERE id = $1 AND publishing_epoch = $2 AND claim_token = $3 AND claim_until > CURRENT_TIMESTAMP AND published_at IS NULL",
-        [id.into(), epoch.into(), claim_token.to_string().into()],
-    )).await?;
-    if result.rows_affected() != 1 {
+    use crate::models::_entities::queue_job_dispatch_outbox::{Column, Entity};
+    let result = Entity::update_many()
+        .col_expr(Column::PublishedAt, Expr::current_timestamp())
+        .col_expr(Column::ClaimToken, Expr::val(None::<String>))
+        .col_expr(
+            Column::ClaimUntil,
+            Expr::val(None::<chrono::DateTime<chrono::FixedOffset>>),
+        )
+        .filter(Column::Id.eq(id))
+        .filter(Column::PublishingEpoch.eq(epoch))
+        .filter(Column::ClaimToken.eq(claim_token.to_string()))
+        .filter(Expr::col(Column::ClaimUntil).gt(Expr::current_timestamp()))
+        .filter(Column::PublishedAt.is_null())
+        .exec(&txn)
+        .await?;
+    if result.rows_affected != 1 {
         txn.rollback().await?;
         return Ok(false);
     }

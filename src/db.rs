@@ -95,33 +95,11 @@ pub(crate) async fn replace_postgres_app_pool(
         options.acquire_timeout(std::time::Duration::from_millis(acquire_timeout));
     }
 
-    let timezone = crate::time::configured(ctx).to_string();
-    let connect_timezone = timezone.clone();
-    let release_timezone = timezone;
-    options.map_sqlx_postgres_pool_opts(move |pool| {
-        let connect_timezone = connect_timezone.clone();
-        let release_timezone = release_timezone.clone();
-        let pool = pool.after_connect(move |conn, _meta| {
-            let timezone = connect_timezone.clone();
-            Box::pin(async move {
-                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
-                    .bind(timezone)
-                    .execute(&mut *conn)
-                    .await?;
-                Ok(())
-            })
-        });
-        pool.after_release(move |conn, _meta| {
-            let timezone = release_timezone.clone();
-            Box::pin(async move {
-                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
-                    .bind(timezone)
-                    .execute(&mut *conn)
-                    .await?;
-                Ok(true)
-            })
-        })
-    });
+    postgres_session_options(
+        &mut options,
+        crate::time::configured(ctx).to_string(),
+        false,
+    );
 
     let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
         loco_rs::Error::Message(format!("failed to build application pool: {error}"))
@@ -289,6 +267,12 @@ pub fn connect_postgres_pool(
         options.acquire_timeout(acquire_timeout);
     }
     options.connect_lazy(lazy);
+    postgres_session_options(&mut options, timezone, tenant);
+    async move { sea_orm::Database::connect(options).await }
+}
+
+/// Installs session ownership and reset policy for every application-owned PostgreSQL pool.
+fn postgres_session_options(options: &mut sea_orm::ConnectOptions, timezone: String, tenant: bool) {
     options.map_sqlx_postgres_pool_opts(move |pool| {
         let connect_timezone = timezone.clone();
         let release_timezone = timezone.clone();
@@ -326,7 +310,6 @@ pub fn connect_postgres_pool(
             })
         })
     });
-    async move { sea_orm::Database::connect(options).await }
 }
 
 /// Reads PostgreSQL's process-level activity view for the load guard.
@@ -516,6 +499,31 @@ pub(crate) async fn begin_workspace(
         .begin_for_workspace(tenant_id, workspace_id)
         .await
         .internal()
+}
+
+/// Begins a read-modify-write transaction, acquiring SQLite's writer reservation before reads.
+/// Other backends retain their normal transaction semantics.
+pub(crate) async fn begin_write(db: &DatabaseConnection) -> Result<DatabaseTransaction, DbErr> {
+    db.begin_with_options(sea_orm::TransactionOptions {
+        sqlite_transaction_mode: Some(sea_orm::SqliteTransactionMode::Immediate),
+        ..Default::default()
+    })
+    .await
+}
+
+/// Opens a workspace-scoped write transaction without exposing backend selection to workers.
+pub(crate) async fn begin_workspace_write(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<DatabaseTransaction, crate::YorishiroError> {
+    use crate::error::ResultExt;
+
+    if ctx.is_sqlite() {
+        begin_write(&ctx.db).await.internal()
+    } else {
+        begin_workspace(ctx, tenant_id, workspace_id).await
+    }
 }
 
 /// Which pools this deployment holds for control-plane vs. tenant-scoped access.

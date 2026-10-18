@@ -1,7 +1,6 @@
 //! Durable schema-default migration, executed by the selected Loco queue provider.
 
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -63,19 +62,9 @@ impl FillDefaultsWorker {
         let job_id = args
             .lifecycle_id
             .ok_or_else(|| loco_rs::Error::Message("fill-defaults lifecycle missing".into()))?;
-        let txn = if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            self.ctx
-                .db
-                .begin_with_options(TransactionOptions {
-                    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                    ..Default::default()
-                })
-                .await?
-        } else {
-            crate::db::begin_workspace(&self.ctx, args.tenant_id, args.workspace_id)
-                .await
-                .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-        };
+        let txn = crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id)
+            .await
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
         crate::db::lock_for_update(&txn, &format!("fill-defaults:{job_id}"))
             .await
             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;

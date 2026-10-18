@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ExprTrait, QuerySelect, Statement};
+use sea_orm::{ExprTrait, QuerySelect};
 use serde::Serialize;
 
 use crate::db_enum::db_enum;
@@ -264,18 +264,20 @@ pub(crate) async fn mark_active(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        conn.get_database_backend(),
-        "UPDATE workspace_workspaces \
-         SET status = $1, schema_id = COALESCE(schema_id, $2) \
-         WHERE id = $3",
-        [
-            WorkspaceStatus::Active.as_db_str().into(),
-            schema_id.into(),
-            workspace_id.into(),
-        ],
-    ))
-    .await
-    .internal()?;
+    use crate::models::_entities::workspace_workspaces::Column;
+    Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(WorkspaceStatus::Active.as_db_str()),
+        )
+        .col_expr(
+            Column::SchemaId,
+            sea_orm::sea_query::Func::coalesce([Expr::col(Column::SchemaId), Expr::val(schema_id)])
+                .into(),
+        )
+        .filter(Column::Id.eq(workspace_id))
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }

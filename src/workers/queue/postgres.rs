@@ -10,6 +10,10 @@ use sea_orm::sqlx::{
     self, AssertSqlSafe, ConnectOptions, Executor, PgPool, Postgres, QueryBuilder, Row,
     postgres::PgConnectOptions,
 };
+use sea_orm::{
+    ConnectionTrait, ExprTrait,
+    sea_query::{Alias, Expr, OnConflict, Query},
+};
 use serde_json::Value as JsonValue;
 use tokio::sync::watch;
 
@@ -79,8 +83,39 @@ impl PostgresTimezoneQueue {
         let now = crate::time::database_instant(
             crate::time::queue_now(self.timezone).with_timezone(&Utc),
         );
-        let inserted = sqlx::query("INSERT INTO pg_loco_queue (id,task_data,name,run_at,interval,tags,priority,created_at,updated_at) VALUES ($1,$2,$3,$4,NULL,$5,$6,$4,$4) ON CONFLICT (id) DO NOTHING")
-            .bind(&id).bind(args).bind(class).bind(now).bind(tags.map(serde_json::to_value).transpose()?).bind(priority.unwrap_or(0)).execute(&self.pool).await?;
+        let statement = Query::insert()
+            .into_table(Alias::new("pg_loco_queue"))
+            .columns(
+                [
+                    "id",
+                    "task_data",
+                    "name",
+                    "run_at",
+                    "interval",
+                    "tags",
+                    "priority",
+                    "created_at",
+                    "updated_at",
+                ]
+                .map(Alias::new),
+            )
+            .values_panic([
+                id.clone().into(),
+                args.into(),
+                class.into(),
+                now.into(),
+                Option::<i64>::None.into(),
+                tags.map(serde_json::to_value).transpose()?.into(),
+                priority.unwrap_or(0).into(),
+                now.into(),
+                now.into(),
+            ])
+            .on_conflict(OnConflict::column(Alias::new("id")).do_nothing().to_owned())
+            .to_owned();
+        let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.pool.clone());
+        let inserted = db
+            .execute_raw(db.get_database_backend().build(&statement))
+            .await?;
         if inserted.rows_affected() == 0 {
             return Err(loco_rs::Error::from(
                 crate::error::YorishiroError::Conflict {
@@ -231,12 +266,20 @@ impl QueueProvider for PostgresTimezoneQueue {
         let now = crate::time::database_instant(
             crate::time::queue_now(self.timezone).with_timezone(&Utc),
         );
-        sqlx::query("UPDATE pg_loco_queue SET status=$1,updated_at=$2 WHERE name=$3 AND status=$4")
-            .bind(JobStatus::Cancelled.to_string())
-            .bind(now)
-            .bind(name)
-            .bind(JobStatus::Queued.to_string())
-            .execute(&self.pool)
+        let statement = Query::update()
+            .table(Alias::new("pg_loco_queue"))
+            .values([
+                (
+                    Alias::new("status"),
+                    Expr::val(JobStatus::Cancelled.to_string()),
+                ),
+                (Alias::new("updated_at"), Expr::val(now)),
+            ])
+            .and_where(Expr::col(Alias::new("name")).eq(name))
+            .and_where(Expr::col(Alias::new("status")).eq(JobStatus::Queued.to_string()))
+            .to_owned();
+        let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.pool.clone());
+        db.execute_raw(db.get_database_backend().build(&statement))
             .await?;
         Ok(())
     }
@@ -244,19 +287,16 @@ impl QueueProvider for PostgresTimezoneQueue {
         if status.is_empty() {
             return Ok(());
         }
-        let mut q = String::from("DELETE FROM pg_loco_queue WHERE status IN (");
-        q.push_str(
-            &(1..=status.len())
-                .map(|i| format!("${i}"))
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        q.push(')');
-        let mut query = sqlx::query(AssertSqlSafe(q));
-        for value in status {
-            query = query.bind(value.to_string());
-        }
-        query.execute(&self.pool).await?;
+        let statement = Query::delete()
+            .from_table(Alias::new("pg_loco_queue"))
+            .and_where(
+                Expr::col(Alias::new("status"))
+                    .is_in(status.into_iter().map(|value| value.to_string())),
+            )
+            .to_owned();
+        let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.pool.clone());
+        db.execute_raw(db.get_database_backend().build(&statement))
+            .await?;
         Ok(())
     }
     async fn clear_jobs_older_than(
@@ -266,45 +306,46 @@ impl QueueProvider for PostgresTimezoneQueue {
     ) -> loco_rs::Result<()> {
         let cutoff = crate::time::queue_now(self.timezone).with_timezone(&Utc)
             - chrono::Duration::days(age_days);
-        let mut q = String::from("DELETE FROM pg_loco_queue WHERE created_at <= $1");
-        if status.is_some_and(|s| !s.is_empty()) {
-            q.push_str(" AND status IN (");
-            q.push_str(
-                &(2..=status.unwrap().len() + 1)
-                    .map(|i| format!("${i}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
+        let mut statement = Query::delete()
+            .from_table(Alias::new("pg_loco_queue"))
+            .and_where(Expr::col(Alias::new("created_at")).lte(cutoff))
+            .to_owned();
+        if let Some(values) = status.filter(|values| !values.is_empty()) {
+            statement.and_where(
+                Expr::col(Alias::new("status")).is_in(values.iter().map(ToString::to_string)),
             );
-            q.push(')');
         }
-        let mut query = sqlx::query(AssertSqlSafe(q)).bind(cutoff);
-        if let Some(values) = status.filter(|s| !s.is_empty()) {
-            for v in values {
-                query = query.bind(v.to_string());
-            }
-        }
-        query.execute(&self.pool).await?;
+        let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.pool.clone());
+        db.execute_raw(db.get_database_backend().build(&statement))
+            .await?;
         Ok(())
     }
     async fn retry_failed(&self, id: Option<&str>) -> loco_rs::Result<u64> {
         let now = crate::time::database_instant(
             crate::time::queue_now(self.timezone).with_timezone(&Utc),
         );
-        let result = if let Some(id) = id {
-            sqlx::query("UPDATE pg_loco_queue SET status=$1,updated_at=$2,run_at=$3 WHERE status=$4 AND id=$5").bind(JobStatus::Queued.to_string()).bind(now).bind(now).bind(JobStatus::Failed.to_string()).bind(id).execute(&self.pool).await?
-        } else {
-            sqlx::query(
-                "UPDATE pg_loco_queue SET status=$1,updated_at=$2,run_at=$3 WHERE status=$4",
-            )
-            .bind(JobStatus::Queued.to_string())
-            .bind(now)
-            .bind(now)
-            .bind(JobStatus::Failed.to_string())
-            .execute(&self.pool)
+        let mut statement = Query::update()
+            .table(Alias::new("pg_loco_queue"))
+            .values([
+                (
+                    Alias::new("status"),
+                    Expr::val(JobStatus::Queued.to_string()),
+                ),
+                (Alias::new("updated_at"), Expr::val(now)),
+                (Alias::new("run_at"), Expr::val(now)),
+            ])
+            .and_where(Expr::col(Alias::new("status")).eq(JobStatus::Failed.to_string()))
+            .to_owned();
+        if let Some(id) = id {
+            statement.and_where(Expr::col(Alias::new("id")).eq(id));
+        }
+        let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.pool.clone());
+        Ok(db
+            .execute_raw(db.get_database_backend().build(&statement))
             .await?
-        };
-        Ok(result.rows_affected())
+            .rows_affected())
     }
+
     async fn requeue(&self, age_minutes: &i64) -> loco_rs::Result<()> {
         requeue(&self.pool, *age_minutes, self.timezone).await
     }
@@ -394,23 +435,33 @@ async fn complete(
     timezone: crate::time::Timezone,
 ) -> loco_rs::Result<()> {
     let now = crate::time::database_instant(crate::time::queue_now(timezone).with_timezone(&Utc));
+    let mut statement = Query::update()
+        .table(Alias::new("pg_loco_queue"))
+        .values([
+            (
+                Alias::new("status"),
+                Expr::val(
+                    if interval.is_some() {
+                        JobStatus::Queued
+                    } else {
+                        JobStatus::Completed
+                    }
+                    .to_string(),
+                ),
+            ),
+            (Alias::new("updated_at"), Expr::val(now)),
+        ])
+        .and_where(Expr::col(Alias::new("id")).eq(id))
+        .to_owned();
     if let Some(ms) = interval {
-        let next = now + chrono::Duration::milliseconds(ms);
-        sqlx::query("UPDATE pg_loco_queue SET status=$1,updated_at=$2,run_at=$3 WHERE id=$4")
-            .bind(JobStatus::Queued.to_string())
-            .bind(now)
-            .bind(next.with_timezone(&Utc))
-            .bind(id)
-            .execute(pool)
-            .await?;
-    } else {
-        sqlx::query("UPDATE pg_loco_queue SET status=$1,updated_at=$2 WHERE id=$3")
-            .bind(JobStatus::Completed.to_string())
-            .bind(now)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        statement.value(
+            Alias::new("run_at"),
+            now + chrono::Duration::milliseconds(ms),
+        );
     }
+    let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
+    db.execute_raw(db.get_database_backend().build(&statement))
+        .await?;
     Ok(())
 }
 /// Stores a job failure and its error details.
@@ -429,15 +480,21 @@ async fn fail(
 async fn requeue(pool: &PgPool, age: i64, timezone: crate::time::Timezone) -> loco_rs::Result<()> {
     let now = crate::time::database_instant(crate::time::queue_now(timezone).with_timezone(&Utc));
     let cutoff = now - chrono::Duration::minutes(age);
-    sqlx::query(
-        "UPDATE pg_loco_queue SET status=$1,updated_at=$2 WHERE status=$3 AND updated_at <= $4",
-    )
-    .bind(JobStatus::Queued.to_string())
-    .bind(now)
-    .bind(JobStatus::Processing.to_string())
-    .bind(cutoff.with_timezone(&Utc))
-    .execute(pool)
-    .await?;
+    let statement = Query::update()
+        .table(Alias::new("pg_loco_queue"))
+        .values([
+            (
+                Alias::new("status"),
+                Expr::val(JobStatus::Queued.to_string()),
+            ),
+            (Alias::new("updated_at"), Expr::val(now)),
+        ])
+        .and_where(Expr::col(Alias::new("status")).eq(JobStatus::Processing.to_string()))
+        .and_where(Expr::col(Alias::new("updated_at")).lte(cutoff))
+        .to_owned();
+    let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
+    db.execute_raw(db.get_database_backend().build(&statement))
+        .await?;
     Ok(())
 }
 async fn get_jobs(

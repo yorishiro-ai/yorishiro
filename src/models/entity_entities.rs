@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
+use sea_orm::ExprTrait;
 use sea_orm::QuerySelect;
 use sea_orm::entity::prelude::*;
-use sea_orm::{FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -118,28 +118,30 @@ pub(crate) struct EmbeddingSnapshot {
 
 /// Finds every entity in a workspace that has no corresponding embedding row.
 ///
-/// Raw SQL keeps the portable anti-join across the width-specific embedding tables explicit.
+/// An anti-subquery per embedding table excludes embedded entities without backend-specific SQL.
 pub(crate) async fn missing_embeddings(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<EmbeddingSnapshot>, DbErr> {
-    let embedded = crate::models::entity_embeddings::embedding_tables()
-        .map(|table| format!("SELECT entity_id FROM {table}"))
-        .collect::<Vec<_>>()
-        .join(" UNION ");
-    EmbeddingSnapshot::find_by_statement(Statement::from_sql_and_values(
-        db.get_database_backend(),
-        format!(
-            "SELECT e.id, e.schema_id, e.entity_type, e.data, e.embedding_sync_token \
-             FROM entity_entities e \
-             LEFT JOIN ({embedded}) ee ON ee.entity_id = e.id \
-             WHERE e.workspace_id = $1 AND ee.entity_id IS NULL"
-        ),
-        [workspace_id.into()],
-    ))
-    .all(db)
-    .await
-    .map(|rows| rows.into_iter().collect())
+    use sea_orm::sea_query::{Alias, Query};
+    let mut select = Entity::find()
+        .select_only()
+        .columns([
+            Column::Id,
+            Column::SchemaId,
+            Column::EntityType,
+            Column::Data,
+            Column::EmbeddingSyncToken,
+        ])
+        .filter(Column::WorkspaceId.eq(workspace_id));
+    for table in crate::models::entity_embeddings::embedding_tables() {
+        let embedded = Query::select()
+            .column(Alias::new("entity_id"))
+            .from(Alias::new(table))
+            .to_owned();
+        select = select.filter(Expr::col(Column::Id).not_in_subquery(embedded));
+    }
+    select.into_model::<EmbeddingSnapshot>().all(db).await
 }
 
 #[loco_rs::prelude::async_trait]
