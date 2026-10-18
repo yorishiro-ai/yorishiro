@@ -214,10 +214,7 @@ impl QueueProvider for SqliteTimezoneQueue {
         ensure_queue_indexes(&self.pool).await
     }
     async fn clear(&self) -> loco_rs::Result<()> {
-        sqlx::query("DELETE FROM sqlt_loco_queue")
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+        loco_rs::bgworker::sqlt::clear(&self.pool).await
     }
     async fn ping(&self) -> loco_rs::Result<()> {
         loco_rs::bgworker::sqlt::ping(&self.pool).await?;
@@ -249,16 +246,7 @@ impl QueueProvider for SqliteTimezoneQueue {
         if status.is_empty() {
             return Ok(());
         }
-        let values = status.iter().map(ToString::to_string).collect::<Vec<_>>();
-        let marks = vec!["?"; values.len()].join(",");
-        let mut query = sqlx::query(AssertSqlSafe(format!(
-            "DELETE FROM sqlt_loco_queue WHERE status IN ({marks})"
-        )));
-        for value in values {
-            query = query.bind(value);
-        }
-        query.execute(&self.pool).await?;
-        Ok(())
+        loco_rs::bgworker::sqlt::clear_by_status(&self.pool, status).await
     }
     async fn clear_jobs_older_than(
         &self,

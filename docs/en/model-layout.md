@@ -9,6 +9,8 @@ None of them owns domain logic or builds ordinary queries.
 
 Use SeaORM for ordinary persistence and SeaQuery for atomic statements such as snapshot inserts and guarded embedding upserts.
 Atomicity alone is not a reason to use handwritten SQL.
+Prefer Loco's public APIs before application-owned SeaORM/SeaQuery operations, and use Tokio only where neither provides the required lifecycle behavior.
+The PostgreSQL queue delegates handler registration, execution, recovery and supported administration to Loco's `PgQueue` while retaining application-required enqueue collision protection.
 Database-specific transaction setup belongs in `src/db.rs`, not in individual workers.
 Tests call production operations instead of rebuilding enqueue or persistence logic in fixture helpers.
 Fixtures for old persisted formats still test current compatibility code and are not obsolete merely because the input format is old.

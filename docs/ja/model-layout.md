@@ -9,6 +9,8 @@
 
 通常の永続化にはSeaORMを使い、snapshotの作成や競合防止付きupsertなどの単一文にはSeaQueryを使います。
 原子性が必要という理由だけではRaw SQLを使いません。
+独自のSeaORM／SeaQuery処理より先にLocoの公開APIを使い、必要なライフサイクルをどちらでも扱えない場合にだけTokioを使います。
+PostgreSQLキューのhandler登録、実行、復旧、対応する管理操作はLocoの`PgQueue`に委譲し、投入時の衝突拒否など必要な差分だけを残します。
 DB固有のトランザクション設定は個々のworkerではなく`src/db.rs`に集約します。
 テストのhelperでenqueueや永続化を再実装せず、本体の操作を呼びます。
 旧形式データのfixtureでも、現行の互換処理を検証していれば不要なテストではありません。

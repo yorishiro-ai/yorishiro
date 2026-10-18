@@ -5,6 +5,10 @@ use sea_orm::sqlx::{self, AssertSqlSafe, PgPool};
 use yorishiro::workers::queue::postgres::PostgresTimezoneQueue;
 
 async fn provider() -> Option<PostgresTimezoneQueue> {
+    provider_with_workers(0).await
+}
+
+async fn provider_with_workers(num_workers: u32) -> Option<PostgresTimezoneQueue> {
     let url = postgres_test_url()?;
     let config = PostgresQueueConfig {
         uri: url,
@@ -15,7 +19,7 @@ async fn provider() -> Option<PostgresTimezoneQueue> {
         connect_timeout: 5_000,
         idle_timeout: 5_000,
         poll_interval_sec: 1,
-        num_workers: 0,
+        num_workers,
         reaper: None,
     };
     let timezone = "Asia/Tokyo".parse().unwrap();
@@ -300,15 +304,31 @@ async fn postgres_provider_lifecycle_metadata_admin_and_collision_contract() {
 
 #[tokio::test]
 async fn postgres_subsecond_due_claim_is_preserved() {
-    let Some(provider) = provider().await else {
+    let Some(provider) = provider_with_workers(1).await else {
         return;
     };
+    let provider = std::sync::Arc::new(provider);
     let pool = &provider.pool;
+    let tag = format!("zone-{}", ulid());
+    let (completed, mut observed) = tokio::sync::mpsc::unbounded_channel();
+    provider
+        .register_handler(
+            "tagged-zone-check".into(),
+            Box::new(move |id, _| {
+                let completed = completed.clone();
+                Box::pin(async move {
+                    completed.send(id).unwrap();
+                    Ok(())
+                })
+            }),
+        )
+        .await
+        .unwrap();
     let id = provider
         .enqueue_with_id(
             "tagged-zone-check".into(),
             serde_json::json!({"n":1}),
-            Some(vec!["zone".into()]),
+            Some(vec![tag.clone()]),
             Some(9),
             ulid(),
         )
@@ -332,6 +352,22 @@ async fn postgres_subsecond_due_claim_is_preserved() {
             .unwrap();
     assert_eq!(status, "queued");
     assert!(run_at < Utc::now());
+    let worker = provider.clone();
+    let runner = tokio::spawn(async move { worker.run(vec![tag]).await });
+    let delivered = tokio::time::timeout(std::time::Duration::from_secs(10), observed.recv()).await;
+    provider.shutdown().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), runner)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(delivered.unwrap(), Some(id.clone()));
+    let status: String = sqlx::query_scalar("SELECT status FROM pg_loco_queue WHERE id=$1")
+        .bind(&id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "completed");
     sqlx::query("DELETE FROM pg_loco_queue WHERE id=$1")
         .bind(id)
         .execute(pool)
