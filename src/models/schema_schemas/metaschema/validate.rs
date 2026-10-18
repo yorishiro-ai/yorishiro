@@ -257,7 +257,7 @@ fn validate_field(
         });
     }
     if let Some(pattern) = &field.pattern
-        && regex::Regex::new(pattern).is_err()
+        && jsonschema::validator_for(&serde_json::json!({ "pattern": pattern })).is_err()
     {
         details.push(ValidationDetail {
             field: format!("{field_path}/pattern"),

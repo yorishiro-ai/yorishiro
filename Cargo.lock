@@ -7698,7 +7698,6 @@ dependencies = [
  "migration",
  "proptest",
  "redis",
- "regex",
  "reqwest",
  "rmcp",
  "schemars",
