@@ -74,10 +74,6 @@ Merge commit is the usual strategy, not squash. PRs that carry an empirical reco
 
 When unclear, prefer a merge commit: losing an empirical record is the more expensive mistake.
 
-## Docs
-
-User-facing docs live in the wiki (`yorishiro-ai/wiki`), in English and Japanese. A PR that changes user-facing behavior, configuration, or MCP tools needs a matching wiki PR.
-
 ## Versioning
 
 - `version = "0.60.0"` in the root `[package]` is the source of truth.
