@@ -56,7 +56,7 @@ async fn detect_startup_reindex(ctx: &AppContext) {
     let workspaces = match crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db).await {
         Ok(workspaces) => workspaces,
         Err(err) => {
-            tracing::error!("startup reindex: failed to list workspaces: {err}");
+            tracing::error!(error = %err, "startup reindex: failed to list workspaces");
             return;
         }
     };

@@ -14,6 +14,7 @@ pub mod controllers;
 pub mod data;
 pub mod db;
 pub(crate) mod dtos;
+pub(crate) mod initializers;
 pub mod models;
 pub mod services;
 pub mod tasks;

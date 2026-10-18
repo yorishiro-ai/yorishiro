@@ -1,3 +1,10 @@
+//! Application logging policy, installed through Loco's logger hook.
+//!
+//! Logger settings and filtering come from Loco's configuration.
+//! Events use tracing with stable messages and structured fields, including `error` for failures.
+//! CLI results remain on stdout; operational diagnostics belong in tracing events.
+//! Error response rendering and internal-error reporting live in `crate::error`.
+
 use std::fmt;
 
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};

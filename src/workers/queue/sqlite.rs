@@ -209,7 +209,7 @@ impl QueueProvider for SqliteTimezoneQueue {
                                     Ok(()) => if let Err(error) = complete(&pool, &job.id, job.interval, timezone).await { tracing::error!(%error, job_id=%job.id, "queue completion failed"); },
                                     Err(error) => if let Err(fail_error) = fail(&pool, &job.id, &error, timezone).await { tracing::error!(%fail_error, job_id=%job.id, "queue failure update failed"); },
                                 }
-                            } else { tracing::error!(worker_index, job_name=%job.name, "No handler registered for job"); }
+                            } else { tracing::error!(worker_index, job_name=%job.name, "no handler registered for job"); }
                             if *stop.borrow() { break; }
                         }
                         Ok(None) => tokio::select! { biased; changed = stop.changed() => if changed.is_err() || *stop.borrow() { break; }, () = tokio::time::sleep(Duration::from_secs(poll.into())) => {} },

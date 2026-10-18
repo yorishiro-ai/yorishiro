@@ -184,7 +184,7 @@ impl Entity {
             })
             .exec(db)
             .await?;
-        tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
+        tracing::warn!(lifecycle_id = %id, error = error, "queue job deferred for retry");
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
         }
@@ -222,7 +222,7 @@ impl Entity {
             )
             .exec(db)
             .await?;
-        tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
+        tracing::warn!(lifecycle_id = %id, error = error, "queue job deferred for retry");
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
         }
@@ -274,7 +274,7 @@ impl Entity {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(error) => {
-                        tracing::warn!(lifecycle_id = %id, diagnostic = %error, "queue lease renewal failed");
+                        tracing::warn!(lifecycle_id = %id, error = %error, "queue lease renewal failed");
                         break;
                     }
                 }

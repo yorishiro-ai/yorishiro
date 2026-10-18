@@ -269,7 +269,7 @@ impl QueueProvider for ValkeyTimezoneQueue {
                         Ok(Some((job, queue))) => {
                             let handler = handlers.lock().await.get(&job.name).cloned();
                             let Some(handler) = handler else {
-                                tracing::error!(worker, job_name=%job.name, "No handler registered for job");
+                                tracing::error!(worker, job_name=%job.name, "no handler registered for job");
                                 tokio::select! {
                                     biased;
                                     changed = token.changed() => if changed.is_err() || *token.borrow() { break; },
@@ -280,10 +280,10 @@ impl QueueProvider for ValkeyTimezoneQueue {
                             let result=handler(job.id.clone(), job.data.clone()).await;
                             match result {
                                 Ok(()) => if let Err(error) = finish(&client, &job, &queue, timezone).await {
-                                    tracing::error!(%error, job_id=%job.id, "Valkey completion failed");
+                                    tracing::error!(%error, job_id=%job.id, "valkey completion failed");
                                 },
                                 Err(error) => if let Err(failure) = fail(&client, &job, &queue, &error, timezone).await {
-                                    tracing::error!(%failure, job_id=%job.id, "Valkey failure update failed");
+                                    tracing::error!(%failure, job_id=%job.id, "valkey failure update failed");
                                 },
                             }
                         }
@@ -294,7 +294,7 @@ impl QueueProvider for ValkeyTimezoneQueue {
                         },
                         Err(_) if *token.borrow() => break,
                         Err(error) => {
-                            tracing::error!(%error, "Valkey dequeue failed");
+                            tracing::error!(%error, "valkey dequeue failed");
                             tokio::select! {
                                 biased;
                                 changed = token.changed() => if changed.is_err() || *token.borrow() { break; },
@@ -497,7 +497,7 @@ async fn dequeue(
                         tracing::error!(job_id=%id,"invalid Valkey job JSON; left in queue")
                     }
                 } else {
-                    tracing::error!(job_id=%id, queue=%queue, "Job data not found; removing stale queue member");
+                    tracing::error!(job_id=%id, queue=%queue, "job data not found; removing stale queue member");
                     let _: usize = c.zrem(&q, id).await.map_err(loco_rs::Error::from)?;
                 }
             }

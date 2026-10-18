@@ -6,9 +6,9 @@ src/data/config.rs	fn	validate	integration-test: external settings tests exercis
 src/data/settings.rs	field	Settings::timezone	integration-test: external configuration tests assert the validated timezone setting.
 src/db.rs	fn	set_session_timezone	integration-test: PostgreSQL integration tests verify configured session-zone behavior on real connections.
 src/db.rs	fn	connect_postgres_pool	integration-test: PostgreSQL integration tests exercise the production SeaORM identity pool factory and verify timezone reset on backend reuse.
-src/initializers/mod.rs	mod	timezone_logger	integration-test: external formatter test verifies real timezone-rendered logger timestamps.
-src/initializers/timezone_logger.rs	struct	ConfiguredTimer	integration-test: formatter test invokes the production timer to check DST offsets and trailing-space behavior.
-src/initializers/timezone_logger.rs	fn	ConfiguredTimer::new	integration-test: formatter test supplies explicit IANA zones to the production timer.
+src/initializers/mod.rs	mod	logger	integration-test: external formatter test verifies real timezone-rendered logger timestamps.
+src/initializers/logger.rs	struct	ConfiguredTimer	integration-test: formatter test invokes the production timer to check DST offsets and trailing-space behavior.
+src/initializers/logger.rs	fn	ConfiguredTimer::new	integration-test: formatter test supplies explicit IANA zones to the production timer.
 src/lib.rs	mod	time	integration-test: external tests verify shared timezone parsing and instant-preserving conversion.
 src/models/mod.rs	mod	timezone_state	integration-test: external backend tests exercise transactional singleton activation and rollback.
 src/models/timezone_state.rs	fn	activate	integration-test: external SQLite/PostgreSQL tests exercise the table-owned timezone state transition.

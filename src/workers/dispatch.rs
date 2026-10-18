@@ -86,20 +86,6 @@ pub async fn recover_pending(ctx: &AppContext) {
     recover_pending_on(ctx, db.as_ref().unwrap_or(&ctx.db)).await;
 }
 
-pub(crate) fn start_relay(ctx: &AppContext) {
-    if ctx.shared_store.get::<tokio::task::AbortHandle>().is_some() {
-        return;
-    }
-    let relay_ctx = ctx.clone();
-    let task = tokio::spawn(async move {
-        loop {
-            recover_pending(&relay_ctx).await;
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
-    });
-    ctx.shared_store.insert(task.abort_handle());
-}
-
 pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnection) {
     let state = match crate::models::queue_job_dispatch_outbox::publishing_state(db).await {
         Ok(state) if state.active => state,
@@ -257,7 +243,7 @@ pub(crate) async fn dispatch_job(
         Err(error) => {
             let diagnostic = format!("worker target lookup failed: {error}");
             refuse(ctx, &spec, lifecycle_id, None, class, 0, &diagnostic).await;
-            tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, diagnostic = %diagnostic, "queue dispatch refused because the worker target is unknown");
+            tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, error = %diagnostic, "queue dispatch refused because the worker target is unknown");
             return Err(loco_rs::Error::Message(diagnostic));
         }
     };
@@ -267,7 +253,7 @@ pub(crate) async fn dispatch_job(
             Ok(policy) => policy,
             Err(error) => {
                 refuse(ctx, &spec, lifecycle_id, None, class, 0, &error).await;
-                tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, diagnostic = %error, "queue policy unavailable");
+                tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, error = %error, "queue policy unavailable");
                 return Err(loco_rs::Error::Message(error));
             }
         };
@@ -299,7 +285,7 @@ pub(crate) async fn dispatch_job(
                 worker_class = class,
                 policy = "starvation",
                 degraded = true,
-                diagnostic = %diagnostic,
+                error = %diagnostic,
                 "queue dispatch refused because starvation policy is unavailable"
             );
             return Err(loco_rs::Error::Message(diagnostic));
@@ -395,7 +381,7 @@ async fn refuse(
     )
     .await
     {
-        tracing::warn!(lifecycle_id = %lifecycle_id, diagnostic = %error, "refused job could not be recorded");
+        tracing::warn!(lifecycle_id = %lifecycle_id, error = %error, "refused job could not be recorded");
         return;
     }
     close_unavailable(ctx, lifecycle_id, diagnostic).await;
@@ -411,6 +397,6 @@ async fn close_unavailable(ctx: &AppContext, lifecycle_id: Uuid, diagnostic: &st
     )
     .await
     {
-        tracing::warn!(lifecycle_id = %lifecycle_id, diagnostic = %error, "unavailable job could not be closed");
+        tracing::warn!(lifecycle_id = %lifecycle_id, error = %error, "unavailable job could not be closed");
     }
 }

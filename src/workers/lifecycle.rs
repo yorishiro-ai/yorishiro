@@ -80,7 +80,7 @@ where
             if let Err(error) =
                 Entity::finish(&ctx.db, id, Some(attempt), LifecycleStatus::Completed, None).await
             {
-                tracing::warn!(lifecycle_id = %id, diagnostic = %error, "job finished but its lifecycle could not be completed");
+                tracing::warn!(lifecycle_id = %id, error = %error, "job finished but its lifecycle could not be completed");
             }
             Ok(())
         }

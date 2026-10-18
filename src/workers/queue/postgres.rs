@@ -198,7 +198,7 @@ impl QueueProvider for PostgresTimezoneQueue {
                                 Err(err) => if let Err(fail_err) = fail(&pool, &job.id, &err, timezone).await { tracing::error!(%fail_err, job_id=%job.id, "queue failure failed"); },
                             }
                         } else {
-                            tracing::error!(worker_index, job_name=%job.name, "No handler registered for job");
+                            tracing::error!(worker_index, job_name=%job.name, "no handler registered for job");
                         },
                         Ok(None) => tokio::select! { biased; changed = token.changed() => if changed.is_err() || *token.borrow() { break; }, () = tokio::time::sleep(Duration::from_secs(poll.into())) => {} },
                         Err(err) => { tracing::error!(%err, "queue dequeue failed"); tokio::select! { () = tokio::time::sleep(Duration::from_secs(1)) => {}, changed = token.changed() => if changed.is_err() || *token.borrow() { break; } } },

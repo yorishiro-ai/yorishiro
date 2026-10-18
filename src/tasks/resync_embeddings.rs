@@ -60,7 +60,7 @@ impl Task for ResyncEmbeddings {
                 Ok(()) => queued += 1,
                 Err(err) => {
                     failed += 1;
-                    eprintln!("  failed to queue entity {}: {err}", candidate.id);
+                    tracing::error!(entity_id = %candidate.id, error = %err, "failed to queue entity");
                 }
             }
         }
