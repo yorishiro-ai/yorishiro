@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import PurePosixPath
 
-GROUPS = ("rust", "ee", "shared", "config", "migration", "topology", "packaging", "docker", "release", "deps", "docs")
+GROUPS = ("rust", "ee", "shared", "config", "migration", "topology", "packaging", "docker", "release", "deps")
 ALL = set(GROUPS)
 
 RUST_SETUP_CONSUMERS = {"rust", "ee", "deps", "packaging", "release"}
@@ -33,7 +33,7 @@ def classify_path(path: str) -> set[str]:
 
     if s.startswith("src/"):
         groups |= {"rust"}
-    if s.startswith("ee/") and not p.name.endswith(".md"):
+    if s.startswith("ee/"):
         groups |= {"ee"}
     if s.startswith("edition/"):
         groups |= {"shared", "rust", "ee"}
@@ -55,13 +55,10 @@ def classify_path(path: str) -> set[str]:
         groups |= {"release"}
     if s in {"Cargo.toml", "Cargo.lock", "migration/Cargo.toml"} or (p.name in {"Cargo.toml", "Cargo.lock"}):
         groups |= {"deps", "rust", "ee"}
-    if p.name.endswith(".md"):
-        groups |= {"docs"}
     workflow_groups = {
         ".github/workflows/ci.yml": {"shared", "rust", "ee"},
         ".github/workflows/release.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/release_pre.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
-        ".github/workflows/doc-check.yml": set(),
         ".github/workflows/security.yml": {"deps"},
         ".github/workflows/dep-audit.yml": {"deps"},
         ".github/workflows/coverage.yml": {"rust", "ee"},
@@ -96,8 +93,6 @@ def classify(paths: list[str], force_full: bool = False) -> dict[str, bool]:
     groups = set(ALL) if force_full else set().union(*(classify_path(p) for p in paths)) if paths else set()
     selected = {group: group in groups for group in GROUPS}
     selected["full"] = force_full or groups == ALL
-    selected["docs_only"] = bool(groups) and groups <= {"docs"}
-    selected["code"] = bool(groups - {"docs"})
     package_related = bool(groups & {"packaging", "docker", "release"})
     selected["package_build"] = force_full or package_related
     selected["package_validation"] = force_full or package_related

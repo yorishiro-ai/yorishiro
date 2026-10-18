@@ -37,7 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.classify.outputs.full }}
-      docs_only: ${{ steps.classify.outputs.docs_only }}
       rust_validation: ${{ steps.classify.outputs.rust_validation }}
       package_validation: ${{ steps.classify.outputs.package_validation }}
       package_build: ${{ steps.classify.outputs.package_build }}

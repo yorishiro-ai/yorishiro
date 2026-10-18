@@ -10,15 +10,8 @@ def test_unknown_defaults_to_full() -> None:
     assert classify_path(".github/workflows/unknown.yml") == ALL
 
 
-def test_docs_are_lightweight() -> None:
-    assert classify_path("README.md") == {"docs"}
-    assert classify_path("ee/docs/configuration.md") == {"docs"}
-    assert classify(["README.md", "CONTRIBUTING.md"])["docs_only"]
+def test_ee_paths_select_ee() -> None:
     assert classify_path("ee/models/example.rs") == {"ee"}
-    result = classify(["CONTRIBUTING.md", "AGENTS.md"])
-    assert result["docs_only"]
-    assert not result["rust_validation"]
-    assert not result["package_validation"]
 
 
 def test_packaging_selects_package_and_rust() -> None:
@@ -42,7 +35,6 @@ def test_manual_full_run_selects_every_group() -> None:
 def test_misc_workflow_change_does_not_force_package_matrix() -> None:
     result = classify([".github/workflows/stale.yml"])
     assert not result["package_build"]
-    assert not classify([".github/workflows/doc-check.yml"])["full"]
     assert not result["package_validation"]
 
 
@@ -64,7 +56,6 @@ def test_shared_actions_fan_out_to_consumers() -> None:
 
 def test_missing_paths_force_full_and_manual_force_is_full() -> None:
     assert classify([], force_full=True)["full"]
-    assert classify(["CONTRIBUTING.md"])["docs_only"]
 
 
 def test_selected_gate_states_fail_unless_success_or_intentionally_skipped() -> None:
@@ -80,8 +71,6 @@ def test_package_and_docker_groups_are_independent() -> None:
     docker = classify(["Dockerfile"])
     assert docker["package_build"] and docker["package_validation"]
     assert docker["docker_validation"]
-    docs = classify(["CONTRIBUTING.md"])
-    assert not docs["package_build"] and not docs["package_validation"]
     dependency = classify(["Cargo.lock"])
     assert dependency["security_validation"]
 
@@ -96,7 +85,7 @@ def test_package_build_prerequisite_selection() -> None:
 if __name__ == "__main__":
     for test in (
         test_unknown_defaults_to_full,
-        test_docs_are_lightweight,
+        test_ee_paths_select_ee,
         test_packaging_selects_package_and_rust,
         test_release_workflow_selects_all_validations,
         test_manual_full_run_selects_every_group,
