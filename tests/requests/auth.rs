@@ -6,6 +6,58 @@ use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn concurrent_invited_signups_consume_the_token_once_without_internal_errors() {
+    use sea_orm::ActiveModelTrait;
+    use yorishiro::models::{tenant_tenants, workspace_invites};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = tenant_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("concurrent-invite".into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let (_, token) = workspace_invites::create_invite(
+            &ctx.db,
+            tenant.id,
+            "race-invite@example.com",
+            MembershipRole::Member,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        let body = serde_json::json!({"invite_token": token, "password": "test-password"});
+        let barrier = tokio::sync::Barrier::new(2);
+        let signup = || async {
+            barrier.wait().await;
+            request.post("/auth/signup").json(&body).await
+        };
+        let (first, second) = tokio::join!(signup(), signup());
+        let statuses = [first.status_code(), second.status_code()];
+        assert_eq!(
+            statuses
+                .iter()
+                .filter(|status| **status == StatusCode::CREATED)
+                .count(),
+            1
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .filter(|status| **status == StatusCode::UNPROCESSABLE_ENTITY)
+                .count(),
+            1,
+            "responses: {} / {}",
+            first.text(),
+            second.text()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn failed_invited_registration_does_not_consume_the_invite() {
     use sea_orm::EntityTrait;
     use yorishiro::models::{tenant_tenants, user_users, workspace_invites};

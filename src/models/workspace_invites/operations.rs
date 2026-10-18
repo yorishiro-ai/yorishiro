@@ -3,7 +3,7 @@
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    QueryFilter, TransactionTrait,
+    QueryFilter,
 };
 use uuid::Uuid;
 
@@ -68,7 +68,7 @@ pub(crate) async fn register_user(
     password: &str,
     display_name: Option<&str>,
 ) -> Result<(crate::models::user_users::Model, RedeemedInvite), YorishiroError> {
-    let txn = db.begin().await.internal()?;
+    let txn = crate::db::begin_write(db).await.internal()?;
     let invite = redeem_invite_at(&txn, raw_token, crate::time::now())
         .await?
         .ok_or_else(|| YorishiroError::ValidationFailed {
