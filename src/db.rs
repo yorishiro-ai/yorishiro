@@ -447,13 +447,17 @@ impl TenantDb {
     }
 }
 
-/// Sets a PostgreSQL session's timezone using an escaped IANA name.
+/// Sets a PostgreSQL session's timezone using a bound IANA name.
 ///
 /// # Errors
 /// Returns an error if the statement fails.
 pub async fn set_session_timezone(db: &DatabaseConnection, timezone: &str) -> Result<(), DbErr> {
-    db.execute_unprepared(&format!("SET TIME ZONE '{}'", timezone.replace('\'', "''")))
-        .await?;
+    db.execute_raw(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT set_config('TimeZone', $1, false)",
+        [timezone.into()],
+    ))
+    .await?;
     Ok(())
 }
 
@@ -726,38 +730,44 @@ pub async fn acquire_workspace_reindex_lock(
     })
 }
 
-/// Acquires the session-scoped advisory lock and runs a reindex under it, returning the outcome.
-///
-/// This is the single-entry-point the concurrency test exercises: it races two such calls
-/// against the same workspace with different providers so the lock's serialization — and the
-/// restamp-on-full-success invariant that depends on it — can be verified.
+/// Runs a reindex with the backend's workspace serialization policy.
+/// PostgreSQL holds a detached session lock; SQLite retains the model's transactional writes without a session lock.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn reindex_workspace_with_lock(
-    pool: PgPool,
+    ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
-    conn: &impl ConnectionTrait,
     candidate_ids: &[Uuid],
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    let lock = acquire_workspace_reindex_lock(pool, workspace_id)
-        .await
-        .map_err(|err| {
+    let lock = if ctx.is_sqlite() {
+        None
+    } else {
+        let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
             crate::YorishiroError::Internal(anyhow::anyhow!(
-                "failed to acquire workspace lock: {err}"
+                "reindex requires the tenant pool, which this deployment did not build"
             ))
         })?;
+        Some(
+            acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
+                .await
+                .map_err(|err| {
+                    crate::YorishiroError::Internal(anyhow::anyhow!(
+                        "failed to acquire workspace lock: {err}"
+                    ))
+                })?,
+        )
+    };
     let outcome = crate::models::entity_embeddings::reindex_workspace(
-        conn,
+        &ctx.db,
         workspace_id,
         candidate_ids,
         provider,
     )
     .await;
-    let _ = lock.release().await;
-    match outcome {
-        Ok(ok) => Ok(ok),
-        Err(err) => Err(err),
+    if let Some(lock) = lock {
+        let _ = lock.release().await;
     }
+    outcome
 }

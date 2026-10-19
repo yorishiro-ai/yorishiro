@@ -31,6 +31,9 @@ APIキー、招待、OAuthのnonce生成はLocoの暗号学的に安全な`hash:
 アプリケーションの`rand`直接依存は削除しましたが、フレームワークなどの推移依存には残ります。
 
 transport adapterはDBのbackendを自身で選ばず、共通のrequest認証guardを使用します。
+再インデックスworkerと回帰テストは、backend固有のadvisory lockを管理する同じDBの入口を使用します。
+公開APIで表現できる場合は、独自のSQL演算子文字列ではなく`PgBinOper::CosineDistance`などSeaQueryの型付き演算子を使用します。
+Raw SQLは接続・セッション操作、セキュリティ境界、原子性や計測済みの性能上必要なクエリに限定し、通常のレコード検索には使用しません。
 認証情報の解決、scopeの検査、workspace transactionを分け、認証の解決だけを行うrouteに使用履歴の更新や不要な接続保持を追加しないでください。
 
 queue providerの試験は保存先を隔離し、設定された共有DBを全消去しないでください。

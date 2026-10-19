@@ -77,32 +77,13 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
             .await
             .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
-    let outcome = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        crate::models::entity_embeddings::reindex_workspace(
-            &ctx.db,
-            args.workspace_id,
-            &candidate_ids,
-            provider.as_ref(),
-        )
-        .await
-    } else {
-        let db_handle = ctx
-            .shared_store
-            .get::<crate::db::DbHandle>()
-            .ok_or_else(|| {
-                loco_rs::Error::Message(
-                    "reindex requires the tenant pool, which this deployment did not build".into(),
-                )
-            })?;
-        crate::db::reindex_workspace_with_lock(
-            db_handle.tenant.pool().clone(),
-            args.workspace_id,
-            &ctx.db,
-            &candidate_ids,
-            provider.as_ref(),
-        )
-        .await
-    }
+    let outcome = crate::db::reindex_workspace_with_lock(
+        ctx,
+        args.workspace_id,
+        &candidate_ids,
+        provider.as_ref(),
+    )
+    .await
     .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
     if !outcome.failures.is_empty() {

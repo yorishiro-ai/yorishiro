@@ -14,7 +14,7 @@
 //! Both use the same provider, so documents and queries share one vector space.
 
 use sea_orm::sea_query::{
-    Alias, BinOper, Expr, ExprTrait, Func, JoinType, Order, Query, SelectStatement,
+    Alias, Expr, ExprTrait, Func, JoinType, Order, Query, SelectStatement,
     extension::postgres::{PgBinOper, PgExpr},
 };
 use sea_orm::{ConnectionTrait, FromQueryResult};
@@ -312,9 +312,8 @@ pub(crate) async fn search_in_table(
             ])
             .into()
     } else {
-        // SeaQuery has no pgvector cosine-distance operator.
         embedding.clone().binary(
-            BinOper::Custom("<=>"),
+            PgBinOper::CosineDistance,
             Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
         )
     };
