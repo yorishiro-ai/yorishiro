@@ -305,6 +305,17 @@ The optional comparison table is named `<embedding_table>_vec0` and must have `e
 The workspace partition is applied inside KNN selection, so another workspace cannot consume its nearest-neighbor slots.
 The task counts only non-null embeddings in the selected workspace and refuses a comparison that returns no matching entities.
 
+### Worker Admission Configuration
+
+The enterprise overlay reads target concurrency limits from `initializers.worker_admission` in the resolved Loco configuration.
+The `shared` and `tenant_private` fields default to 1, while an absent `official` field uses the plan's official-worker limit.
+Values must be positive integers; empty strings mean no override.
+The shipped configuration files interpolate `YORISHIRO_WORKER_CLASS_SHARED_LIMIT`, `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` and `YORISHIRO_WORKER_OFFICIAL_LIMIT` into these fields.
+Configuration-file overrides take precedence, and later environment changes do not change a loaded configuration.
+Community builds ignore this initializer block, and admission caps remain disabled unless plan policy is enabled.
+The plan-policy switch is `initializers.plan_policy_enabled`, populated from `YORISHIRO_PLAN_POLICY_ENABLED` in the shipped files.
+It accepts a boolean or case-insensitive boolean text and is fixed when the context is built.
+
 ## Secret handling in logs
 
 API keys, webhook secrets, OAuth credentials, OIDC tokens, and licence owner information are hidden from debug logs.

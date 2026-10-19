@@ -90,3 +90,10 @@ auth:
   jwt:
     secret: sqliteTierManualVerification
     expiration: 604800 # 7 days
+
+initializers:
+  plan_policy_enabled: '<%= get_env(name="YORISHIRO_PLAN_POLICY_ENABLED", default="false") %>'
+  worker_admission:
+    shared: '<%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="") %>'
+    tenant_private: '<%= get_env(name="YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", default="") %>'
+    official: '<%= get_env(name="YORISHIRO_WORKER_OFFICIAL_LIMIT", default="") %>'

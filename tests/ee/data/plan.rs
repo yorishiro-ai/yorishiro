@@ -2,6 +2,80 @@ use crate::EnvGuard;
 use serial_test::serial;
 use yorishiro::edition::ee::data::plan::{Plan, PriorityTier, plan_policy_enabled};
 
+#[tokio::test]
+#[serial(process_environment)]
+async fn admission_limits_follow_the_resolved_config_not_later_environment_changes() {
+    use loco_rs::{app::Hooks, environment::Environment};
+    use yorishiro::workers::embedding_sync::WorkerClass;
+    let guard = EnvGuard::capture(&[
+        "YORISHIRO_PLAN_POLICY_ENABLED",
+        "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
+    ]);
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
+    guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "2");
+    let directory = tempfile::tempdir().unwrap();
+    let env = Environment::Any("test_sqlite".into());
+    let mut config = yorishiro::App::load_config(&env).await.unwrap();
+    config.database.uri = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("app.sqlite3").display()
+    );
+    if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
+        queue.uri = format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("queue.sqlite3").display()
+        );
+    }
+    config
+        .initializers
+        .as_mut()
+        .unwrap()
+        .get_mut("worker_admission")
+        .unwrap()["shared"] = 7.into();
+    guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "invalid-after-load");
+    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid-after-load");
+    let boot = yorishiro::App::boot(
+        loco_rs::boot::StartMode::ServerOnly,
+        &Environment::Test,
+        config,
+    )
+    .await
+    .unwrap();
+    let ctx = &boot.app_context;
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+    let tenant = tenant_tenants::ActiveModel {
+        name: Set("config-limits".into()),
+        ..Default::default()
+    }
+    .insert(&ctx.db)
+    .await
+    .unwrap();
+    let workspace = workspace_workspaces::ActiveModel {
+        tenant_id: Set(tenant.id),
+        name: Set("main".into()),
+        status: Set("active".into()),
+        ..Default::default()
+    }
+    .insert(&ctx.db)
+    .await
+    .unwrap();
+    let policy = ctx
+        .shared_store
+        .get::<std::sync::Arc<dyn yorishiro::workers::queue::QueuePolicy>>()
+        .unwrap();
+    assert_eq!(
+        policy
+            .concurrency(ctx, workspace.id, WorkerClass::Shared)
+            .await
+            .unwrap()
+            .limit,
+        Some(7)
+    );
+    let path = directory.path().join("app.sqlite3");
+    crate::requests::close_app_pools_sqlite(ctx, path.to_str().unwrap()).await;
+}
+
 #[test]
 fn plan_claims_preserve_existing_values_and_map_enterprise_to_team() {
     let claims = [
@@ -52,18 +126,32 @@ fn compute_policies_match_the_published_bounds() {
 }
 
 #[test]
-#[serial(process_environment)]
-fn plan_policy_parser_is_guarded_and_restores_environment() {
-    let guard = EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-    assert!(!plan_policy_enabled().unwrap());
-    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "TrUe");
-    assert!(plan_policy_enabled().unwrap());
-    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "false");
-    assert!(!plan_policy_enabled().unwrap());
-    guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "invalid");
-    let error = plan_policy_enabled().expect_err("invalid flag");
-    assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED"));
+fn plan_policy_parser_accepts_typed_and_legacy_text_values() {
+    let mut config = crate::sqlite_fixture_config("sqlite::memory:");
+    config.initializers = None;
+    assert!(!plan_policy_enabled(&config).unwrap());
+    for (value, expected) in [
+        (serde_json::json!(true), true),
+        (serde_json::json!("TrUe"), true),
+        (serde_json::json!(false), false),
+        (serde_json::json!("false"), false),
+        (serde_json::json!(""), false),
+    ] {
+        config.initializers = Some(std::collections::BTreeMap::from([(
+            "plan_policy_enabled".into(),
+            value,
+        )]));
+        assert_eq!(plan_policy_enabled(&config).unwrap(), expected);
+    }
+    for value in [serde_json::json!("invalid"), serde_json::json!(1)] {
+        config
+            .initializers
+            .as_mut()
+            .unwrap()
+            .insert("plan_policy_enabled".into(), value);
+        let error = plan_policy_enabled(&config).expect_err("invalid flag");
+        assert!(error.to_string().contains("YORISHIRO_PLAN_POLICY_ENABLED"));
+    }
 }
 
 #[test]

@@ -123,15 +123,26 @@ pub(crate) struct StripePriceMapping {
     pub(crate) team_price_id: Option<String>,
 }
 
-/// Reads and validates the enterprise plan-policy switch.
+/// Reads and validates the enterprise plan-policy switch from resolved Loco initializer configuration.
 ///
 /// # Errors
-/// Returns an error when the variable is set to a value other than `true` or `false`.
-pub fn plan_policy_enabled() -> Result<bool, crate::YorishiroError> {
-    match crate::edition::ee::data::env::Env::PlanPolicyEnabled.non_empty() {
-        None => Ok(false),
-        Some(value) if value.eq_ignore_ascii_case("true") => Ok(true),
-        Some(value) if value.eq_ignore_ascii_case("false") => Ok(false),
+/// Returns an error when the value is neither a boolean nor its case-insensitive text representation.
+pub fn plan_policy_enabled(
+    config: &loco_rs::config::Config,
+) -> Result<bool, crate::YorishiroError> {
+    match config
+        .initializers
+        .as_ref()
+        .and_then(|values| values.get("plan_policy_enabled"))
+    {
+        None | Some(serde_json::Value::Null) => Ok(false),
+        Some(serde_json::Value::Bool(value)) => Ok(*value),
+        Some(serde_json::Value::String(value))
+            if value.is_empty() || value.eq_ignore_ascii_case("false") =>
+        {
+            Ok(false)
+        }
+        Some(serde_json::Value::String(value)) if value.eq_ignore_ascii_case("true") => Ok(true),
         Some(_) => {
             tracing::error!("invalid YORISHIRO_PLAN_POLICY_ENABLED; specify true or false");
             Err(crate::YorishiroError::Internal(anyhow::anyhow!(

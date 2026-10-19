@@ -342,6 +342,17 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 workspaceのpartition制約をKNN選択の内側に適用し、別workspaceのデータが近傍候補の枠を消費しないようにします。
 件数は対象workspaceの非NULL embeddingだけを数え、対応するエンティティが1件も返らない比較はエラーにします。
 
+### Worker Admission設定
+
+enterprise overlayは、解決済みのLoco設定にある`initializers.worker_admission`からtargetの同時実行上限を読み込みます。
+`shared`と`tenant_private`の既定値は1で、`official`が未指定ならplanのofficial worker上限を使います。
+値は正の整数で指定し、空文字列は上書きなしとして扱います。
+同梱の設定ファイルは`YORISHIRO_WORKER_CLASS_SHARED_LIMIT`、`YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT`、`YORISHIRO_WORKER_OFFICIAL_LIMIT`を各fieldへ展開します。
+設定ファイルで上書きでき、読み込み後の環境変数変更は反映されません。
+community buildはこのinitializer設定を無視し、plan policyが無効なら同時実行上限も適用されません。
+plan policyの有効／無効は`initializers.plan_policy_enabled`で指定し、同梱ファイルでは`YORISHIRO_PLAN_POLICY_ENABLED`から展開します。
+真偽値または大文字小文字を区別しない真偽値の文字列を受け付け、context作成時に確定します。
+
 ## ログでの秘密情報の扱い
 
 API キー、webhook secret、OAuth 認証情報、OIDC token、ライセンス所有者情報は debug ログに出力されません。

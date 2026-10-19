@@ -10,13 +10,9 @@ pub(crate) enum Env {
     OAuthClientId,
     OAuthClientSecret,
     OAuthRedirectUri,
-    PlanPolicyEnabled,
     StripePricePro,
     StripePriceTeam,
     StripeWebhookSecret,
-    WorkerClassSharedLimit,
-    WorkerClassTenantPrivateLimit,
-    WorkerOfficialLimit,
 }
 
 impl Env {
@@ -28,13 +24,9 @@ impl Env {
             Self::OAuthClientId => "YORISHIRO_OAUTH_CLIENT_ID",
             Self::OAuthClientSecret => "YORISHIRO_OAUTH_CLIENT_SECRET",
             Self::OAuthRedirectUri => "YORISHIRO_OAUTH_REDIRECT_URI",
-            Self::PlanPolicyEnabled => "YORISHIRO_PLAN_POLICY_ENABLED",
             Self::StripePricePro => "YORISHIRO_STRIPE_PRICE_PRO",
             Self::StripePriceTeam => "YORISHIRO_STRIPE_PRICE_TEAM",
             Self::StripeWebhookSecret => "YORISHIRO_STRIPE_WEBHOOK_SECRET",
-            Self::WorkerClassSharedLimit => "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
-            Self::WorkerClassTenantPrivateLimit => "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
-            Self::WorkerOfficialLimit => "YORISHIRO_WORKER_OFFICIAL_LIMIT",
         }
     }
 
