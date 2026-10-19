@@ -118,7 +118,7 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
 /// `undo_migration_job` is recorded on the same transaction as the undo itself.
 #[tokio::test]
 async fn undo_migration_job_is_recorded() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
         let definition = serde_json::from_value(serde_json::json!({
@@ -177,10 +177,16 @@ async fn undo_migration_job_is_recorded() {
             .await;
         assert_eq!(
             undo.status_code(),
-            StatusCode::OK,
+            StatusCode::ACCEPTED,
             "response: {:?}",
             undo.text()
         );
+        let queued_id: Uuid = undo.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        super::fill_defaults::finish(&ctx, queued_id).await;
 
         let log = request
             .get("/api/audit-log")
@@ -189,7 +195,8 @@ async fn undo_migration_job_is_recorded() {
         let body: Vec<serde_json::Value> = log.json();
         assert_eq!(body.len(), 1, "body: {body:?}");
         assert_eq!(body[0]["action"], "undo_migration_job");
-        assert_eq!(body[0]["detail"]["job_id"], job_id.to_string());
+        assert_eq!(body[0]["detail"]["job_id"], queued_id.to_string());
+        assert_eq!(body[0]["detail"]["snapshot_job_id"], job_id.to_string());
         assert_eq!(body[0]["detail"]["restored"], 1);
     })
     .await;

@@ -26,7 +26,7 @@ impl fmt::Debug for Model {
             .debug_struct("QueueJobDispatchOutbox")
             .field("id", &self.id)
             .field("lifecycle_id", &self.lifecycle_id)
-            .field("payload", &self.payload)
+            .field("payload", &"[REDACTED]")
             .field("worker_name", &self.worker_name)
             .field("queue_name", &self.queue_name)
             .field("tags", &self.tags)

@@ -24,6 +24,13 @@ pub struct FillDefaultsResponse {
     pub job_id: Uuid,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UndoResponse {
+    pub job_id: Uuid,
+    pub snapshot_job_id: Uuid,
+}
+
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateEntityRequest {

@@ -27,7 +27,7 @@ async fn record_is_recoverable_until_attempted() {
             concurrency_key: Some("shared"),
             concurrency_limit: Some(1),
         },
-        serde_json::json!({"value": 7}),
+        serde_json::json!({"value": 7, "jsonl": "sensitive-import-body"}),
         "TestWorker".into(),
         None,
         Some(vec!["test-tag".into()]),
@@ -41,6 +41,15 @@ async fn record_is_recoverable_until_attempted() {
     assert_eq!(rows[0].payload["lifecycle_id"], id.to_string());
     assert_eq!(rows[0].worker_name, "TestWorker");
     assert_eq!(rows[0].tags, Some(vec!["test-tag".into()]));
+    let stored = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    let diagnostic = format!("{stored:?}");
+    assert!(diagnostic.contains("[REDACTED]"));
+    assert!(!diagnostic.contains("sensitive-import-body"));
+    assert_eq!(stored.payload["jsonl"], "sensitive-import-body");
 }
 
 #[tokio::test]

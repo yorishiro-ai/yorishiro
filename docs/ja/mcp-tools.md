@@ -16,5 +16,17 @@
 
 `fill_defaults`はリクエスト内で全件処理せず、設定されたLocoキューへ永続ジョブを投入し、`schema_name`と`job_id`を返します。
 RESTの`POST /api/migration-jobs/fill-defaults`も同じ経路を使い、202で受付結果を返します。
-完了時の`entities_updated`と`fields_filled`は監査ログで確認してください。
+完了時の`entities_updated`と`fields_filled`は、migrationスコープの`GET /api/migration-jobs/{job_id}`の`result`から確認できます。
 実行前にはエンティティを変更せず、完了後の取り消しには返された`job_id`を使います。
+
+`import_jsonl`は設定されたLocoキューへインポートを投入し、`job_id`を返します。
+schemaスコープの`import_job_status`で状態と完了件数を取得してください。
+RESTの`POST /api/import.jsonl`も202と`job_id`を返し、`GET /api/import-jobs/{job_id}`で状態を取得できます。
+不正な行が含まれる場合はジョブが`failed`となり、それまでのインポートと埋め込みジョブの投入をすべてロールバックします。
+インポート本文は永続キューに保存されるため、キューのアクセス権と保存期間もデータ保護の対象です。
+
+`POST /api/migration-jobs/{job_id}/undo`も202で取り消しジョブを受け付け、`job_id`と元の`snapshot_job_id`を返します。
+受付時には復元せず、migrationスコープの`GET /api/migration-jobs/{job_id}`で`restored`と`missing`を確認できます。
+提案の一括確定は`POST /api/inference-jobs/{job_id}/confirm`で受け付け、schemaスコープの`GET /api/inference-jobs/confirmations/{job_id}`で結果を確認できます。
+未完了または失敗した推論ジョブは受付時に409となります。
+いずれの状態取得も同じworkspace内の対応する種類のジョブに限り、内部エラーの詳細は公開しません。

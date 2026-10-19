@@ -4,8 +4,6 @@
 pub mod discovery;
 mod id_token;
 
-use std::sync::Arc;
-
 use crate::YorishiroError;
 use crate::edition::ee::controllers::oauth::state_token;
 use crate::edition::ee::data::oauth::OAuthConfig;
@@ -18,19 +16,12 @@ pub struct AuthorizeRedirect {
 
 /// Builds the provider's authorize URL (the OAuth 2.0 authorize endpoint) with a freshly issued, signed `state` (see `state_token`) and PKCE challenge (RFC 7636) attached.
 /// `openid email profile` is a fixed scope request, not configurable: `email` is the one claim `users::find_or_create` requires.
-pub(crate) async fn build_authorize_redirect(
-    config: &OAuthConfig,
-) -> Result<AuthorizeRedirect, YorishiroError> {
-    build_authorize_redirect_with_http(config, discovery::production()).await
-}
-
-///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn build_authorize_redirect_with_http(
+pub async fn build_authorize_redirect(
     config: &OAuthConfig,
-    http: Arc<dyn discovery::OAuthHttp>,
 ) -> Result<AuthorizeRedirect, YorishiroError> {
+    let http = discovery::ReqwestOAuthHttp::new();
     let discovery = http.fetch_discovery_document(&config.issuer_url).await?;
     let issued = state_token::issue(&config.state_signing_key);
 
@@ -63,31 +54,13 @@ pub struct CallbackIdentity {
 /// Handles `GET /auth/oauth/callback`'s core logic: verifies `state` and the CSRF cookie it is bound to (see `state_token` module docs), exchanges `code` for tokens, and verifies the returned ID token.
 ///
 /// `csrf_cookie_value` is `None` when the browser presented no CSRF cookie at all: treated the same as a mismatched cookie, both rejected before `state` is trusted.
-pub(crate) async fn handle_callback(
-    config: &OAuthConfig,
-    code: &str,
-    state: &str,
-    csrf_cookie_value: Option<&str>,
-) -> Result<CallbackIdentity, YorishiroError> {
-    handle_callback_with_http(
-        config,
-        code,
-        state,
-        csrf_cookie_value,
-        discovery::production(),
-    )
-    .await
-}
-
-///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn handle_callback_with_http(
+pub async fn handle_callback(
     config: &OAuthConfig,
     code: &str,
     state: &str,
     csrf_cookie_value: Option<&str>,
-    http: Arc<dyn discovery::OAuthHttp>,
 ) -> Result<CallbackIdentity, YorishiroError> {
     let verified = state_token::verify(&config.state_signing_key, state).ok_or_else(|| {
         tracing::warn!("OAuth callback rejected: invalid or expired state parameter");
@@ -105,6 +78,7 @@ pub async fn handle_callback_with_http(
     }
     let pkce_verifier = verified.pkce_verifier;
 
+    let http = discovery::ReqwestOAuthHttp::new();
     let discovery = http.fetch_discovery_document(&config.issuer_url).await?;
 
     let tokens = http

@@ -48,6 +48,7 @@ pub(crate) fn compose_context(ctx: &AppContext) -> Result<()> {
 /// Adds the enterprise workers after the base's, so their tags and queue come from the worker type like every other worker's.
 pub(crate) fn workers(registry: WorkerRegistry) -> WorkerRegistry {
     registry.register::<InferFillArgs, InferFillWorker>()
+        .register::<crate::edition::ee::workers::confirm_proposals::ConfirmProposalsArgs, crate::edition::ee::workers::confirm_proposals::ConfirmProposalsWorker>()
 }
 
 /// Mounts the enterprise edition's route groups after the community ones: `ee/` adds paths rather than replacing any.

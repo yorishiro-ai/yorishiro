@@ -8,7 +8,7 @@ use crate::models::{entity_entities, schema_schemas};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, SqlErr,
+    QuerySelect, SelectExt, Set, SqlErr,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -183,7 +183,7 @@ pub async fn for_job(
         .collect()
 }
 
-async fn require_completed_job(
+pub(crate) async fn require_completed_job(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
@@ -204,10 +204,9 @@ async fn require_completed_job(
     let has_proposals = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
-        .one(conn)
+        .exists(conn)
         .await
-        .internal()?
-        .is_some();
+        .internal()?;
     if !has_proposals {
         return Err(YorishiroError::Conflict {
             message: format!("inference job '{job_id}' did not produce proposals"),

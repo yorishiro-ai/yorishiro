@@ -1,5 +1,6 @@
 use super::boot_request;
 use axum::http::StatusCode;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
@@ -7,6 +8,47 @@ use super::fixtures::{self, TenantArgs};
 
 struct Setup {
     key: String,
+}
+
+#[test]
+fn concurrent_import_workers_keep_each_apps_database() {
+    let run = || {
+        super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+            let setup = setup(&ctx).await;
+            let accepted = request
+                .post("/api/import.jsonl")
+                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .text("")
+                .await;
+            assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
+            let id = accepted.json::<serde_json::Value>()["job_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap();
+            super::fill_defaults::finish(&ctx, id).await;
+            let status = request
+                .get(&format!("/api/import-jobs/{id}"))
+                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .await;
+            assert_eq!(status.status_code(), StatusCode::OK);
+            assert_eq!(status.json::<serde_json::Value>()["status"], "completed");
+        })
+    };
+    // Independent runtimes must not nest the process-environment read guard on one thread.
+    let worker = || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(run());
+    };
+    std::thread::scope(|scope| {
+        let first = scope.spawn(worker);
+        let second = scope.spawn(worker);
+        first.join().unwrap();
+        second.join().unwrap();
+    });
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
@@ -18,6 +60,64 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     Setup { key }
 }
 
+#[tokio::test]
+async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, workspace_id, user_id, key) =
+            fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
+        let read_key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            workspace_id,
+            ApiKeyScope::Read,
+            Some(user_id),
+            false,
+        )
+        .await
+        .unwrap();
+        let (_, _, _, other_key) = fixtures::create_tenant_workspace_owner(
+            &ctx,
+            TenantArgs {
+                tenant_name: "other".into(),
+                owner_email: "other@example.com".into(),
+                ..Default::default()
+            },
+        )
+        .await;
+        let accepted = request
+            .post("/api/import.jsonl")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .text("")
+            .await;
+        assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
+        let id = accepted.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let path = format!("/api/import-jobs/{id}");
+        let own = request
+            .get(&path)
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(own.status_code(), StatusCode::OK);
+        let foreign = request
+            .get(&path)
+            .add_header("Authorization", format!("Bearer {other_key}"))
+            .await;
+        assert_eq!(foreign.status_code(), StatusCode::NOT_FOUND);
+        let denied = request
+            .get(&path)
+            .add_header("Authorization", format!("Bearer {}", read_key.plaintext))
+            .await;
+        assert_eq!(denied.status_code(), StatusCode::FORBIDDEN);
+        let wrong_type = request
+            .get(&format!("/api/migration-jobs/{id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(wrong_type.status_code(), StatusCode::NOT_FOUND);
+    })
+    .await;
+}
+
 /// A schema line is only present in the import file when the exporting workspace's own schema is being restored.
 /// An entity referencing a schema that already exists in the destination workspace (created directly, not via this import) has to fall through to a lookup by id instead, and that lookup is memoized (`import::import_jsonl`'s `schema_name_by_id` cache) since a batch of entities sharing one pre-existing schema is the common case.
 ///
@@ -26,7 +126,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// rather than just checking the import didn't error.
 #[tokio::test]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key } = setup(&ctx).await;
         let auth = format!("Bearer {key}");
 
@@ -82,13 +182,60 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .await;
         assert_eq!(
             import_response.status_code(),
-            200,
+            StatusCode::ACCEPTED,
             "response: {:?}",
             import_response.text()
         );
-        let result: serde_json::Value = import_response.json();
+        let accepted: serde_json::Value = import_response.json();
+        let id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        let before = request
+            .get("/api/entities?entity_type=project")
+            .add_header("Authorization", auth.clone())
+            .await;
+        assert!(before.json::<Vec<serde_json::Value>>().is_empty());
+        super::fill_defaults::finish(&ctx, id).await;
+        let status = request
+            .get(&format!("/api/import-jobs/{id}"))
+            .add_header("Authorization", auth.clone())
+            .await;
+        assert_eq!(status.status_code(), StatusCode::OK, "{}", status.text());
+        let completed: serde_json::Value = status.json();
+        assert_eq!(completed["status"], "completed");
+        let result = &completed["result"];
         assert_eq!(result["entities"], 2, "result: {result:?}");
         assert_eq!(result["schemas"], 0, "result: {result:?}");
+
+        // Simulate a crash after effects commit but before lifecycle completion is persisted.
+        let mut lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        lifecycle.status = Set("queued".to_owned());
+        lifecycle.completed_at = Set(None);
+        lifecycle.update(&ctx.db).await.unwrap();
+        let dispatch =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+        yorishiro::models::queue_job_dispatch_outbox::record_lifecycle_payload(
+            &ctx.db,
+            id,
+            dispatch.payload,
+            dispatch.worker_name,
+            dispatch.queue_name,
+            dispatch
+                .tags
+                .map(serde_json::from_value)
+                .transpose()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        super::fill_defaults::finish(&ctx, id).await;
 
         let list_response = request
             .get("/api/entities?entity_type=project")

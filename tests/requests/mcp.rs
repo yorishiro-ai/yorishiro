@@ -543,10 +543,19 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             .await;
         assert_eq!(
             undo.status_code(),
-            StatusCode::OK,
+            StatusCode::ACCEPTED,
             "response: {}",
             undo.text()
         );
+        super::fill_defaults::finish(
+            &ctx,
+            undo.json::<Value>()["job_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        )
+        .await;
         let restored = entity_entities::get(&ctx.db, workspace_id, entity.id)
             .await
             .expect("read undone entity");
@@ -746,7 +755,7 @@ async fn community_mcp_entities_relations_and_schema_tools_execute_over_protocol
 
 #[tokio::test]
 async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id, _owner_id, schema_key) =
             fixtures::create_tenant_workspace_owner(
                 &ctx,
@@ -791,12 +800,19 @@ async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
             json!({ "name": "import_jsonl", "arguments": { "jsonl": jsonl } }),
         )
         .await;
-        assert_eq!(result["result"]["isError"], true, "MCP call: {result}");
-        assert!(
-            result["result"]["content"][0]["text"]
-                .as_str()
-                .is_some_and(|text| text.contains("line 2"))
-        );
+        let accepted = tool_result_json(&result);
+        let id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        super::fill_defaults::finish_with_status(&ctx, id, "failed").await;
+        let status = mcp_call(
+            &request,
+            &session,
+            &schema_key,
+            3,
+            "tools/call",
+            json!({"name": "import_job_status", "arguments": {"job_id": id}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&status)["status"], "failed");
         assert!(
             schema_schemas::get_active_schema(&ctx.db, workspace_id, "rollback-schema")
                 .await

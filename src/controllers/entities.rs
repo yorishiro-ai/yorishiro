@@ -11,10 +11,10 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
 use crate::dtos::entities::{
     CreateEntityRequest, FillDefaultsRequest, FillDefaultsResponse, ListEntitiesParams,
-    ReindexResponse, UpdateEntityRequest,
+    ReindexResponse, UndoResponse, UpdateEntityRequest,
 };
 use crate::models::api_key_audit_log;
-use crate::models::entity_entities::{self, EntityRecord, UndoReport};
+use crate::models::entity_entities::{self, EntityRecord};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
@@ -99,30 +99,37 @@ pub async fn list_entities(
 /// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
 ///
 /// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope that would gate the job that produced the snapshots, e.g. confirming a proposal that writes entities), not an ordinary entity write.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 200, body = crate::models::entity_entities::UndoReport), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 202, body = crate::dtos::entities::UndoResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub(crate) async fn undo_migration_job(
+    State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
     Path(job_id): Path<Uuid>,
-) -> Result<Json<UndoReport>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let report = entity_entities::undo_job(authorized.txn(), workspace_id, job_id).await?;
-    // Recorded on the same transaction as the undo itself, before commit: a rollback of the undo
-    // must also roll back the record that it happened, or a failed request could still leave an
-    // audit trail claiming it succeeded.
-    api_key_audit_log::record(
-        authorized.txn(),
-        api_key_audit_log::AuditActor {
-            workspace_id,
-            tenant_id: authorized.ctx.tenant_id,
-            api_key_id: authorized.ctx.api_key_id,
-            user_id: authorized.ctx.user_id,
-        },
-        api_key_audit_log::AuditAction::UndoMigrationJob,
-        serde_json::json!({ "job_id": job_id, "restored": report.restored, "missing": report.missing }),
-    )
-    .await?;
+) -> Result<(StatusCode, Json<UndoResponse>), ApiError> {
+    let queued_id =
+        crate::workers::undo::enqueue(&ctx, authorized.txn(), &authorized.ctx, job_id).await?;
     authorized.commit().await?;
-    Ok(Json(report))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(UndoResponse {
+            job_id: queued_id,
+            snapshot_job_id: job_id,
+        }),
+    ))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/migration-jobs/{job_id}", params(("job_id" = Uuid, Path)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+pub(crate) async fn migration_job_status(
+    authorized: Authorized<MigrationScope>,
+    Path(job_id): Path<Uuid>,
+) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
+    Ok(Json(
+        crate::models::queue_job_lifecycles::migration_job_status(
+            authorized.txn(),
+            authorized.ctx.workspace_id,
+            job_id,
+        )
+        .await?,
+    ))
 }
 
 /// Enqueues a reindex job for this workspace.
@@ -235,6 +242,7 @@ pub fn routes() -> Routes {
 pub fn migration_routes() -> Routes {
     Routes::new()
         .prefix("api/migration-jobs")
+        .add("/{job_id}", get(migration_job_status))
         .add("/{job_id}/undo", post(undo_migration_job))
         .add("/reindex", post(reindex_workspace))
         .add("/fill-defaults", post(fill_defaults))
@@ -249,6 +257,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_delete_entity),
         super::route_inventory::path_doc(__path_list_entities),
         super::route_inventory::path_doc(__path_undo_migration_job),
+        super::route_inventory::path_doc(__path_migration_job_status),
         super::route_inventory::path_doc(__path_reindex_workspace),
         super::route_inventory::path_doc(__path_fill_defaults),
     ]

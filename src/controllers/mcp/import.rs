@@ -9,8 +9,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::jobs::QueuedJobResponse;
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::import;
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ImportJsonlArgs {
@@ -18,14 +18,18 @@ pub(crate) struct ImportJsonlArgs {
     pub jsonl: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ImportJobArgs {
+    job_id: uuid::Uuid,
+}
+
 #[tool_router(vis = "pub(crate)", router = tool_router_import)]
 impl YorishiroMcpServer {
     #[tool(
         description = "Bulk-import schemas/entities/relations from a JSON Lines document in the \
                            export format (requires schema scope, since importing schemas is itself \
-                           a schema-scope-only operation). Runs as a single transaction: either \
-                           every record in `jsonl` is applied, or the first error rolls back \
-                           everything imported so far."
+                           a schema-scope-only operation). Returns a job_id; poll import_job_status. \
+                           The worker applies every record in one transaction or rolls everything back."
     )]
     pub async fn import_jsonl(
         &self,
@@ -38,34 +42,42 @@ impl YorishiroMcpServer {
                 AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
             };
 
-        let tenant_id = authorized.auth_context().tenant_id;
-        let workspace_id = authorized.auth_context().workspace_id;
-        let imported_by = authorized.auth_context().user_id;
-        let result = match import::import_jsonl(
+        let job_id = match crate::workers::import::enqueue(
+            self.app_context(),
             authorized.txn(),
-            tenant_id,
-            workspace_id,
-            imported_by,
-            args.jsonl.as_bytes(),
+            authorized.auth_context(),
+            args.jsonl,
         )
         .await
         {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        for entity_id in result.entity_ids.iter().copied() {
-            if let Err(error) = crate::workers::embedding_sync::enqueue_after_write(
-                self.app_context(),
-                workspace_id,
-                entity_id,
-                authorized.txn(),
-            )
-            .await
-            {
-                return Ok(err_to_tool_result(error));
-            }
-        }
         authorized.commit().await?;
-        ok_json(result)
+        ok_json(QueuedJobResponse { job_id })
+    }
+
+    #[tool(description = "Poll a queued JSON Lines import (requires schema scope)")]
+    pub(crate) async fn import_job_status(
+        &self,
+        Parameters(args): Parameters<ImportJobArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized =
+            match super::authorize(self.app_context(), &parts, ApiKeyScope::Schema).await? {
+                AuthzOutcome::Authorized(value) => value,
+                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
+        match crate::models::queue_job_lifecycles::bulk_job_status(
+            authorized.txn(),
+            authorized.auth_context().workspace_id,
+            args.job_id,
+            &["import"],
+        )
+        .await
+        {
+            Ok(status) => ok_json(status),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
     }
 }

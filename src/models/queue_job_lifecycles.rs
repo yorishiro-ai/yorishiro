@@ -9,6 +9,53 @@ use crate::db_enum::db_enum;
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
 const LEASE_DURATION_MINUTES: i64 = 5;
 
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub(crate) struct BulkJobStatus {
+    job_id: Uuid,
+    job_name: String,
+    status: LifecycleStatus,
+    result: Option<serde_json::Value>,
+}
+
+pub(crate) async fn migration_job_status(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<BulkJobStatus, crate::YorishiroError> {
+    bulk_job_status(db, workspace_id, id, &["undo", "fill_defaults"]).await
+}
+
+pub(crate) async fn bulk_job_status(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+    allowed_jobs: &[&str],
+) -> Result<BulkJobStatus, crate::YorishiroError> {
+    use crate::error::ResultExt;
+    use crate::models::api_key_audit_log::{self, AuditAction};
+    let row = Entity::find_by_id(id)
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::JobName.is_in(allowed_jobs.iter().copied()))
+        .one(db)
+        .await
+        .internal()?
+        .ok_or_else(|| crate::YorishiroError::not_found("migration job not found"))?;
+    let action = if row.job_name == "undo" {
+        AuditAction::UndoMigrationJob
+    } else if row.job_name == "fill_defaults" {
+        AuditAction::FillDefaults
+    } else {
+        AuditAction::BackgroundJobCompleted
+    };
+    Ok(BulkJobStatus {
+        job_id: id,
+        job_name: row.job_name,
+        status: LifecycleStatus::from_row(&row.status).internal()?,
+        result: api_key_audit_log::job_result(db, workspace_id, id, action).await?,
+    })
+}
+
 db_enum! {
     /// Where a queued job stands.
     /// Matches `status`'s CHECK constraint string-for-string.

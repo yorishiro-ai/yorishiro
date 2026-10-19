@@ -1,9 +1,19 @@
 # 貢献ガイドライン
 
+## フレームワークの公開 API
+
+アプリケーション独自の代替実装より、Loco、SeaORM、SeaQuery、Tokio、既存依存の公開 API を優先します。
+存在確認には SeaORM の `SelectExt::exists`、行ロックには `lock_exclusive` を使います。
+SeaQuery は SQLite が対応しない行ロック句を自動的に省略します。
+テストでもキューの生成処理を複製せず、Loco の `create_queue_provider` を使います。
+テスト用の代替実装のためだけに本番コードへ trait を追加せず、本番の HTTP クライアントをローカル HTTP サーバーに接続して検証します。
+Raw SQL は、RLS のセッション設定、advisory lock、ベクトル操作、条件付きの原子的な書き込みなど、ORM では必要な意味を保てない箇所に限定します。
+
 ## データベースプール
 
 データベース接続プールは、ワーカープールやキューとは別のものです。
-PostgreSQL では、`AppContext.db` は migration role を使う Loco の SeaORM プール、`TenantDb` は `ROLE yorishiro_app` を設定する RLS 用の別プール、`DbHandle.identity` は migration role を使うもう一つの raw sqlx プールです。
+PostgreSQL では、`AppContext.db` は migration role を使う SeaORM プール、`TenantDb` は `ROLE yorishiro_app` を設定する RLS 用の別プールです。
+`DbHandle.identity` は `AppContext.db` の接続プールを共有し、追加のプールは作りません。
 Loco のキュープロバイダも独立したプールを持ちます。
 SQLite には `DbHandle` はなく、`AppContext.db` とキュープロバイダの別 SQLite プールを使います。
 

@@ -32,11 +32,8 @@ pub async fn activate(db: &DatabaseConnection, configured: &str) -> loco_rs::Res
 
 async fn activate_once(db: &DatabaseConnection, configured: &str) -> loco_rs::Result<()> {
     let txn = crate::db::begin_write(db).await?;
-    let mut current_query = Entity::find_by_id(SINGLETON_ID);
-    if db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        current_query = current_query.lock_exclusive();
-    }
-    let current = current_query
+    let current = Entity::find_by_id(SINGLETON_ID)
+        .lock_exclusive()
         .one(&txn)
         .await?
         .ok_or_else(|| loco_rs::Error::Message("timezone_state singleton row missing".into()))?;

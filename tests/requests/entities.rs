@@ -24,7 +24,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let definition = serde_json::from_value(serde_json::json!({
@@ -100,13 +100,34 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
             .await;
         assert_eq!(
             response.status_code(),
-            200,
+            202,
             "response: {:?}",
             response.text()
         );
         let body: serde_json::Value = response.json();
-        assert_eq!(body["restored"], 1, "body: {body}");
-        assert_eq!(body["missing"], 1, "body: {body}");
+        assert_eq!(body["snapshot_job_id"], job_id.to_string());
+        let status_path = format!("/api/migration-jobs/{}", body["job_id"].as_str().unwrap());
+        let pending = request
+            .get(&status_path)
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(pending.status_code(), 200);
+        assert_eq!(pending.json::<serde_json::Value>()["status"], "queued");
+        assert!(pending.json::<serde_json::Value>()["result"].is_null());
+        let before = entity_entities::get(&ctx.db, setup.workspace_id, survivor.id)
+            .await
+            .unwrap();
+        assert_eq!(before.data["title"], "overwritten");
+        super::fill_defaults::finish(&ctx, body["job_id"].as_str().unwrap().parse().unwrap()).await;
+        let completed = request
+            .get(&status_path)
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(completed.status_code(), 200);
+        let completed = completed.json::<serde_json::Value>();
+        assert_eq!(completed["status"], "completed");
+        assert_eq!(completed["result"]["restored"], 1);
+        assert_eq!(completed["result"]["missing"], 1);
 
         let restored = entity_entities::get(&ctx.db, setup.workspace_id, survivor.id)
             .await

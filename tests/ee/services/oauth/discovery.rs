@@ -7,7 +7,7 @@ use tokio::net::TcpListener;
 
 use yorishiro::edition::ee::services::oauth::discovery::*;
 
-async fn start_server(response: &str) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
+pub(super) async fn start_server(response: &str) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("test listener must bind");

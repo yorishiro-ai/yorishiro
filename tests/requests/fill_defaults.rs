@@ -1,21 +1,60 @@
 use std::time::Duration;
+use std::{future::Future, sync::Arc};
 
-use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
+use loco_rs::app::{AppContext, Hooks};
 use sea_orm::EntityTrait;
 use uuid::Uuid;
-use yorishiro::workers::{fill_defaults::FillDefaultsWorker, target::WorkerTarget};
+use yorishiro::workers::embedding_sync::{WorkerClass, WorkerClassResolver};
+use yorishiro::workers::target::WorkerTarget;
+
+struct DedicatedWorker;
+
+#[loco_rs::prelude::async_trait]
+impl WorkerClassResolver for DedicatedWorker {
+    async fn resolve(
+        &self,
+        _: &sea_orm::DatabaseConnection,
+        _: Uuid,
+    ) -> Result<Option<WorkerClass>, yorishiro::YorishiroError> {
+        Ok(Some(WorkerClass::TenantPrivate))
+    }
+}
+
+/// Use production tenant targets so concurrent apps cannot consume each other's Valkey jobs with the wrong database.
+pub(crate) async fn boot_request<H: Hooks, F, Fut>(callback: F)
+where
+    F: FnOnce(loco_rs::TestServer, AppContext) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    super::boot_request::<H, _, _>(|request, ctx| async move {
+        ctx.shared_store
+            .insert(Arc::new(DedicatedWorker) as Arc<dyn WorkerClassResolver>);
+        callback(request, ctx).await;
+    })
+    .await;
+}
 
 pub(crate) async fn finish(ctx: &AppContext, id: Uuid) {
-    let queue = super::query_worker::shared_target_queue(ctx).await;
-    queue
-        .register(FillDefaultsWorker::build(ctx))
+    finish_with_status(ctx, id, "completed").await;
+}
+
+pub(crate) async fn finish_with_status(ctx: &AppContext, id: Uuid, expected: &str) {
+    let outbox = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+        .one(&ctx.db)
         .await
-        .expect("register migration worker");
+        .unwrap()
+        .unwrap();
+    let tag = outbox.tags.unwrap()[0].as_str().unwrap().to_owned();
+    let target = WorkerTarget::parse_tag(&tag).unwrap();
+    let queue = super::query_worker::target_queue(ctx, target).await;
+    yorishiro::App::connect_workers(ctx, &queue)
+        .await
+        .expect("register production workers");
     let mut publisher = ctx.clone();
     publisher.queue_provider = Some(queue.clone());
     yorishiro::workers::dispatch::recover_pending(&publisher).await;
     let running = queue.clone();
-    let worker = tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
+    let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
     let result = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             let row = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(id)
@@ -23,8 +62,8 @@ pub(crate) async fn finish(ctx: &AppContext, id: Uuid) {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_ne!(row.status, "failed", "worker failed: {:?}", row.error);
-            if row.status == "completed" {
+            if matches!(row.status.as_str(), "completed" | "failed") {
+                assert_eq!(row.status, expected, "worker outcome: {:?}", row.error);
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;

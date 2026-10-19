@@ -1,6 +1,7 @@
 pub mod dispatch;
 pub mod embedding_sync;
 pub mod fill_defaults;
+pub(crate) mod import;
 pub mod lifecycle;
 pub mod query_embedding;
 pub mod queue;
@@ -9,3 +10,4 @@ pub mod reindex;
 pub(crate) mod start;
 pub mod startup_reindex;
 pub mod target;
+pub(crate) mod undo;

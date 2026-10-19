@@ -19,6 +19,7 @@ use crate::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker};
 use crate::workers::fill_defaults::{FillDefaultsArgs, FillDefaultsWorker};
 use crate::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
 use crate::workers::reindex::{ReindexArgs, ReindexWorker};
+use crate::workers::undo::{UndoArgs, UndoWorker};
 
 type ConnectFn =
     for<'a> fn(&'a AppContext, &'a Queue) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
@@ -47,7 +48,7 @@ pub struct WorkerRegistry {
 }
 
 impl WorkerRegistry {
-    /// The workers the base application owns: embedding sync, reindex and query embedding.
+    /// The workers the base application owns, including durable migration operations.
     #[must_use]
     pub fn community() -> Self {
         Self::default()
@@ -55,6 +56,8 @@ impl WorkerRegistry {
             .register::<ReindexArgs, ReindexWorker>()
             .register::<QueryEmbeddingArgs, QueryEmbeddingWorker>()
             .register::<FillDefaultsArgs, FillDefaultsWorker>()
+            .register::<UndoArgs, UndoWorker>()
+            .register::<super::import::ImportArgs, super::import::ImportWorker>()
     }
 
     /// Adds worker type `W`.

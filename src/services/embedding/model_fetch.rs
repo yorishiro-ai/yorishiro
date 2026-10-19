@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use loco_rs::prelude::async_trait;
 use sha2::{Digest, Sha256};
 
 /// One file to fetch, with everything needed to verify it.
@@ -162,18 +161,21 @@ async fn ensure_file(
         .read_timeout(READ_TIMEOUT)
         .build()
         .expect("reqwest client configuration is static and always valid");
-    ensure_file_with_http(dir, def, artifact, &client, &ReqwestArtifactHttp).await
+    let url = format!(
+        "https://huggingface.co/{}/resolve/{}/{}",
+        def.id, def.revision, artifact.remote_path
+    );
+    ensure_file_with_client(dir, &url, artifact, &client).await
 }
 
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn ensure_file_with_http(
+pub async fn ensure_file_with_client(
     dir: &Path,
-    def: &LocalModelDef,
+    url: &str,
     artifact: &Artifact,
     client: &reqwest::Client,
-    http: &dyn ArtifactHttp,
 ) -> anyhow::Result<PathBuf> {
     let destination = dir.join(artifact.local_name);
     if destination.exists() {
@@ -214,10 +216,6 @@ pub async fn ensure_file_with_http(
     std::fs::create_dir_all(dir)
         .map_err(|err| anyhow::anyhow!("failed to create {}: {err}", dir.display()))?;
 
-    let url = format!(
-        "https://huggingface.co/{}/resolve/{}/{}",
-        def.id, def.revision, artifact.remote_path
-    );
     let mebibytes = artifact.size / (1024 * 1024);
     tracing::info!(
         url = %url,
@@ -232,7 +230,7 @@ pub async fn ensure_file_with_http(
     // The pid and process-local nonce keep concurrent fetches from writing or cleaning up the same partial file.
     let temp = staging_path(dir, artifact);
 
-    let result = download_verified(&url, &temp, artifact, client, http).await;
+    let result = download_verified(url, &temp, artifact, client).await;
     if result.is_err() {
         // A partial or corrupt file must not survive to be mistaken for a complete one on the next startup.
         let _ = std::fs::remove_file(&temp);
@@ -256,99 +254,6 @@ fn staging_path(dir: &Path, artifact: &Artifact) -> PathBuf {
         std::process::id(),
         nonce
     ))
-}
-
-#[async_trait]
-pub trait ArtifactHttp: Send + Sync {
-    async fn get(
-        &self,
-        client: &reqwest::Client,
-        url: &str,
-    ) -> Result<ArtifactHttpResponse, ArtifactHttpError>;
-}
-
-pub struct ReqwestArtifactHttp;
-
-#[async_trait]
-impl ArtifactHttp for ReqwestArtifactHttp {
-    async fn get(
-        &self,
-        client: &reqwest::Client,
-        url: &str,
-    ) -> Result<ArtifactHttpResponse, ArtifactHttpError> {
-        let response = client
-            .get(url)
-            .send()
-            .await
-            .map_err(ArtifactHttpError::from_request)?;
-        let status = response.status();
-        Ok(ArtifactHttpResponse {
-            status,
-            body: Box::new(ReqwestArtifactBody(response)),
-        })
-    }
-}
-
-pub struct ArtifactHttpResponse {
-    pub status: reqwest::StatusCode,
-    pub body: Box<dyn ArtifactBody>,
-}
-
-#[async_trait]
-pub trait ArtifactBody: Send {
-    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ArtifactHttpError>;
-}
-
-struct ReqwestArtifactBody(reqwest::Response);
-
-#[async_trait]
-impl ArtifactBody for ReqwestArtifactBody {
-    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ArtifactHttpError> {
-        self.0
-            .chunk()
-            .await
-            .map(|chunk| chunk.map(|chunk| chunk.to_vec()))
-            .map_err(ArtifactHttpError::from_response)
-    }
-}
-
-#[derive(Debug)]
-pub enum ArtifactHttpError {
-    Timeout(String),
-    Request(String),
-    Response(String),
-}
-
-impl ArtifactHttpError {
-    fn from_request(error: reqwest::Error) -> Self {
-        if error.is_timeout() {
-            Self::Timeout(error.to_string())
-        } else {
-            Self::Request(error.to_string())
-        }
-    }
-
-    fn from_response(error: reqwest::Error) -> Self {
-        if error.is_timeout() {
-            Self::Timeout(error.to_string())
-        } else {
-            Self::Response(error.to_string())
-        }
-    }
-
-    fn message(&self) -> &str {
-        match self {
-            Self::Timeout(message) | Self::Request(message) | Self::Response(message) => message,
-        }
-    }
-
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::Timeout(_) => "request timed out",
-            Self::Request(_) => "request failed",
-            Self::Response(_) => "response stream failed",
-        }
-    }
 }
 
 /// How long a `.partial.` file must have gone untouched before a sweep will remove it.
@@ -391,21 +296,25 @@ pub fn sweep_stale_partials(dir: &Path, artifact: &Artifact) {
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn download_verified(
+async fn download_verified(
     url: &str,
     temp: &Path,
     artifact: &Artifact,
     client: &reqwest::Client,
-    http: &dyn ArtifactHttp,
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt as _;
 
-    let mut response = http.get(client, url).await.map_err(|err| {
-        anyhow::anyhow!("failed to fetch {url}: {}: {}", err.kind(), err.message())
+    let mut response = client.get(url).send().await.map_err(|err| {
+        let kind = if err.is_timeout() {
+            "request timed out"
+        } else {
+            "request failed"
+        };
+        anyhow::anyhow!("failed to fetch {url}: {kind}: {err}")
     })?;
-    if !response.status.is_success() {
+    if !response.status().is_success() {
         // Do not read or include an error body. It can contain upstream credentials or request data.
-        anyhow::bail!("failed to fetch {url}: HTTP {}", response.status);
+        anyhow::bail!("failed to fetch {url}: HTTP {}", response.status());
     }
 
     let mut file = tokio::fs::File::create(temp)
@@ -415,12 +324,13 @@ pub async fn download_verified(
     // Streamed chunk by chunk rather than collected with `bytes()`: buffering hundreds of megabytes in memory only to write it straight back out costs the whole model's size in resident memory for no benefit.
     let mut hasher = Sha256::new();
     let mut written: u64 = 0;
-    while let Some(chunk) = response.body.next_chunk().await.map_err(|err| {
-        anyhow::anyhow!(
-            "failed while downloading {url}: {}: {}",
-            err.kind(),
-            err.message()
-        )
+    while let Some(chunk) = response.chunk().await.map_err(|err| {
+        let kind = if err.is_timeout() {
+            "request timed out"
+        } else {
+            "response stream failed"
+        };
+        anyhow::anyhow!("failed while downloading {url}: {kind}: {err}")
     })? {
         hasher.update(&chunk);
         written += chunk.len() as u64;

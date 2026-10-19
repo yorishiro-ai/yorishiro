@@ -1,9 +1,29 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QueryOrder};
+use sea_orm::{ActiveValue, QueryOrder, SelectExt};
 use uuid::Uuid;
 
 use super::{ActiveModel, EntitySnapshot, UndoReport};
 use crate::error::{ResultExt, YorishiroError};
+
+pub(crate) async fn require_job_snapshots(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::entity_snapshots::{Column, Entity};
+    if !Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::JobId.eq(job_id))
+        .exists(conn)
+        .await
+        .internal()?
+    {
+        return Err(YorishiroError::not_found(format!(
+            "no snapshots for job '{job_id}'"
+        )));
+    }
+    Ok(())
+}
 
 /// Records what `entity_id` holds now, tagged with `job_id`.
 ///

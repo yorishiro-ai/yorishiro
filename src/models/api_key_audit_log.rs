@@ -36,11 +36,23 @@ impl ActiveModel {}
 impl Entity {}
 
 /// A committed completion record makes redelivery a no-op without replacing original undo snapshots.
-pub(crate) async fn fill_defaults_completed(
+pub(crate) async fn job_completed(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
+    action: AuditAction,
 ) -> Result<bool, YorishiroError> {
+    Ok(job_result(conn, workspace_id, job_id, action)
+        .await?
+        .is_some())
+}
+
+pub(crate) async fn job_result(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+    action: AuditAction,
+) -> Result<Option<serde_json::Value>, YorishiroError> {
     use crate::models::_entities::api_key_audit_log::Column;
     use sea_orm::QuerySelect;
     use sea_orm::{
@@ -53,17 +65,16 @@ pub(crate) async fn fill_defaults_completed(
             .args([Expr::col(Column::Detail), Expr::val("$.job_id")])
             .into(),
     };
-    Ok(Entity::find()
+    Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
-        .filter(Column::Action.eq(AuditAction::FillDefaults.as_db_str()))
+        .filter(Column::Action.eq(action.as_db_str()))
         .filter(job.eq(job_id.to_string()))
         .select_only()
-        .column(Column::Id)
-        .into_tuple::<Uuid>()
+        .column(Column::Detail)
+        .into_tuple::<serde_json::Value>()
         .one(conn)
         .await
-        .internal()?
-        .is_some())
+        .internal()
 }
 
 db_enum! {
@@ -79,6 +90,8 @@ db_enum! {
         ReindexEmbeddings = "reindex_embeddings",
         /// `entity_entities::fill_defaults`: a `Migration`-scoped batch fill of absent required fields.
         FillDefaults = "fill_defaults",
+        /// A bulk worker's durable result, committed with its effects.
+        BackgroundJobCompleted = "background_job_completed",
     }
 }
 

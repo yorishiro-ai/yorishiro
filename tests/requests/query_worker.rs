@@ -96,24 +96,30 @@ impl EmbeddingProvider for FailingProvider {
 /// A Redis worker polls only the queues its configuration names, which `yorishiro start --worker=...` fills in from the targets it serves.
 /// The booted test app is a server, so for Redis this builds the provider a worker process would have, over the same database.
 pub(crate) async fn shared_target_queue(ctx: &AppContext) -> Arc<loco_rs::bgworker::Queue> {
-    if let Some(loco_rs::config::QueueConfig::Redis(redis)) = ctx.config.queue.clone() {
-        let mut redis = redis;
-        redis.dangerously_flush = false;
-        redis.queues = Some(vec![WorkerTarget::Shared.queue()]);
-        let queue = Arc::new(
-            loco_rs::bgworker::redis::create_provider(&redis)
-                .await
-                .expect("the worker's Redis queue provider"),
-        );
-        queue
-            .setup()
-            .await
-            .expect("set up the worker's Redis queue");
-        return queue;
+    target_queue(ctx, WorkerTarget::Shared).await
+}
+
+pub(crate) async fn target_queue(
+    ctx: &AppContext,
+    target: WorkerTarget,
+) -> Arc<loco_rs::bgworker::Queue> {
+    let mut config = ctx.config.clone();
+    match config.queue.as_mut().expect("configured queue") {
+        loco_rs::config::QueueConfig::Redis(redis) => {
+            redis.dangerously_flush = false;
+            redis.queues = Some(vec![target.queue()]);
+        }
+        loco_rs::config::QueueConfig::Postgres(queue) => queue.dangerously_flush = false,
+        loco_rs::config::QueueConfig::Sqlite(queue) => queue.dangerously_flush = false,
+        _ => panic!("unsupported queue configuration"),
     }
-    ctx.queue_provider
-        .clone()
-        .expect("the app's queue provider")
+    // A shutdown provider stays cancelled; every worker process needs a fresh one.
+    let queue = loco_rs::bgworker::create_queue_provider(&config)
+        .await
+        .expect("create the worker's configured queue")
+        .expect("background queue mode");
+    queue.setup().await.expect("set up the worker's queue");
+    queue
 }
 
 /// Boots the app, installs `provider` as the worker's deployment default, and runs a query embedding worker against the app's queue until `callback` returns.

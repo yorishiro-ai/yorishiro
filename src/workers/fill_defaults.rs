@@ -55,9 +55,14 @@ impl FillDefaultsWorker {
         crate::db::lock_for_update(&txn, &format!("fill-defaults:{job_id}"))
             .await
             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-        if api_key_audit_log::fill_defaults_completed(&txn, args.workspace_id, job_id)
-            .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        if api_key_audit_log::job_completed(
+            &txn,
+            args.workspace_id,
+            job_id,
+            api_key_audit_log::AuditAction::FillDefaults,
+        )
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
         {
             txn.commit().await?;
             return Ok(());

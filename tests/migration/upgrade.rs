@@ -531,6 +531,32 @@ async fn upgrade_000006_creates_inference_jobs_with_defaults_and_status_check() 
 }
 
 #[tokio::test]
+async fn background_completion_upgrade_and_refused_downgrade_preserve_audit_history() {
+    let _environment = crate::EnvironmentRead::enter();
+    with_database("completion_audit", |db| Box::pin(async move {
+        let migration = "m20261020_000023_background_job_completion";
+        Migrator::up(db, Some(migrations_through(migration) - 1)).await.unwrap();
+        seed_initial_rows(db).await;
+        let workspace = id(db, WORKSPACE);
+        let tenant = id(db, TENANT);
+        let insert = |uuid: &str, action: &str| format!(
+            "INSERT INTO api_key_audit_log (id, workspace_id, tenant_id, action, detail) VALUES ({}, {workspace}, {tenant}, '{action}', '{{}}')", id(db, uuid));
+        execute(db, insert("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "set_maintenance")).await;
+        let completion = insert("ffffffff-ffff-4fff-8fff-ffffffffffff", "background_job_completed");
+        assert_rejected(db, &completion).await;
+        Migrator::up(db, Some(1)).await.unwrap();
+        Migrator::down(db, Some(1)).await.expect("rollback before completion records exist");
+        assert_rejected(db, &completion).await;
+        Migrator::up(db, Some(1)).await.unwrap();
+        execute(db, completion).await;
+        assert!(Migrator::down(db, Some(1)).await.is_err(), "append-only completion records must not be deleted to permit rollback");
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM api_key_audit_log").await, 2);
+        assert_eq!(value::<i64>(db, "SELECT COUNT(*) FROM api_key_audit_log WHERE action = 'background_job_completed'").await, 1);
+        assert_rejected(db, &insert("12121212-1212-4121-8121-121212121212", "not_an_action")).await;
+    })).await;
+}
+
+#[tokio::test]
 #[serial(postgres_cluster)]
 #[serial(process_environment)]
 async fn upgrade_000007_creates_fork_history_and_integrity_objects() {

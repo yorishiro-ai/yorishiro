@@ -26,7 +26,10 @@ impl MigrationTrait for Migration {
     }
 }
 
-async fn replace_check(manager: &SchemaManager<'_>, new_check: &str) -> Result<(), DbErr> {
+pub(crate) async fn replace_check(
+    manager: &SchemaManager<'_>,
+    new_check: &str,
+) -> Result<(), DbErr> {
     if manager.get_database_backend() == DbBackend::Sqlite {
         let create = format!(
             "CREATE TABLE api_key_audit_log_new (\

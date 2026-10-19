@@ -306,7 +306,7 @@ pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &Setup) 
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
@@ -369,10 +369,21 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             .await;
         assert_eq!(
             confirm.status_code(),
-            StatusCode::OK,
+            StatusCode::ACCEPTED,
             "response: {:?}",
             confirm.text()
         );
+        let accepted: serde_json::Value = confirm.json();
+        let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        super::fill_defaults::finish(&ctx, confirmation_id).await;
+        let status = request
+            .get(&format!(
+                "/api/inference-jobs/confirmations/{confirmation_id}"
+            ))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(status.status_code(), StatusCode::OK, "{}", status.text());
+        assert_eq!(status.json::<serde_json::Value>()["result"]["confirmed"], 1);
 
         // The accepted write is snapshot-backed and remains undoable through the base endpoint.
         let undo = request
@@ -381,12 +392,16 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             .await;
         assert_eq!(
             undo.status_code(),
-            StatusCode::OK,
+            StatusCode::ACCEPTED,
             "response: {:?}",
             undo.text()
         );
         let undo_report: serde_json::Value = undo.json();
-        assert_eq!(undo_report["restored"], 1, "undo report: {undo_report:?}");
+        super::fill_defaults::finish(
+            &ctx,
+            undo_report["job_id"].as_str().unwrap().parse().unwrap(),
+        )
+        .await;
 
         let get_after_undo = request
             .get(&format!("/api/entities/{}", entity))

@@ -1,64 +1,14 @@
 mod discovery;
 
-use std::sync::Arc;
-use std::sync::Mutex;
+use serde_json::json;
 use yorishiro::YorishiroError;
 use yorishiro::edition::ee::controllers::oauth::state_token;
 use yorishiro::edition::ee::data::oauth::OAuthConfig;
+use yorishiro::edition::ee::services::oauth::{build_authorize_redirect, handle_callback};
 
-use jsonwebtoken::jwk::JwkSet;
-use loco_rs::prelude::async_trait;
-
-use yorishiro::edition::ee::services::oauth::*;
-
-struct FakeOAuthHttp {
-    calls: Mutex<Vec<&'static str>>,
-}
-
-#[async_trait]
-impl yorishiro::edition::ee::services::oauth::discovery::OAuthHttp for FakeOAuthHttp {
-    async fn fetch_discovery_document(
-        &self,
-        _issuer_url: &str,
-    ) -> Result<yorishiro::edition::ee::services::oauth::discovery::DiscoveryDocument, YorishiroError>
-    {
-        self.calls.lock().unwrap().push("discovery");
-        Ok(
-            yorishiro::edition::ee::services::oauth::discovery::DiscoveryDocument {
-                authorization_endpoint: "https://idp.example/authorize".into(),
-                token_endpoint: "https://idp.example/token".into(),
-                jwks_uri: "https://idp.example/jwks".into(),
-            },
-        )
-    }
-
-    async fn exchange_code_for_tokens(
-        &self,
-        _token_endpoint: &str,
-        _client_id: &str,
-        _client_secret: &str,
-        _code: &str,
-        _redirect_uri: &str,
-        _pkce_verifier: &str,
-    ) -> Result<yorishiro::edition::ee::services::oauth::discovery::TokenResponse, YorishiroError>
-    {
-        self.calls.lock().unwrap().push("token");
-        Ok(
-            yorishiro::edition::ee::services::oauth::discovery::TokenResponse {
-                id_token: "not-a-jwt".into(),
-            },
-        )
-    }
-
-    async fn fetch_jwks(&self, _jwks_uri: &str) -> Result<JwkSet, YorishiroError> {
-        self.calls.lock().unwrap().push("jwks");
-        Ok(JwkSet { keys: Vec::new() })
-    }
-}
-
-fn config() -> OAuthConfig {
+fn config(issuer_url: String) -> OAuthConfig {
     OAuthConfig {
-        issuer_url: "https://idp.example".into(),
+        issuer_url,
         client_id: "client-id".into(),
         client_secret: "client-secret".into(),
         redirect_uri: "http://localhost:5150/auth/oauth/callback".into(),
@@ -66,43 +16,58 @@ fn config() -> OAuthConfig {
     }
 }
 
-#[tokio::test]
-async fn authorize_uses_the_injected_discovery_operation() {
-    let http = Arc::new(FakeOAuthHttp {
-        calls: Mutex::new(Vec::new()),
-    });
-    let redirect = build_authorize_redirect_with_http(&config(), http.clone())
-        .await
-        .expect("fake discovery should build the authorization redirect");
-
-    assert!(redirect.url.starts_with("https://idp.example/authorize?"));
-    assert!(redirect.url.contains("code_challenge_method=S256"));
-    assert!(!redirect.csrf_cookie_value.is_empty());
-    assert_eq!(*http.calls.lock().unwrap(), vec!["discovery"]);
+async fn json_server(body: serde_json::Value) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
+    let body = body.to_string();
+    discovery::start_server(&format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len(),
+    ))
+    .await
 }
 
 #[tokio::test]
-async fn callback_uses_all_three_injected_operations_before_token_verification() {
-    let http = Arc::new(FakeOAuthHttp {
-        calls: Mutex::new(Vec::new()),
-    });
+async fn authorize_uses_production_discovery() {
+    let (issuer, server) = json_server(json!({
+        "authorization_endpoint": "https://idp.example/authorize",
+        "token_endpoint": "https://idp.example/token",
+        "jwks_uri": "https://idp.example/jwks",
+    }))
+    .await;
+    let redirect = build_authorize_redirect(&config(issuer)).await.unwrap();
+    assert!(redirect.url.starts_with("https://idp.example/authorize?"));
+    assert!(redirect.url.contains("code_challenge_method=S256"));
+    assert!(!redirect.csrf_cookie_value.is_empty());
+    let request = server.await.unwrap();
+    assert!(
+        String::from_utf8_lossy(&request).starts_with("GET /.well-known/openid-configuration ")
+    );
+}
+
+#[tokio::test]
+async fn callback_uses_production_discovery_exchange_and_jwks_before_verifying_token() {
+    let (token_endpoint, token_server) = json_server(json!({"id_token": "not-a-jwt"})).await;
+    let (jwks_uri, jwks_server) = json_server(json!({"keys": []})).await;
+    let (issuer, discovery_server) = json_server(json!({
+        "authorization_endpoint": "https://idp.example/authorize",
+        "token_endpoint": token_endpoint,
+        "jwks_uri": jwks_uri,
+    }))
+    .await;
     let issued = state_token::issue(b"client-secret");
-    let result = handle_callback_with_http(
-        &config(),
+    let result = handle_callback(
+        &config(issuer),
         "authorization-code",
         &issued.state,
         Some(&issued.csrf_cookie_value),
-        http.clone(),
     )
     .await;
-    let error = match result {
-        Ok(_) => panic!("the deliberately invalid ID token must be rejected"),
-        Err(error) => error,
-    };
-
-    assert!(matches!(error, YorishiroError::Unauthenticated));
-    assert_eq!(
-        *http.calls.lock().unwrap(),
-        vec!["discovery", "token", "jwks"]
-    );
+    assert!(matches!(result, Err(YorishiroError::Unauthenticated)));
+    discovery_server.await.unwrap();
+    jwks_server.await.unwrap();
+    let request = token_server.await.unwrap();
+    let request = String::from_utf8_lossy(&request);
+    assert!(request.starts_with("POST / "));
+    assert!(request.contains("code=authorization-code"));
+    assert!(request.contains("grant_type=authorization_code"));
+    assert!(request.contains("code_verifier="));
 }

@@ -10,6 +10,7 @@ mod backend;
 mod crud;
 mod migration;
 mod snapshots;
+pub(crate) use snapshots::require_job_snapshots;
 mod validation;
 
 use crate::models::_entities::entity_entities::Column;

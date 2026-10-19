@@ -1,5 +1,5 @@
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, ExprTrait, QueryFilter, QuerySelect,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, ExprTrait, QueryFilter, SelectExt,
 };
 use uuid::Uuid;
 
@@ -79,17 +79,11 @@ pub(super) async fn embed_and_write(
         // The upsert found no matching entity row with the expected token.
         // Distinguish: was the entity deleted, or just token-mismatched?
 
-        use crate::models::_entities::entity_entities::{Column, Entity};
-
         let entity_exists = Entity::find_by_id(input.entity_id)
-            .select_only()
-            .column(Column::Id)
             .filter(Column::WorkspaceId.eq(input.workspace_id))
-            .into_tuple::<Uuid>()
-            .one(conn)
+            .exists(conn)
             .await
-            .internal()?
-            .is_some();
+            .internal()?;
 
         if entity_exists {
             return Err(YorishiroError::Conflict {

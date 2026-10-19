@@ -588,9 +588,11 @@ ee/services/oauth/discovery.rs	fn	redirect_policy	integration-test: tests/ee/ser
 ee/services/oauth/discovery.rs	struct	DiscoveryDocument	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
 ee/services/oauth/discovery.rs	struct	ReqwestOAuthHttp	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
 ee/services/oauth/discovery.rs	struct	TokenResponse	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
-ee/services/oauth/discovery.rs	trait	OAuthHttp	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
-ee/services/oauth/mod.rs	fn	build_authorize_redirect_with_http	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
-ee/services/oauth/mod.rs	fn	handle_callback_with_http	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
+ee/services/oauth/discovery.rs	fn	ReqwestOAuthHttp::exchange_code_for_tokens	integration-test: tests/ee/services/oauth/discovery.rs exercises production form encoding and secret redaction.
+ee/services/oauth/discovery.rs	fn	ReqwestOAuthHttp::fetch_discovery_document	integration-test: tests/ee/services/oauth/discovery.rs exercises production URL policy and timeout handling.
+ee/services/oauth/discovery.rs	fn	ReqwestOAuthHttp::fetch_jwks	integration-test: tests/ee/services/oauth/discovery.rs exercises production JWKS retrieval.
+ee/services/oauth/mod.rs	fn	build_authorize_redirect	integration-test: tests/ee/services/oauth/mod.rs exercises the production flow against loopback HTTP.
+ee/services/oauth/mod.rs	fn	handle_callback	integration-test: tests/ee/services/oauth/mod.rs exercises the production flow against loopback HTTP.
 ee/services/oauth/mod.rs	mod	discovery	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
 ee/services/oauth/mod.rs	struct	AuthorizeRedirect	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
 ee/services/oauth/mod.rs	struct	CallbackIdentity	integration-test: tests/ee/services/oauth/mod.rs exercises it now that the unit tests moved out of src/.
@@ -687,27 +689,19 @@ src/services/embedding/model_fetch.rs	const	CONNECT_TIMEOUT	integration-test: te
 src/services/embedding/model_fetch.rs	const	DEFAULT_MODEL	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	const	READ_TIMEOUT	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	const	STALE_PARTIAL_AGE	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	enum	ArtifactHttpError	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	Artifact::description	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	Artifact::local_name	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	Artifact::remote_path	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	Artifact::sha256	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	Artifact::size	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	field	ArtifactHttpResponse::body	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	field	ArtifactHttpResponse::status	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	LocalModelDef::model	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	LocalModelDef::revision	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	LocalModelDef::short_id	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	field	LocalModelDef::tokenizer	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	fn	download_verified	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	fn	ensure_file_with_http	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/model_fetch.rs	fn	ensure_file_with_client	integration-test: tests/services/embedding/model_fetch.rs exercises the production download and cache path against a loopback HTTP server.
 src/services/embedding/model_fetch.rs	fn	sweep_stale_partials	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	struct	Artifact	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	struct	ArtifactHttpResponse	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	struct	LocalModelDef	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	struct	ReqwestArtifactHttp	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	trait	ArtifactBody	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/model_fetch.rs	trait	ArtifactHttp	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/openai.rs	fn	OpenAiCompatibleProvider::with_client	integration-test: loopback tests exercise the production reqwest transport with a bounded timeout.
 src/workers/dispatch.rs	trait	EmbeddingSyncDispatcher	integration-test: tests/workers/dispatch.rs exercises it now that the unit tests moved out of src/.
 src/workers/embedding_sync.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/embedding_sync.rs exercises it now that the unit tests moved out of src/.

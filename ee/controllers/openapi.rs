@@ -13,8 +13,7 @@ pub(crate) use crate::edition::ee::dtos::{
 pub(crate) use crate::edition::ee::models::{
     entity_column_preferences::ColumnPreference,
     inference_proposals::{
-        ConfirmReport as ProposalConfirmResponse, ProposalActionReport as ProposalActionResponse,
-        ProposalRecord as InferenceProposalResponse,
+        ProposalActionReport as ProposalActionResponse, ProposalRecord as InferenceProposalResponse,
     },
     marketplace::{
         MarketplaceListing, SubmitReviewRequest, TemplateReviewRecord, TemplateVersionRecord,

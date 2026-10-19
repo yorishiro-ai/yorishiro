@@ -26,6 +26,7 @@ mod m20261011_000020_inference_one_running_job_per_workspace;
 mod m20261015_160234_queue_job_outbox_scope;
 mod m20261015_160332_query_embedding_deadline;
 mod m20261016_000022_timezone_state;
+mod m20261020_000023_background_job_completion;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -55,6 +56,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_160234_queue_job_outbox_scope::Migration),
             Box::new(m20261015_160332_query_embedding_deadline::Migration),
             Box::new(m20261016_000022_timezone_state::Migration),
+            Box::new(m20261020_000023_background_job_completion::Migration),
             // inject-above (do not remove this comment)
         ]
     }
