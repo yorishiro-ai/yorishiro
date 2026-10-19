@@ -1,5 +1,7 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/workers/queue/valkey.rs	fn	enqueue_with_id	integration-test: deterministic collision test executes the same atomic enqueue operation as QueueProvider.
+src/workers/queue/valkey.rs	fn	ValkeyTimezoneQueue::enqueue_batch_with_ids	integration-test: deterministic batch collision test verifies the production atomic operation without duplicating Lua.
 src/workers/mod.rs	mod	fill_defaults	integration-test: request tests register the production migration worker on the configured queue provider.
 src/workers/fill_defaults.rs	struct	FillDefaultsWorker	integration-test: REST and MCP tests prove migration waits for and executes on the selected Loco queue provider.
 src/workers/fill_defaults.rs	struct	FillDefaultsArgs	loco-task-worker: public BackgroundWorker implementation names this serializable job payload type; fields remain crate-private.

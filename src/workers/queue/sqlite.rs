@@ -7,7 +7,7 @@ use loco_rs::{
     config::SqliteQueueConfig,
 };
 use sea_orm::sqlx::{
-    self, AssertSqlSafe, ConnectOptions, QueryBuilder, Row,
+    self, ConnectOptions, Row,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
 };
 use sea_orm::{
@@ -209,33 +209,59 @@ impl QueueProvider for SqliteTimezoneQueue {
             }
             ids.push(id);
         }
-        let mut tx = self.pool.begin().await?;
+        let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(self.pool.clone());
+        let tx = crate::db::begin_write(&db).await?;
         let mut id_iter = ids.iter();
         for chunk in jobs.chunks(1000) {
-            let mut query = QueryBuilder::<sqlx::Sqlite>::new(
-                "INSERT INTO sqlt_loco_queue (id, task_data, name, run_at, run_at_epoch_seconds, run_at_epoch_nanos, interval, tags, priority, created_at, created_at_epoch_seconds, created_at_epoch_nanos, created_at_legacy_checked, updated_at, updated_at_epoch_seconds, updated_at_epoch_nanos, updated_at_legacy_checked) ",
-            );
-            query.push_values(chunk, |mut row, (data, priority)| {
+            let mut query = Query::insert()
+                .into_table(Alias::new("sqlt_loco_queue"))
+                .columns(
+                    [
+                        "id",
+                        "task_data",
+                        "name",
+                        "run_at",
+                        "run_at_epoch_seconds",
+                        "run_at_epoch_nanos",
+                        "interval",
+                        "tags",
+                        "priority",
+                        "created_at",
+                        "created_at_epoch_seconds",
+                        "created_at_epoch_nanos",
+                        "created_at_legacy_checked",
+                        "updated_at",
+                        "updated_at_epoch_seconds",
+                        "updated_at_epoch_nanos",
+                        "updated_at_legacy_checked",
+                    ]
+                    .map(Alias::new),
+                )
+                .to_owned();
+            for (data, priority) in chunk {
                 let id = id_iter.next().expect("one id per batch entry").clone();
-                row.push_bind(id)
-                    .push_bind(data)
-                    .push_bind(&class)
-                    .push_bind(&run_at)
-                    .push_bind(sec)
-                    .push_bind(nanos)
-                    .push_bind(None::<i64>)
-                    .push_bind(tags.clone())
-                    .push_bind(priority.unwrap_or(0))
-                    .push_bind(&now_local)
-                    .push_bind(sec)
-                    .push_bind(nanos)
-                    .push_bind(1)
-                    .push_bind(&now_local)
-                    .push_bind(sec)
-                    .push_bind(nanos)
-                    .push_bind(1);
-            });
-            query.build().execute(&mut *tx).await?;
+                query.values_panic([
+                    id.into(),
+                    data.clone().into(),
+                    class.clone().into(),
+                    run_at.clone().into(),
+                    sec.into(),
+                    nanos.into(),
+                    None::<i64>.into(),
+                    tags.clone().into(),
+                    priority.unwrap_or(0).into(),
+                    now_local.clone().into(),
+                    sec.into(),
+                    nanos.into(),
+                    1.into(),
+                    now_local.clone().into(),
+                    sec.into(),
+                    nanos.into(),
+                    1.into(),
+                ]);
+            }
+            tx.execute_raw(tx.get_database_backend().build(&query))
+                .await?;
         }
         tx.commit().await?;
         Ok(ids)
@@ -461,34 +487,17 @@ pub async fn get_jobs_at_cutoff(
     cutoff_sec: i64,
     cutoff_nanos: i32,
 ) -> loco_rs::Result<Vec<Job>> {
-    let mut query = String::from(
-        "SELECT id, name, task_data, status, run_at, interval, created_at, updated_at, tags, priority FROM sqlt_loco_queue WHERE created_at_epoch_seconds IS NOT NULL AND (created_at_epoch_seconds < ? OR (created_at_epoch_seconds = ? AND created_at_epoch_nanos <= ?))",
+    let mut statement = queue_listing();
+    statement.cond_where(
+        Condition::any()
+            .add(Expr::col(Alias::new("created_at_epoch_seconds")).lt(cutoff_sec))
+            .add(
+                Condition::all()
+                    .add(Expr::col(Alias::new("created_at_epoch_seconds")).eq(cutoff_sec))
+                    .add(Expr::col(Alias::new("created_at_epoch_nanos")).lte(cutoff_nanos)),
+            ),
     );
-    if status.is_some_and(|values| !values.is_empty()) {
-        query.push_str(" AND status IN (");
-        query.push_str(&vec!["?"; status.map_or(0, Vec::len)].join(","));
-        query.push(')');
-    }
-    let mut statement = sqlx::query(AssertSqlSafe(query))
-        .bind(cutoff_sec)
-        .bind(cutoff_sec)
-        .bind(cutoff_nanos);
-    if let Some(values) = status.filter(|values| !values.is_empty()) {
-        for value in values {
-            statement = statement.bind(value.to_string());
-        }
-    }
-    let rows = statement.fetch_all(pool).await?;
-    Ok(rows
-        .iter()
-        .filter_map(|row| match row_to_job(row) {
-            Ok(job) => Some(job),
-            Err(error) => {
-                tracing::error!(%error, "invalid queue row skipped by get_jobs");
-                None
-            }
-        })
-        .collect())
+    list_queue_rows(pool, statement, status).await
 }
 
 async fn initialize_schema(
@@ -500,29 +509,43 @@ async fn initialize_schema(
 }
 
 async fn ensure_exact_columns(pool: &SqlitePool) -> loco_rs::Result<()> {
-    for (name, definition) in [
-        ("run_at_epoch_seconds", "INTEGER"),
-        ("run_at_epoch_nanos", "INTEGER"),
-        ("run_at_legacy_checked", "INTEGER NOT NULL DEFAULT 0"),
-        ("created_at_epoch_seconds", "INTEGER"),
-        ("created_at_epoch_nanos", "INTEGER"),
-        ("created_at_legacy_checked", "INTEGER NOT NULL DEFAULT 0"),
-        ("updated_at_epoch_seconds", "INTEGER"),
-        ("updated_at_epoch_nanos", "INTEGER"),
-        ("updated_at_legacy_checked", "INTEGER NOT NULL DEFAULT 0"),
+    use sea_orm::sea_query::{ColumnDef, Func, Table};
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    for name in [
+        "run_at_epoch_seconds",
+        "run_at_epoch_nanos",
+        "run_at_legacy_checked",
+        "created_at_epoch_seconds",
+        "created_at_epoch_nanos",
+        "created_at_legacy_checked",
+        "updated_at_epoch_seconds",
+        "updated_at_epoch_nanos",
+        "updated_at_legacy_checked",
     ] {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('sqlt_loco_queue') WHERE name = ?)",
-        )
-        .bind(name)
-        .fetch_one(pool)
-        .await?;
-        if !exists {
-            sqlx::query(AssertSqlSafe(format!(
-                "ALTER TABLE sqlt_loco_queue ADD COLUMN {name} {definition}"
-            )))
-            .execute(pool)
-            .await?;
+        let exists = Query::select()
+            .expr(Expr::val(1))
+            .from_function(
+                Func::cust(Alias::new("pragma_table_info")).arg("sqlt_loco_queue"),
+                Alias::new("info"),
+            )
+            .and_where(Expr::col(Alias::new("name")).eq(name))
+            .to_owned();
+        if db
+            .query_one_raw(db.get_database_backend().build(&exists))
+            .await?
+            .is_none()
+        {
+            let mut column = ColumnDef::new(Alias::new(name));
+            column.integer();
+            if name.ends_with("_checked") {
+                column.not_null().default(0);
+            }
+            let alter = Table::alter()
+                .table(Alias::new("sqlt_loco_queue"))
+                .add_column(column)
+                .to_owned();
+            db.execute_raw(db.get_database_backend().build(&alter))
+                .await?;
         }
     }
     backfill_lifecycle_epochs(pool).await?;
@@ -530,8 +553,32 @@ async fn ensure_exact_columns(pool: &SqlitePool) -> loco_rs::Result<()> {
 }
 
 async fn ensure_queue_indexes(pool: &SqlitePool) -> loco_rs::Result<()> {
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sqlt_queue_status_priority_epoch ON sqlt_loco_queue(status, priority DESC, run_at_epoch_seconds, run_at_epoch_nanos, id) WHERE run_at_epoch_seconds IS NOT NULL AND run_at_epoch_nanos IS NOT NULL").execute(pool).await?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sqlt_queue_legacy_unchecked ON sqlt_loco_queue(id) WHERE run_at_epoch_seconds IS NULL AND run_at_legacy_checked=0").execute(pool).await?;
+    use sea_orm::sea_query::{ConditionalStatement, Index, IndexOrder};
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    let exact = Index::create()
+        .name("idx_sqlt_queue_status_priority_epoch")
+        .table(Alias::new("sqlt_loco_queue"))
+        .if_not_exists()
+        .col(Alias::new("status"))
+        .col((Alias::new("priority"), IndexOrder::Desc))
+        .col(Alias::new("run_at_epoch_seconds"))
+        .col(Alias::new("run_at_epoch_nanos"))
+        .col(Alias::new("id"))
+        .and_where(Expr::col(Alias::new("run_at_epoch_seconds")).is_not_null())
+        .and_where(Expr::col(Alias::new("run_at_epoch_nanos")).is_not_null())
+        .to_owned();
+    let legacy = Index::create()
+        .name("idx_sqlt_queue_legacy_unchecked")
+        .table(Alias::new("sqlt_loco_queue"))
+        .if_not_exists()
+        .col(Alias::new("id"))
+        .and_where(Expr::col(Alias::new("run_at_epoch_seconds")).is_null())
+        .and_where(Expr::col(Alias::new("run_at_legacy_checked")).eq(0))
+        .to_owned();
+    db.execute_raw(db.get_database_backend().build(&exact))
+        .await?;
+    db.execute_raw(db.get_database_backend().build(&legacy))
+        .await?;
     Ok(())
 }
 
@@ -551,41 +598,49 @@ async fn backfill_lifecycle_epochs(pool: &SqlitePool) -> loco_rs::Result<()> {
         ),
     ] {
         loop {
-            let select = format!(
-                "SELECT id, quote({column}) FROM sqlt_loco_queue WHERE {sec_column} IS NULL AND {checked_column}=0 ORDER BY id LIMIT 1000"
-            );
-            let rows: Vec<(String, String)> = sqlx::query_as(AssertSqlSafe(select))
-                .fetch_all(pool)
+            let select = Query::select()
+                .column(Alias::new("id"))
+                .expr(
+                    sea_orm::sea_query::Func::cust(Alias::new("quote"))
+                        .arg(Expr::col(Alias::new(column))),
+                )
+                .from(Alias::new("sqlt_loco_queue"))
+                .and_where(Expr::col(Alias::new(sec_column)).is_null())
+                .and_where(Expr::col(Alias::new(checked_column)).eq(0))
+                .order_by(Alias::new("id"), sea_orm::Order::Asc)
+                .limit(1000)
+                .to_owned();
+            let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+            let rows = db
+                .query_all_raw(db.get_database_backend().build(&select))
                 .await?;
             if rows.is_empty() {
                 break;
             }
-            for (id, quoted) in rows {
+            for row in rows {
+                let id: String = row.try_get_by_index(0)?;
+                let quoted: String = row.try_get_by_index(1)?;
                 let raw = quoted
                     .strip_prefix('\'')
                     .and_then(|value| value.strip_suffix('\''))
                     .unwrap_or(&quoted);
+                let mut update = Query::update()
+                    .table(Alias::new("sqlt_loco_queue"))
+                    .value(Alias::new(checked_column), 1)
+                    .and_where(Expr::col(Alias::new("id")).eq(id.clone()))
+                    .and_where(Expr::col(Alias::new(sec_column)).is_null())
+                    .to_owned();
                 if let Some(at) = parse_storage(raw) {
                     let (seconds, nanos) = exact_parts(at);
-                    let update = format!(
-                        "UPDATE sqlt_loco_queue SET {sec_column}=?, {nanos_column}=?, {checked_column}=1 WHERE id=? AND {sec_column} IS NULL"
-                    );
-                    sqlx::query(AssertSqlSafe(update))
-                        .bind(seconds)
-                        .bind(nanos)
-                        .bind(&id)
-                        .execute(pool)
-                        .await?;
+                    update.values([
+                        (Alias::new(sec_column), Expr::val(seconds)),
+                        (Alias::new(nanos_column), Expr::val(nanos)),
+                    ]);
                 } else {
-                    let update = format!(
-                        "UPDATE sqlt_loco_queue SET {checked_column}=1 WHERE id=? AND {sec_column} IS NULL"
-                    );
-                    sqlx::query(AssertSqlSafe(update))
-                        .bind(&id)
-                        .execute(pool)
-                        .await?;
                     tracing::error!(job_id=%id, column, value=%raw, "invalid legacy queue lifecycle timestamp; leaving row unkeyed");
                 }
+                db.execute_raw(db.get_database_backend().build(&update))
+                    .await?;
             }
         }
     }
@@ -601,68 +656,112 @@ pub async fn dequeue(
     tags: &[String],
     timezone: crate::time::Timezone,
 ) -> loco_rs::Result<Option<Job>> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    // Key legacy rows in bounded batches; no lexical wall-time shortcut is valid for mixed offsets.
+    use sea_orm::sea_query::{Func, Order};
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    let tx = crate::db::begin_write(&db).await?;
     let now = crate::time::queue_now(timezone).with_timezone(&Utc);
     let (sec, nanos) = exact_parts(now);
     let updated_at = crate::time::queue_storage(now, timezone);
-    let legacy: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id, quote(run_at) FROM sqlt_loco_queue WHERE run_at_epoch_seconds IS NULL AND run_at_legacy_checked=0 ORDER BY id LIMIT 1000",
-    )
-    .fetch_all(&mut *tx)
-    .await?;
-    for (id, stored) in legacy {
+    // Key legacy rows in bounded batches; no lexical wall-time shortcut is valid for mixed offsets.
+    let legacy = Query::select()
+        .column(Alias::new("id"))
+        .expr(Func::cust(Alias::new("quote")).arg(Expr::col(Alias::new("run_at"))))
+        .from(Alias::new("sqlt_loco_queue"))
+        .and_where(Expr::col(Alias::new("run_at_epoch_seconds")).is_null())
+        .and_where(Expr::col(Alias::new("run_at_legacy_checked")).eq(0))
+        .order_by(Alias::new("id"), Order::Asc)
+        .limit(1000)
+        .to_owned();
+    for row in tx
+        .query_all_raw(tx.get_database_backend().build(&legacy))
+        .await?
+    {
+        let id: String = row.try_get_by_index(0)?;
+        let stored: String = row.try_get_by_index(1)?;
         let raw = stored
             .strip_prefix('\'')
-            .and_then(|s| s.strip_suffix('\''))
+            .and_then(|value| value.strip_suffix('\''))
             .unwrap_or(&stored);
+        let mut update = Query::update()
+            .table(Alias::new("sqlt_loco_queue"))
+            .value(Alias::new("run_at_legacy_checked"), 1)
+            .and_where(Expr::col(Alias::new("id")).eq(id.clone()))
+            .and_where(Expr::col(Alias::new("run_at_epoch_seconds")).is_null())
+            .to_owned();
         if let Some(at) = parse_storage(raw) {
             let (legacy_sec, legacy_nanos) = exact_parts(at);
-            sqlx::query("UPDATE sqlt_loco_queue SET run_at_epoch_seconds=?, run_at_epoch_nanos=?, run_at_legacy_checked=1 WHERE id=? AND run_at_epoch_seconds IS NULL")
-                .bind(legacy_sec).bind(legacy_nanos).bind(id).execute(&mut *tx).await?;
+            update.values([
+                (Alias::new("run_at_epoch_seconds"), Expr::val(legacy_sec)),
+                (Alias::new("run_at_epoch_nanos"), Expr::val(legacy_nanos)),
+            ]);
         } else {
-            sqlx::query("UPDATE sqlt_loco_queue SET run_at_legacy_checked=1 WHERE id=? AND run_at_epoch_seconds IS NULL")
-                .bind(&id).execute(&mut *tx).await?;
             tracing::error!(job_id=%id, run_at=%raw, "invalid legacy queue timestamp; leaving job queued");
         }
-    }
-    let mut query = String::from(
-        "SELECT id, name, task_data, status, run_at, interval, tags, priority, run_at_epoch_seconds, run_at_epoch_nanos FROM sqlt_loco_queue WHERE status = ? AND run_at_epoch_seconds IS NOT NULL AND run_at_epoch_nanos IS NOT NULL AND run_at_epoch_seconds <= ? AND (run_at_epoch_seconds < ? OR run_at_epoch_nanos <= ?)",
-    );
-    if tags.is_empty() {
-        query.push_str(" AND tags IS NULL");
-    } else {
-        query.push_str(" AND tags IS NOT NULL AND (");
-        query.push_str(&vec!["json_extract(tags, '$') LIKE ?"; tags.len()].join(" OR "));
-        query.push(')');
-    }
-    query.push_str(" ORDER BY priority DESC, run_at_epoch_seconds, run_at_epoch_nanos, id LIMIT 1");
-    let mut q = sqlx::query(AssertSqlSafe(query))
-        .bind(JobStatus::Queued.to_string())
-        .bind(sec)
-        .bind(sec)
-        .bind(nanos);
-    for tag in tags {
-        q = q.bind(format!("%\"{tag}\"%"));
-    }
-    let row = q.fetch_optional(&mut *tx).await?;
-    if let Some(row) = row {
-        let job = row_to_job(&row)?;
-        let (updated_sec, updated_nanos) = (sec, nanos);
-        sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1 WHERE id=?")
-            .bind(JobStatus::Processing.to_string())
-            .bind(updated_at)
-            .bind(updated_sec)
-            .bind(updated_nanos)
-            .bind(&job.id)
-            .execute(&mut *tx)
+        tx.execute_raw(tx.get_database_backend().build(&update))
             .await?;
-        tx.commit().await?;
-        Ok(Some(job))
-    } else {
-        tx.commit().await?;
-        Ok(None)
     }
+    let mut select = queue_listing();
+    select
+        .and_where(Expr::col(Alias::new("status")).eq(JobStatus::Queued.to_string()))
+        .and_where(Expr::col(Alias::new("run_at_epoch_seconds")).is_not_null())
+        .and_where(Expr::col(Alias::new("run_at_epoch_nanos")).is_not_null())
+        .and_where(Expr::col(Alias::new("run_at_epoch_seconds")).lte(sec))
+        .cond_where(
+            Condition::any()
+                .add(Expr::col(Alias::new("run_at_epoch_seconds")).lt(sec))
+                .add(Expr::col(Alias::new("run_at_epoch_nanos")).lte(nanos)),
+        );
+    if tags.is_empty() {
+        select.and_where(Expr::col(Alias::new("tags")).is_null());
+    } else {
+        let matches = Query::select()
+            .expr(Expr::val(1))
+            .from_function(
+                Func::cust(Alias::new("json_each")).arg(Expr::col(Alias::new("tags"))),
+                Alias::new("tag"),
+            )
+            .and_where(
+                Expr::col((Alias::new("tag"), Alias::new("value"))).is_in(tags.iter().cloned()),
+            )
+            .to_owned();
+        select.and_where(Expr::exists(matches));
+    }
+    select
+        .order_by(Alias::new("priority"), Order::Desc)
+        .order_by(Alias::new("run_at_epoch_seconds"), Order::Asc)
+        .order_by(Alias::new("run_at_epoch_nanos"), Order::Asc)
+        .order_by(Alias::new("id"), Order::Asc)
+        .limit(1);
+    let row = tx
+        .query_one_raw(tx.get_database_backend().build(&select))
+        .await?;
+    let job = row
+        .map(|row| {
+            row.try_as_sqlite_row()
+                .ok_or_else(|| loco_rs::Error::Message("expected SQLite queue row".into()))
+                .and_then(row_to_job)
+        })
+        .transpose()?;
+    if let Some(job) = &job {
+        let update = Query::update()
+            .table(Alias::new("sqlt_loco_queue"))
+            .values([
+                (
+                    Alias::new("status"),
+                    Expr::val(JobStatus::Processing.to_string()),
+                ),
+                (Alias::new("updated_at"), Expr::val(updated_at)),
+                (Alias::new("updated_at_epoch_seconds"), Expr::val(sec)),
+                (Alias::new("updated_at_epoch_nanos"), Expr::val(nanos)),
+                (Alias::new("updated_at_legacy_checked"), Expr::val(1)),
+            ])
+            .and_where(Expr::col(Alias::new("id")).eq(job.id.clone()))
+            .to_owned();
+        tx.execute_raw(tx.get_database_backend().build(&update))
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(job)
 }
 
 fn row_to_job(row: &SqliteRow) -> loco_rs::Result<Job> {
@@ -808,28 +907,54 @@ async fn get_jobs(
         let (sec, nanos) = exact_parts(cutoff);
         return get_jobs_at_cutoff(pool, status, sec, nanos).await;
     }
-    let mut query = String::from(
-        "SELECT id, name, task_data, status, run_at, interval, created_at, updated_at, tags, priority FROM sqlt_loco_queue WHERE 1=1",
-    );
-    if let Some(status) = status.filter(|status| !status.is_empty()) {
-        query.push_str(" AND status IN (");
-        query.push_str(&vec!["?"; status.len()].join(","));
-        query.push(')');
+    list_queue_rows(pool, queue_listing(), status).await
+}
+
+fn queue_listing() -> sea_orm::sea_query::SelectStatement {
+    Query::select()
+        .columns(
+            [
+                "id",
+                "name",
+                "task_data",
+                "status",
+                "run_at",
+                "interval",
+                "created_at",
+                "updated_at",
+                "tags",
+                "priority",
+            ]
+            .map(Alias::new),
+        )
+        .from(Alias::new("sqlt_loco_queue"))
+        .to_owned()
+}
+
+async fn list_queue_rows(
+    pool: &SqlitePool,
+    mut statement: sea_orm::sea_query::SelectStatement,
+    status: Option<&Vec<JobStatus>>,
+) -> loco_rs::Result<Vec<Job>> {
+    if let Some(status) = status.filter(|values| !values.is_empty()) {
+        statement.and_where(
+            Expr::col(Alias::new("status")).is_in(status.iter().map(ToString::to_string)),
+        );
     }
-    let mut statement = sqlx::query(AssertSqlSafe(query));
-    if let Some(status) = status.filter(|status| !status.is_empty()) {
-        for value in status {
-            statement = statement.bind(value.to_string());
-        }
-    }
-    let rows = statement.fetch_all(pool).await?;
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    let rows = db
+        .query_all_raw(db.get_database_backend().build(&statement))
+        .await?;
     Ok(rows
         .iter()
-        .filter_map(|row| match row_to_job(row) {
-            Ok(job) => Some(job),
-            Err(error) => {
-                tracing::error!(%error, "invalid queue row skipped by get_jobs");
-                None
+        .filter_map(|row| {
+            let row = row.try_as_sqlite_row()?;
+            match row_to_job(row) {
+                Ok(job) => Some(job),
+                Err(error) => {
+                    tracing::error!(%error, "invalid queue row skipped by get_jobs");
+                    None
+                }
             }
         })
         .collect())

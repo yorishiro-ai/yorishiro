@@ -13,8 +13,8 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::compute_credit_ledger::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, ExprTrait,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -151,7 +151,10 @@ pub async fn balance(
         .filter(Column::WorkspaceId.eq(workspace_id))
         .select_only()
         .column_as(
-            Expr::cust("CAST(COALESCE(SUM(amount), 0) AS BIGINT)"),
+            Expr::col(Column::Amount)
+                .sum()
+                .if_null(0)
+                .cast_as(sea_orm::sea_query::Alias::new("bigint")),
             "total",
         )
         .into_tuple::<(Option<i64>,)>()

@@ -1,7 +1,7 @@
 use chrono::Utc;
 use loco_rs::bgworker::{Job, JobStatus, QueueProvider};
 use loco_rs::config::RedisQueueConfig;
-use redis::{AsyncCommands, Client, Script};
+use redis::{AsyncCommands, Client};
 use std::time::Duration;
 use yorishiro::workers::queue::valkey::ValkeyTimezoneQueue;
 
@@ -90,19 +90,18 @@ async fn forced_duplicate_job_id_does_not_overwrite_or_enqueue_existing_job() {
     let job_key = format!("{JOB}{id}");
     let sentinel = serde_json::json!({"id":id,"name":"sentinel","task_data":{},"status":"queued","run_at":"2020-01-01T00:00:00Z","interval":null,"created_at":null,"updated_at":null,"tags":null,"priority":0}).to_string();
     let _: () = conn.set(&job_key, &sentinel).await.unwrap();
-    let enqueue_script = redis::Script::new(
-        "if redis.call('EXISTS',KEYS[1])==1 then return 0 end; redis.call('SET',KEYS[1],ARGV[1]); redis.call('ZADD',KEYS[2],ARGV[2],ARGV[3]); return 1",
-    );
-    let committed: i32 = enqueue_script
-        .key(&job_key)
-        .key(&queue)
-        .arg("replacement")
-        .arg(100)
-        .arg(&id)
-        .invoke_async(&mut conn)
-        .await
-        .unwrap();
-    assert_eq!(committed, 0);
+    let result = yorishiro::workers::queue::valkey::enqueue_with_id(
+        &client,
+        "Asia/Tokyo".parse().unwrap(),
+        "replacement".into(),
+        Some(queue.trim_start_matches(QUEUE).into()),
+        serde_json::json!({"replacement": true}),
+        None,
+        Some(100),
+        id.clone(),
+    )
+    .await;
+    assert!(result.is_err());
     let saved: String = conn.get(&job_key).await.unwrap();
     assert_eq!(saved, sentinel);
     let queued: Option<f64> = conn.zscore(&queue, &id).await.unwrap();
@@ -126,22 +125,36 @@ async fn batch_collision_is_atomic_and_failed_clear_matches_provider_membership_
         .await
         .unwrap();
 
-    let script = Script::new(
-        "local n=tonumber(ARGV[1]); for i=1,n do if redis.call('EXISTS',ARGV[2+(i-1)*3])==1 then return 0 end end; for i=1,n do local p=2+(i-1)*3; local key=ARGV[p]; redis.call('SET',key,ARGV[p+1]); redis.call('ZADD',KEYS[1],ARGV[p+2],string.sub(key,5)) end; return 1",
-    );
-    let mut invoker = script.key(&queue);
-    let committed: i32 = invoker
-        .arg(2)
-        .arg(format!("{JOB}{}", ulid::Ulid::generate()))
-        .arg("first")
-        .arg(0)
-        .arg(format!("{JOB}{collision_id}"))
-        .arg("replacement")
-        .arg(0)
-        .invoke_async(&mut conn)
+    let config: RedisQueueConfig = serde_json::from_value(serde_json::json!({
+        "uri": std::env::var("YORISHIRO_VALKEY_TEST_URL").unwrap(),
+        "dangerously_flush": false, "num_workers": 0
+    }))
+    .unwrap();
+    let provider = ValkeyTimezoneQueue::connect(&config, "Asia/Tokyo".parse().unwrap())
         .await
         .unwrap();
-    assert_eq!(committed, 0);
+    let first_id = ulid::Ulid::generate().to_string();
+    let result = provider
+        .enqueue_batch_with_ids(
+            "replacement".into(),
+            Some(queue.trim_start_matches(QUEUE).into()),
+            vec![
+                (first_id.clone(), serde_json::json!({"first": true}), None),
+                (
+                    collision_id.clone(),
+                    serde_json::json!({"replacement": true}),
+                    None,
+                ),
+            ],
+            None,
+        )
+        .await;
+    assert!(result.is_err());
+    let first_exists: bool = conn.exists(format!("{JOB}{first_id}")).await.unwrap();
+    assert!(
+        !first_exists,
+        "a later collision must roll back the earlier payload too"
+    );
     let members: Vec<String> = conn.zrange(&queue, 0, -1).await.unwrap();
     assert!(members.is_empty());
     let saved: String = conn.get(format!("{JOB}{collision_id}")).await.unwrap();

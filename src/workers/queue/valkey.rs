@@ -62,6 +62,66 @@ impl ValkeyTimezoneQueue {
         })
     }
 
+    /// Atomically enqueues jobs with caller-selected IDs, rejecting existing or repeated IDs.
+    ///
+    /// # Errors
+    /// Returns an error if an ID collides, serialization fails or Valkey is unavailable.
+    pub async fn enqueue_batch_with_ids(
+        &self,
+        class: String,
+        queue: Option<String>,
+        jobs: Vec<(String, JsonValue, Option<i32>)>,
+        tags: Option<Vec<String>>,
+    ) -> loco_rs::Result<Vec<JobId>> {
+        if jobs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.connection().await?;
+        let queue = queue.unwrap_or_else(|| "default".into());
+        let queue_key = format!("{QUEUE}{queue}");
+        let mut ids = Vec::with_capacity(jobs.len());
+        let mut expected = Vec::with_capacity(jobs.len());
+        for (id, data, priority) in jobs {
+            let (job, json) = job_json(
+                id.clone(),
+                class.clone(),
+                data,
+                tags.clone(),
+                priority.unwrap_or(0),
+                self.timezone,
+            )?;
+            expected.push((id.clone(), job, json));
+            ids.push(id);
+        }
+        let mut unique_ids = std::collections::HashSet::with_capacity(expected.len());
+        if ids.iter().any(|id| !unique_ids.insert(id.clone())) {
+            return Err(loco_rs::Error::Message(
+                "duplicate ULID generated within batch".into(),
+            ));
+        }
+        let batch_script = Script::new(
+            "local n=tonumber(ARGV[1]); for i=1,n do if redis.call('EXISTS',ARGV[2+(i-1)*3])==1 then return 0 end end; for i=1,n do local p=2+(i-1)*3; local key=ARGV[p]; local data=ARGV[p+1]; local score=ARGV[p+2]; redis.call('SET',key,data); redis.call('ZADD',KEYS[1],score,string.sub(key,5)) end; return 1",
+        );
+        let mut invoker = batch_script.key(&queue_key);
+        let mut script = invoker.arg(expected.len());
+        for (id, job, json) in expected {
+            script = script
+                .arg(format!("{JOB}{id}"))
+                .arg(json)
+                .arg(score(job.priority));
+        }
+        let committed: i32 = script
+            .invoke_async(&mut conn)
+            .await
+            .map_err(loco_rs::Error::from)?;
+        if committed != 1 {
+            return Err(loco_rs::Error::Message(
+                "ULID collision in atomic Valkey batch; no jobs enqueued".into(),
+            ));
+        }
+        Ok(ids)
+    }
+
     async fn connection(&self) -> loco_rs::Result<MultiplexedConnection> {
         self.client
             .get_multiplexed_async_connection()
@@ -79,8 +139,12 @@ async fn worker_connection(client: &Client) -> redis::RedisResult<MultiplexedCon
         .await
 }
 
+/// Enqueues one job with a caller-selected ID without replacing an existing payload.
+///
+/// # Errors
+/// Returns an error on an ID collision, serialization failure or Valkey connection failure.
 #[allow(clippy::too_many_arguments)]
-async fn enqueue_with_id(
+pub async fn enqueue_with_id(
     client: &Client,
     timezone: crate::time::Timezone,
     class: String,
@@ -230,59 +294,15 @@ impl QueueProvider for ValkeyTimezoneQueue {
         jobs: Vec<(JsonValue, Option<i32>)>,
         tags: Option<Vec<String>>,
     ) -> loco_rs::Result<Vec<JobId>> {
-        if jobs.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut conn = self.connection().await?;
-        let queue = queue.unwrap_or_else(|| "default".into());
-        let queue_key = format!("{QUEUE}{queue}");
-        let mut ids = Vec::with_capacity(jobs.len());
-        let mut expected = Vec::with_capacity(jobs.len());
-        for (data, priority) in jobs {
-            let id = ulid::Ulid::generate().to_string();
-            let (job, json) = job_json(
-                id.clone(),
-                class.clone(),
-                data,
-                tags.clone(),
-                priority.unwrap_or(0),
-                self.timezone,
-            )?;
-            expected.push((id.clone(), job, json));
-            if ids.contains(&id) {
-                return Err(loco_rs::Error::Message(
-                    "duplicate ULID generated within batch".into(),
-                ));
-            }
-            ids.push(id);
-        }
-        let mut unique_ids = std::collections::HashSet::with_capacity(expected.len());
-        if ids.iter().any(|id| !unique_ids.insert(id.clone())) {
-            return Err(loco_rs::Error::Message(
-                "duplicate ULID generated within batch".into(),
-            ));
-        }
-        let batch_script = Script::new(
-            "local n=tonumber(ARGV[1]); for i=1,n do if redis.call('EXISTS',ARGV[2+(i-1)*3])==1 then return 0 end end; for i=1,n do local p=2+(i-1)*3; local key=ARGV[p]; local data=ARGV[p+1]; local score=ARGV[p+2]; redis.call('SET',key,data); redis.call('ZADD',KEYS[1],score,string.sub(key,5)) end; return 1",
-        );
-        let mut invoker = batch_script.key(&queue_key);
-        let mut script = invoker.arg(expected.len());
-        for (id, job, json) in expected {
-            script = script
-                .arg(format!("{JOB}{id}"))
-                .arg(json)
-                .arg(score(job.priority));
-        }
-        let committed: i32 = script
-            .invoke_async(&mut conn)
-            .await
-            .map_err(loco_rs::Error::from)?;
-        if committed != 1 {
-            return Err(loco_rs::Error::Message(
-                "ULID collision in atomic Valkey batch; no jobs enqueued".into(),
-            ));
-        }
-        Ok(ids)
+        self.enqueue_batch_with_ids(
+            class,
+            queue,
+            jobs.into_iter()
+                .map(|(data, priority)| (ulid::Ulid::generate().to_string(), data, priority))
+                .collect(),
+            tags,
+        )
+        .await
     }
     async fn register_handler(&self, name: String, handler: JobHandler) -> loco_rs::Result<()> {
         self.handlers.lock().await.insert(name, Arc::new(handler));

@@ -6,9 +6,7 @@ use loco_rs::{
     bgworker::{Job, JobHandler, JobId, JobStatus, QueueProvider},
     config::PostgresQueueConfig,
 };
-use sea_orm::sqlx::{
-    self, ConnectOptions, Executor, PgPool, Postgres, QueryBuilder, postgres::PgConnectOptions,
-};
+use sea_orm::sqlx::{self, ConnectOptions, Executor, PgPool, postgres::PgConnectOptions};
 use sea_orm::{
     ConnectionTrait, ExprTrait,
     sea_query::{Alias, Expr, OnConflict, Query},
@@ -170,25 +168,43 @@ impl QueueProvider for PostgresTimezoneQueue {
             }
             ids.push(id);
         }
-        let mut tx = self.pool.begin().await?;
+        let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.pool.clone());
+        let tx = crate::db::begin_write(&db).await?;
         let mut id_iter = ids.iter();
         for chunk in jobs.chunks(5000) {
-            let mut query = QueryBuilder::<Postgres>::new(
-                "INSERT INTO pg_loco_queue (id,task_data,name,run_at,interval,tags,priority,created_at,updated_at) ",
-            );
-            query.push_values(chunk, |mut row, (data, priority)| {
+            let mut query = Query::insert()
+                .into_table(Alias::new("pg_loco_queue"))
+                .columns(
+                    [
+                        "id",
+                        "task_data",
+                        "name",
+                        "run_at",
+                        "interval",
+                        "tags",
+                        "priority",
+                        "created_at",
+                        "updated_at",
+                    ]
+                    .map(Alias::new),
+                )
+                .to_owned();
+            for (data, priority) in chunk {
                 let id = id_iter.next().expect("one id per batch entry").clone();
-                row.push_bind(id)
-                    .push_bind(data)
-                    .push_bind(&class)
-                    .push_bind(now)
-                    .push_bind(None::<i64>)
-                    .push_bind(tags.clone())
-                    .push_bind(priority.unwrap_or(0))
-                    .push_bind(now)
-                    .push_bind(now);
-            });
-            query.build().execute(&mut *tx).await?;
+                query.values_panic([
+                    id.into(),
+                    data.clone().into(),
+                    class.clone().into(),
+                    now.into(),
+                    None::<i64>.into(),
+                    tags.clone().into(),
+                    priority.unwrap_or(0).into(),
+                    now.into(),
+                    now.into(),
+                ]);
+            }
+            tx.execute_raw(tx.get_database_backend().build(&query))
+                .await?;
         }
         tx.commit().await?;
         Ok(ids)
@@ -202,8 +218,15 @@ impl QueueProvider for PostgresTimezoneQueue {
     }
     async fn setup(&self) -> loco_rs::Result<()> {
         loco_rs::bgworker::pg::initialize_database(&self.pool).await?;
-        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS pg_loco_queue_id_key ON pg_loco_queue (id)")
-            .execute(&self.pool)
+        let index = sea_orm::sea_query::Index::create()
+            .name("pg_loco_queue_id_key")
+            .table(Alias::new("pg_loco_queue"))
+            .if_not_exists()
+            .unique()
+            .col(Alias::new("id"))
+            .to_owned();
+        let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.pool.clone());
+        db.execute_raw(db.get_database_backend().build(&index))
             .await?;
         Ok(())
     }

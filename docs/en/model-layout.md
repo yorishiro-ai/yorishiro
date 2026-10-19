@@ -13,6 +13,8 @@ Prefer Loco's public APIs before application-owned SeaORM/SeaQuery operations, a
 The PostgreSQL queue delegates handler registration, execution, recovery and supported administration to Loco's `PgQueue` while retaining application-required enqueue collision protection.
 Valkey delegates supported administration to Loco; its recovery keeps a guarded atomic membership move because Loco 1.2.0 issues separate commands that can race with completion.
 Outbox recovery, marketplace aggregates and next-version inserts use SeaORM/SeaQuery even when they need joins, correlated subqueries or a single atomic statement.
+SQLite queue persistence and schema extensions also use SeaORM/SeaQuery, including exact-instant claims and legacy timestamp backfill.
+Valkey collision tests call the production enqueue operations with explicit IDs instead of copying their Lua scripts.
 Database-specific transaction setup belongs in `src/db.rs`, not in individual workers.
 Tests call production operations instead of rebuilding enqueue or persistence logic in fixture helpers.
 Fixtures for old persisted formats still test current compatibility code and are not obsolete merely because the input format is old.

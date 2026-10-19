@@ -14,6 +14,8 @@ PostgreSQLキューのhandler登録、実行、復旧、対応する管理操作
 Valkeyの対応する管理操作もLocoへ委譲しますが、復旧ではmembershipを条件付きで原子的に移動します。
 Loco 1.2.0の復旧はコマンドが分かれており、完了処理との競合を防げないためです。
 outboxの復旧、marketplaceの集計、次versionの作成も、JOIN、相関サブクエリ、単一文の原子性を理由にRaw SQLを残さず、SeaORM／SeaQueryで組み立てます。
+SQLiteキューの永続化とschema拡張も、時刻精度を維持したclaimや旧timestampのbackfillを含めてSeaORM／SeaQueryを使います。
+Valkeyの衝突テストはLuaを複製せず、本体の投入処理に明示的なIDを渡して検証します。
 DB固有のトランザクション設定は個々のworkerではなく`src/db.rs`に集約します。
 テストのhelperでenqueueや永続化を再実装せず、本体の操作を呼びます。
 旧形式データのfixtureでも、現行の互換処理を検証していれば不要なテストではありません。
