@@ -11,6 +11,9 @@
 原子性が必要という理由だけではRaw SQLを使いません。
 独自のSeaORM／SeaQuery処理より先にLocoの公開APIを使い、必要なライフサイクルをどちらでも扱えない場合にだけTokioを使います。
 PostgreSQLキューのhandler登録、実行、復旧、対応する管理操作はLocoの`PgQueue`に委譲し、投入時の衝突拒否など必要な差分だけを残します。
+Valkeyの対応する管理操作もLocoへ委譲しますが、復旧ではmembershipを条件付きで原子的に移動します。
+Loco 1.2.0の復旧はコマンドが分かれており、完了処理との競合を防げないためです。
+outboxの復旧、marketplaceの集計、次versionの作成も、JOIN、相関サブクエリ、単一文の原子性を理由にRaw SQLを残さず、SeaORM／SeaQueryで組み立てます。
 DB固有のトランザクション設定は個々のworkerではなく`src/db.rs`に集約します。
 テストのhelperでenqueueや永続化を再実装せず、本体の操作を呼びます。
 旧形式データのfixtureでも、現行の互換処理を検証していれば不要なテストではありません。

@@ -13,8 +13,9 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
 use crate::models::template_templates::TemplateVisibility;
 use chrono::{DateTime, Utc};
-use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
+use sea_orm::ExprTrait;
+use sea_orm::sea_query::{Expr, OnConflict, Query};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -292,9 +293,7 @@ impl TryFrom<ForkSourceDbRecord> for ForkSource {
 /// subqueries rather than a `JOIN` + `GROUP BY`: `limit` bounds the page to 200 rows, so their cost
 /// is bounded too, and nothing has measured the rewrite as faster.
 ///
-/// That is also why the whole `SELECT` is raw SQL: three of its nine columns are those subqueries,
-/// which no entity projection can produce. Putting the other six on the entity API would split one
-/// query across two code paths without reducing drift, since the struct lists all nine either way.
+/// SeaQuery builds the correlated aggregates inside the same paginated entity projection.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -303,38 +302,108 @@ pub async fn list_marketplace(
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
     require_postgres(conn, "listing the marketplace")?;
-    let limit = page.limit();
-    let offset = page.offset();
-
-    MarketplaceListing::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT t.id AS template_id, t.name, t.description, \
-         ARRAY(SELECT e FROM jsonb_array_elements_text(t.tags) WITH ORDINALITY AS a(e, n) \
-                ORDER BY n) AS tags, \
-         t.author, t.tenant_id, \
-         (SELECT max(v.version) FROM template_versions v \
-           WHERE v.template_id = t.id AND v.status = 'stable') AS latest_stable_version, \
-         (SELECT count(*) FROM template_reviews r \
-           WHERE r.template_id = t.id) AS review_count, \
-         (SELECT avg(r.rating)::float8 FROM template_reviews r \
-           WHERE r.template_id = t.id) AS average_rating \
-         FROM template_templates t \
-         WHERE t.visibility = $3 \
-            AND EXISTS ( \
-             SELECT 1 FROM template_versions v \
-               WHERE v.template_id = t.id AND v.status IN ('pre', 'stable') \
-           ) \
-         ORDER BY t.name ASC, t.id ASC \
-         LIMIT $1 OFFSET $2",
-        [
-            limit.into(),
-            offset.into(),
-            TemplateVisibility::Community.as_db_str().into(),
-        ],
-    ))
-    .all(conn)
-    .await
-    .internal()
+    use crate::models::_entities::{
+        template_reviews as review, template_templates as template, template_versions as version,
+    };
+    use sea_orm::sea_query::{Alias, SimpleExpr};
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
+    #[derive(FromQueryResult)]
+    struct Listing {
+        template_id: Uuid,
+        name: String,
+        description: Option<String>,
+        tags: Value,
+        author: Option<String>,
+        tenant_id: Uuid,
+        latest_stable_version: Option<i32>,
+        review_count: i64,
+        average_rating: Option<f64>,
+    }
+    let latest = Query::select()
+        .expr(Expr::col((version::Entity, version::Column::Version)).max())
+        .from(version::Entity)
+        .and_where(
+            Expr::col((version::Entity, version::Column::TemplateId))
+                .equals((template::Entity, template::Column::Id)),
+        )
+        .and_where(Expr::col((version::Entity, version::Column::Status)).eq("stable"))
+        .to_owned();
+    let review_count = Query::select()
+        .expr(Expr::col((review::Entity, review::Column::Id)).count())
+        .from(review::Entity)
+        .and_where(
+            Expr::col((review::Entity, review::Column::TemplateId))
+                .equals((template::Entity, template::Column::Id)),
+        )
+        .to_owned();
+    let average = Query::select()
+        .expr(
+            Expr::col((review::Entity, review::Column::Rating))
+                .avg()
+                .cast_as(Alias::new("float8")),
+        )
+        .from(review::Entity)
+        .and_where(
+            Expr::col((review::Entity, review::Column::TemplateId))
+                .equals((template::Entity, template::Column::Id)),
+        )
+        .to_owned();
+    let published = Query::select()
+        .expr(Expr::val(1))
+        .from(version::Entity)
+        .and_where(
+            Expr::col((version::Entity, version::Column::TemplateId))
+                .equals((template::Entity, template::Column::Id)),
+        )
+        .and_where(Expr::col((version::Entity, version::Column::Status)).is_in(["pre", "stable"]))
+        .to_owned();
+    let rows = template::Entity::find()
+        .select_only()
+        .column_as(template::Column::Id, "template_id")
+        .columns([
+            template::Column::Name,
+            template::Column::Description,
+            template::Column::Tags,
+            template::Column::Author,
+            template::Column::TenantId,
+        ])
+        .expr_as(
+            SimpleExpr::SubQuery(None, Box::new(latest.into())),
+            "latest_stable_version",
+        )
+        .expr_as(
+            SimpleExpr::SubQuery(None, Box::new(review_count.into())),
+            "review_count",
+        )
+        .expr_as(
+            SimpleExpr::SubQuery(None, Box::new(average.into())),
+            "average_rating",
+        )
+        .filter(template::Column::Visibility.eq(TemplateVisibility::Community.as_db_str()))
+        .filter(Expr::exists(published))
+        .order_by_asc(template::Column::Name)
+        .order_by_asc(template::Column::Id)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .into_model::<Listing>()
+        .all(conn)
+        .await
+        .internal()?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(MarketplaceListing {
+                template_id: row.template_id,
+                name: row.name,
+                description: row.description,
+                tags: serde_json::from_value(row.tags).internal()?,
+                author: row.author,
+                tenant_id: row.tenant_id,
+                latest_stable_version: row.latest_stable_version,
+                review_count: row.review_count,
+                average_rating: row.average_rating,
+            })
+        })
+        .collect()
 }
 
 /// Versions of a template that `tenant_id` is allowed to see.
@@ -396,7 +465,7 @@ pub async fn list_versions(
 ///
 /// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`models::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
 ///
-/// Stays a hand-written `INSERT ... SELECT`, not `ActiveModel::insert`: the version number itself is computed by the same statement that inserts it, which is the concurrency guarantee above.
+/// SeaQuery builds one `INSERT ... SELECT` so the version is computed in the inserting statement.
 /// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
 pub(crate) async fn insert_next_version(
     conn: &impl ConnectionTrait,
@@ -405,29 +474,45 @@ pub(crate) async fn insert_next_version(
     user_id: Option<Uuid>,
 ) -> Result<TemplateVersionRecord, YorishiroError> {
     require_postgres(conn, "publishing a template version")?;
-    TemplateVersionDbRecord::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO template_versions \
-                (template_id, version, definition, changelog, status, created_by) \
-         SELECT $1, \
-                COALESCE(max(v.version), 0) + 1, \
-                $2, $3, $4, $5 \
-           FROM template_versions v \
-          WHERE v.template_id = $1 \
-         RETURNING id, template_id, version, definition, changelog, status, created_at",
-        [
-            template_id.into(),
-            request.definition.clone().into(),
-            request.changelog.clone().into(),
-            request.status.as_db_str().into(),
-            user_id.into(),
-        ],
-    ))
-    .one(conn)
-    .await
-    .internal()?
-    .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("insert did not return a row")))
-    .and_then(TemplateVersionRecord::try_from)
+    use crate::models::_entities::template_versions::{Column, Entity};
+    let select = Query::select()
+        .expr(Expr::val(template_id))
+        .expr(Expr::col(Column::Version).max().if_null(0).add(1))
+        .expr(Expr::val(request.definition.clone()))
+        .expr(Expr::val(request.changelog.clone()))
+        .expr(Expr::val(request.status.as_db_str()))
+        .expr(Expr::val(user_id))
+        .from(Entity)
+        .and_where(Expr::col(Column::TemplateId).eq(template_id))
+        .to_owned();
+    let statement = Query::insert()
+        .into_table(Entity)
+        .columns([
+            Column::TemplateId,
+            Column::Version,
+            Column::Definition,
+            Column::Changelog,
+            Column::Status,
+            Column::CreatedBy,
+        ])
+        .select_from(select)
+        .map_err(|error| YorishiroError::Internal(error.into()))?
+        .returning(Query::returning().columns([
+            Column::Id,
+            Column::TemplateId,
+            Column::Version,
+            Column::Definition,
+            Column::Changelog,
+            Column::Status,
+            Column::CreatedAt,
+        ]))
+        .to_owned();
+    TemplateVersionDbRecord::find_by_statement(conn.get_database_backend().build(&statement))
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("insert did not return a row")))
+        .and_then(TemplateVersionRecord::try_from)
 }
 
 /// Reviews of a template, readable by anyone who can see the template itself.

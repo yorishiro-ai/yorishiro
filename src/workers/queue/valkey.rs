@@ -336,66 +336,27 @@ impl QueueProvider for ValkeyTimezoneQueue {
         Ok(())
     }
     async fn ping(&self) -> loco_rs::Result<()> {
-        let mut c = self.connection().await?;
-        let _: String = redis::cmd("PING")
-            .query_async(&mut c)
-            .await
-            .map_err(loco_rs::Error::from)?;
-        Ok(())
+        loco_rs::bgworker::redis::ping(&self.client).await
     }
     async fn get_jobs(
         &self,
         status: Option<&Vec<JobStatus>>,
         age_days: Option<i64>,
     ) -> loco_rs::Result<Vec<Job>> {
-        get_jobs(&self.client, status, age_days, self.timezone).await
+        loco_rs::bgworker::redis::get_jobs(&self.client, status, age_days).await
     }
     async fn cancel_jobs_by_name(&self, name: &str) -> loco_rs::Result<()> {
-        let mut c = self.connection().await?;
-        let keys: Vec<String> = redis::cmd("KEYS")
-            .arg(format!("{QUEUE}*"))
-            .query_async(&mut c)
-            .await
-            .map_err(loco_rs::Error::from)?;
-        for q in keys {
-            let ids: Vec<String> = c.zrange(&q, 0, -1).await.map_err(loco_rs::Error::from)?;
-            for id in ids {
-                let k = format!("{JOB}{id}");
-                let raw: Option<String> = c.get(&k).await.map_err(loco_rs::Error::from)?;
-                if let Some(raw) = raw
-                    && let Ok(mut job) = serde_json::from_str::<Job>(&raw)
-                    && job.name == name
-                    && job.status == JobStatus::Queued
-                {
-                    let _: () = redis::pipe()
-                        .zrem(&q, &id)
-                        .ignore()
-                        .set(&k, {
-                            job.status = JobStatus::Cancelled;
-                            job.updated_at =
-                                Some(crate::time::queue_now(self.timezone).with_timezone(&Utc));
-                            serde_json::to_string(&job).map_err(loco_rs::Error::from)?
-                        })
-                        .ignore()
-                        .sadd(format!("{CANCELLED}{}", q.trim_start_matches(QUEUE)), &id)
-                        .ignore()
-                        .query_async(&mut c)
-                        .await
-                        .map_err(loco_rs::Error::from)?;
-                }
-            }
-        }
-        Ok(())
+        loco_rs::bgworker::redis::cancel_jobs_by_name(&self.client, name).await
     }
     async fn clear_by_status(&self, status: Vec<JobStatus>) -> loco_rs::Result<()> {
-        clear_matching(&self.client, Some(&status), None, self.timezone).await
+        loco_rs::bgworker::redis::clear_by_status(&self.client, status).await
     }
     async fn clear_jobs_older_than(
         &self,
         age_days: i64,
         status: Option<&Vec<JobStatus>>,
     ) -> loco_rs::Result<()> {
-        clear_matching(&self.client, status, Some(age_days), self.timezone).await
+        loco_rs::bgworker::redis::clear_jobs_older_than(&self.client, age_days, status).await
     }
     async fn retry_failed(&self, id: Option<&str>) -> loco_rs::Result<u64> {
         retry(&self.client, id, self.timezone).await
@@ -594,87 +555,6 @@ async fn finish(
     Ok(())
 }
 
-async fn clear_older_than(
-    client: &Client,
-    status: Option<&Vec<JobStatus>>,
-    days: i64,
-    timezone: crate::time::Timezone,
-) -> loco_rs::Result<()> {
-    let mut c = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let cutoff =
-        crate::time::queue_now(timezone).with_timezone(&Utc) - chrono::Duration::days(days);
-    let qkeys: Vec<String> = redis::cmd("KEYS")
-        .arg("queue:*")
-        .query_async(&mut c)
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let pkeys: Vec<String> = redis::cmd("KEYS")
-        .arg("processing:*")
-        .query_async(&mut c)
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let job_keys: Vec<String> = redis::cmd("KEYS")
-        .arg("job:*")
-        .query_async(&mut c)
-        .await
-        .map_err(loco_rs::Error::from)?;
-    for q in &qkeys {
-        let ids: Vec<String> = c.zrange(q, 0, -1).await.map_err(loco_rs::Error::from)?;
-        for id in ids {
-            let key = format!("{JOB}{id}");
-            let raw: Option<String> = c.get(&key).await.map_err(loco_rs::Error::from)?;
-            if raw
-                .as_deref()
-                .and_then(|v| serde_json::from_str::<Job>(v).ok())
-                .is_some_and(|j| {
-                    j.created_at.is_some_and(|created| created < cutoff)
-                        && status.is_none_or(|s| s.contains(&j.status))
-                })
-            {
-                let _: usize = c.zrem(q, &id).await.map_err(loco_rs::Error::from)?;
-                let _: usize = c.del(key).await.map_err(loco_rs::Error::from)?;
-            }
-        }
-    }
-    for p in &pkeys {
-        let ids: Vec<String> = c.smembers(p).await.map_err(loco_rs::Error::from)?;
-        for id in ids {
-            let key = format!("{JOB}{id}");
-            let raw: Option<String> = c.get(&key).await.map_err(loco_rs::Error::from)?;
-            if let Some(raw) = raw
-                && let Ok(mut j) = serde_json::from_str::<Job>(&raw)
-            {
-                if j.status == JobStatus::Queued {
-                    j.status = JobStatus::Processing;
-                }
-                if j.created_at.is_some_and(|created| created < cutoff)
-                    && status.is_none_or(|s| s.contains(&j.status))
-                {
-                    let _: usize = c.srem(p, &id).await.map_err(loco_rs::Error::from)?;
-                    let _: usize = c.del(key).await.map_err(loco_rs::Error::from)?;
-                }
-            }
-        }
-    }
-    for key in job_keys {
-        let raw: Option<String> = c.get(&key).await.map_err(loco_rs::Error::from)?;
-        if raw
-            .as_deref()
-            .and_then(|raw| serde_json::from_str::<Job>(raw).ok())
-            .is_some_and(|job| {
-                job.created_at.is_some_and(|created| created < cutoff)
-                    && status.is_none_or(|statuses| statuses.contains(&job.status))
-            })
-        {
-            let _: usize = c.del(key).await.map_err(loco_rs::Error::from)?;
-        }
-    }
-    Ok(())
-}
-
 async fn fail(
     client: &Client,
     job: &Job,
@@ -724,153 +604,13 @@ async fn fail(
     Ok(())
 }
 
-async fn get_jobs(
-    client: &Client,
-    status: Option<&Vec<JobStatus>>,
-    age: Option<i64>,
-    timezone: crate::time::Timezone,
-) -> loco_rs::Result<Vec<Job>> {
-    let mut c = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let now = crate::time::queue_now(timezone).with_timezone(&Utc);
-    let pkeys: Vec<String> = redis::cmd("KEYS")
-        .arg(format!("{PROCESSING}*"))
-        .query_async(&mut c)
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let mut processing = std::collections::HashSet::new();
-    for key in pkeys {
-        let ids: Vec<String> = c.smembers(key).await.map_err(loco_rs::Error::from)?;
-        processing.extend(ids);
-    }
-    let keys: Vec<String> = redis::cmd("KEYS")
-        .arg(format!("{JOB}*"))
-        .query_async(&mut c)
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let cutoff = age.map(|days| now - chrono::Duration::days(days));
-    let mut jobs = Vec::new();
-    for key in keys {
-        if let Some(raw) = c
-            .get::<_, Option<String>>(key)
-            .await
-            .map_err(loco_rs::Error::from)?
-            && let Ok(job) = serde_json::from_str::<Job>(&raw)
-        {
-            let effective_status =
-                if job.status == JobStatus::Queued && processing.contains(&job.id) {
-                    JobStatus::Processing
-                } else {
-                    job.status.clone()
-                };
-            if status.is_none_or(|s| s.contains(&effective_status))
-                && cutoff.is_none_or(|cut| job.created_at.is_none_or(|created| created <= cut))
-            {
-                jobs.push(job);
-            }
-        }
-    }
-    Ok(jobs)
-}
-
-async fn clear_matching(
-    client: &Client,
-    status: Option<&Vec<JobStatus>>,
-    age: Option<i64>,
-    timezone: crate::time::Timezone,
-) -> loco_rs::Result<()> {
-    if let Some(days) = age {
-        return clear_older_than(client, status, days, timezone).await;
-    }
-    let mut c = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let queue_keys: Vec<String> = redis::cmd("KEYS")
-        .arg("queue:*")
-        .query_async(&mut c)
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let processing_keys: Vec<String> = redis::cmd("KEYS")
-        .arg("processing:*")
-        .query_async(&mut c)
-        .await
-        .map_err(loco_rs::Error::from)?;
-    let mut memberships = std::collections::HashMap::<String, Vec<String>>::new();
-    for key in &queue_keys {
-        memberships.insert(
-            key.clone(),
-            c.zrange(key, 0, -1).await.map_err(loco_rs::Error::from)?,
-        );
-    }
-    for key in &processing_keys {
-        memberships.insert(
-            key.clone(),
-            c.smembers(key).await.map_err(loco_rs::Error::from)?,
-        );
-    }
-    if let Some(statuses) = status.filter(|statuses| !statuses.is_empty()) {
-        for (membership, ids) in memberships.iter().filter(|(key, _)| key.starts_with(QUEUE)) {
-            for id in ids {
-                let key = format!("{JOB}{id}");
-                let raw: Option<String> = c.get(&key).await.map_err(loco_rs::Error::from)?;
-                if raw
-                    .as_deref()
-                    .and_then(|raw| serde_json::from_str::<Job>(raw).ok())
-                    .is_some_and(|job| statuses.contains(&job.status))
-                {
-                    let _: usize = c.zrem(membership, id).await.map_err(loco_rs::Error::from)?;
-                    let _: usize = c.del(key).await.map_err(loco_rs::Error::from)?;
-                }
-            }
-        }
-        for (membership, ids) in memberships
-            .iter()
-            .filter(|(key, _)| key.starts_with(PROCESSING))
-        {
-            for id in ids {
-                let key = format!("{JOB}{id}");
-                let raw: Option<String> = c.get(&key).await.map_err(loco_rs::Error::from)?;
-                if let Some(raw) = raw
-                    && let Ok(mut job) = serde_json::from_str::<Job>(&raw)
-                {
-                    if job.status == JobStatus::Queued {
-                        job.status = JobStatus::Processing;
-                    }
-                    if statuses.contains(&job.status) {
-                        let _: usize =
-                            c.srem(membership, id).await.map_err(loco_rs::Error::from)?;
-                        let _: usize = c.del(key).await.map_err(loco_rs::Error::from)?;
-                    }
-                }
-            }
-        }
-        let job_keys: Vec<String> = redis::cmd("KEYS")
-            .arg("job:*")
-            .query_async(&mut c)
-            .await
-            .map_err(loco_rs::Error::from)?;
-        for key in job_keys {
-            let raw: Option<String> = c.get(&key).await.map_err(loco_rs::Error::from)?;
-            if raw
-                .as_deref()
-                .and_then(|raw| serde_json::from_str::<Job>(raw).ok())
-                .is_some_and(|job| statuses.contains(&job.status))
-            {
-                let _: usize = c.del(key).await.map_err(loco_rs::Error::from)?;
-            }
-        }
-    }
-    Ok(())
-}
 async fn retry(
     client: &Client,
     id: Option<&str>,
     timezone: crate::time::Timezone,
 ) -> loco_rs::Result<u64> {
-    let jobs = get_jobs(client, Some(&vec![JobStatus::Failed]), None, timezone).await?;
+    let jobs =
+        loco_rs::bgworker::redis::get_jobs(client, Some(&vec![JobStatus::Failed]), None).await?;
     let mut c = client
         .get_multiplexed_async_connection()
         .await
@@ -903,6 +643,7 @@ async fn requeue(
     age: i64,
     timezone: crate::time::Timezone,
 ) -> loco_rs::Result<()> {
+    // Loco 1.2.0 moves membership and payload in separate commands; the guarded script prevents resurrection after completion.
     let mut c = client
         .get_multiplexed_async_connection()
         .await

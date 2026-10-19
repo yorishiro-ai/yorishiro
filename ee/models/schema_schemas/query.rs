@@ -12,7 +12,10 @@ use crate::models::pagination::ListParams;
 use crate::models::schema_schemas::UpstreamChange;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 use chrono::{DateTime, Utc};
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder,
+    QuerySelect,
+};
 use uuid::Uuid;
 
 #[derive(FromQueryResult)]
@@ -39,34 +42,43 @@ struct Row {
 ///
 /// The explicit `origin_updated_at IS NULL` state is the source of truth.
 /// It survives local schema versioning and is cleared only by a successful merge acknowledgement.
-/// Stays raw SQL because this projection joins control-plane and workspace tables and computes its merge summary from both definitions.
+/// Reads both definitions in one joined ORM query before computing the merge summary.
 pub(crate) async fn list_with_upstream_changes(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<UpstreamChange>, YorishiroError> {
-    let rows = Row::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT s.id AS schema_id, s.name AS schema_name, s.version, \
-                t.id AS template_id, t.name AS template_name, t.updated_at AS changed_at, s.origin_updated_at AS origin_updated_at, \
-                s.definition AS schema_definition, s.origin_snapshot AS origin_snapshot, t.definition AS template_definition \
-           FROM schema_schemas s \
-           JOIN template_templates t ON t.id = s.origin_template_id \
-          WHERE s.workspace_id = $1 \
-            AND s.status = 'active' \
-            AND s.origin_status = 'linked' \
-            AND s.origin_updated_at IS NULL \
-          ORDER BY t.updated_at DESC \
-          LIMIT $2 OFFSET $3",
-        [
-            workspace_id.into(),
-            page.limit().into(),
-            page.offset().into(),
-        ],
-    ))
-    .all(conn)
-    .await
-    .internal()?;
+    use crate::models::_entities::{schema_schemas as schema, template_templates as template};
+    let rows = schema::Entity::find()
+        .select_only()
+        .column_as(schema::Column::Id, "schema_id")
+        .column_as(schema::Column::Name, "schema_name")
+        .column(schema::Column::Version)
+        .column_as(template::Column::Id, "template_id")
+        .column_as(template::Column::Name, "template_name")
+        .column_as(template::Column::UpdatedAt, "changed_at")
+        .column(schema::Column::OriginUpdatedAt)
+        .column_as(schema::Column::Definition, "schema_definition")
+        .column(schema::Column::OriginSnapshot)
+        .column_as(template::Column::Definition, "template_definition")
+        .join(
+            JoinType::InnerJoin,
+            schema::Entity::belongs_to(template::Entity)
+                .from(schema::Column::OriginTemplateId)
+                .to(template::Column::Id)
+                .into(),
+        )
+        .filter(schema::Column::WorkspaceId.eq(workspace_id))
+        .filter(schema::Column::Status.eq("active"))
+        .filter(schema::Column::OriginStatus.eq("linked"))
+        .filter(schema::Column::OriginUpdatedAt.is_null())
+        .order_by_desc(template::Column::UpdatedAt)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .into_model::<Row>()
+        .all(conn)
+        .await
+        .internal()?;
 
     rows.into_iter()
         .map(|row| {

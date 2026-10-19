@@ -3,8 +3,8 @@ use std::fmt;
 
 use sea_orm::entity::prelude::*;
 use sea_orm::{
-    ActiveValue::Set, ConnectionTrait, DatabaseConnection, DbErr, ExprTrait, IntoActiveModel,
-    Statement, TransactionTrait,
+    ActiveValue::Set, Condition, ConnectionTrait, DatabaseConnection, DbErr, ExprTrait,
+    IntoActiveModel, QueryOrder, QuerySelect, QueryTrait, Statement, TransactionTrait,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -462,78 +462,116 @@ async fn record_row(db: &impl ConnectionTrait, row: DispatchRow) -> Result<(), D
 /// # Errors
 /// Returns an error if the query fails or a stored row cannot be decoded.
 pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, YorishiroError> {
-    // One batch joins lifecycle state to outbox payloads and compares backend-specific cooldown and retry timestamps.
-    let backend = db.get_database_backend();
-    let cooldown = match backend {
-        sea_orm::DatabaseBackend::Sqlite => format!(
-            "(o.last_attempt_at IS NULL OR o.last_attempt_at <= datetime('now', '-{RETRY_COOLDOWN_SECONDS} seconds'))"
-        ),
-        _ => format!(
-            "(o.last_attempt_at IS NULL OR o.last_attempt_at <= CURRENT_TIMESTAMP - INTERVAL '{RETRY_COOLDOWN_SECONDS} seconds')"
-        ),
+    use crate::models::_entities::{
+        queue_job_dispatch_outbox as outbox, queue_job_lifecycles as lifecycle,
     };
-    let retry_due = match backend {
-        sea_orm::DatabaseBackend::Sqlite => {
-            "(l.retry_at IS NULL OR datetime(l.retry_at) <= datetime('now'))"
-        }
-        _ => "(l.retry_at IS NULL OR l.retry_at <= CURRENT_TIMESTAMP)",
+    use sea_orm::{
+        JoinType,
+        sea_query::{Alias, Func, SimpleExpr},
     };
-    let lifecycle_due = format!(
-        "(l.id IS NOT NULL AND ((l.status = 'queued' AND o.published_at IS NULL) OR (l.status = 'retrying' AND {retry_due} AND o.published_at IS NULL)))"
-    );
-    db.query_all_raw(Statement::from_string(
-        backend,
-        format!(
-            "SELECT o.id AS dispatch_id, o.lifecycle_id, l.job_name, l.worker_class, o.payload, o.worker_name, o.queue_name, o.tags, o.publishing_epoch, o.deadline_at, o.workspace_id, o.priority \
-         FROM queue_job_dispatch_outbox o LEFT JOIN queue_job_lifecycles l ON o.lifecycle_id = l.id \
-          WHERE o.legacy_quarantined = FALSE AND ({lifecycle_due} OR (l.id IS NULL AND o.workspace_id IS NOT NULL AND o.worker_name = 'QueryEmbeddingWorker' AND o.deadline_at > CURRENT_TIMESTAMP AND o.published_at IS NULL)) \
-           AND {cooldown} \
-          ORDER BY o.id LIMIT {RECOVERY_BATCH_SIZE}"
-        ),
-    ))
-    .await
-    .internal()?
-    .into_iter()
-    .map(|row| {
-        let payload = if backend == sea_orm::DatabaseBackend::Sqlite {
-            serde_json::from_str::<Value>(&row.try_get::<String>("", "payload").internal()?)
-                .internal()?
-        } else {
-            row.try_get("", "payload").internal()?
-        };
-        let tags = if backend == sea_orm::DatabaseBackend::Sqlite {
-            row.try_get::<Option<String>>("", "tags")
-                .internal()?
-                .map(|json| serde_json::from_str(&json).internal())
-                .transpose()?
-        } else {
-            row.try_get::<Option<Value>>("", "tags")
-                .internal()?
+
+    let sqlite = db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+    let retry_at: SimpleExpr = Expr::col((lifecycle::Entity, lifecycle::Column::RetryAt));
+    let (retry_at, now, cooldown): (SimpleExpr, SimpleExpr, SimpleExpr) = if sqlite {
+        (
+            Func::cust(Alias::new("datetime")).arg(retry_at).into(),
+            Func::cust(Alias::new("datetime")).arg("now").into(),
+            Func::cust(Alias::new("datetime"))
+                .args([
+                    Expr::val("now"),
+                    Expr::val(format!("-{RETRY_COOLDOWN_SECONDS} seconds")),
+                ])
+                .into(),
+        )
+    } else {
+        (
+            retry_at,
+            Expr::current_timestamp(),
+            Expr::current_timestamp().sub(
+                Expr::val(format!("{RETRY_COOLDOWN_SECONDS} seconds"))
+                    .cast_as(Alias::new("interval")),
+            ),
+        )
+    };
+    let rows = outbox::Entity::find()
+        .join(
+            JoinType::LeftJoin,
+            outbox::Entity::belongs_to(lifecycle::Entity)
+                .from(outbox::Column::LifecycleId)
+                .to(lifecycle::Column::Id)
+                .into(),
+        )
+        .filter(outbox::Column::LegacyQuarantined.eq(false))
+        .filter(outbox::Column::PublishedAt.is_null())
+        .filter(
+            Condition::any()
+                .add(
+                    Condition::all()
+                        .add(lifecycle::Column::Id.is_not_null())
+                        .add(
+                            Condition::any()
+                                .add(lifecycle::Column::Status.eq("queued"))
+                                .add(
+                                    Condition::all()
+                                        .add(lifecycle::Column::Status.eq("retrying"))
+                                        .add(
+                                            Condition::any()
+                                                .add(lifecycle::Column::RetryAt.is_null())
+                                                .add(retry_at.lte(now)),
+                                        ),
+                                ),
+                        ),
+                )
+                .add(
+                    Condition::all()
+                        .add(lifecycle::Column::Id.is_null())
+                        .add(outbox::Column::WorkspaceId.is_not_null())
+                        .add(outbox::Column::WorkerName.eq("QueryEmbeddingWorker"))
+                        .add(
+                            Expr::col((outbox::Entity, outbox::Column::DeadlineAt))
+                                .gt(Expr::current_timestamp()),
+                        ),
+                ),
+        )
+        .filter(
+            Condition::any()
+                .add(outbox::Column::LastAttemptAt.is_null())
+                .add(Expr::col((outbox::Entity, outbox::Column::LastAttemptAt)).lte(cooldown)),
+        )
+        .order_by_asc(outbox::Column::Id)
+        .limit(RECOVERY_BATCH_SIZE as u64)
+        .select_also(lifecycle::Entity)
+        .all(db)
+        .await
+        .internal()?;
+    rows.into_iter()
+        .map(|(row, lifecycle)| {
+            let tags = row
+                .tags
                 .map(serde_json::from_value)
                 .transpose()
-                .internal()?
-        };
-        let worker_class_str = row.try_get::<Option<String>>("", "worker_class").internal()?.unwrap_or_else(|| "shared".to_owned());
-        let worker_class = WorkerClass::from_db_str(&worker_class_str).unwrap_or(WorkerClass::Shared);
-        Ok(PendingDispatch {
-            id: row.try_get("", "dispatch_id").internal()?,
-            lifecycle_id: row.try_get("", "lifecycle_id").internal()?,
-            job_name: row
-                .try_get::<Option<String>>("", "job_name")
-                .internal()?
-                .unwrap_or_else(|| "query_embedding".to_owned()),
-            worker_class,
-            payload,
-            worker_name: row.try_get("", "worker_name").internal()?,
-            queue_name: row.try_get("", "queue_name").internal()?,
-            tags,
-            publishing_epoch: row.try_get("", "publishing_epoch").internal()?,
-            deadline_at: row.try_get("", "deadline_at").internal()?,
-            workspace_id: row.try_get("", "workspace_id").internal()?,
-            priority: row.try_get("", "priority").internal()?,
+                .internal()?;
+            Ok(PendingDispatch {
+                id: row.id,
+                lifecycle_id: row.lifecycle_id,
+                job_name: lifecycle
+                    .as_ref()
+                    .map_or_else(|| "query_embedding".to_owned(), |row| row.job_name.clone()),
+                worker_class: lifecycle
+                    .as_ref()
+                    .and_then(|row| WorkerClass::from_db_str(&row.worker_class))
+                    .unwrap_or(WorkerClass::Shared),
+                payload: row.payload,
+                worker_name: row.worker_name,
+                queue_name: row.queue_name,
+                tags,
+                publishing_epoch: row.publishing_epoch,
+                deadline_at: row.deadline_at,
+                workspace_id: row.workspace_id,
+                priority: row.priority,
+            })
         })
-    })
-    .collect()
+        .collect()
 }
 
 async fn replay_snapshot_locked(
@@ -558,23 +596,49 @@ async fn replay_snapshot_locked(
             "snapshot evidence must be recorded before replay".into(),
         ));
     }
-    let rows = txn.query_all_raw(Statement::from_string(
-        txn.get_database_backend(),
-        "SELECT o.id FROM queue_job_dispatch_outbox o WHERE o.legacy_quarantined = FALSE AND ((o.lifecycle_id IS NOT NULL AND EXISTS (SELECT 1 FROM queue_job_lifecycles l WHERE l.id = o.lifecycle_id AND l.status IN ('queued', 'retrying', 'running'))) OR (o.lifecycle_id IS NULL AND o.worker_name = 'QueryEmbeddingWorker' AND o.workspace_id IS NOT NULL AND o.deadline_at > CURRENT_TIMESTAMP)) ORDER BY o.id",
-    )).await?;
-    let unavailable = txn.query_one_raw(Statement::from_string(
-        txn.get_database_backend(),
-        "SELECT COUNT(*) AS count FROM queue_job_dispatch_outbox o WHERE o.legacy_quarantined = FALSE AND o.lifecycle_id IS NULL AND (o.worker_name <> 'QueryEmbeddingWorker' OR o.workspace_id IS NULL OR o.deadline_at IS NULL) AND o.published_at IS NULL",
-    )).await?.ok_or_else(|| DbErr::RecordNotFound("dispatch quarantine scan".into()))?;
-    let unavailable_count: i64 = unavailable.try_get("", "count")?;
+    use crate::models::_entities::{
+        queue_job_dispatch_outbox as outbox, queue_job_lifecycles as lifecycle,
+    };
+    let active_lifecycles = lifecycle::Entity::find()
+        .select_only()
+        .column(lifecycle::Column::Id)
+        .filter(lifecycle::Column::Status.is_in(["queued", "retrying", "running"]))
+        .into_query();
+    let mut ids: Vec<Uuid> = outbox::Entity::find()
+        .select_only()
+        .column(outbox::Column::Id)
+        .filter(outbox::Column::LegacyQuarantined.eq(false))
+        .filter(
+            Condition::any()
+                .add(outbox::Column::LifecycleId.in_subquery(active_lifecycles))
+                .add(
+                    Condition::all()
+                        .add(outbox::Column::LifecycleId.is_null())
+                        .add(outbox::Column::WorkerName.eq("QueryEmbeddingWorker"))
+                        .add(outbox::Column::WorkspaceId.is_not_null())
+                        .add(Expr::col(outbox::Column::DeadlineAt).gt(Expr::current_timestamp())),
+                ),
+        )
+        .order_by_asc(outbox::Column::Id)
+        .into_tuple()
+        .all(txn)
+        .await?;
+    let unavailable_count = outbox::Entity::find()
+        .filter(outbox::Column::LegacyQuarantined.eq(false))
+        .filter(outbox::Column::LifecycleId.is_null())
+        .filter(
+            Condition::any()
+                .add(outbox::Column::WorkerName.ne("QueryEmbeddingWorker"))
+                .add(outbox::Column::WorkspaceId.is_null())
+                .add(outbox::Column::DeadlineAt.is_null()),
+        )
+        .filter(outbox::Column::PublishedAt.is_null())
+        .count(txn)
+        .await?;
     if unavailable_count != 0 {
         return Err(DbErr::Custom(format!(
             "{unavailable_count} lifecycle-less dispatch rows cannot be replayed safely"
         )));
-    }
-    let mut ids = Vec::with_capacity(rows.len());
-    for row in rows {
-        ids.push(row.try_get("", "id")?);
     }
     ids.sort_unstable();
     ids.dedup();
@@ -1118,28 +1182,54 @@ pub(crate) async fn expire(db: &impl ConnectionTrait, id: Uuid) -> Result<(), Db
 /// # Errors
 /// Returns an error if the query fails, including when the schema has not been migrated.
 pub async fn count_retired_routes(db: &impl ConnectionTrait) -> Result<u64, DbErr> {
-    let backend = db.get_database_backend();
-    // Raw SQL expresses JSON array membership on both backends without matching serialized substrings.
-    let current_target = match backend {
-        sea_orm::DatabaseBackend::Sqlite => {
-            "EXISTS (SELECT 1 FROM json_each(o.tags) t WHERE substr(t.value, 1, 14) = 'worker-target:')"
-        }
-        _ => {
-            "EXISTS (SELECT 1 FROM jsonb_array_elements_text(o.tags) t(value) WHERE left(t.value, 14) = 'worker-target:')"
-        }
+    use crate::models::_entities::{
+        queue_job_dispatch_outbox as outbox, queue_job_lifecycles as lifecycle,
     };
-    let row = db
-        .query_one_raw(Statement::from_string(
-            backend,
-            format!(
-                "SELECT COUNT(*) AS retired FROM queue_job_dispatch_outbox o \
-                 JOIN queue_job_lifecycles l ON l.id = o.lifecycle_id \
-                 WHERE l.status IN ('queued', 'running', 'retrying') \
-                 AND o.tags IS NOT NULL AND NOT ({current_target})"
-            ),
-        ))
-        .await?
-        .ok_or_else(|| DbErr::Custom("retired route count returned no row".into()))?;
-    let count: i64 = row.try_get("", "retired")?;
-    u64::try_from(count).map_err(|error| DbErr::Type(error.to_string()))
+    use sea_orm::{
+        JoinType,
+        sea_query::{Alias, Func, Query},
+    };
+    let function = if db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        "json_each"
+    } else {
+        "jsonb_array_elements_text"
+    };
+    let current_target = Query::select()
+        .expr(Expr::val(1))
+        .from_function(
+            Func::cust(Alias::new(function)).arg(Expr::col((outbox::Entity, outbox::Column::Tags))),
+            Alias::new("tag"),
+        )
+        .and_where(
+            Func::cust(Alias::new("substr"))
+                .args([
+                    Expr::col((
+                        Alias::new("tag"),
+                        Alias::new(
+                            if db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                                "value"
+                            } else {
+                                "jsonb_array_elements_text"
+                            },
+                        ),
+                    )),
+                    Expr::val(1),
+                    Expr::val(14),
+                ])
+                .eq("worker-target:"),
+        )
+        .to_owned();
+    outbox::Entity::find()
+        .join(
+            JoinType::InnerJoin,
+            outbox::Entity::belongs_to(lifecycle::Entity)
+                .from(outbox::Column::LifecycleId)
+                .to(lifecycle::Column::Id)
+                .into(),
+        )
+        .filter(lifecycle::Column::Status.is_in(["queued", "running", "retrying"]))
+        .filter(outbox::Column::Tags.is_not_null())
+        .filter(Expr::exists(current_target).not())
+        .count(db)
+        .await
 }

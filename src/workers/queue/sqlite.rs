@@ -10,6 +10,10 @@ use sea_orm::sqlx::{
     self, AssertSqlSafe, ConnectOptions, QueryBuilder, Row,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
 };
+use sea_orm::{
+    ConnectionTrait, ExprTrait,
+    sea_query::{Alias, Condition, Expr, Query},
+};
 use serde_json::Value as JsonValue;
 
 type SqlitePool = sqlx::SqlitePool;
@@ -129,8 +133,53 @@ impl QueueProvider for SqliteTimezoneQueue {
         let now_local = crate::time::queue_storage(now, self.timezone);
         let id = ulid::Ulid::generate().to_string();
         let tags = tags.map(serde_json::to_value).transpose()?;
-        sqlx::query("INSERT INTO sqlt_loco_queue (id, task_data, name, run_at, run_at_epoch_seconds, run_at_epoch_nanos, interval, tags, priority, created_at, created_at_epoch_seconds, created_at_epoch_nanos, created_at_legacy_checked, updated_at, updated_at_epoch_seconds, updated_at_epoch_nanos, updated_at_legacy_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 1)")
-            .bind(&id).bind(args).bind(class).bind(&now_local).bind(sec).bind(nanos).bind(None::<i64>).bind(tags).bind(priority.unwrap_or(0)).bind(&now_local).bind(sec).bind(nanos).bind(&now_local).bind(sec).bind(nanos).execute(&self.pool).await?;
+        let statement = Query::insert()
+            .into_table(Alias::new("sqlt_loco_queue"))
+            .columns(
+                [
+                    "id",
+                    "task_data",
+                    "name",
+                    "run_at",
+                    "run_at_epoch_seconds",
+                    "run_at_epoch_nanos",
+                    "interval",
+                    "tags",
+                    "priority",
+                    "created_at",
+                    "created_at_epoch_seconds",
+                    "created_at_epoch_nanos",
+                    "created_at_legacy_checked",
+                    "updated_at",
+                    "updated_at_epoch_seconds",
+                    "updated_at_epoch_nanos",
+                    "updated_at_legacy_checked",
+                ]
+                .map(Alias::new),
+            )
+            .values_panic([
+                id.clone().into(),
+                args.into(),
+                class.into(),
+                now_local.clone().into(),
+                sec.into(),
+                nanos.into(),
+                None::<i64>.into(),
+                tags.into(),
+                priority.unwrap_or(0).into(),
+                now_local.clone().into(),
+                sec.into(),
+                nanos.into(),
+                1.into(),
+                now_local.into(),
+                sec.into(),
+                nanos.into(),
+                1.into(),
+            ])
+            .to_owned();
+        let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(self.pool.clone());
+        db.execute_raw(db.get_database_backend().build(&statement))
+            .await?;
         Ok(Some(id))
     }
 
@@ -229,16 +278,27 @@ impl QueueProvider for SqliteTimezoneQueue {
     }
     async fn cancel_jobs_by_name(&self, name: &str) -> loco_rs::Result<()> {
         let now = crate::time::queue_now(self.timezone).with_timezone(&Utc);
-        let updated_at = crate::time::queue_storage(now, self.timezone);
         let (sec, nanos) = exact_parts(now);
-        sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1 WHERE name=? AND status=?")
-            .bind(JobStatus::Cancelled.to_string())
-            .bind(updated_at)
-            .bind(sec)
-            .bind(nanos)
-            .bind(name)
-            .bind(JobStatus::Queued.to_string())
-            .execute(&self.pool)
+        let statement = Query::update()
+            .table(Alias::new("sqlt_loco_queue"))
+            .values([
+                (
+                    Alias::new("status"),
+                    Expr::val(JobStatus::Cancelled.to_string()),
+                ),
+                (
+                    Alias::new("updated_at"),
+                    Expr::val(crate::time::queue_storage(now, self.timezone)),
+                ),
+                (Alias::new("updated_at_epoch_seconds"), Expr::val(sec)),
+                (Alias::new("updated_at_epoch_nanos"), Expr::val(nanos)),
+                (Alias::new("updated_at_legacy_checked"), Expr::val(1)),
+            ])
+            .and_where(Expr::col(Alias::new("name")).eq(name))
+            .and_where(Expr::col(Alias::new("status")).eq(JobStatus::Queued.to_string()))
+            .to_owned();
+        let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(self.pool.clone());
+        db.execute_raw(db.get_database_backend().build(&statement))
             .await?;
         Ok(())
     }
@@ -281,15 +341,33 @@ impl QueueProvider for SqliteTimezoneQueue {
         let (sec, nanos) = exact_parts(now);
         let local = crate::time::queue_storage(now, self.timezone);
         let updated_at = crate::time::queue_storage(now, self.timezone);
-        let result = if let Some(id) = id {
-            sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1, run_at=?, run_at_epoch_seconds=?, run_at_epoch_nanos=? WHERE status=? AND id=?")
-                .bind(JobStatus::Queued.to_string()).bind(&updated_at).bind(sec).bind(nanos).bind(local).bind(sec).bind(nanos).bind(JobStatus::Failed.to_string()).bind(id).execute(&self.pool).await?
-        } else {
-            sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1, run_at=?, run_at_epoch_seconds=?, run_at_epoch_nanos=? WHERE status=?")
-                .bind(JobStatus::Queued.to_string()).bind(&updated_at).bind(sec).bind(nanos).bind(local).bind(sec).bind(nanos).bind(JobStatus::Failed.to_string()).execute(&self.pool).await?
-        };
-        Ok(result.rows_affected())
+        let mut statement = Query::update()
+            .table(Alias::new("sqlt_loco_queue"))
+            .values([
+                (
+                    Alias::new("status"),
+                    Expr::val(JobStatus::Queued.to_string()),
+                ),
+                (Alias::new("updated_at"), Expr::val(updated_at)),
+                (Alias::new("updated_at_epoch_seconds"), Expr::val(sec)),
+                (Alias::new("updated_at_epoch_nanos"), Expr::val(nanos)),
+                (Alias::new("updated_at_legacy_checked"), Expr::val(1)),
+                (Alias::new("run_at"), Expr::val(local)),
+                (Alias::new("run_at_epoch_seconds"), Expr::val(sec)),
+                (Alias::new("run_at_epoch_nanos"), Expr::val(nanos)),
+            ])
+            .and_where(Expr::col(Alias::new("status")).eq(JobStatus::Failed.to_string()))
+            .to_owned();
+        if let Some(id) = id {
+            statement.and_where(Expr::col(Alias::new("id")).eq(id));
+        }
+        let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(self.pool.clone());
+        Ok(db
+            .execute_raw(db.get_database_backend().build(&statement))
+            .await?
+            .rows_affected())
     }
+
     fn describe(&self) -> String {
         "sqlite queue".into()
     }
@@ -309,24 +387,26 @@ pub async fn clear_jobs_through(
     cutoff_nanos: i32,
     status: Option<&Vec<JobStatus>>,
 ) -> loco_rs::Result<()> {
-    let mut query = String::from(
-        "DELETE FROM sqlt_loco_queue WHERE created_at_epoch_seconds IS NOT NULL AND (created_at_epoch_seconds < ? OR (created_at_epoch_seconds = ? AND created_at_epoch_nanos <= ?))",
-    );
-    if status.is_some_and(|values| !values.is_empty()) {
-        query.push_str(" AND status IN (");
-        query.push_str(&vec!["?"; status.map_or(0, Vec::len)].join(","));
-        query.push(')');
-    }
-    let mut statement = sqlx::query(AssertSqlSafe(query))
-        .bind(cutoff_sec)
-        .bind(cutoff_sec)
-        .bind(cutoff_nanos);
+    let mut statement = Query::delete()
+        .from_table(Alias::new("sqlt_loco_queue"))
+        .cond_where(
+            Condition::any()
+                .add(Expr::col(Alias::new("created_at_epoch_seconds")).lt(cutoff_sec))
+                .add(
+                    Condition::all()
+                        .add(Expr::col(Alias::new("created_at_epoch_seconds")).eq(cutoff_sec))
+                        .add(Expr::col(Alias::new("created_at_epoch_nanos")).lte(cutoff_nanos)),
+                ),
+        )
+        .to_owned();
     if let Some(values) = status.filter(|values| !values.is_empty()) {
-        for value in values {
-            statement = statement.bind(value.to_string());
-        }
+        statement.and_where(
+            Expr::col(Alias::new("status")).is_in(values.iter().map(ToString::to_string)),
+        );
     }
-    statement.execute(pool).await?;
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    db.execute_raw(db.get_database_backend().build(&statement))
+        .await?;
     Ok(())
 }
 
@@ -342,8 +422,32 @@ pub async fn requeue_through(
     now_sec: i64,
     now_nanos: i32,
 ) -> loco_rs::Result<()> {
-    sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1 WHERE status=? AND updated_at_epoch_seconds IS NOT NULL AND (updated_at_epoch_seconds < ? OR (updated_at_epoch_seconds = ? AND updated_at_epoch_nanos <= ?))")
-        .bind(JobStatus::Queued.to_string()).bind(updated_at).bind(now_sec).bind(now_nanos).bind(JobStatus::Processing.to_string()).bind(cutoff_sec).bind(cutoff_sec).bind(cutoff_nanos).execute(pool).await?;
+    let statement = Query::update()
+        .table(Alias::new("sqlt_loco_queue"))
+        .values([
+            (
+                Alias::new("status"),
+                Expr::val(JobStatus::Queued.to_string()),
+            ),
+            (Alias::new("updated_at"), Expr::val(updated_at)),
+            (Alias::new("updated_at_epoch_seconds"), Expr::val(now_sec)),
+            (Alias::new("updated_at_epoch_nanos"), Expr::val(now_nanos)),
+            (Alias::new("updated_at_legacy_checked"), Expr::val(1)),
+        ])
+        .and_where(Expr::col(Alias::new("status")).eq(JobStatus::Processing.to_string()))
+        .cond_where(
+            Condition::any()
+                .add(Expr::col(Alias::new("updated_at_epoch_seconds")).lt(cutoff_sec))
+                .add(
+                    Condition::all()
+                        .add(Expr::col(Alias::new("updated_at_epoch_seconds")).eq(cutoff_sec))
+                        .add(Expr::col(Alias::new("updated_at_epoch_nanos")).lte(cutoff_nanos)),
+                ),
+        )
+        .to_owned();
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    db.execute_raw(db.get_database_backend().build(&statement))
+        .await?;
     Ok(())
 }
 
@@ -598,22 +702,48 @@ async fn complete(
     let now = crate::time::queue_now(timezone).with_timezone(&Utc);
     let updated_at = crate::time::queue_storage(now, timezone);
     let (updated_sec, updated_nanos) = exact_parts(now);
+    let mut statement = Query::update()
+        .table(Alias::new("sqlt_loco_queue"))
+        .values([
+            (
+                Alias::new("status"),
+                Expr::val(
+                    if interval.is_some() {
+                        JobStatus::Queued
+                    } else {
+                        JobStatus::Completed
+                    }
+                    .to_string(),
+                ),
+            ),
+            (Alias::new("updated_at"), Expr::val(updated_at)),
+            (
+                Alias::new("updated_at_epoch_seconds"),
+                Expr::val(updated_sec),
+            ),
+            (
+                Alias::new("updated_at_epoch_nanos"),
+                Expr::val(updated_nanos),
+            ),
+            (Alias::new("updated_at_legacy_checked"), Expr::val(1)),
+        ])
+        .and_where(Expr::col(Alias::new("id")).eq(id))
+        .to_owned();
     if let Some(interval) = interval {
         let next = now + chrono::Duration::milliseconds(interval);
         let (sec, nanos) = exact_parts(next);
-        let local = crate::time::queue_storage(next, timezone);
-        sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1, run_at=?, run_at_epoch_seconds=?, run_at_epoch_nanos=? WHERE id=?")
-            .bind(JobStatus::Queued.to_string()).bind(updated_at).bind(updated_sec).bind(updated_nanos).bind(local).bind(sec).bind(nanos).bind(id).execute(pool).await?;
-    } else {
-        sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1 WHERE id=?")
-            .bind(JobStatus::Completed.to_string())
-            .bind(updated_at)
-            .bind(updated_sec)
-            .bind(updated_nanos)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        statement.values([
+            (
+                Alias::new("run_at"),
+                Expr::val(crate::time::queue_storage(next, timezone)),
+            ),
+            (Alias::new("run_at_epoch_seconds"), Expr::val(sec)),
+            (Alias::new("run_at_epoch_nanos"), Expr::val(nanos)),
+        ]);
     }
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    db.execute_raw(db.get_database_backend().build(&statement))
+        .await?;
     Ok(())
 }
 
@@ -630,8 +760,38 @@ async fn fail(
     let now = crate::time::queue_now(timezone).with_timezone(&Utc);
     let updated_at = crate::time::queue_storage(now, timezone);
     let (updated_sec, updated_nanos) = exact_parts(now);
-    sqlx::query("UPDATE sqlt_loco_queue SET status=?, updated_at=?, updated_at_epoch_seconds=?, updated_at_epoch_nanos=?, updated_at_legacy_checked=1, task_data=json_patch(task_data, ?) WHERE id=?")
-        .bind(JobStatus::Failed.to_string()).bind(updated_at).bind(updated_sec).bind(updated_nanos).bind(serde_json::json!({"error": error.to_string()})).bind(id).execute(pool).await?;
+    let statement = Query::update()
+        .table(Alias::new("sqlt_loco_queue"))
+        .values([
+            (
+                Alias::new("status"),
+                Expr::val(JobStatus::Failed.to_string()),
+            ),
+            (Alias::new("updated_at"), Expr::val(updated_at)),
+            (
+                Alias::new("updated_at_epoch_seconds"),
+                Expr::val(updated_sec),
+            ),
+            (
+                Alias::new("updated_at_epoch_nanos"),
+                Expr::val(updated_nanos),
+            ),
+            (Alias::new("updated_at_legacy_checked"), Expr::val(1)),
+            (
+                Alias::new("task_data"),
+                sea_orm::sea_query::Func::cust(Alias::new("json_patch"))
+                    .args([
+                        Expr::col(Alias::new("task_data")),
+                        Expr::val(serde_json::json!({"error": error.to_string()})),
+                    ])
+                    .into(),
+            ),
+        ])
+        .and_where(Expr::col(Alias::new("id")).eq(id))
+        .to_owned();
+    let db = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool.clone());
+    db.execute_raw(db.get_database_backend().build(&statement))
+        .await?;
     Ok(())
 }
 
