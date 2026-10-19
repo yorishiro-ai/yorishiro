@@ -1194,6 +1194,11 @@ pub async fn count_retired_routes(db: &impl ConnectionTrait) -> Result<u64, DbEr
     } else {
         "jsonb_array_elements_text"
     };
+    let tag_value = if db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        Expr::col((Alias::new("tag"), Alias::new("value")))
+    } else {
+        Expr::col(Alias::new("tag"))
+    };
     let current_target = Query::select()
         .expr(Expr::val(1))
         .from_function(
@@ -1202,20 +1207,7 @@ pub async fn count_retired_routes(db: &impl ConnectionTrait) -> Result<u64, DbEr
         )
         .and_where(
             Func::cust(Alias::new("substr"))
-                .args([
-                    Expr::col((
-                        Alias::new("tag"),
-                        Alias::new(
-                            if db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                                "value"
-                            } else {
-                                "jsonb_array_elements_text"
-                            },
-                        ),
-                    )),
-                    Expr::val(1),
-                    Expr::val(14),
-                ])
+                .args([tag_value, Expr::val(1), Expr::val(14)])
                 .eq("worker-target:"),
         )
         .to_owned();
