@@ -65,6 +65,8 @@ cargo loco task resync_embeddings workspace_id:<uuid>
 ### 埋め込みプロバイダの選択
 
 マシン上で動くローカルモデルか、OpenAI 互換のサービス（LM Studio、Ollama、vLLM、OpenAI など）のどちらかを選べます。
+埋め込みと推論のHTTP呼び出しはreqwestを直接使い、リクエストをタイムアウトで制限し、レスポンス本文を読む前にステータスを判定します。
+providerのエラーにはレスポンス本文を含めず、推論の呼び出しではworkspaceの認証情報を伴うリダイレクトを追跡しません。
 
 | 変数 | 説明 |
 |---|---|

@@ -60,6 +60,8 @@ An entity without an embedding does not cause errors. Search simply returns less
 ### Choosing an embedding provider
 
 You can choose between a local model that runs on your machine, or an OpenAI-compatible service (LM Studio, Ollama, vLLM, OpenAI, etc.).
+Outbound embedding and inference HTTP calls use reqwest directly, with request timeouts and status handling before reading the response body.
+Provider errors do not include the response body, and inference calls do not follow redirects carrying workspace credentials.
 
 | Variable | Description |
 |---|---|

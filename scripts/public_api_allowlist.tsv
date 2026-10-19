@@ -743,13 +743,7 @@ ee/models/schema_schemas/merge.rs	fn	apply_plan	integration-test: tests/ee/model
 ee/models/schema_schemas/merge.rs	fn	three_way	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
 ee/models/schema_schemas/merge.rs	struct	FieldMerge	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
 ee/models/schema_schemas/merge.rs	struct	MergePlan	integration-test: tests/ee/models/schema_schemas/merge.rs exercises it now that the unit tests moved out of src/.
-ee/services/inference.rs	enum	InferenceHttpError	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
-ee/services/inference.rs	field	InferenceHttpResponse::body	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
-ee/services/inference.rs	field	InferenceHttpResponse::headers	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
-ee/services/inference.rs	field	InferenceHttpResponse::status	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
-ee/services/inference.rs	fn	InferenceClient::with_http	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
-ee/services/inference.rs	struct	InferenceHttpResponse	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
-ee/services/inference.rs	trait	InferenceHttp	integration-test: tests/ee/services/inference.rs exercises it now that the unit tests moved out of src/.
+ee/services/inference.rs	fn	InferenceClient::with_client	integration-test: loopback tests exercise the production reqwest transport with a bounded timeout.
 ee/services/oauth/discovery.rs	field	DiscoveryDocument::authorization_endpoint	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
 ee/services/oauth/discovery.rs	field	DiscoveryDocument::jwks_uri	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
 ee/services/oauth/discovery.rs	field	DiscoveryDocument::token_endpoint	integration-test: tests/ee/services/oauth/discovery.rs exercises it now that the unit tests moved out of src/.
@@ -881,13 +875,7 @@ src/services/embedding/model_fetch.rs	struct	LocalModelDef	integration-test: tes
 src/services/embedding/model_fetch.rs	struct	ReqwestArtifactHttp	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	trait	ArtifactBody	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	trait	ArtifactHttp	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/openai.rs	enum	OpenAiHttpError	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/openai.rs	field	OpenAiHttpResponse::body	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/openai.rs	field	OpenAiHttpResponse::headers	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/openai.rs	field	OpenAiHttpResponse::status	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/openai.rs	fn	OpenAiCompatibleProvider::with_http	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/openai.rs	struct	OpenAiHttpResponse	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
-src/services/embedding/openai.rs	trait	OpenAiCompatibleHttp	integration-test: tests/services/embedding/openai.rs exercises it now that the unit tests moved out of src/.
+src/services/embedding/openai.rs	fn	OpenAiCompatibleProvider::with_client	integration-test: loopback tests exercise the production reqwest transport with a bounded timeout.
 src/workers/dispatch.rs	trait	EmbeddingSyncDispatcher	integration-test: tests/workers/dispatch.rs exercises it now that the unit tests moved out of src/.
 src/workers/embedding_sync.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/embedding_sync.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	lifecycle	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
