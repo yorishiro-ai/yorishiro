@@ -194,10 +194,10 @@ async fn perform_embedding_with_lifecycle(
 ) -> loco_rs::Result<()> {
     let concurrency = ctx
         .shared_store
-        .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
+        .get::<Arc<tokio::sync::Semaphore>>()
         .ok_or_else(|| loco_rs::Error::Message("embedding concurrency missing".into()))?;
     let _permit = concurrency
-        .acquire()
+        .acquire_owned()
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     let Some(id) = args.lifecycle_id else {

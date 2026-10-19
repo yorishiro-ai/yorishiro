@@ -108,12 +108,12 @@ async fn embed(
         })?;
     let concurrency = ctx
         .shared_store
-        .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
+        .get::<std::sync::Arc<tokio::sync::Semaphore>>()
         .ok_or_else(|| {
             YorishiroError::Internal(anyhow::anyhow!("embedding concurrency missing"))
         })?;
     let _permit = concurrency
-        .acquire()
+        .acquire_owned()
         .await
         .map_err(|error| YorishiroError::Internal(error.into()))?;
     if deadline_at <= crate::time::now().fixed_offset() {

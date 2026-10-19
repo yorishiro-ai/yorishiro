@@ -5,11 +5,10 @@ use loco_rs::{Result, app::AppContext};
 pub(crate) fn install(ctx: &AppContext, settings: &crate::data::settings::Settings) {
     ctx.shared_store
         .insert(crate::services::embedding::default_embedding_resolver());
-    ctx.shared_store.insert(
-        crate::services::embedding::concurrency::EmbeddingConcurrency::new(
+    ctx.shared_store
+        .insert(std::sync::Arc::new(tokio::sync::Semaphore::new(
             settings.embedding.provider_concurrency,
-        ),
-    );
+        )));
 }
 
 pub(crate) async fn install_provider(ctx: &AppContext) -> Result<()> {
