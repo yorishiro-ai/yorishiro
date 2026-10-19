@@ -15,6 +15,9 @@ Valkeyの対応する管理操作もLocoへ委譲しますが、復旧ではmemb
 Loco 1.2.0の復旧はコマンドが分かれており、完了処理との競合を防げないためです。
 outboxの復旧、marketplaceの集計、次versionの作成も、JOIN、相関サブクエリ、単一文の原子性を理由にRaw SQLを残さず、SeaORM／SeaQueryで組み立てます。
 SQLiteキューの永続化とschema拡張も、時刻精度を維持したclaimや旧timestampのbackfillを含めてSeaORM／SeaQueryを使います。
+隣接検索はPostgreSQLではLATERAL、SQLiteではpartition付きwindowをSeaQueryで組み立て、1回の問い合わせでpivotごとの件数制限を維持します。
+ベクトル検索とテキストの補完検索も、workspace制約、reindex中の除外、JSON包含、FTS5、pg_trgmを含めてSeaQueryを使います。
+これらの検索で独自演算子の指定が必要なのは、pgvectorのcosine距離演算子だけです。
 Valkeyの衝突テストはLuaを複製せず、本体の投入処理に明示的なIDを渡して検証します。
 DB固有のトランザクション設定は個々のworkerではなく`src/db.rs`に集約します。
 テストのhelperでenqueueや永続化を再実装せず、本体の操作を呼びます。

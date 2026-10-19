@@ -26,6 +26,7 @@
 //! ```
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::_entities::entity_entities::Column as EntityColumn;
 use crate::models::entity_entities;
 use crate::models::search::SearchHit;
 use crate::models::search::SearchRow;
@@ -36,6 +37,7 @@ use sea_orm::EntityTrait;
 use sea_orm::FromQueryResult;
 use sea_orm::PaginatorTrait;
 use sea_orm::Statement;
+use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, JoinType, Query};
 use uuid::Uuid;
 
 /// `cargo loco task sqlite_ann_benchmark workspace_id:<uuid> [min_entities:<int>] [max_latency_ms:<int>]`
@@ -140,21 +142,26 @@ async fn fetch_sample_embedding(
     workspace_id: Uuid,
     table_name: &str,
 ) -> std::result::Result<Option<(Uuid, Vec<u8>)>, YorishiroError> {
-    let sql = format!(
-        "SELECT ee.entity_id, ee.embedding FROM {table_name} ee \
-         JOIN entity_entities e ON e.id = ee.entity_id \
-         WHERE e.workspace_id = ? \
-         LIMIT 1"
-    );
-
-    let row = EmbeddingRow::find_by_statement(Statement::from_sql_and_values(
-        conn.get_database_backend(),
-        &sql,
-        vec![workspace_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
+    let query = Query::select()
+        .columns([
+            (Alias::new("ee"), Alias::new("entity_id")),
+            (Alias::new("ee"), Alias::new("embedding")),
+        ])
+        .from_as(Alias::new(table_name), Alias::new("ee"))
+        .join_as(
+            JoinType::InnerJoin,
+            entity_entities::Entity,
+            Alias::new("e"),
+            Expr::col((Alias::new("e"), EntityColumn::Id))
+                .equals((Alias::new("ee"), Alias::new("entity_id"))),
+        )
+        .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
+        .limit(1)
+        .to_owned();
+    let row = EmbeddingRow::find_by_statement(conn.get_database_backend().build(&query))
+        .one(conn)
+        .await
+        .internal()?;
 
     Ok(row.map(|er| (er.entity_id, er.embedding)))
 }
@@ -166,12 +173,9 @@ fn vector_blob_to_f32(blob: Vec<u8>) -> Vec<f32> {
         0,
         "embedding BLOB not a multiple of 4 bytes"
     );
-    let len = blob.len() / 4;
-    let mut vec = vec![0.0_f32; len];
-    unsafe {
-        std::ptr::copy_nonoverlapping(blob.as_ptr(), vec.as_mut_ptr() as *mut u8, blob.len());
-    }
-    vec
+    blob.chunks_exact(4)
+        .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        .collect()
 }
 
 /// Results from one measurement phase.
@@ -405,23 +409,16 @@ async fn check_vec0_availability(
 ) -> std::result::Result<PhaseResult, YorishiroError> {
     let vec0_table = format!("{table_name}_vec0");
 
-    // SQLite stores virtual tables in sqlite_master like regular tables.
-    let sql = "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1";
-
-    #[derive(sea_orm::FromQueryResult)]
-    struct MasterRow {
-        #[sea_orm(alias = "type")]
-        _typ: String,
-    }
-
-    let row = MasterRow::find_by_statement(Statement::from_sql_and_values(
-        conn.get_database_backend(),
-        sql,
-        vec![vec0_table.clone().into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
+    let query = Query::select()
+        .column(Asterisk)
+        .from(Alias::new("sqlite_master"))
+        .and_where(Expr::col(Alias::new("name")).eq(vec0_table))
+        .limit(1)
+        .to_owned();
+    let row = conn
+        .query_one_raw(conn.get_database_backend().build(&query))
+        .await
+        .internal()?;
 
     Ok(PhaseResult {
         median_ms: 0.0,

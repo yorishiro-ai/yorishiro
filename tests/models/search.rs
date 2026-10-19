@@ -1323,6 +1323,14 @@ async fn sqlite_document_embed_persist_and_search() {
                 hits[0].distance.is_some(),
                 "vector hit must have a distance"
             );
+            #[cfg(feature = "enterprise")]
+            {
+                use loco_rs::task::{Task, Vars};
+                use yorishiro::edition::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark;
+                SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
+                    ("workspace_id".into(), workspace_id.to_string()),
+                ])).await.expect("benchmark stored embedding without a vec0 table");
+            }
         },
     )
     .await;
