@@ -8,7 +8,8 @@ use crate::db::AppContextBackend;
 use crate::edition::ee::controllers::middleware::{auth, edition::LicenceState};
 
 pub(crate) fn install(ctx: &AppContext) {
-    ctx.shared_store.insert(Arc::new(LicenceState::from_env()));
+    ctx.shared_store
+        .insert(Arc::new(LicenceState::from_config(&ctx.config)));
     if ctx.is_sqlite() {
         tracing::warn!(
             "browsing the marketplace and publishing a template version are unavailable on SQLite \

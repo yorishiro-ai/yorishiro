@@ -240,3 +240,4 @@ initializers:
     client_secret: '<%= get_env(name="YORISHIRO_OAUTH_CLIENT_SECRET", default="") %>'
     redirect_uri: '<%= get_env(name="YORISHIRO_OAUTH_REDIRECT_URI", default="") %>'
     bind: '<%= get_env(name="YORISHIRO_BIND", default="") %>'
+  licence_key: '<%= get_env(name="YORISHIRO_LICENSE_KEY", default="") %>'

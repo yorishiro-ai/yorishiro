@@ -338,6 +338,10 @@ plan policyの有効／無効は`initializers.plan_policy_enabled`で指定し�
 
 ### 外部連携の認証情報
 
+ライセンスキーは解決済み設定の`initializers.licence_key`から読み込み、同梱設定は`YORISHIRO_LICENSE_KEY`をこのfieldへ展開します。
+キーは起動時に検証し、有効期限は引き続き各enterprise gateで確認します。
+キーが未指定、空、無効、または設定の型が不正な場合は、communityの起動を妨げずenterprise機能を無効にします。
+
 Stripeは解決済みLoco設定の`initializers.stripe.webhook_secret`、`price_pro`、`price_team`を読み込みます。
 OAuthは`initializers.oauth.issuer_url`、`client_id`、`client_secret`、`redirect_uri`、任意の旧callback上書き設定`bind`を読み込みます。
 同梱ファイルは既存の`YORISHIRO_STRIPE_*`、`YORISHIRO_OAUTH_*`、`YORISHIRO_BIND`環境変数をこれらのfieldへ展開します。

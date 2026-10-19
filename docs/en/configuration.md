@@ -312,6 +312,10 @@ It accepts a boolean or case-insensitive boolean text and is fixed when the cont
 
 ### Integration Credentials
 
+The licence key is read from resolved `initializers.licence_key`, populated from `YORISHIRO_LICENSE_KEY` in shipped configurations.
+The key is verified at startup, while its expiry is still checked at every enterprise gate.
+Missing, empty, invalid or incorrectly typed licence settings disable enterprise features without blocking community startup.
+
 Stripe reads `initializers.stripe.webhook_secret`, `price_pro` and `price_team` from the resolved Loco configuration.
 OAuth reads `initializers.oauth.issuer_url`, `client_id`, `client_secret`, `redirect_uri` and the optional legacy callback `bind` override.
 The shipped configuration files interpolate the existing `YORISHIRO_STRIPE_*`, `YORISHIRO_OAUTH_*` and `YORISHIRO_BIND` environment variables into these fields.

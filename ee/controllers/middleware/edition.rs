@@ -27,7 +27,7 @@ const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../../keys/licence-public.pem");
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LicenceClaims {
     /// Who the licence was issued to.
-    /// Free-form, and routinely an email address, so it is deliberately not logged, see `from_env`.
+    /// Free-form, and routinely an email address, so it is deliberately not logged, see `from_config`.
     pub sub: String,
     pub plan: String,
     /// Expiry, as a Unix timestamp.
@@ -35,18 +35,9 @@ pub struct LicenceClaims {
     pub exp: i64,
 }
 
-/// The licence key from `YORISHIRO_LICENSE_KEY`, or `None` when absent or empty.
-///
-/// `YORISHIRO_LICENSE_KEY=` (set-but-empty) means "no licence" rather than
-/// falling through to any other source, so an operator can explicitly disable
-/// a licence configured elsewhere.
-pub(crate) fn resolve_licence_key(from_env: Option<String>) -> Option<String> {
-    from_env.filter(|v| !v.is_empty())
-}
-
 /// Verifies a licence key against a PEM-encoded RSA public key.
 ///
-/// Split from [`LicenceState::from_env`] so tests can verify against their own key rather than the compiled-in one.
+/// Split from [`LicenceState::from_config`] so tests can verify against their own key rather than the compiled-in one.
 /// Failures are logged in detail, unlike OAuth token failures: the caller here is an operator debugging a key they hold, not an untrusted client whose probing should not be helped along.
 ///
 /// # Errors
@@ -84,21 +75,31 @@ pub struct LicenceState {
 }
 
 impl LicenceState {
-    /// Reads `YORISHIRO_LICENSE_KEY` and verifies it against the compiled-in public key.
+    /// Reads `initializers.licence_key` and verifies it against the compiled-in public key.
     ///
     /// An absent, empty or invalid key all yield an unlicensed state rather than aborting startup: refusing to boot would take down the free half over a enterprise-feature misconfiguration.
     /// An invalid one is logged at `warn`, since it almost certainly means someone expected enterprise features to be on.
-    pub(crate) fn from_env() -> Self {
-        let from_env = crate::edition::ee::data::env::Env::LicenceKey
-            .read_os()
-            .map(|v| v.into_string().unwrap_or_default());
-
-        let Some(token) = resolve_licence_key(from_env) else {
+    pub(crate) fn from_config(config: &loco_rs::config::Config) -> Self {
+        let token = config
+            .initializers
+            .as_ref()
+            .and_then(|values| values.get("licence_key"));
+        let token = match token {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::String(token)) => Some(token.as_str()),
+            Some(_) => {
+                tracing::warn!(
+                    "invalid initializers.licence_key: enterprise features are disabled"
+                );
+                return Self::default();
+            }
+        };
+        let Some(token) = token.filter(|value| !value.is_empty()) else {
             tracing::info!("no licence key configured: enterprise features are disabled");
             return Self::default();
         };
 
-        match verify(&token, PUBLIC_KEY_PEM) {
+        match verify(token, PUBLIC_KEY_PEM) {
             Ok(claims) => {
                 // `sub` is free-form and routinely an email address, so it does not go in a routine log line.
                 // Plan and expiry are what an operator needs to see; the issuee is in the key they already hold.
