@@ -313,17 +313,13 @@ async fn benchmark_phase(
     let mut latencies = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = std::time::Instant::now();
-        let _hits: Vec<SearchHit> = SearchRow::find_by_statement(Statement::from_sql_and_values(
-            conn.get_database_backend(),
-            &knn.sql,
-            knn.values.clone(),
-        ))
-        .all(conn)
-        .await
-        .internal()?
-        .into_iter()
-        .map(SearchRow::into_hit)
-        .collect();
+        let _hits: Vec<SearchHit> = SearchRow::find_by_statement(knn.clone())
+            .all(conn)
+            .await
+            .internal()?
+            .into_iter()
+            .map(SearchRow::into_hit)
+            .collect();
         latencies.push(start.elapsed().as_secs_f64() * 1000.0);
     }
 
@@ -343,42 +339,54 @@ async fn benchmark_phase(
     })
 }
 
-/// SQL query for full-scan vector search (uses `vec_distance_cosine`).
-struct KnnQuery {
-    sql: String,
-    values: Vec<sea_orm::Value>,
-}
-
-fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> KnnQuery {
-    // Convert the vector to raw LE f32 bytes for `vec_distance_cosine`.
-    let blob_bytes =
-        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-
-    let sql = format!(
-        "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
-         e.entity_type, e.data, e.created_at, e.updated_at, \
-         e.created_by, e.updated_by, \
-         vec_distance_cosine(?, ee.embedding) AS distance \
-         FROM entity_entities e \
-         JOIN {table_name} ee ON e.id = ee.entity_id \
-         WHERE ee.embedding IS NOT NULL AND e.workspace_id = ? \
-         ORDER BY distance LIMIT 10"
-    );
-    let values = vec![
-        sea_orm::Value::from(blob_bytes.to_vec()),
-        workspace_id.into(),
-    ];
-    KnnQuery { sql, values }
+fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Statement {
+    use sea_orm::sea_query::{Func, Order};
+    let query = Query::select()
+        .columns(
+            [
+                EntityColumn::Id,
+                EntityColumn::WorkspaceId,
+                EntityColumn::SchemaId,
+                EntityColumn::SchemaVersion,
+                EntityColumn::EntityType,
+                EntityColumn::Data,
+                EntityColumn::CreatedAt,
+                EntityColumn::UpdatedAt,
+                EntityColumn::CreatedBy,
+                EntityColumn::UpdatedBy,
+            ]
+            .map(|column| (Alias::new("e"), column)),
+        )
+        .expr_as(
+            Func::cust(Alias::new("vec_distance_cosine")).args([
+                Expr::val(crate::db::sqlite_vec_blob(vector)),
+                Expr::col((Alias::new("ee"), Alias::new("embedding"))),
+            ]),
+            "distance",
+        )
+        .from_as(entity_entities::Entity, Alias::new("e"))
+        .join_as(
+            JoinType::InnerJoin,
+            Alias::new(table_name),
+            Alias::new("ee"),
+            Expr::col((Alias::new("e"), EntityColumn::Id))
+                .equals((Alias::new("ee"), Alias::new("entity_id"))),
+        )
+        .and_where(Expr::col((Alias::new("ee"), Alias::new("embedding"))).is_not_null())
+        .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
+        .order_by(Alias::new("distance"), Order::Asc)
+        .limit(10)
+        .to_owned();
+    sea_orm::DatabaseBackend::Sqlite.build(&query)
 }
 
 /// SQL query for vec0 KNN search (uses the vec0 virtual table).
 ///
 /// The vec0 virtual table is created by sqlite-vec as `{table_name}_vec0`
 /// and exposes a `MATCH k=` operator for KNN search.
-fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> KnnQuery {
+fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Statement {
     // Convert the vector to raw LE f32 bytes for vec0.
-    let blob_bytes =
-        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
+    let blob_bytes = crate::db::sqlite_vec_blob(vector);
 
     let sql = format!(
         "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
@@ -396,7 +404,7 @@ fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> KnnQ
         sea_orm::Value::from(blob_bytes.to_vec()),
         workspace_id.into(),
     ];
-    KnnQuery { sql, values }
+    Statement::from_sql_and_values(sea_orm::DatabaseBackend::Sqlite, sql, values)
 }
 
 /// Check whether the vec0 virtual table exists for the given embedding table.

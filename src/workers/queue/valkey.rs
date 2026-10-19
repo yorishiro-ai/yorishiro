@@ -438,7 +438,7 @@ async fn dequeue(
                     return Ok(None);
                 }
                 if let Some(raw) = raw {
-                    tracing::debug!(job_id=%id, job_json=%raw, "scanning Valkey queue item");
+                    tracing::debug!(job_id=%id, "scanning Valkey queue item");
                     if let Ok(job) = serde_json::from_str::<Job>(&raw) {
                         let tag_match = if tags.is_empty() {
                             job.tags.as_ref().is_none_or(Vec::is_empty)
