@@ -313,17 +313,26 @@ fn postgres_session_options(options: &mut sea_orm::ConnectOptions, timezone: Str
 }
 
 /// Reads PostgreSQL's process-level activity view for the load guard.
-/// This is backend-specific operational state that SeaORM does not model.
+/// The activity view is queried with SeaQuery rather than an application entity.
 pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::YorishiroError> {
     use crate::error::ResultExt;
 
-    sea_orm::sqlx::query_scalar(
-        "SELECT count(*) FROM pg_stat_activity \
-         WHERE datname = current_database() AND state = 'active'",
-    )
-    .fetch_one(pool)
-    .await
-    .internal()
+    use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Query};
+    let query = Query::select()
+        .expr(Func::count(Expr::col(Asterisk)))
+        .from(Alias::new("pg_stat_activity"))
+        .and_where(Expr::col(Alias::new("datname")).eq(Func::cust(Alias::new("current_database"))))
+        .and_where(Expr::col(Alias::new("state")).eq("active"))
+        .to_owned();
+    let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
+    db.query_one_raw(db.get_database_backend().build(&query))
+        .await
+        .internal()?
+        .ok_or_else(|| {
+            crate::YorishiroError::Internal(anyhow::anyhow!("activity count returned no row"))
+        })?
+        .try_get_by_index(0)
+        .internal()
 }
 
 /// A vector in the BLOB layout `sqlite-vec` reads: consecutive little-endian `f32` values.

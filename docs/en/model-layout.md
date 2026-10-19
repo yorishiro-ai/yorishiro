@@ -17,6 +17,8 @@ SQLite queue persistence and schema extensions also use SeaORM/SeaQuery, includi
 Neighbor batching uses SeaQuery LATERAL queries on PostgreSQL and partitioned window queries on SQLite to retain the per-pivot limit in one round trip.
 Vector search and text fallback queries use SeaQuery, including workspace scope, reindex exclusion, JSON containment, FTS5 and pg_trgm expressions.
 The pgvector cosine-distance operator is the only custom operator in those search queries.
+Authentication queries also use SeaQuery while retaining the SECURITY DEFINER functions and RLS-scoped pools.
+The API key usage timestamp is updated on its dedicated scoped connection, outside the request transaction, so read-only requests cannot roll it back.
 Valkey collision tests call the production enqueue operations with explicit IDs instead of copying their Lua scripts.
 Database-specific transaction setup belongs in `src/db.rs`, not in individual workers.
 Tests call production operations instead of rebuilding enqueue or persistence logic in fixture helpers.

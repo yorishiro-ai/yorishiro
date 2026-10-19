@@ -1,6 +1,6 @@
 use rand::Rng;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect, TransactionTrait};
+use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, TransactionTrait};
 use sha2::{Digest, Sha256};
 
 use crate::db::DbHandle;
@@ -97,7 +97,7 @@ impl Entity {
     ///
     /// At this point neither the workspace nor the tenant is known yet, so RLS's `app.current_workspace`/`app.current_tenant` can't be set, which is why this takes the whole [`DbHandle`] rather than a scoped connection.
     ///
-    /// Raw SQL: `authenticate_api_key` is a SECURITY DEFINER function, so this bypasses RLS on api_keys/workspace_workspaces, and limits the columns it returns to id/workspace_id/tenant_id/scope/user_id/audit (never key_hash itself).
+    /// SeaQuery calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only id/workspace_id/tenant_id/scope/user_id/audit, never key_hash itself.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -105,24 +105,49 @@ impl Entity {
         db: &DbHandle,
         presented_key: &str,
     ) -> Result<AuthContext, YorishiroError> {
-        let row: Option<(uuid::Uuid, uuid::Uuid, uuid::Uuid, String, Option<uuid::Uuid>, bool)> =
-            sea_orm::sqlx::query_as(
-                "SELECT id, workspace_id, tenant_id, scope, user_id, audit FROM authenticate_api_key($1)",
+        use sea_orm::sea_query::{Alias, Expr, Func, Query};
+        #[derive(sea_orm::FromQueryResult)]
+        struct Credential {
+            id: uuid::Uuid,
+            workspace_id: uuid::Uuid,
+            tenant_id: uuid::Uuid,
+            scope: String,
+            user_id: Option<uuid::Uuid>,
+            audit: bool,
+        }
+        let query = Query::select()
+            .columns(
+                [
+                    "id",
+                    "workspace_id",
+                    "tenant_id",
+                    "scope",
+                    "user_id",
+                    "audit",
+                ]
+                .map(Alias::new),
             )
-            .bind(hash_key(presented_key))
-            .fetch_optional(db.tenant.pool())
+            .from_function(
+                Func::cust(Alias::new("authenticate_api_key"))
+                    .arg(Expr::val(hash_key(presented_key))),
+                Alias::new("credential"),
+            )
+            .to_owned();
+        let conn =
+            sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.tenant.pool().clone());
+        let row = Credential::find_by_statement(conn.get_database_backend().build(&query))
+            .one(&conn)
             .await
             .internal()?;
 
-        let (api_key_id, workspace_id, tenant_id, scope, user_id, audit) =
-            row.ok_or(YorishiroError::Unauthenticated)?;
+        let row = row.ok_or(YorishiroError::Unauthenticated)?;
         Ok(AuthContext {
-            api_key_id,
-            workspace_id,
-            tenant_id,
-            scope: stored_scope(&scope)?,
-            user_id,
-            audit,
+            api_key_id: row.id,
+            workspace_id: row.workspace_id,
+            tenant_id: row.tenant_id,
+            scope: stored_scope(&row.scope)?,
+            user_id: row.user_id,
+            audit: row.audit,
         })
     }
 
@@ -164,7 +189,17 @@ impl Entity {
         conn: &mut sea_orm::sqlx::PgConnection,
         api_key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
-        sea_orm::sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
+        use crate::models::_entities::api_keys::Column;
+        use sea_orm::sea_query::{Expr, ExprTrait, Func, PostgresQueryBuilder, Query};
+        let (sql, _) = Query::update()
+            .table(Entity)
+            .value(
+                Column::LastUsedAt,
+                Func::cust(sea_orm::sea_query::Alias::new("now")),
+            )
+            .and_where(Expr::col(Column::Id).eq(api_key_id))
+            .build(PostgresQueryBuilder);
+        sea_orm::sqlx::query(sea_orm::sqlx::AssertSqlSafe(sql))
             .bind(api_key_id)
             .execute(conn)
             .await

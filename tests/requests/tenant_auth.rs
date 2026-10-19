@@ -111,6 +111,16 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 "response: {:?}",
                 with_header.text()
             );
+            use sea_orm::EntityTrait;
+            let persisted = yorishiro::models::api_keys::Entity::find_by_id(tenant_key.id)
+                .one(&identity)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                persisted.last_used_at.is_some(),
+                "a read-only request must persist last_used_at outside its rolled-back transaction"
+            );
         })
         .await;
     })

@@ -18,6 +18,8 @@ SQLiteキューの永続化とschema拡張も、時刻精度を維持したclaim
 隣接検索はPostgreSQLではLATERAL、SQLiteではpartition付きwindowをSeaQueryで組み立て、1回の問い合わせでpivotごとの件数制限を維持します。
 ベクトル検索とテキストの補完検索も、workspace制約、reindex中の除外、JSON包含、FTS5、pg_trgmを含めてSeaQueryを使います。
 これらの検索で独自演算子の指定が必要なのは、pgvectorのcosine距離演算子だけです。
+認証の問い合わせもSeaQueryを使い、SECURITY DEFINER関数とRLS付きpoolを維持します。
+API keyの最終使用時刻は要求のtransactionとは別の専用接続で更新し、読み取り専用の要求でもrollbackされないようにします。
 Valkeyの衝突テストはLuaを複製せず、本体の投入処理に明示的なIDを渡して検証します。
 DB固有のトランザクション設定は個々のworkerではなく`src/db.rs`に集約します。
 テストのhelperでenqueueや永続化を再実装せず、本体の操作を呼びます。
