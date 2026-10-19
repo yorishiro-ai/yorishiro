@@ -1,7 +1,7 @@
 //! Configuration for OAuth2/OIDC login from resolved Loco initializer settings.
 //! A bad config reports `YorishiroError::Internal` rather than panicking, since a panic here would crash the task handling whichever request triggered it.
 //!
-//! `Ok(None)` (via [`OAuthConfig::from_config`]) means OAuth is disabled.
+//! `Ok(None)` (via `OAuthConfig::from_config`) means OAuth is disabled.
 //! Every `/auth/oauth/authorize` and `/auth/oauth/callback` request then answers `404`, and the community server's own `/auth/login` (email/password) is unaffected.
 
 use loco_rs::config::{Config, Server};

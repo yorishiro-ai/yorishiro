@@ -41,7 +41,7 @@ db_enum! {
 /// Resolves a workspace's own worker-class assignment, if it has one.
 ///
 /// A trait, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`], letting a deployment pin a workspace's jobs to particular compute without touching the callers that enqueue them.
-/// [`DefaultWorkerClassResolver`] keeps every workspace on `Shared`.
+/// `DefaultWorkerClassResolver` keeps every workspace on `Shared`.
 ///
 /// `conn` is `ctx.db` rather than the RLS-scoped pool: which compute a tenant pays for is deployment configuration, not tenant content.
 ///

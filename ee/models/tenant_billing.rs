@@ -59,7 +59,7 @@ pub(crate) async fn get_by_stripe_customer(
         .map(|row| row.map(TenantBillingRecord::from))
 }
 
-/// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via [`get_by_stripe_customer`].
+/// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via `get_by_stripe_customer`.
 /// Upserts, because checkout can be completed for a tenant that already has a billing row (a resubscribe after cancellation).
 ///
 /// # Errors

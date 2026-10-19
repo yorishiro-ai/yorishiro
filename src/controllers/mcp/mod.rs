@@ -48,7 +48,7 @@ impl McpToolPolicy for AllowAllTools {
 
 /// The tools one MCP server exposes, and the policy that decides which of them a request may see.
 ///
-/// Starts as the community tool set under [`AllowAllTools`].
+/// Starts as the community tool set under `AllowAllTools`.
 /// An edition adds its own tools with [`McpToolSet::extend`], which replaces the policy because only the edition knows which of the tools it added need gating.
 #[derive(Clone)]
 pub struct McpToolSet {

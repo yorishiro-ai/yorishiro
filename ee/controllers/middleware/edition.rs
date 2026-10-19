@@ -37,7 +37,7 @@ pub struct LicenceClaims {
 
 /// Verifies a licence key against a PEM-encoded RSA public key.
 ///
-/// Split from [`LicenceState::from_config`] so tests can verify against their own key rather than the compiled-in one.
+/// Split from `LicenceState::from_config` so tests can verify against their own key rather than the compiled-in one.
 /// Failures are logged in detail, unlike OAuth token failures: the caller here is an operator debugging a key they hold, not an untrusted client whose probing should not be helped along.
 ///
 /// # Errors

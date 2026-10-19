@@ -2,8 +2,8 @@
 //!
 //! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `template_templates`.
 //!
-//! [`get`] returns the key so the inference client can send it.
-//! Nothing else does: [`describe`] is what an endpoint calls, and it reports the endpoint and model without the secret.
+//! `get` returns the key so the inference client can send it.
+//! Nothing else does: `describe` is what an endpoint calls, and it reports the endpoint and model without the secret.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_llm_keys::{ActiveModel, Column, Entity};

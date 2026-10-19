@@ -1,7 +1,7 @@
 //! Following an origin template: `/api/schemas/upstream-changes`, `merge-preview` and `merge`.
 //! This overlays base's own `/api/schemas` namespace, since merging a schema is a schema operation from the client's side, not an administrative one like the dashboard or Stripe.
 //!
-//! Authentication goes through [`authz::authenticate_workspace`] rather than a base extractor, and the scope check is written out explicitly in each handler below rather than carried by the extractor's own type.
+//! Authentication goes through `authz::authenticate_workspace` rather than a base extractor, and the scope check is written out explicitly in each handler below rather than carried by the extractor's own type.
 //! It resolves through `TenantScopedAuthenticator`, so a workspace-scoped key names its own workspace and a tenant-scoped one names it with `X-Workspace-Id`.
 //! The scope check is explicit for the same reason: there is no extractor here to carry it.
 

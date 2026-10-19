@@ -49,7 +49,7 @@ pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
 /// Resolves a presented API key into an [`AuthContext`].
 ///
 /// A seam: a deployment can replace this rule (a key that names its workspace per request, a key issued by an external identity system) without touching the routes that call it.
-/// [`DefaultAuthenticator`] is the behaviour of every deployment that does not replace it.
+/// `DefaultAuthenticator` is the behaviour of every deployment that does not replace it.
 ///
 /// # Contract
 ///

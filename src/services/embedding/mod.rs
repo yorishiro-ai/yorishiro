@@ -85,7 +85,7 @@ pub trait EmbeddingProvider: Send + Sync {
 /// Resolves a workspace's own embedding provider, if it has one.
 ///
 /// A trait that a deployment can implement to let a workspace point at a different embedding backend than the deployment default (its own local model, a different OpenAI-compatible endpoint) without touching the callers that resolve a provider.
-/// [`DefaultEmbeddingResolver`] is the behaviour of every deployment that does not replace it: every workspace uses the deployment-wide provider.
+/// `DefaultEmbeddingResolver` is the behaviour of every deployment that does not replace it: every workspace uses the deployment-wide provider.
 ///
 /// `conn` is `ctx.db` (Loco's own `DatabaseConnection`), not the RLS-scoped tenant pool: a per-workspace assignment is deployment configuration, not tenant content.
 /// This is why `conn` takes a `sea_orm::DatabaseConnection` rather than `DbHandle`: `DbHandle` does not exist on SQLite (see `Hooks::after_context`), and this trait must work on both backends, unlike `Authenticator`, which is a PostgreSQL/RLS-only concept by design.

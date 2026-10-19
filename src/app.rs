@@ -2,7 +2,7 @@
 //!
 //! This crate has exactly one `Hooks` implementation, and it lives in `crate::edition`.
 //! That implementation calls the functions below for the base behaviour and adds whatever its edition contributes.
-//! Nothing here knows which editions exist: the types this module hands out ([`RouteMounts`], [`WorkerRegistry`], [`McpToolSet`]) are how an edition adds to the base.
+//! Nothing here knows which editions exist: the types this module hands out (`RouteMounts`, [`WorkerRegistry`], [`McpToolSet`]) are how an edition adds to the base.
 
 use loco_rs::{
     Result,
