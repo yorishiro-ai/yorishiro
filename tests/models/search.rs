@@ -1330,6 +1330,39 @@ async fn sqlite_document_embed_persist_and_search() {
                 SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
                     ("workspace_id".into(), workspace_id.to_string()),
                 ])).await.expect("benchmark stored embedding without a vec0 table");
+                ctx.db.execute_unprepared("CREATE VIRTUAL TABLE entity_embeddings_768_vec0 USING vec0(entity_id TEXT PRIMARY KEY, workspace_id TEXT PARTITION KEY, embedding FLOAT[768] distance_metric=cosine)")
+                    .await.unwrap();
+                let unrelated_workspace = uuid::Uuid::now_v7();
+                for _ in 0..11 {
+                    ctx.db.execute_raw(Statement::from_sql_and_values(
+                        sea_orm::DatabaseBackend::Sqlite,
+                        "INSERT INTO entity_embeddings_768_vec0(entity_id, workspace_id, embedding) VALUES (?, ?, ?)",
+                        [uuid::Uuid::now_v7().to_string().into(), unrelated_workspace.to_string().into(),
+                            yorishiro::db::sqlite_vec_blob(&provider.vector()).into()],
+                    )).await.unwrap();
+                }
+                ctx.db.execute_raw(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "INSERT INTO entity_embeddings_768_vec0(entity_id, workspace_id, embedding) VALUES (?, ?, ?)",
+                    [entity.id.to_string().into(), workspace_id.to_string().into(),
+                        yorishiro::db::sqlite_vec_blob(&provider.vector()).into()],
+                )).await.unwrap();
+                SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
+                    ("workspace_id".into(), workspace_id.to_string()),
+                    ("min_entities".into(), "0".into()),
+                    ("max_latency_ms".into(), "0".into()),
+                ])).await.expect("benchmark real vec0 KNN with UUID keys and workspace partition");
+                ctx.db.execute_raw(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "DELETE FROM entity_embeddings_768_vec0 WHERE entity_id = ?",
+                    [entity.id.to_string().into()],
+                )).await.unwrap();
+                let error = SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
+                    ("workspace_id".into(), workspace_id.to_string()),
+                    ("min_entities".into(), "0".into()),
+                    ("max_latency_ms".into(), "0".into()),
+                ])).await.expect_err("an unpopulated workspace partition must not look like a fast benchmark");
+                assert!(error.to_string().contains("returned no entities"), "{error}");
             }
         },
     )

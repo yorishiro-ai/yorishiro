@@ -338,6 +338,9 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 タスクは、ベクトル検索クエリの 5 回反復にわたって中央値、最小値、最大値のレイテンシを測定します。エンティティ数が 1000 以上で中央値レイテンシが 200 ms を超える場合、vec0 の採用を推奨します。`min_entities` と `max_latency_ms` CLI 引数で両方の閾値を変更できます。
 
 このタスクは計測専用です。スキーマや構成を変更しません。vec0 仮想テーブルの採用がデプロイメントにとって価値があるかどうかを判断するのに役立ちます。
+任意の比較用テーブルは`<embedding_table>_vec0`という名前で、正規のUUID文字列を格納する`entity_id TEXT PRIMARY KEY`、`workspace_id TEXT PARTITION KEY`、`embedding FLOAT[<width>] distance_metric=cosine`列を必要とします。
+workspaceのpartition制約をKNN選択の内側に適用し、別workspaceのデータが近傍候補の枠を消費しないようにします。
+件数は対象workspaceの非NULL embeddingだけを数え、対応するエンティティが1件も返らない比較はエラーにします。
 
 ## ログでの秘密情報の扱い
 

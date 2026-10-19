@@ -301,6 +301,9 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 The task measures median, min, and max latency across five iterations of a vector search query. When the entity count is 1000 or more and the median latency exceeds 200 ms, the task recommends adopting vec0. You can adjust both thresholds with `min_entities` and `max_latency_ms` CLI arguments.
 
 This task is measurement only: it does not change any schema or configuration. It helps you decide whether the vec0 virtual table is worth adopting on your deployment.
+The optional comparison table is named `<embedding_table>_vec0` and must have `entity_id TEXT PRIMARY KEY` containing canonical UUID strings, `workspace_id TEXT PARTITION KEY`, and an `embedding FLOAT[<width>] distance_metric=cosine` column.
+The workspace partition is applied inside KNN selection, so another workspace cannot consume its nearest-neighbor slots.
+The task counts only non-null embeddings in the selected workspace and refuses a comparison that returns no matching entities.
 
 ## Secret handling in logs
 

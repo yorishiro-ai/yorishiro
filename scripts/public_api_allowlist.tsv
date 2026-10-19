@@ -1,12 +1,13 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/app.rs	use	crate::initializers::timezone::{cli_requires_timezone_gate,cli_timezone_gate_result}	integration-test: preserve the existing CLI gate imports while moving implementation into its lifecycle owner.
 src/workers/queue/valkey.rs	fn	enqueue_with_id	integration-test: deterministic collision test executes the same atomic enqueue operation as QueueProvider.
 src/workers/queue/valkey.rs	fn	ValkeyTimezoneQueue::enqueue_batch_with_ids	integration-test: deterministic batch collision test verifies the production atomic operation without duplicating Lua.
 src/workers/mod.rs	mod	fill_defaults	integration-test: request tests register the production migration worker on the configured queue provider.
 src/workers/fill_defaults.rs	struct	FillDefaultsWorker	integration-test: REST and MCP tests prove migration waits for and executes on the selected Loco queue provider.
 src/workers/fill_defaults.rs	struct	FillDefaultsArgs	loco-task-worker: public BackgroundWorker implementation names this serializable job payload type; fields remain crate-private.
-src/app.rs	fn	cli_requires_timezone_gate	integration-test: external CLI argument tests verify pre-run worker-command gating and migration exemptions.
-src/app.rs	fn	cli_timezone_gate_result	integration-test: external CLI tests verify persisted-state gating while allowing database migration bootstrap.
+src/initializers/timezone.rs	fn	cli_requires_timezone_gate	integration-test: external CLI argument tests verify pre-run worker-command gating and migration exemptions.
+src/initializers/timezone.rs	fn	cli_timezone_gate_result	integration-test: external CLI tests verify persisted-state gating while allowing database migration bootstrap.
 src/data/config.rs	fn	validate	integration-test: external settings tests exercise application configuration validation.
 src/data/settings.rs	field	Settings::timezone	integration-test: external configuration tests assert the validated timezone setting.
 src/db.rs	fn	set_session_timezone	integration-test: PostgreSQL integration tests verify configured session-zone behavior on real connections.
