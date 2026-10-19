@@ -230,53 +230,55 @@ async fn sqlite_queue_delivers_each_target_only_to_its_worker() {
 async fn postgres_queue_delivers_each_target_only_to_its_worker() {
     let is_postgres =
         |url: &String| url.starts_with("postgres://") || url.starts_with("postgresql://");
-    let Some(uri) = std::env::var("QUEUE_URL")
+    let Some(_) = std::env::var("QUEUE_URL")
         .ok()
         .filter(is_postgres)
         .or_else(|| std::env::var("DATABASE_URL").ok().filter(is_postgres))
     else {
         return;
     };
-    let make = move || {
-        let uri = uri.clone();
-        Box::pin(async move {
-            let config = PostgresQueueConfig {
-                uri,
-                dangerously_flush: false,
-                enable_logging: false,
-                max_connections: 2,
-                min_connections: 1,
-                connect_timeout: 5_000,
-                idle_timeout: 5_000,
-                poll_interval_sec: 1,
-                num_workers: 1,
-                reaper: None,
-            };
-            let queue = Arc::new(
-                bgworker::pg::create_provider(&config)
-                    .await
-                    .expect("Postgres queue"),
-            );
-            queue.setup().await.expect("set up Postgres queue");
-            queue
-        }) as Pin<Box<dyn Future<Output = Arc<bgworker::Queue>>>>
-    };
-    let first = make().await;
-    first.clear().await.expect("empty the Postgres queue");
-    let outcome = std::panic::AssertUnwindSafe(each_worker_takes_only_its_own_target(
-        first.clone(),
-        Box::new(make),
-        false,
-        None,
-        None,
-    ))
-    .catch_unwind()
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let uri = ctx.config.database.uri.clone();
+        let make = move || {
+            let uri = uri.clone();
+            Box::pin(async move {
+                let config = PostgresQueueConfig {
+                    uri,
+                    dangerously_flush: false,
+                    enable_logging: false,
+                    max_connections: 2,
+                    min_connections: 1,
+                    connect_timeout: 5_000,
+                    idle_timeout: 5_000,
+                    poll_interval_sec: 1,
+                    num_workers: 1,
+                    reaper: None,
+                };
+                let queue = Arc::new(
+                    bgworker::pg::create_provider(&config)
+                        .await
+                        .expect("Postgres queue"),
+                );
+                queue.setup().await.expect("set up Postgres queue");
+                queue
+            }) as Pin<Box<dyn Future<Output = Arc<bgworker::Queue>>>>
+        };
+        let first = make().await;
+        let outcome = std::panic::AssertUnwindSafe(each_worker_takes_only_its_own_target(
+            first.clone(),
+            Box::new(make),
+            false,
+            None,
+            None,
+        ))
+        .catch_unwind()
+        .await;
+        let _ = first.shutdown();
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+    })
     .await;
-    let _ = first.clear().await;
-    let _ = first.shutdown();
-    if let Err(panic) = outcome {
-        std::panic::resume_unwind(panic);
-    }
 }
 
 #[tokio::test]

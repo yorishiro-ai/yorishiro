@@ -26,6 +26,9 @@ This is a regression guardrail, not a blanket ban on `pub` and not a second visi
 
 ## Review Guidance
 
+Queue-provider tests must isolate their storage and must not clear a shared configured database.
+Use Loco's throwaway database harness for PostgreSQL routing tests, including tests run concurrently in separate edition processes.
+
 Keep shared behavior in Loco's model extensions, not in controllers or a repository layer.
 Use typed settings for deployment tuning, existing enums for closed domain values, and named constants for protocol limits and retry policies.
 Use structs for coherent state and traits for behavior that actually varies at runtime, not to wrap static edition assembly.

@@ -143,6 +143,9 @@ psql -d template1 -c '\dx'
 
 A non-superuser role is required. A superuser bypasses RLS regardless of `FORCE`.
 
+Provider routing tests use the request harness's owned throwaway database rather than clearing the database named by `DATABASE_URL` or `QUEUE_URL`.
+Process-local serial locks do not isolate separate CE and EE test processes.
+
 Queue tests (`tests/requests/queue.rs`) bypass `request_with_create_db` because the queue pool has no public close path. They use a temporary SQLite queue file instead.
 
 ## Gate testing

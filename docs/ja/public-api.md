@@ -26,6 +26,9 @@ CI では `PUBLIC_API_BASE_REF` と `PUBLIC_API_HEAD_REF` に明示的な base �
 
 ## レビュー指針
 
+queue providerの試験は保存先を隔離し、設定された共有DBを全消去しないでください。
+PostgreSQLのrouting試験にはLocoの使い捨てDBを使い、別プロセスで並行するeditionの試験とも干渉しないようにします。
+
 共有する処理はcontrollerやrepository層ではなく、Locoのmodel拡張に置きます。
 運用時に調整する値は型付き設定、閉じたドメイン値は既存のenum、プロトコル上の制限やリトライ方針は名前付き定数で表します。
 関連する状態はstructにまとめ、traitは実行時に振る舞いが変わる箇所に使います。
