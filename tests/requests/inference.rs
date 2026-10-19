@@ -1086,15 +1086,9 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
         .await
         .expect("durable lifecycle dispatch");
         txn.commit().await.expect("commit lifecycle dispatch");
-        let epoch = yorishiro::models::queue_job_dispatch_outbox::publishing_state(&ctx.db)
-            .await
-            .expect("publisher state")
-            .epoch;
         InferFillWorker::build(&ctx)
             .perform(InferFillArgs {
                 lifecycle_id: Some(lifecycle_id),
-                dispatch_id: Some(lifecycle_id),
-                publishing_epoch: Some(epoch),
                 job_id,
                 workspace_id: setup.workspace_id,
                 schema_name: "note".into(),
@@ -1112,33 +1106,6 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
     .await;
 }
 
-#[tokio::test]
-async fn infer_fill_worker_rejects_unversioned_provider_delivery() {
-    use loco_rs::bgworker::BackgroundWorker;
-    use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
-
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let worker = InferFillWorker::build(&ctx);
-        for (dispatch_id, publishing_epoch) in
-            [(None, None), (Some(Uuid::new_v4()), None), (None, Some(1))]
-        {
-            let result = worker
-                .perform(InferFillArgs {
-                    lifecycle_id: None,
-                    dispatch_id,
-                    publishing_epoch,
-                    job_id: Uuid::new_v4(),
-                    workspace_id: Uuid::new_v4(),
-                    schema_name: "note".into(),
-                })
-                .await;
-            assert!(result.is_ok(), "rejected stale delivery is a no-op");
-        }
-    })
-    .await;
-}
-
-/// The queued job names only the workspace, so the scope the worker opens has to carry the workspace's real tenant, not the workspace id in both places.
 #[tokio::test]
 async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
     use sea_orm::{ConnectionTrait, Statement};

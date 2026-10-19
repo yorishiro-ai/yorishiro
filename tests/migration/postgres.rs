@@ -177,73 +177,6 @@ async fn rls_enabled(db: &sea_orm::DatabaseConnection) -> bool {
 #[tokio::test]
 #[serial(postgres_cluster)]
 #[serial(process_environment)]
-async fn publishing_state_is_select_only_for_tenant_and_shared_lock_is_callable() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    with_scratch_db("publishing_state_privileges", |db| {
-        async move {
-            Migrator::up(db, None).await.expect("migrations");
-            let privileges = db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres, "SELECT has_table_privilege('yorishiro_app', 'public.queue_publishing_state', 'UPDATE'), has_function_privilege('yorishiro_app', 'public.queue_publishing_epoch_shared_lock()', 'EXECUTE'), has_function_privilege('yorishiro_app', 'public.queue_publishing_epoch_exclusive_lock()', 'EXECUTE'), EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE p.oid = 'public.queue_publishing_epoch_exclusive_lock()'::regprocedure AND a.grantee = 0 AND a.privilege_type = 'EXECUTE')")).await.expect("check privileges").expect("privilege row");
-            assert!(!privileges.try_get_by_index::<bool>(0).expect("publisher update privilege"));
-            assert!(privileges.try_get_by_index::<bool>(1).expect("shared lock execute privilege"));
-            assert!(!privileges.try_get_by_index::<bool>(2).expect("exclusive lock execute privilege"));
-            assert!(!privileges.try_get_by_index::<bool>(3).expect("PUBLIC exclusive execute privilege"));
-            let role = db.begin().await.expect("begin role test");
-            role.execute_unprepared("SET ROLE yorishiro_app").await.expect("set application role");
-            let exclusive_call = role.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres, "SELECT public.queue_publishing_epoch_exclusive_lock()")).await;
-            assert!(exclusive_call.is_err(), "tenant role must not execute exclusive lock");
-            role.rollback().await.expect("release denied exclusive lock");
-            let txn = db.begin().await.expect("begin lock transaction");
-            txn.execute_unprepared("SET ROLE yorishiro_app")
-                .await
-                .expect("set role");
-            let result = txn
-                .execute_unprepared(
-                    "UPDATE public.queue_publishing_state SET epoch = epoch + 1 WHERE id = 1",
-                )
-                .await;
-            assert!(
-                result.is_err(),
-                "tenant role must not mutate publisher state"
-            );
-            txn.rollback().await.expect("rollback denied direct update");
-
-            let shared = db.begin().await.expect("begin shared-lock transaction");
-            shared.execute_unprepared("SET ROLE yorishiro_app").await.expect("set application role");
-            let _ = shared
-                .query_one_raw(Statement::from_string(
-                    sea_orm::DatabaseBackend::Postgres,
-                    "SELECT public.queue_publishing_epoch_shared_lock()",
-                ))
-                .await
-                .expect("shared-lock function")
-                .expect("epoch row");
-            let blocked_db = db.clone();
-            let blocked = tokio::spawn(async move {
-                blocked_db
-                    .query_one_raw(Statement::from_string(
-                        sea_orm::DatabaseBackend::Postgres,
-                        "SELECT public.queue_publishing_epoch_exclusive_lock()",
-                    ))
-                    .await
-            });
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            assert!(!blocked.is_finished(), "exclusive lock must wait for shared lock");
-            shared.execute_unprepared("RESET ROLE")
-                .await
-                .expect("reset role");
-            shared.rollback().await.expect("release shared lock transaction");
-            blocked.await.expect("exclusive lock task").expect("exclusive lock query");
-        }
-        .boxed()
-    })
-    .await;
-}
-
-#[tokio::test]
-#[serial(postgres_cluster)]
-#[serial(process_environment)]
 async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
     if !super::super::require_postgres_backend() {
         return;
@@ -263,17 +196,6 @@ async fn tenant_role_can_insert_a_workspace_scoped_lifecycle_and_outbox_row() {
             assert!(lifecycle_privileges.try_get_by_index::<bool>(1).unwrap());
             assert!(lifecycle_privileges.try_get_by_index::<bool>(2).unwrap());
             assert!(!lifecycle_privileges.try_get_by_index::<bool>(3).unwrap());
-            let lock_function_present: bool = db
-                .query_one_raw(Statement::from_string(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT to_regprocedure('public.queue_publishing_epoch_shared_lock()') IS NOT NULL AS present",
-            ))
-            .await
-            .expect("check lock function")
-            .expect("lock function row")
-                .try_get_by_index(0)
-                .expect("read lock function presence");
-            assert!(lock_function_present, "publisher lock function was migrated");
             let tenant_id = "11111111-1111-4111-8111-111111111111";
             let workspace_id = "22222222-2222-4222-8222-222222222222";
             db.execute_unprepared(&format!(
@@ -611,7 +533,7 @@ async fn queue_epoch_upgrade_grants_insert_to_existing_inference_job_installatio
 
             // Rolling back the queue migration restores migration 013's INSERT privilege state.
             let total = Migrator::migrations().len() as u32;
-            let queue_epoch_pos = migrations_through("m20261015_160234_queue_publishing_epoch");
+            let queue_epoch_pos = migrations_through("m20261015_160234_queue_job_outbox_scope");
             let steps_back = total - queue_epoch_pos + 1;
             Migrator::down(db, Some(steps_back))
                 .await

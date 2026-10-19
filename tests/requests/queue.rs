@@ -306,8 +306,6 @@ where
 fn args_for(class: WorkerClass, workspace_id: Uuid) -> EmbeddingSyncArgs {
     EmbeddingSyncArgs {
         lifecycle_id: None,
-        dispatch_id: None,
-        publishing_epoch: None,
         workspace_id,
         entity_id: Uuid::now_v7(),
         worker_class: class,
@@ -508,8 +506,6 @@ async fn each_reindex_worker_class_is_sent_to_its_own_target() {
                 &ctx,
                 ReindexArgs {
                     lifecycle_id: None,
-                    dispatch_id: None,
-                    publishing_epoch: None,
                     workspace_id,
                     worker_class: class,
                     startup: false,
@@ -581,8 +577,6 @@ async fn missing_billing_uses_free_policy_for_reindex_but_not_embedding() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -649,8 +643,6 @@ async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -710,8 +702,6 @@ async fn enterprise_billing_plan_uses_team_queue_policy() {
                 &ctx,
                 ReindexArgs {
                     lifecycle_id: None,
-                    dispatch_id: None,
-                    publishing_epoch: None,
                     workspace_id,
                     worker_class: class,
                     startup: false,
@@ -764,8 +754,6 @@ async fn enterprise_billing_plan_uses_team_queue_fallback_without_official_overr
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -815,8 +803,6 @@ async fn pro_plan_has_no_official_cap_when_policy_is_disabled() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -864,8 +850,6 @@ async fn disabled_policy_ignores_official_override_without_changing_metadata() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,
@@ -910,8 +894,6 @@ async fn present_invalid_billing_plan_remains_diagnostic() {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 worker_class: WorkerClass::Official,
                 startup: false,

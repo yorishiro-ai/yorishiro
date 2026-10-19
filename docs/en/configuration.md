@@ -225,25 +225,13 @@ When that URL names a shared SQLite file, use an absolute path because a relativ
 With PostgreSQL, multiple worker processes can dequeue in parallel.
 With SQLite, dequeueing is serialized, while durable queue recovery still works.
 
-## Durable queue publisher transition
+## Durable queue publisher
 
 Application producers commit business state and a dispatch-outbox row together.
-Only the dispatch relay publishes outbox rows.
-Ordinary recovery publishes queued rows and retries whose `retry_at` is due; running rows are taken over only by explicit attested replay, and expired QueryEmbedding requests are excluded.
-The relay takes a short durable row claim under the publisher epoch fence, commits it, then calls the provider outside the database transaction.
-A conditional acknowledgement records provider acceptance only while the same epoch and claim token remain current; a provider timeout or crash can still cause at-least-once duplicates.
-
-For a provider cutover, deploy the release that stops direct producer publication, stop all old producers and workers, and record the operator attestation `old_workers_exited:true`.
-Pause publication with `cargo loco task set_queue_publishing_epoch expected_epoch:<n> active:false`; this advances the epoch to E.
-Then record provider snapshot evidence and prepare replay while still paused: `cargo loco task replay_queue_dispatch_snapshot phase:prepare expected_epoch:<E> old_workers_exited:true cutoff_at:<RFC3339> snapshot_id:<evidence-id>`.
-Prepare atomically retags representable queued, retrying, running, and unexpired pending QueryEmbedding work and advances global state to E+1.
-Work admitted during the pause is included in that prepared snapshot.
-Future `retry_at` values remain unchanged, and running rows are reclaimed without waiting for their old lease.
-Start the new worker pool and activate the prepared E+1 with `cargo loco task replay_queue_dispatch_snapshot phase:activate expected_epoch:<E> old_workers_exited:true snapshot_id:<evidence-id>`; activation validates paused epoch E and enables its prepared successor without incrementing again.
-Producers remain stopped until activation completes.
-The attestation and snapshot ID are operator-provided evidence, not machine verification.
-Quarantined, expired, or unrepresentable legacy rows are not replayed and must be reconciled separately.
-Epoch changes cannot retract provider-accepted messages; ambiguous enqueue outcomes may duplicate work.
+Only the dispatch relay publishes outbox rows to the Loco queue provider.
+The relay takes a short durable row claim, commits it, then calls the provider outside the database transaction.
+A conditional acknowledgement records provider acceptance only while the same claim token remains current.
+A provider timeout or crash between acceptance and acknowledgement can duplicate work, which the job lifecycle admission absorbs.
 
 `YORISHIRO_QUEUE_WORKERS` controls the number of concurrent dequeue loops in one worker process.
 It defaults to 1 for a SQLite queue and 2 for PostgreSQL and Redis-compatible queues.

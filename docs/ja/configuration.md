@@ -224,35 +224,13 @@ Official と tenant の自動起動は運用者がプロセスマネージャー
 tenant 対象の Redis キューはジョブの到着に応じて作られ、tenant を削除しても自動削除されません。
 キューの増加を監視し、その tenant のジョブを処理し終えた後に不要なキューを削除してください。
 
-## 永続キューパブリッシャーの切り替え
+## 永続キューの publisher
 
-プロデューサーは業務データとディスパッチ outbox を同一トランザクションでコミットします。
-outbox を公開するのは dispatch relay のみです。
-通常の回復では queued 行と `retry_at` 到来済みの再試行を公開し、running 行の引き継ぎは証跡付きの明示的な replay に限定します。
-期限切れの QueryEmbedding 要求は除外します。
-relay は publisher epoch のフェンス下で短時間の永続 claim を取得・コミットしてから、DB トランザクション外で provider を呼び出します。
-条件付き ack は同じ epoch と claim token が有効な場合だけ provider 受理を記録しますが、provider timeout やプロセス停止では at-least-once の重複が起こり得ます。
-
-プロバイダー切り替えでは、直接公開を停止するリリースを先にデプロイし、旧プロデューサーとワーカーを停止して `old_workers_exited:true` を運用者が記録します。
-`cargo loco task set_queue_publishing_epoch expected_epoch:<n> active:false` で公開を停止します。
-この操作後の epoch を E とします。
-スナップショット証跡を記録した後、停止状態のまま `cargo loco task replay_queue_dispatch_snapshot phase:prepare expected_epoch:<E> old_workers_exited:true cutoff_at:<RFC3339> snapshot_id:<evidence-id>` を実行します。
-prepare は表現可能な queued、retrying、running、および期限内の pending QueryEmbedding を原子的に付け替え、global state を E+1 に進めます。
-停止中に受け付けた仕事もこの snapshot に含めます。
-未来の `retry_at` は維持し、running は旧 lease を待たずに回収します。
-次に新ワーカープールを起動し、停止 epoch E を検証した上で、epoch を進めずに準備済み E+1 を `phase:activate expected_epoch:<E> old_workers_exited:true snapshot_id:<evidence-id>` で有効化します。
-有効化後にプロデューサーを再開します。
-attestation と snapshot ID は運用者が入力する証跡であり、システムが検証するものではありません。
-隔離、期限切れ、または表現できない legacy 行は再投入されず、別途照合が必要です。
-epoch 変更で受理済みメッセージは取り消せず、enqueue の結果が不明な場合は重複処理が起きる可能性があります。
-
-各ワーカープロセスには、同じキュー設定と、そのジョブに必要な埋め込みまたは推論の設定が必要です。
-ワーカーは HTTP サーバと同じホストでも別サーバでも動かせます。
-別サーバのワーカーは、サーバと同じ `QUEUE_URL` を必ず使ってください。
-SQLite ファイルを共有キューにする場合は絶対パスを使ってください。
-相対パスはホストごとに別々に解決され、共有キューになりません。
-PostgreSQL では複数のワーカープロセスが並列にジョブを取り出せます。
-SQLite では取り出し処理は直列ですが、永続キューによる障害回復は利用できます。
+アプリケーションの producer は業務状態と dispatch-outbox 行を同じトランザクションでコミットします。
+outbox 行を Loco の queue provider へ公開するのは dispatch relay だけです。
+relay は短い永続 claim を取得してコミットしてから、DB トランザクション外で provider を呼び出します。
+条件付き ack は同じ claim token が有効な場合だけ provider 受理を記録します。
+provider 受理から ack までの間にタイムアウトやプロセス停止が起きると重複処理が起こり得ますが、job lifecycle の admission が吸収します。
 
 `YORISHIRO_QUEUE_WORKERS` は 1 ワーカープロセス内の並列取り出しループ数を設定します。
 既定値は SQLite キューで 1、PostgreSQL と Redis 互換キューで 2 です。

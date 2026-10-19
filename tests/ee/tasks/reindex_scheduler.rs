@@ -60,8 +60,6 @@ async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
                 Uuid::now_v7(),
                 yorishiro::workers::reindex::ReindexArgs {
                     lifecycle_id: None,
-                    dispatch_id: None,
-                    publishing_epoch: None,
                     workspace_id: Uuid::now_v7(),
                     worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
                     startup: false,

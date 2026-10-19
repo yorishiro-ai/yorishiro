@@ -48,26 +48,6 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Entity {
-    pub(crate) async fn count_waiting_lower_classes(
-        db: &impl ConnectionTrait,
-        lower_classes: &[crate::workers::embedding_sync::WorkerClass],
-        cutoff: DateTimeWithTimeZone,
-    ) -> Result<u64, DbErr> {
-        let lower_classes = lower_classes
-            .iter()
-            .copied()
-            .map(crate::workers::embedding_sync::WorkerClass::as_db_str);
-        Entity::find()
-            .filter(Column::Status.is_in([
-                LifecycleStatus::Queued.as_db_str(),
-                LifecycleStatus::Retrying.as_db_str(),
-            ]))
-            .filter(Column::WorkerClass.is_in(lower_classes))
-            .filter(Column::EnqueueAt.lte(cutoff))
-            .count(db)
-            .await
-    }
-
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -124,7 +104,6 @@ impl Entity {
         }
     }
 
-    /// Whether `workspace_id` already has a `job_name` job that is queued, running or waiting for a retry.
     ///
     /// # Errors
     /// Returns an error if the read fails.
@@ -226,15 +205,6 @@ impl Entity {
         Ok(())
     }
 
-    pub(crate) async fn renew(
-        db: &impl ConnectionTrait,
-        id: Uuid,
-        attempt: i32,
-        now: DateTimeWithTimeZone,
-    ) -> Result<bool, DbErr> {
-        Self::renew_at(db, id, attempt, now).await
-    }
-
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -260,7 +230,7 @@ impl Entity {
                 tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
             ticker.tick().await;
             loop {
-                match Self::renew(
+                match Self::renew_at(
                     &db,
                     id,
                     attempt,
@@ -284,19 +254,6 @@ impl Entity {
         Self::start_at(db, id, crate::time::database_instant(crate::time::now())).await
     }
 
-    pub(crate) async fn start_ignoring_capacity(
-        db: &DatabaseConnection,
-        id: Uuid,
-    ) -> Result<Admission, DbErr> {
-        Self::start_at_with_capacity_policy(
-            db,
-            id,
-            crate::time::database_instant(crate::time::now()),
-            true,
-        )
-        .await
-    }
-
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -306,23 +263,8 @@ impl Entity {
         now: DateTimeWithTimeZone,
     ) -> Result<Admission, DbErr> {
         let txn = crate::db::begin_write(db).await?;
-        let admission = admit(&txn, id, now, false).await?;
+        let admission = admit(&txn, id, now).await?;
         // Only an admission wrote anything; every other outcome leaves the row as it found it.
-        match admission {
-            Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
-            _ => txn.rollback().await?,
-        }
-        Ok(admission)
-    }
-
-    async fn start_at_with_capacity_policy(
-        db: &DatabaseConnection,
-        id: Uuid,
-        now: DateTimeWithTimeZone,
-        ignore_capacity: bool,
-    ) -> Result<Admission, DbErr> {
-        let txn = crate::db::begin_write(db).await?;
-        let admission = admit(&txn, id, now, ignore_capacity).await?;
         match admission {
             Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
             _ => txn.rollback().await?,
@@ -384,7 +326,6 @@ async fn admit(
     txn: &DatabaseTransaction,
     id: Uuid,
     now: DateTimeWithTimeZone,
-    ignore_capacity: bool,
 ) -> Result<Admission, DbErr> {
     let row = Entity::find_by_id(id)
         .lock_exclusive()
@@ -407,14 +348,13 @@ async fn admit(
     let recovered = status == LifecycleStatus::Running;
 
     let in_flight = match (&row.concurrency_key, row.concurrency_limit) {
-        (Some(key), Some(_)) if !ignore_capacity => {
+        (Some(key), Some(_)) => {
             crate::db::lock_for_update(txn, &format!("queue-concurrency:{key}")).await?;
             Some(in_flight(txn, key, now, id).await?)
         }
         _ => None,
     };
-    if !ignore_capacity
-        && let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)
+    if let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)
         && in_flight >= u64::try_from(limit).unwrap_or(0)
     {
         tracing::warn!(

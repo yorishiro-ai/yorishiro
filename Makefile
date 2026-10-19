@@ -80,7 +80,7 @@ test-postgres: build
 
 test-pg-migrations:
 	docker compose up -d --wait testdb
-	DATABASE_URL='$(DATABASE_URL)' YORISHIRO_TEST_BACKEND=postgres-postgres DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --test mod --features enterprise migration::postgres::publishing_state_is_select_only_for_tenant_and_shared_lock_is_callable
+	DATABASE_URL='$(DATABASE_URL)' YORISHIRO_TEST_BACKEND=postgres-postgres DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --test mod --features enterprise migration::postgres::
 
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' YORISHIRO_TEST_TOPOLOGY=sqlite-sqlite YORISHIRO_TEST_QUEUE=sqlite RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite

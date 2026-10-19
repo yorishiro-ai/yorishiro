@@ -26,10 +26,6 @@ use crate::models::schema_schemas;
 pub struct InferFillArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
-    #[serde(default)]
-    pub dispatch_id: Option<Uuid>,
-    #[serde(default)]
-    pub publishing_epoch: Option<i64>,
     pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub schema_name: String,
@@ -217,17 +213,6 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
-        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &self.ctx.db,
-            args.lifecycle_id,
-            args.dispatch_id,
-            args.publishing_epoch,
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-        {
-            return Ok(());
-        }
         self.perform_job(args).await
     }
 }
@@ -433,10 +418,6 @@ async fn defer_and_enqueue(
             "lifecycle_id".into(),
             serde_json::Value::String(lifecycle_id.to_string()),
         );
-        fields.insert(
-            "dispatch_id".into(),
-            serde_json::Value::String(lifecycle_id.to_string()),
-        );
     }
     crate::models::queue_job_dispatch_outbox::record_lifecycle_payload(
         &txn,
@@ -491,8 +472,6 @@ pub async fn enqueue_infer_fill(
             ctx,
             InferFillArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 job_id,
                 workspace_id,
                 schema_name,

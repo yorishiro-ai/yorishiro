@@ -66,16 +66,10 @@ async fn perform(ctx: &AppContext, workspace_id: Uuid, request_id: Uuid) -> loco
     txn.commit()
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    let epoch = queue_job_dispatch_outbox::publishing_state(&ctx.db)
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-        .epoch;
     QueryEmbeddingWorker::build(ctx)
         .perform(QueryEmbeddingArgs {
             request_id,
             workspace_id,
-            dispatch_id: Some(dispatch_id),
-            publishing_epoch: Some(epoch),
         })
         .await
 }
@@ -93,21 +87,11 @@ fn the_job_payload_carries_ids_only() {
     let args = QueryEmbeddingArgs {
         request_id: Uuid::nil(),
         workspace_id: Uuid::nil(),
-        dispatch_id: None,
-        publishing_epoch: None,
     };
     let json = serde_json::to_value(&args).unwrap();
     let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
     keys.sort();
-    assert_eq!(
-        keys,
-        [
-            "dispatch_id",
-            "publishing_epoch",
-            "request_id",
-            "workspace_id"
-        ]
-    );
+    assert_eq!(keys, ["request_id", "workspace_id"]);
 }
 
 #[tokio::test]

@@ -3484,7 +3484,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tree-fs",
- "ulid 1.2.1",
+ "ulid",
  "url",
  "uuid",
  "validator",
@@ -6942,16 +6942,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ulid"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "947dde63b6d514cc5e044edad4e0ca7261afd1099d16c83d942cb2b2f348689c"
-dependencies = [
- "rand 0.10.3",
- "web-time",
-]
-
-[[package]]
 name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7715,7 +7705,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "ulid 3.0.0",
  "utoipa",
  "utoipa-swagger-ui",
  "uuid",

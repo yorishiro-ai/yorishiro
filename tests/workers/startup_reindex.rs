@@ -6,7 +6,10 @@ use futures::future::join_all;
 use loco_rs::app::AppContext;
 use loco_rs::environment::Environment;
 use loco_rs::prelude::async_trait;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    TransactionTrait,
+};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
@@ -219,10 +222,16 @@ async fn concurrent_sqlite_scans_admit_only_one_reindex() {
         let second = startup_reindex::run(&worker);
         tokio::join!(first, second);
         assert_eq!(queued(&dispatcher), [workspace]);
-        assert!(
-            Lifecycles::has_active(&ctx.db, "startup_reindex", workspace)
+        assert_eq!(
+            Lifecycles::find()
+                .filter(
+                    yorishiro::models::queue_job_lifecycles::Column::JobName.eq("startup_reindex")
+                )
+                .filter(yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(workspace))
+                .count(&ctx.db)
                 .await
-                .expect("check active lifecycle")
+                .expect("count lifecycles"),
+            1
         );
     })
     .await;

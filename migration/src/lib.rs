@@ -17,16 +17,14 @@ mod m20260930_000010_queue_job_admission;
 mod m20260930_000011_queue_job_lease;
 mod m20260930_000012_inference_job_attempt;
 mod m20260930_000013_inference_job_attempt_privileges;
-mod m20261001_000014_queue_lifecycle_starvation_index;
 mod m20261002_000015_api_key_name;
 mod m20261005_000016_add_entity_embedding_sync_token;
 mod m20261005_000017_embedding_tables_tenant_read;
 mod m20261006_000018_embedding_queue_state;
 mod m20261009_000019_template_tags_json;
 mod m20261011_000020_inference_one_running_job_per_workspace;
-mod m20261015_160234_queue_publishing_epoch;
+mod m20261015_160234_queue_job_outbox_scope;
 mod m20261015_160332_query_embedding_deadline;
-mod m20261016_000021_queue_replay_snapshot_id;
 mod m20261016_000022_timezone_state;
 pub struct Migrator;
 
@@ -48,16 +46,14 @@ impl MigratorTrait for Migrator {
             Box::new(m20260930_000011_queue_job_lease::Migration),
             Box::new(m20260930_000012_inference_job_attempt::Migration),
             Box::new(m20260930_000013_inference_job_attempt_privileges::Migration),
-            Box::new(m20261001_000014_queue_lifecycle_starvation_index::Migration),
             Box::new(m20261002_000015_api_key_name::Migration),
             Box::new(m20261005_000016_add_entity_embedding_sync_token::Migration),
             Box::new(m20261005_000017_embedding_tables_tenant_read::Migration),
             Box::new(m20261006_000018_embedding_queue_state::Migration),
             Box::new(m20261009_000019_template_tags_json::Migration),
             Box::new(m20261011_000020_inference_one_running_job_per_workspace::Migration),
-            Box::new(m20261015_160234_queue_publishing_epoch::Migration),
+            Box::new(m20261015_160234_queue_job_outbox_scope::Migration),
             Box::new(m20261015_160332_query_embedding_deadline::Migration),
-            Box::new(m20261016_000021_queue_replay_snapshot_id::Migration),
             Box::new(m20261016_000022_timezone_state::Migration),
             // inject-above (do not remove this comment)
         ]

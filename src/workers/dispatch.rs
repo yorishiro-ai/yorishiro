@@ -87,14 +87,6 @@ pub async fn recover_pending(ctx: &AppContext) {
 }
 
 pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnection) {
-    let state = match crate::models::queue_job_dispatch_outbox::publishing_state(db).await {
-        Ok(state) if state.active => state,
-        Ok(_) => return,
-        Err(error) => {
-            tracing::warn!(error = %error, "dispatch outbox: publishing state unavailable");
-            return;
-        }
-    };
     let pending = match crate::models::queue_job_dispatch_outbox::due(db).await {
         Ok(rows) => rows,
         Err(error) => {
@@ -103,18 +95,8 @@ pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnecti
         }
     };
     for row in pending {
-        if row.publishing_epoch != state.epoch {
-            continue;
-        }
         let claim = Uuid::now_v7();
-        match crate::models::queue_job_dispatch_outbox::claim_dispatch(
-            db,
-            row.id,
-            state.epoch,
-            claim,
-            30,
-        )
-        .await
+        match crate::models::queue_job_dispatch_outbox::claim_dispatch(db, row.id, claim, 30).await
         {
             Ok(true) => {}
             Ok(false) => continue,
@@ -150,7 +132,6 @@ pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnecti
                 match crate::models::queue_job_dispatch_outbox::acknowledge_dispatch(
                     db,
                     row.id,
-                    state.epoch,
                     claim,
                     provider_job_id,
                 )
@@ -160,7 +141,7 @@ pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnecti
                         // The acknowledgement transaction also records lifecycle correlation.
                     }
                     Ok(false) => {
-                        tracing::warn!(dispatch_id = %row.id, "provider accepted dispatch after claim or epoch was fenced; duplicate risk retained")
+                        tracing::warn!(dispatch_id = %row.id, "provider accepted dispatch after its claim lease expired; duplicate risk retained")
                     }
                     Err(error) => {
                         tracing::warn!(dispatch_id = %row.id, error = %error, "provider accepted dispatch but acknowledgement failed")
@@ -181,23 +162,6 @@ async fn enqueue_pending(
     ctx: &AppContext,
     row: &crate::models::queue_job_dispatch_outbox::PendingDispatch,
 ) -> loco_rs::Result<String> {
-    let mut payload = row.payload.clone();
-    if let serde_json::Value::Object(fields) = &mut payload {
-        fields.insert(
-            "dispatch_id".into(),
-            serde_json::Value::String(row.id.to_string()),
-        );
-        fields.insert(
-            "publishing_epoch".into(),
-            serde_json::Value::from(row.publishing_epoch),
-        );
-        if let Some(workspace_id) = row.workspace_id {
-            fields.insert(
-                "workspace_id".into(),
-                serde_json::Value::String(workspace_id.to_string()),
-            );
-        }
-    }
     let queue = ctx
         .queue_provider
         .as_ref()
@@ -206,10 +170,10 @@ async fn enqueue_pending(
         .enqueue(
             row.worker_name.clone(),
             row.queue_name.clone(),
-            payload,
+            row.payload.clone(),
             row.tags.clone(),
             row.priority
-                .or_else(|| Some(crate::workers::queue::decide(row.worker_class).priority)),
+                .or_else(|| Some(crate::workers::queue::priority(row.worker_class))),
         )
         .await
         .map(|id| id.unwrap_or_else(|| Uuid::now_v7().to_string()))
@@ -229,7 +193,7 @@ pub(crate) struct JobSpec {
 /// Admits one job: resolves its target, concurrency policy and priority, records the lifecycle row, then hands the job to the target's workers through `enqueue`.
 ///
 /// Every lookup fails closed.
-/// A job whose target, capacity or starvation policy cannot be determined is recorded as unavailable and refused, rather than enqueued under a guess that would let one class borrow another's reservation or send a tenant's work to the wrong workers.
+/// A job whose target or capacity policy cannot be determined is recorded as unavailable and refused, rather than enqueued under a guess that would let one class borrow another's reservation or send a tenant's work to the wrong workers.
 pub(crate) async fn dispatch_job(
     ctx: &AppContext,
     spec: JobSpec,
@@ -265,39 +229,6 @@ pub(crate) async fn dispatch_job(
     } else {
         (None, None, None)
     };
-
-    let scheduling = match crate::workers::queue::decide_for_dispatch(&ctx.db, spec.class).await {
-        Ok(scheduling) => scheduling,
-        Err(error) => {
-            let diagnostic = format!("starvation policy lookup failed: {error}");
-            refuse(
-                ctx,
-                &spec,
-                lifecycle_id,
-                plan.as_deref(),
-                concurrency_key.as_deref().unwrap_or(class),
-                concurrency_limit.unwrap_or(0),
-                &diagnostic,
-            )
-            .await;
-            tracing::error!(
-                lifecycle_id = %lifecycle_id,
-                worker_class = class,
-                policy = "starvation",
-                degraded = true,
-                error = %diagnostic,
-                "queue dispatch refused because starvation policy is unavailable"
-            );
-            return Err(loco_rs::Error::Message(diagnostic));
-        }
-    };
-    tracing::info!(
-        lifecycle_id = %lifecycle_id,
-        worker_class = class,
-        scheduling_priority = scheduling.priority,
-        fallback = scheduling.fallback,
-        "queue scheduling decision"
-    );
 
     let payload = match spec.dispatch_payload {
         serde_json::Value::Object(mut fields) => {
@@ -353,7 +284,6 @@ pub(crate) async fn dispatch_job(
             .await
             .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
     }
-    let _ = (scheduling, target);
     Ok(lifecycle_id.to_string())
 }
 

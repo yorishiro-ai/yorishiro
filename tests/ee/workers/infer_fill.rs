@@ -124,8 +124,6 @@ async fn dispatches_the_original_args_and_returns_success() {
     let ctx = crate::workers::test_context().await;
     let args = InferFillArgs {
         lifecycle_id: None,
-        dispatch_id: None,
-        publishing_epoch: None,
         job_id: Uuid::now_v7(),
         workspace_id: Uuid::now_v7(),
         schema_name: "note".into(),
@@ -159,8 +157,6 @@ async fn preserves_dispatch_failure() {
         &ctx,
         InferFillArgs {
             lifecycle_id: None,
-            dispatch_id: None,
-            publishing_epoch: None,
             job_id: Uuid::now_v7(),
             workspace_id: Uuid::now_v7(),
             schema_name: "note".into(),
@@ -320,11 +316,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
             .unwrap();
     assert!(!queued.is_empty());
     let name: String = sea_orm::sqlx::Row::try_get(&queued[0], "name").unwrap();
-    let task_data: serde_json::Value =
-        sea_orm::sqlx::Row::try_get(&queued[0], "task_data").unwrap();
     assert_eq!(name, InferFillWorker::class_name());
-    assert_eq!(task_data["dispatch_id"], lifecycle_id.to_string());
-    assert_eq!(task_data["publishing_epoch"], 1);
 
     let provider = queue.clone();
     let runner = tokio::spawn(async move { provider.run(vec![WorkerTarget::Shared.tag()]).await });
@@ -360,7 +352,6 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
 #[tokio::test]
 async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
     use loco_rs::bgworker::Queue;
-    use sea_orm::EntityTrait;
     use yorishiro::models::_entities::queue_job_dispatch_outbox::Entity as Outbox;
     use yorishiro::models::queue_job_dispatch_outbox;
     use yorishiro::models::queue_job_lifecycles::Enqueue;
@@ -518,8 +509,6 @@ async fn zero_capacity_defers_lifecycle_and_rewrites_outbox_atomically() {
     let worker = InferFillWorker::build(&ctx);
     let args = InferFillArgs {
         lifecycle_id: Some(lifecycle_id),
-        dispatch_id: Some(lifecycle_id),
-        publishing_epoch: Some(1),
         job_id,
         workspace_id,
         schema_name: "note".into(),
@@ -530,17 +519,9 @@ async fn zero_capacity_defers_lifecycle_and_rewrites_outbox_atomically() {
         .await
         .unwrap()
         .unwrap();
-    let outbox =
-        yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(lifecycle_id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
     let job = inference_jobs::get(&db, job_id).await.unwrap().unwrap();
     assert_eq!(lifecycle.status, "queued");
     assert_eq!(lifecycle.attempt, 0);
-    assert_eq!(outbox.payload["dispatch_id"], lifecycle_id.to_string());
-    assert_eq!(outbox.payload["publishing_epoch"], outbox.publishing_epoch);
     assert_eq!(job.status, InferenceJobStatus::Queued);
     db.close().await.unwrap();
 }
@@ -631,8 +612,6 @@ async fn busy_workspace_defers_lifecycle_without_changing_inference_job() {
     worker
         .perform(InferFillArgs {
             lifecycle_id: Some(lifecycle_id),
-            dispatch_id: Some(lifecycle_id),
-            publishing_epoch: Some(1),
             job_id: deferred_id,
             workspace_id,
             schema_name: "note".into(),
@@ -644,20 +623,12 @@ async fn busy_workspace_defers_lifecycle_without_changing_inference_job() {
         .await
         .unwrap()
         .unwrap();
-    let outbox =
-        yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(lifecycle_id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
     let deferred = inference_jobs::get(&db, deferred_id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(lifecycle.status, "queued");
     assert_eq!(lifecycle.attempt, 0);
-    assert_eq!(outbox.payload["dispatch_id"], lifecycle_id.to_string());
-    assert_eq!(outbox.payload["publishing_epoch"], outbox.publishing_epoch);
     assert_eq!(deferred.status, InferenceJobStatus::Queued);
     db.close().await.unwrap();
 }
@@ -732,31 +703,10 @@ async fn inference_failure_requeues_inference_lifecycle_and_outbox_together() {
     )
     .await
     .unwrap();
-    let mut publishing =
-        yorishiro::models::_entities::queue_publishing_state::Entity::find_by_id(1)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap()
-            .into_active_model();
-    publishing.active = Set(true);
-    publishing.update(&db).await.unwrap();
-    assert!(
-        yorishiro::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &db,
-            Some(lifecycle_id),
-            Some(lifecycle_id),
-            Some(1),
-        )
-        .await
-        .unwrap()
-    );
     let worker = InferFillWorker::build(&ctx);
     worker
         .perform(InferFillArgs {
             lifecycle_id: Some(lifecycle_id),
-            dispatch_id: Some(lifecycle_id),
-            publishing_epoch: Some(1),
             job_id,
             workspace_id,
             schema_name: "note".into(),
@@ -768,17 +718,9 @@ async fn inference_failure_requeues_inference_lifecycle_and_outbox_together() {
         .await
         .unwrap()
         .unwrap();
-    let outbox =
-        yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(lifecycle_id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
     let job = inference_jobs::get(&db, job_id).await.unwrap().unwrap();
     assert_eq!(lifecycle.status, "queued");
     assert_eq!(lifecycle.attempt, 0);
-    assert_eq!(outbox.payload["dispatch_id"], lifecycle_id.to_string());
-    assert_eq!(outbox.payload["publishing_epoch"], outbox.publishing_epoch);
     assert_eq!(job.status, InferenceJobStatus::Queued);
     db.close().await.unwrap();
 }
@@ -907,7 +849,6 @@ async fn gated_llm() -> (
 
 #[tokio::test]
 async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
-    use sea_orm::EntityTrait;
     use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
     use yorishiro::models::queue_job_lifecycles::Enqueue;
     use yorishiro::workers::embedding_sync::WorkerClass;
@@ -968,21 +909,12 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             Some(vec![WorkerTarget::Shared.tag()]),
         )
         .await
-        .expect("record current-epoch infer-fill delivery");
-        let outbox = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(
-            lifecycle_id,
-        )
-        .one(&ctx.db)
-        .await
-        .expect("read outbox row")
-        .expect("outbox row exists");
+        .expect("record infer-fill delivery");
         let worker = InferFillWorker::build(&ctx);
         let run = tokio::spawn(async move {
             worker
                 .perform(InferFillArgs {
                     lifecycle_id: Some(lifecycle_id),
-                    dispatch_id: Some(lifecycle_id),
-                    publishing_epoch: Some(outbox.publishing_epoch),
                     job_id,
                     workspace_id: setup.workspace_id,
                     schema_name: "note".into(),
@@ -1071,21 +1003,11 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
         )
         .await
         .expect("record reclaim regression delivery");
-        let reclaimed_outbox =
-            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(
-                reclaimed_lifecycle_id,
-            )
-            .one(&ctx.db)
-            .await
-            .expect("read reclaim outbox")
-            .expect("reclaim outbox exists");
         let reclaimed_worker = InferFillWorker::build(&ctx);
         let reclaimed_run = tokio::spawn(async move {
             reclaimed_worker
                 .perform(InferFillArgs {
                     lifecycle_id: Some(reclaimed_lifecycle_id),
-                    dispatch_id: Some(reclaimed_lifecycle_id),
-                    publishing_epoch: Some(reclaimed_outbox.publishing_epoch),
                     job_id: reclaimed_job_id,
                     workspace_id: setup.workspace_id,
                     schema_name: "note".into(),
@@ -1179,17 +1101,14 @@ async fn two_jobs_for_one_workspace_never_run_together() {
                 .await
                 .expect("create job");
         }
-        let args = |job_id, lifecycle_id, dispatch_id, publishing_epoch| InferFillArgs {
+        let args = |job_id, lifecycle_id| InferFillArgs {
             lifecycle_id: Some(lifecycle_id),
-            dispatch_id: Some(dispatch_id),
-            publishing_epoch: Some(publishing_epoch),
             job_id,
             workspace_id: setup.workspace_id,
             schema_name: "note".into(),
         };
         let worker = InferFillWorker::build(&ctx);
         let deliveries = [Uuid::now_v7(), Uuid::now_v7()];
-        let mut epochs = Vec::new();
         for index in 0..jobs.len() {
             let job_id = jobs[index];
             let lifecycle_id = deliveries[index];
@@ -1212,17 +1131,10 @@ async fn two_jobs_for_one_workspace_never_run_together() {
             )
             .await
             .expect("record current-epoch delivery");
-            let row = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(lifecycle_id)
-                .one(&ctx.db)
-                .await
-                .expect("read outbox delivery")
-                .expect("outbox delivery exists");
-            epochs.push(row.publishing_epoch);
             let claim = Uuid::now_v7();
             assert!(yorishiro::models::queue_job_dispatch_outbox::claim_dispatch(
                 &ctx.db,
                 lifecycle_id,
-                row.publishing_epoch,
                 claim,
                 30,
             )
@@ -1231,20 +1143,15 @@ async fn two_jobs_for_one_workspace_never_run_together() {
             assert!(yorishiro::models::queue_job_dispatch_outbox::acknowledge_dispatch(
                 &ctx.db,
                 lifecycle_id,
-                row.publishing_epoch,
                 claim,
                 &format!("fixture-provider-job-{lifecycle_id}"),
             )
             .await
             .expect("acknowledge fixture delivery"));
         }
-        let publisher = yorishiro::models::queue_job_dispatch_outbox::publishing_state(&ctx.db)
-            .await
-            .expect("read initialized publisher state");
-        assert!(publisher.active, "test app publisher is active");
         let (first, second) = tokio::join!(
-            worker.perform(args(jobs[0], deliveries[0], deliveries[0], epochs[0])),
-            worker.perform(args(jobs[1], deliveries[1], deliveries[1], epochs[1]))
+            worker.perform(args(jobs[0], deliveries[0])),
+            worker.perform(args(jobs[1], deliveries[1]))
         );
         assert!(first.is_ok() && second.is_ok(), "{first:?} / {second:?}");
         assert_eq!(peak.load(Ordering::SeqCst), 1, "LLM calls overlapped");
@@ -1261,12 +1168,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
             if lifecycle.status == "queued" {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 worker
-                    .perform(args(
-                        job_id,
-                        lifecycle_id,
-                        lifecycle_id,
-                        epochs[index],
-                    ))
+                    .perform(args(job_id, lifecycle_id))
                     .await
                     .expect("deferred delivery runs once workspace is free");
             }

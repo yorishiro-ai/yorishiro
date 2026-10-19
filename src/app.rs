@@ -329,26 +329,9 @@ pub(crate) async fn connect_workers(
     workers: &WorkerRegistry,
 ) -> Result<()> {
     initializers::embedding::install_provider(ctx).await?;
-    refuse_retired_routes(ctx).await?;
     workers.connect(ctx, queue).await?;
     initializers::queue::start_relay(ctx);
     crate::workers::startup_reindex::run(ctx).await;
-    Ok(())
-}
-
-/// Refuses to start a worker while jobs enqueued by a release that routed by worker class are still unfinished.
-///
-/// Those jobs carry tags no worker asks for any more, so they would wait forever, and their running rows would not count against the limit the new concurrency keys enforce.
-/// The queue has to be drained by the previous release first.
-async fn refuse_retired_routes(ctx: &AppContext) -> Result<()> {
-    let retired = crate::models::queue_job_dispatch_outbox::count_retired_routes(&ctx.db)
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    if retired > 0 {
-        return Err(loco_rs::Error::Message(format!(
-            "{retired} queued, running, or retrying jobs were enqueued by a release that routed jobs by worker class; drain the queue with that release before starting workers (see the upgrade notes in the configuration documentation)"
-        )));
-    }
     Ok(())
 }
 
@@ -369,8 +352,6 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::maintenance::Maintenance);
     tasks.register(tasks::maintenance_status::MaintenanceStatus);
     tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
-    tasks.register(tasks::set_queue_publishing_epoch::SetQueuePublishingEpoch);
-    tasks.register(tasks::replay_queue_dispatch_snapshot::ReplayQueueDispatchSnapshot);
     tasks.register(tasks::db_load_guard::DbLoadGuard);
 }
 

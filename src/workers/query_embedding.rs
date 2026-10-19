@@ -35,8 +35,6 @@ const RETRY_AFTER: Duration = Duration::from_secs(1);
 pub struct QueryEmbeddingArgs {
     pub request_id: Uuid,
     pub workspace_id: Uuid,
-    pub dispatch_id: Option<Uuid>,
-    pub publishing_epoch: Option<i64>,
 }
 
 /// The worker type for [`QueryEmbeddingArgs`].
@@ -51,17 +49,6 @@ impl BackgroundWorker<QueryEmbeddingArgs> for QueryEmbeddingWorker {
     }
 
     async fn perform(&self, args: QueryEmbeddingArgs) -> loco_rs::Result<()> {
-        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &self.ctx.db,
-            None,
-            args.dispatch_id,
-            args.publishing_epoch,
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-        {
-            return Ok(());
-        }
         // The message, not the HTTP-shaped conversion: Loco stores this text as the failed job's diagnostic, so an operator reads the cause in the queue.
         answer(&self.ctx, &args)
             .await
@@ -269,13 +256,6 @@ impl Scope<'_> {
         let args = QueryEmbeddingArgs {
             request_id: id,
             workspace_id: self.workspace_id,
-            dispatch_id: Some(dispatch_id),
-            publishing_epoch: Some(
-                crate::models::queue_job_dispatch_outbox::publishing_state(&txn)
-                    .await
-                    .map_err(|error| YorishiroError::Internal(error.into()))?
-                    .epoch,
-            ),
         };
         let mut payload =
             serde_json::to_value(&args).map_err(|error| YorishiroError::Internal(error.into()))?;

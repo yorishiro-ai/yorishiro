@@ -81,10 +81,6 @@ pub(crate) fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
 pub struct EmbeddingSyncArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
-    #[serde(default)]
-    pub dispatch_id: Option<Uuid>,
-    #[serde(default)]
-    pub publishing_epoch: Option<i64>,
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
     pub worker_class: WorkerClass,
@@ -196,17 +192,6 @@ async fn perform_embedding_with_lifecycle(
     ctx: &AppContext,
     args: &EmbeddingSyncArgs,
 ) -> loco_rs::Result<()> {
-    if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-        &ctx.db,
-        args.lifecycle_id,
-        args.dispatch_id,
-        args.publishing_epoch,
-    )
-    .await
-    .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-    {
-        return Ok(());
-    }
     let concurrency = ctx
         .shared_store
         .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
@@ -221,19 +206,18 @@ async fn perform_embedding_with_lifecycle(
             .map(|_| ())
             .map_err(Into::into);
     };
-    let attempt =
-        match crate::models::queue_job_lifecycles::Entity::start_ignoring_capacity(&ctx.db, id)
-            .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-        {
-            crate::models::queue_job_lifecycles::Admission::Started { attempt }
-            | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
-            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
-            | crate::models::queue_job_lifecycles::Admission::Terminal => return Ok(()),
-            crate::models::queue_job_lifecycles::Admission::Saturated { .. } => {
-                unreachable!("capacity is non-authoritative for embedding workers")
-            }
-        };
+    let attempt = match crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+    {
+        crate::models::queue_job_lifecycles::Admission::Started { attempt }
+        | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
+        crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+        | crate::models::queue_job_lifecycles::Admission::Terminal => return Ok(()),
+        crate::models::queue_job_lifecycles::Admission::Saturated { .. } => {
+            unreachable!("capacity is non-authoritative for embedding workers")
+        }
+    };
     let result = perform_embedding_sync(ctx, args).await;
     let (status, diagnostic, error, superseded) = match result {
         Ok(EmbeddingSyncOutcome::Persisted) => (
@@ -338,8 +322,6 @@ pub(crate) async fn enqueue_after_write_with_dispatcher(
     };
     let args = EmbeddingSyncArgs {
         lifecycle_id: None,
-        dispatch_id: None,
-        publishing_epoch: None,
         workspace_id,
         entity_id,
         worker_class,

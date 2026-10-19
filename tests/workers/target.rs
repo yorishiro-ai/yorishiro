@@ -188,15 +188,12 @@ mod concurrency {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
     use uuid::Uuid;
     use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
-    use yorishiro::models::queue_job_dispatch_outbox;
     use yorishiro::models::queue_job_lifecycles::{
-        Admission, Column, Enqueue, Entity, LifecycleStatus, Model,
+        Admission, Column, Entity, LifecycleStatus, Model,
     };
     use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
     use yorishiro::workers::embedding_sync::WorkerClass;
     use yorishiro::workers::reindex::{self, ReindexArgs};
-
-    use super::{TENANT_A, tenant};
 
     async fn workspace_of_new_tenant(ctx: &loco_rs::app::AppContext) -> (Uuid, Uuid) {
         let tenant = tenant_tenants::ActiveModel {
@@ -232,8 +229,6 @@ mod concurrency {
             ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 worker_class: class,
                 startup: false,
@@ -355,8 +350,6 @@ mod concurrency {
                 &ctx,
                 ReindexArgs {
                     lifecycle_id: None,
-                    dispatch_id: None,
-                    publishing_epoch: None,
                     workspace_id: missing,
                     worker_class: WorkerClass::TenantPrivate,
                     startup: false,
@@ -372,95 +365,6 @@ mod concurrency {
                 .unwrap()
                 .expect("the refusal is recorded");
             assert_eq!(row.status, LifecycleStatus::Unavailable.as_db_str());
-        })
-        .await;
-    }
-
-    /// Unfinished dispatches from a release that routed by worker class stop a worker from starting, and finished ones do not.
-    #[tokio::test]
-    #[serial_test::serial(process_environment)]
-    async fn unfinished_dispatches_from_the_class_routed_release_are_counted() {
-        crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-            assert_eq!(
-                queue_job_dispatch_outbox::count_retired_routes(&ctx.db)
-                    .await
-                    .unwrap(),
-                0
-            );
-            let mut recorded = Vec::new();
-            for (name, tags) in [
-                ("retired-class-tag", Some(vec!["worker-class:shared".to_owned()])),
-                ("retired-job-tag", Some(vec!["infer-fill".to_owned()])),
-                ("current", Some(vec![tenant(TENANT_A).tag()])),
-                ("untagged", None),
-            ] {
-                let id = Uuid::now_v7();
-                queue_job_dispatch_outbox::record(
-                    &ctx.db,
-                    Enqueue {
-                        id,
-                        job_name: "retired-route-test",
-                        worker_class: WorkerClass::Shared,
-                        workspace_id: None,
-                        plan: None,
-                        concurrency_key: None,
-                        concurrency_limit: None,
-                    },
-                    serde_json::json!({}),
-                    name.to_owned(),
-                    None,
-                    tags,
-                )
-                .await
-                .unwrap();
-                recorded.push((name, id));
-            }
-            assert_eq!(
-                queue_job_dispatch_outbox::count_retired_routes(&ctx.db)
-                    .await
-                    .unwrap(),
-                2,
-                "only the two routes without a worker-target tag"
-            );
-
-            for status in ["queued", "running", "retrying", "completed", "failed", "cancelled"] {
-                for (name, id) in &recorded {
-                    if name.starts_with("retired") {
-                        let row = Entity::find_by_id(*id).one(&ctx.db).await.unwrap().unwrap();
-                        let mut row: yorishiro::models::_entities::queue_job_lifecycles::ActiveModel = row.into();
-                        row.status = Set(status.to_owned());
-                        row.update(&ctx.db).await.unwrap();
-                    }
-                }
-                let unfinished = matches!(status, "queued" | "running" | "retrying");
-                assert_eq!(
-                    queue_job_dispatch_outbox::count_retired_routes(&ctx.db).await.unwrap(),
-                    if unfinished { 2 } else { 0 },
-                    "{status}"
-                );
-                if unfinished {
-                    let queue = ctx.queue_provider.as_ref().expect("queue provider");
-                    let error = <yorishiro::App as loco_rs::app::Hooks>::connect_workers(&ctx, queue)
-                        .await
-                        .expect_err("unfinished retired routes refuse worker startup");
-                    assert!(error.to_string().contains("drain the queue"), "{error}");
-                }
-            }
-
-            // Finishing a dispatch removes its outbox row, which is how a drained queue stops being counted.
-            for (name, id) in recorded {
-                if name.starts_with("retired") {
-                    Entity::finish(&ctx.db, id, None, LifecycleStatus::Cancelled, None)
-                        .await
-                        .unwrap();
-                }
-            }
-            assert_eq!(
-                queue_job_dispatch_outbox::count_retired_routes(&ctx.db)
-                    .await
-                    .unwrap(),
-                0
-            );
         })
         .await;
     }

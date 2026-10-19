@@ -16,7 +16,6 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub tags: Option<Json>,
     pub last_attempt_at: Option<DateTimeWithTimeZone>,
-    pub publishing_epoch: i64,
     pub deadline_at: Option<DateTimeWithTimeZone>,
     pub published_at: Option<DateTimeWithTimeZone>,
     #[serde(skip_serializing)]
@@ -24,7 +23,6 @@ pub struct Model {
     pub claim_until: Option<DateTimeWithTimeZone>,
     pub priority: Option<i32>,
     pub workspace_id: Option<Uuid>,
-    pub legacy_quarantined: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

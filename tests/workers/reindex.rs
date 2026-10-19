@@ -53,8 +53,6 @@ mod unit {
         let ctx = crate::workers::test_context().await;
         let args = ReindexArgs {
             lifecycle_id: None,
-            dispatch_id: None,
-            publishing_epoch: None,
             workspace_id: Uuid::now_v7(),
             worker_class: WorkerClass::TenantPrivate,
             startup: false,
@@ -86,8 +84,6 @@ mod unit {
             &ctx,
             ReindexArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,
                 startup: false,

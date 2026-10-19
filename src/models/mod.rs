@@ -23,7 +23,6 @@ pub mod pagination;
 pub mod query_embedding_requests;
 pub mod queue_job_dispatch_outbox;
 pub mod queue_job_lifecycles;
-pub(crate) mod queue_publishing_state;
 pub mod recall;
 pub mod schema_schemas;
 pub mod search;

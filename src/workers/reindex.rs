@@ -30,10 +30,6 @@ use crate::workers::embedding_sync::WorkerClass;
 pub struct ReindexArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
-    #[serde(default)]
-    pub dispatch_id: Option<Uuid>,
-    #[serde(default)]
-    pub publishing_epoch: Option<i64>,
     pub workspace_id: Uuid,
     pub worker_class: WorkerClass,
     #[serde(default)]
@@ -135,17 +131,6 @@ impl BackgroundWorker<ReindexArgs> for ReindexWorker {
     }
 
     async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &self.ctx.db,
-            args.lifecycle_id,
-            args.dispatch_id,
-            args.publishing_epoch,
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-        {
-            return Ok(());
-        }
         crate::workers::lifecycle::perform_with_terminal_lifecycle::<Self, _, _, _>(
             &self.ctx,
             args.lifecycle_id,
@@ -211,8 +196,6 @@ pub async fn enqueue_reindex_with_dispatcher(
         .dispatch(
             ctx,
             ReindexArgs {
-                dispatch_id: None,
-                publishing_epoch: None,
                 lifecycle_id: None,
                 workspace_id,
                 worker_class,

@@ -1,5 +1,4 @@
 mod dispatch;
-mod lifecycle;
 mod queue;
 
 mod embedding_sync;

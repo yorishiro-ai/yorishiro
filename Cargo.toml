@@ -64,7 +64,6 @@ sea-orm = { version = "2.0.4", features = [
   "postgres-vector",
 ] }
 uuid = { version = "1.26.1", features = ["v4", "v7", "serde"] }
-ulid = "=3.0.0"
 redis = { version = "=1.7.1", features = ["aio", "tokio-comp"] }
 
 [dependencies]
@@ -85,8 +84,6 @@ chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
 rand.workspace = true
-ulid.workspace = true
-redis.workspace = true
 anyhow.workspace = true
 sha2.workspace = true
 jsonschema = { version = "=0.59.0" }
@@ -124,6 +121,7 @@ required-features = []
 [dev-dependencies]
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
+redis.workspace = true
 serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 # Used by queue and integration tests for isolated temporary databases.
 tempfile = { version = "3.27.0" }

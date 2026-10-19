@@ -85,7 +85,7 @@ impl WorkspaceEmbeddingResolver for Missing {
     }
 }
 
-async fn record_delivery(ctx: &loco_rs::app::AppContext, workspace_id: Uuid) -> (Uuid, i64) {
+async fn record_delivery(ctx: &loco_rs::app::AppContext, workspace_id: Uuid) -> Uuid {
     use yorishiro::models::queue_job_lifecycles::Enqueue;
 
     let lifecycle_id = Uuid::now_v7();
@@ -106,12 +106,8 @@ async fn record_delivery(ctx: &loco_rs::app::AppContext, workspace_id: Uuid) -> 
         Some(vec![WorkerTarget::Shared.tag()]),
     )
     .await
-    .expect("record current-epoch reindex delivery");
-    let epoch = yorishiro::models::queue_job_dispatch_outbox::publishing_state(&ctx.db)
-        .await
-        .expect("read publisher state")
-        .epoch;
-    (lifecycle_id, epoch)
+    .expect("record reindex delivery");
+    lifecycle_id
 }
 
 #[tokio::test]
@@ -174,11 +170,9 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
         .insert(Arc::new(Resolver(workspace_provider)) as Arc<dyn WorkspaceEmbeddingResolver>);
     ctx.shared_store
         .insert(default as Arc<dyn EmbeddingProvider>);
-    let (lifecycle_id, epoch) = record_delivery(&ctx, workspace.id).await;
+    let lifecycle_id = record_delivery(&ctx, workspace.id).await;
     let args = ReindexArgs {
         lifecycle_id: Some(lifecycle_id),
-        dispatch_id: Some(lifecycle_id),
-        publishing_epoch: Some(epoch),
         workspace_id: workspace.id,
         worker_class: WorkerClass::Shared,
         startup: false,
@@ -244,12 +238,10 @@ async fn absent_and_disabled_providers_are_terminal_worker_errors() {
         .await
         .expect("workspace");
         ctx.shared_store.insert(provider);
-        let (lifecycle_id, epoch) = record_delivery(&ctx, workspace.id).await;
+        let lifecycle_id = record_delivery(&ctx, workspace.id).await;
         let result = ReindexWorker::build(&ctx)
             .perform(ReindexArgs {
                 lifecycle_id: Some(lifecycle_id),
-                dispatch_id: Some(lifecycle_id),
-                publishing_epoch: Some(epoch),
                 workspace_id: workspace.id,
                 worker_class: WorkerClass::Shared,
                 startup: false,

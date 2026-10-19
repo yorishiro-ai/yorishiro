@@ -13,8 +13,6 @@ use crate::workers::{
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FillDefaultsArgs {
     pub(crate) lifecycle_id: Option<Uuid>,
-    pub(crate) dispatch_id: Option<Uuid>,
-    pub(crate) publishing_epoch: Option<i64>,
     pub(crate) tenant_id: Uuid,
     pub(crate) workspace_id: Uuid,
     pub(crate) api_key_id: Uuid,
@@ -34,17 +32,6 @@ impl BackgroundWorker<FillDefaultsArgs> for FillDefaultsWorker {
     }
 
     async fn perform(&self, args: FillDefaultsArgs) -> loco_rs::Result<()> {
-        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &self.ctx.db,
-            args.lifecycle_id,
-            args.dispatch_id,
-            args.publishing_epoch,
-        )
-        .await
-        .map_err(loco_rs::Error::from)?
-        {
-            return Ok(());
-        }
         crate::workers::lifecycle::perform_with_terminal_lifecycle::<Self, _, _, _>(
             &self.ctx,
             args.lifecycle_id,
@@ -112,8 +99,6 @@ pub(crate) async fn enqueue(
         .map_err(|error| error.0)?;
     let args = FillDefaultsArgs {
         lifecycle_id: None,
-        dispatch_id: None,
-        publishing_epoch: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.workspace_id,
         api_key_id: auth.api_key_id,

@@ -690,67 +690,6 @@ async fn incremental_migration_rollbacks_are_separate_from_fresh_upgrades() {
 #[tokio::test]
 #[serial(postgres_cluster)]
 #[serial(process_environment)]
-async fn queue_starvation_index_matches_admission_predicate() {
-    with_database("queue_starvation_index", |db| Box::pin(async move {
-        let through_starvation =
-            migrations_through("m20261001_000014_queue_lifecycle_starvation_index");
-        Migrator::up(db, Some(through_starvation))
-            .await
-            .expect("migrations through starvation index");
-        assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
-        let definition: String = match db.get_database_backend() {
-            DbBackend::Sqlite => {
-                value(
-                    db,
-                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'queue_job_lifecycles_starvation_idx'",
-                )
-                .await
-            }
-            DbBackend::Postgres => {
-                value(
-                    db,
-                    "SELECT indexdef FROM pg_indexes WHERE indexname = 'queue_job_lifecycles_starvation_idx'",
-                )
-                .await
-            }
-            backend => panic!("unsupported migration test backend: {backend:?}"),
-        };
-        for column in ["status", "worker_class", "enqueue_at"] {
-            assert!(
-                definition.contains(column),
-                "index definition missing {column}: {definition}"
-            );
-        }
-        Migrator::down(db, Some(1))
-            .await
-            .expect("roll back starvation index migration");
-        let absent: i64 = match db.get_database_backend() {
-            DbBackend::Sqlite => value(
-                db,
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'queue_job_lifecycles_starvation_idx'",
-            )
-            .await,
-            DbBackend::Postgres => value(
-                db,
-                "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'queue_job_lifecycles_starvation_idx'",
-            )
-            .await,
-            backend => panic!("unsupported migration test backend: {backend:?}"),
-        };
-        assert_eq!(absent, 0, "rollback must remove starvation index");
-        Migrator::up(db, Some(through_starvation))
-            .await
-            .expect("reapply starvation index migration");
-        assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
-    }))
-    .await;
-}
-
-#[tokio::test]
-#[serial(postgres_cluster)]
-#[serial(process_environment)]
-/// The migration owns a partial unique index on active startup-reindex jobs only.
-/// Fresh generation with the lockfile-pinned CLI omits partial indexes from entities entirely; no application/test path creates schemas from entities (including Schema::create_table_from_entity), so migrations are their only owner.
 async fn startup_admission_upgrade_preserves_ordinary_active_duplicates() {
     with_database("startup_admission_upgrade", |db| Box::pin(async move {
         let through_requests = migrations_through("m20261005_000017_embedding_tables_tenant_read");

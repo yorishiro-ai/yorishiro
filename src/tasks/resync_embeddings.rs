@@ -50,8 +50,6 @@ impl Task for ResyncEmbeddings {
         for candidate in &candidates {
             let job = EmbeddingSyncArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id,
                 entity_id: candidate.id,
                 worker_class,

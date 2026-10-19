@@ -98,8 +98,6 @@ mod unit {
         let ctx = crate::workers::test_context().await;
         let args = EmbeddingSyncArgs {
             lifecycle_id: None,
-            dispatch_id: None,
-            publishing_epoch: None,
             workspace_id: Uuid::now_v7(),
             entity_id: Uuid::now_v7(),
             worker_class: WorkerClass::Official,
@@ -132,8 +130,6 @@ mod unit {
             &ctx,
             EmbeddingSyncArgs {
                 lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
                 workspace_id: Uuid::now_v7(),
                 entity_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,
@@ -188,7 +184,7 @@ mod conflict {
         lifecycle_id: Uuid,
         workspace_id: Uuid,
         entity_id: Uuid,
-    ) -> i64 {
+    ) {
         queue_job_dispatch_outbox::record(
             &ctx.db,
             Enqueue {
@@ -210,34 +206,23 @@ mod conflict {
             Some(vec![WorkerTarget::Shared.tag()]),
         )
         .await
-        .expect("record current-epoch embedding delivery");
-        let state = queue_job_dispatch_outbox::publishing_state(&ctx.db)
-            .await
-            .expect("read publishing epoch");
+        .expect("record embedding delivery");
         let claim = Uuid::now_v7();
         assert!(
-            queue_job_dispatch_outbox::claim_dispatch(
-                &ctx.db,
-                lifecycle_id,
-                state.epoch,
-                claim,
-                30,
-            )
-            .await
-            .expect("claim fixture dispatch")
+            queue_job_dispatch_outbox::claim_dispatch(&ctx.db, lifecycle_id, claim, 30,)
+                .await
+                .expect("claim fixture dispatch")
         );
         assert!(
             queue_job_dispatch_outbox::acknowledge_dispatch(
                 &ctx.db,
                 lifecycle_id,
-                state.epoch,
                 claim,
                 &format!("fixture-provider-job-{lifecycle_id}"),
             )
             .await
             .expect("acknowledge fixture dispatch")
         );
-        state.epoch
     }
 
     async fn remove_owned_redis_job(uri: &str, queue_name: &str, job_id: &str) {
@@ -1033,13 +1018,11 @@ mod conflict {
             ] {
                 ctx.shared_store
                     .insert(Arc::new(FailingProvider { kind }) as Arc<dyn EmbeddingProvider>);
-                let epoch = record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
+                record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
 
                 let result = EmbeddingSyncWorker::build(&ctx)
                     .perform(EmbeddingSyncArgs {
                         lifecycle_id: Some(lifecycle_id),
-                        dispatch_id: Some(lifecycle_id),
-                        publishing_epoch: Some(epoch),
                         workspace_id,
                         entity_id,
                         worker_class: WorkerClass::Shared,
@@ -1067,7 +1050,7 @@ mod conflict {
             ctx.shared_store.insert(Arc::new(FailingProvider {
                 kind: FailureKind::Busy,
             }) as Arc<dyn EmbeddingProvider>);
-            let epoch = record_delivery(&ctx, live_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, live_id, workspace_id, entity_id).await;
             ctx.queue_provider
                 .as_ref()
                 .unwrap()
@@ -1076,8 +1059,6 @@ mod conflict {
                     Some(WorkerTarget::Shared.queue()),
                     EmbeddingSyncArgs {
                         lifecycle_id: Some(live_id),
-                        dispatch_id: Some(live_id),
-                        publishing_epoch: Some(epoch),
                         workspace_id,
                         entity_id,
                         worker_class: WorkerClass::Shared,
@@ -1185,20 +1166,16 @@ mod conflict {
             let ctx = harness.ctx.clone();
             let ids = [first, second, third];
             let mut lifecycle_ids = Vec::new();
-            let mut epochs = Vec::new();
             let mut queue_ids = Vec::new();
             for entity_id in ids {
                 let lifecycle_id = Uuid::now_v7();
                 lifecycle_ids.push(lifecycle_id);
-                let epoch = record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
-                epochs.push(epoch);
+                record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
                 let queue_id = harness
                     .enqueue(
                         EmbeddingSyncWorker::class_name(),
                         EmbeddingSyncArgs {
                             lifecycle_id: Some(lifecycle_id),
-                            dispatch_id: Some(lifecycle_id),
-                            publishing_epoch: Some(epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1304,15 +1281,13 @@ mod conflict {
                 Arc::new(TestResolver(provider.clone())) as Arc<dyn WorkspaceEmbeddingResolver>
             );
             let lifecycle_id = Uuid::now_v7();
-            let epoch = record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
             let document = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(lifecycle_id),
-                            dispatch_id: Some(lifecycle_id),
-                            publishing_epoch: Some(epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1345,20 +1320,6 @@ mod conflict {
             .await
             .unwrap();
             query_txn.commit().await.unwrap();
-            let query_epoch = queue_job_dispatch_outbox::publishing_state(&ctx.db)
-                .await
-                .unwrap()
-                .epoch;
-            assert!(
-                queue_job_dispatch_outbox::delivery_epoch_allowed(
-                    &ctx.db,
-                    None,
-                    Some(query_dispatch_id),
-                    Some(query_epoch),
-                )
-                .await
-                .unwrap()
-            );
             let query = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
@@ -1366,8 +1327,6 @@ mod conflict {
                         .perform(yorishiro::workers::query_embedding::QueryEmbeddingArgs {
                             request_id,
                             workspace_id,
-                            dispatch_id: Some(query_dispatch_id),
-                            publishing_epoch: Some(query_epoch),
                         })
                         .await
                 }
@@ -1449,18 +1408,12 @@ mod conflict {
             )
             .await
             .unwrap();
-            let epoch = queue_job_dispatch_outbox::publishing_state(&ctx.db)
-                .await
-                .unwrap()
-                .epoch;
             let holder = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(lifecycle_id),
-                            dispatch_id: Some(lifecycle_id),
-                            publishing_epoch: Some(epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1492,20 +1445,6 @@ mod conflict {
             .await
             .unwrap();
             query_txn.commit().await.unwrap();
-            let query_epoch = queue_job_dispatch_outbox::publishing_state(&ctx.db)
-                .await
-                .unwrap()
-                .epoch;
-            assert!(
-                queue_job_dispatch_outbox::delivery_epoch_allowed(
-                    &ctx.db,
-                    None,
-                    Some(query_dispatch_id),
-                    Some(query_epoch),
-                )
-                .await
-                .unwrap()
-            );
             let follower = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
@@ -1513,8 +1452,6 @@ mod conflict {
                         .perform(yorishiro::workers::query_embedding::QueryEmbeddingArgs {
                             request_id,
                             workspace_id,
-                            dispatch_id: Some(query_dispatch_id),
-                            publishing_epoch: Some(query_epoch),
                         })
                         .await
                 }
@@ -1544,12 +1481,10 @@ mod conflict {
             ctx.shared_store
                 .insert(Arc::new(DisabledProvider) as Arc<dyn EmbeddingProvider>);
             let noop_id = Uuid::now_v7();
-            let epoch = record_delivery(&ctx, noop_id, no_content.0, no_content.1).await;
+            record_delivery(&ctx, noop_id, no_content.0, no_content.1).await;
             EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(noop_id),
-                    dispatch_id: Some(noop_id),
-                    publishing_epoch: Some(epoch),
                     workspace_id: no_content.0,
                     entity_id: no_content.1,
                     worker_class: WorkerClass::Shared,
@@ -1587,16 +1522,14 @@ mod conflict {
             );
             let failed_id = Uuid::now_v7();
             let waiting_id = Uuid::now_v7();
-            let failed_epoch = record_delivery(&ctx, failed_id, workspace_id, entity_id).await;
-            let waiting_epoch = record_delivery(&ctx, waiting_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, failed_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, waiting_id, workspace_id, entity_id).await;
             let failed = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(failed_id),
-                            dispatch_id: Some(failed_id),
-                            publishing_epoch: Some(failed_epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1617,8 +1550,6 @@ mod conflict {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(waiting_id),
-                            dispatch_id: Some(waiting_id),
-                            publishing_epoch: Some(waiting_epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1674,8 +1605,8 @@ mod conflict {
 
             let holder_id = Uuid::now_v7();
             let follower_id = Uuid::now_v7();
-            let holder_epoch = record_delivery(&ctx, holder_id, workspace_id, entity_id).await;
-            let follower_epoch = record_delivery(&ctx, follower_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, holder_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, follower_id, workspace_id, entity_id).await;
 
             let holder = tokio::spawn({
                 let ctx = ctx.clone();
@@ -1683,8 +1614,6 @@ mod conflict {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(holder_id),
-                            dispatch_id: Some(holder_id),
-                            publishing_epoch: Some(holder_epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1706,8 +1635,6 @@ mod conflict {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(follower_id),
-                            dispatch_id: Some(follower_id),
-                            publishing_epoch: Some(follower_epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1802,16 +1729,14 @@ mod conflict {
             );
             let holder_id = Uuid::now_v7();
             let follower_id = Uuid::now_v7();
-            let holder_epoch = record_delivery(&ctx, holder_id, workspace_id, entity_id).await;
-            let follower_epoch = record_delivery(&ctx, follower_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, holder_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, follower_id, workspace_id, entity_id).await;
             let holder = tokio::spawn({
                 let ctx = ctx.clone();
                 async move {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(holder_id),
-                            dispatch_id: Some(holder_id),
-                            publishing_epoch: Some(holder_epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1831,8 +1756,6 @@ mod conflict {
                     EmbeddingSyncWorker::build(&ctx)
                         .perform(EmbeddingSyncArgs {
                             lifecycle_id: Some(follower_id),
-                            dispatch_id: Some(follower_id),
-                            publishing_epoch: Some(follower_epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -1932,11 +1855,6 @@ mod conflict {
             )
             .await
             .unwrap();
-            let epoch = yorishiro::models::queue_job_dispatch_outbox::publishing_state(&ctx.db)
-                .await
-                .unwrap()
-                .epoch;
-            let dispatch_id = lifecycle_id;
             let stale = chrono::Utc::now().fixed_offset() - chrono::Duration::minutes(5);
             let mut row = Entity::find_by_id(lifecycle_id)
                 .one(&ctx.db)
@@ -1961,8 +1879,6 @@ mod conflict {
                         EmbeddingSyncWorker::class_name(),
                         EmbeddingSyncArgs {
                             lifecycle_id: Some(lifecycle_id),
-                            dispatch_id: Some(dispatch_id),
-                            publishing_epoch: Some(epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -2062,15 +1978,13 @@ mod conflict {
         for entity_id in [first, second.id] {
             let id = Uuid::now_v7();
             ids.push(id);
-            let epoch = record_delivery(&harness.ctx, id, workspace_id, entity_id).await;
+            record_delivery(&harness.ctx, id, workspace_id, entity_id).await;
             queue_ids.push(
                 harness
                     .enqueue(
                         EmbeddingSyncWorker::class_name(),
                         EmbeddingSyncArgs {
                             lifecycle_id: Some(id),
-                            dispatch_id: Some(id),
-                            publishing_epoch: Some(epoch),
                             workspace_id,
                             entity_id,
                             worker_class: WorkerClass::Shared,
@@ -2212,14 +2126,12 @@ mod conflict {
             .await;
             let result = std::panic::AssertUnwindSafe(async {
                 let id_a = Uuid::now_v7();
-                let epoch_a = record_delivery(&harness_a.ctx, id_a, workspace, entity).await;
+                record_delivery(&harness_a.ctx, id_a, workspace, entity).await;
                 harness_a
                     .enqueue(
                         EmbeddingSyncWorker::class_name(),
                         EmbeddingSyncArgs {
                             lifecycle_id: Some(id_a),
-                            dispatch_id: Some(id_a),
-                            publishing_epoch: Some(epoch_a),
                             workspace_id: workspace,
                             entity_id: entity,
                             worker_class: WorkerClass::Shared,
@@ -2259,15 +2171,12 @@ mod conflict {
                     .await;
                     let result_b = std::panic::AssertUnwindSafe(async {
                         let id_b = Uuid::now_v7();
-                        let epoch_b =
-                            record_delivery(&harness_b.ctx, id_b, workspace_b, entity_b).await;
+                        record_delivery(&harness_b.ctx, id_b, workspace_b, entity_b).await;
                         harness_b
                             .enqueue(
                                 EmbeddingSyncWorker::class_name(),
                                 EmbeddingSyncArgs {
                                     lifecycle_id: Some(id_b),
-                                    dispatch_id: Some(id_b),
-                                    publishing_epoch: Some(epoch_b),
                                     workspace_id: workspace_b,
                                     entity_id: entity_b,
                                     worker_class: WorkerClass::Shared,
@@ -2435,13 +2344,10 @@ mod conflict {
                 width: 768,
             }) as Arc<dyn EmbeddingProvider>);
             let no_content_id = Uuid::now_v7();
-            let no_content_epoch =
-                record_delivery(&ctx, no_content_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, no_content_id, workspace_id, entity_id).await;
             EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(no_content_id),
-                    dispatch_id: Some(no_content_id),
-                    publishing_epoch: Some(no_content_epoch),
                     workspace_id,
                     entity_id,
                     worker_class: WorkerClass::Shared,
@@ -2463,12 +2369,10 @@ mod conflict {
             ctx.shared_store
                 .insert(Arc::new(DisabledProvider) as Arc<dyn EmbeddingProvider>);
             let disabled_id = Uuid::now_v7();
-            let disabled_epoch = record_delivery(&ctx, disabled_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, disabled_id, workspace_id, entity_id).await;
             EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(disabled_id),
-                    dispatch_id: Some(disabled_id),
-                    publishing_epoch: Some(disabled_epoch),
                     workspace_id,
                     entity_id,
                     worker_class: WorkerClass::Shared,
@@ -2522,11 +2426,9 @@ mod conflict {
             };
 
             let lifecycle_id = Uuid::now_v7();
-            let epoch = record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
             let args = EmbeddingSyncArgs {
                 lifecycle_id: Some(lifecycle_id),
-                dispatch_id: Some(lifecycle_id),
-                publishing_epoch: Some(epoch),
                 workspace_id,
                 entity_id,
                 worker_class: WorkerClass::Shared,
@@ -2682,82 +2584,6 @@ mod conflict {
         .await;
     }
 
-    /// Legacy queue capacity metadata does not block an embedding worker after process-local admission.
-    #[tokio::test]
-    async fn legacy_saturated_embedding_metadata_is_ignored() {
-        boot_request::<App, _, _>(|_request, ctx| async move {
-            let (workspace_id, entity_id) = seed(&ctx).await;
-            let enqueue = |id| Enqueue {
-                id,
-                job_name: "embedding_sync",
-                worker_class: WorkerClass::Shared,
-                workspace_id: Some(workspace_id),
-                plan: None,
-                concurrency_key: Some("shared:test"),
-                concurrency_limit: Some(1),
-            };
-            let holder = Uuid::now_v7();
-            queue_job_dispatch_outbox::record(
-                &ctx.db,
-                enqueue(holder),
-                serde_json::json!({"workspace_id": workspace_id, "entity_id": entity_id, "worker_class": WorkerClass::Shared}),
-                EmbeddingSyncWorker::class_name(),
-                Some(WorkerTarget::Shared.queue()),
-                Some(vec![WorkerTarget::Shared.tag()]),
-            )
-                .await
-                .expect("record holder");
-            Entity::start_at(&ctx.db, holder, chrono::Utc::now().fixed_offset())
-                .await
-                .expect("holder runs");
-
-            let waiting = Uuid::now_v7();
-            queue_job_dispatch_outbox::record(
-                &ctx.db,
-                enqueue(waiting),
-                serde_json::json!({"workspace_id": workspace_id, "entity_id": entity_id, "worker_class": WorkerClass::Shared}),
-                EmbeddingSyncWorker::class_name(),
-                Some(WorkerTarget::Shared.queue()),
-                Some(vec![WorkerTarget::Shared.tag()]),
-            )
-                .await
-                .expect("record waiting");
-            let epoch = queue_job_dispatch_outbox::publishing_state(&ctx.db)
-                .await
-                .unwrap()
-                .epoch;
-            let result = EmbeddingSyncWorker::build(&ctx)
-                .perform(EmbeddingSyncArgs {
-                    lifecycle_id: Some(waiting),
-                    dispatch_id: Some(waiting),
-                    publishing_epoch: Some(epoch),
-                    workspace_id,
-                    entity_id,
-                    worker_class: WorkerClass::Shared,
-                })
-                .await;
-            assert!(
-                result.is_ok(),
-                "legacy capacity metadata must not block embedding"
-            );
-            let row = Entity::find_by_id(waiting)
-                .one(&ctx.db)
-                .await
-                .expect("read waiting")
-                .expect("waiting row");
-            assert_ne!(row.status, LifecycleStatus::Failed.as_db_str());
-            let holder = Entity::find_by_id(holder)
-                .one(&ctx.db)
-                .await
-                .expect("read holder")
-                .expect("holder row");
-            assert_eq!(holder.status, LifecycleStatus::Running.as_db_str());
-        })
-        .await;
-    }
-
-    /// A payload that fails `serde_json::from_value` never reaches the typed worker, so only the provider job records the failure.
-    /// The custom lifecycle row is deliberately not asserted: it is authoritative only after a successful deserialization.
     #[tokio::test]
     async fn a_malformed_payload_fails_the_provider_job_without_requeue() {
         boot_request::<App, _, _>(|_request, ctx| async move {
@@ -2861,13 +2687,11 @@ mod conflict {
             }) as Arc<dyn EmbeddingProvider>);
 
             let lifecycle_id = Uuid::now_v7();
-            let epoch = record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
 
             EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(lifecycle_id),
-                    dispatch_id: Some(lifecycle_id),
-                    publishing_epoch: Some(epoch),
                     workspace_id,
                     entity_id,
                     worker_class: WorkerClass::Shared,
@@ -2912,13 +2736,11 @@ mod conflict {
             }) as Arc<dyn EmbeddingProvider>);
 
             let lifecycle_id = Uuid::now_v7();
-            let epoch = record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
+            record_delivery(&ctx, lifecycle_id, workspace_id, entity_id).await;
 
             let _ = EmbeddingSyncWorker::build(&ctx)
                 .perform(EmbeddingSyncArgs {
                     lifecycle_id: Some(lifecycle_id),
-                    dispatch_id: Some(lifecycle_id),
-                    publishing_epoch: Some(epoch),
                     workspace_id,
                     entity_id,
                     worker_class: WorkerClass::Shared,
