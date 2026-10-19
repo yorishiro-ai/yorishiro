@@ -10,7 +10,8 @@ use crate::workers::embedding_sync::{self, EmbeddingSyncArgs};
 ///
 /// Queues an embedding job for every entity that has no row in an embedding table: an operational recovery command for entities that fell out of search because no sync ever completed for them.
 ///
-/// Two things leave an entity in that state. A sync that failed, because embedding is a single attempt and a failed job is not retried, and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the pg_trgm / FTS5 fuzzy fallback.
+/// This recovers entities whose sync never completed or whose data was written outside the normal enqueue path.
+/// REST and MCP imports already enqueue their embedding jobs transactionally.
 ///
 /// The command only enqueues.
 /// It holds no embedding provider, because only a worker process loads a model, so the worker's own guarded write path embeds each entity and the command's output counts queued jobs, not stored vectors.

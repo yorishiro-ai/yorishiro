@@ -1,3 +1,5 @@
+#[cfg(feature = "openapi")]
+use super::swagger::implementation::openapi_method;
 use axum::http::Method;
 use loco_rs::controller::AppRoutes;
 #[cfg(feature = "openapi")]
@@ -40,21 +42,6 @@ pub struct RouteDoc {
     pub(crate) methods: Vec<HttpMethod>,
     pub(crate) operation: Operation,
     pub(crate) schemas: Vec<(String, RefOr<Schema>)>,
-}
-
-#[cfg(feature = "openapi")]
-fn openapi_method(method: &Method) -> HttpMethod {
-    match *method {
-        Method::GET => HttpMethod::Get,
-        Method::POST => HttpMethod::Post,
-        Method::PUT => HttpMethod::Put,
-        Method::DELETE => HttpMethod::Delete,
-        Method::PATCH => HttpMethod::Patch,
-        Method::HEAD => HttpMethod::Head,
-        Method::OPTIONS => HttpMethod::Options,
-        Method::TRACE => HttpMethod::Trace,
-        _ => panic!("unsupported OpenAPI method: {method}"),
-    }
 }
 
 #[cfg(feature = "openapi")]

@@ -220,7 +220,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
 impl InferFillWorker {
     /// Hands a job back to the queue because another job of its workspace is running.
     ///
-    /// Without a lifecycle row the job is left queued and the run fails, so the queue's own retry redelivers it.
+    /// Without a lifecycle row the run fails and requires explicit retry on the native SQL queue.
     /// With one, the admitted attempt is released and the job is enqueued again at once, so a busy workspace costs one poll interval per redelivery until the running job ends.
     async fn defer_for_busy_workspace(
         &self,
