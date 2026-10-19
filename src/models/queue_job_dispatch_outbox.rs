@@ -13,6 +13,7 @@ use crate::models::_entities::{
     queue_job_dispatch_outbox as outbox, queue_job_dispatch_outbox::Model,
     queue_job_lifecycles as lifecycle,
 };
+use crate::models::queue_job_lifecycles::LifecycleStatus;
 use crate::workers::embedding_sync::WorkerClass;
 
 const RETRY_COOLDOWN_SECONDS: i64 = 60;
@@ -168,10 +169,16 @@ pub async fn record_lifecycle_payload(
         );
     }
     let lifecycle_update = crate::models::queue_job_lifecycles::Entity::update_many()
-        .col_expr(lifecycle::Column::Status, Expr::value("queued"))
+        .col_expr(
+            lifecycle::Column::Status,
+            Expr::value(LifecycleStatus::Queued.as_db_str()),
+        )
         .col_expr(lifecycle::Column::Attempt, Expr::value(0))
         .filter(lifecycle::Column::Id.eq(lifecycle_id))
-        .filter(lifecycle::Column::Status.is_in(["retrying", "queued"]))
+        .filter(lifecycle::Column::Status.is_in([
+            LifecycleStatus::Retrying.as_db_str(),
+            LifecycleStatus::Queued.as_db_str(),
+        ]))
         .exec(txn)
         .await?;
     if lifecycle_update.rows_affected != 1 {
@@ -251,10 +258,16 @@ pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, Yori
                         .add(lifecycle::Column::Id.is_not_null())
                         .add(
                             Condition::any()
-                                .add(lifecycle::Column::Status.eq("queued"))
+                                .add(
+                                    lifecycle::Column::Status
+                                        .eq(LifecycleStatus::Queued.as_db_str()),
+                                )
                                 .add(
                                     Condition::all()
-                                        .add(lifecycle::Column::Status.eq("retrying"))
+                                        .add(
+                                            lifecycle::Column::Status
+                                                .eq(LifecycleStatus::Retrying.as_db_str()),
+                                        )
                                         .add(
                                             Condition::any()
                                                 .add(lifecycle::Column::RetryAt.is_null())

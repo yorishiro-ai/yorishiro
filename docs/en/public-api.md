@@ -26,6 +26,11 @@ This is a regression guardrail, not a blanket ban on `pub` and not a second visi
 
 ## Review Guidance
 
+Keep shared behavior in Loco's model extensions, not in controllers or a repository layer.
+Use typed settings for deployment tuning, existing enums for closed domain values, and named constants for protocol limits and retry policies.
+Use structs for coherent state and traits for behavior that actually varies at runtime, not to wrap static edition assembly.
+An overlay implementing the same functionality mirrors the base directory and file name; CE never imports or branches on the overlay.
+
 Derive OpenAPI schemas on the serialized request and response types instead of maintaining contract-only copies of their fields.
 Enterprise schema names in `ee/controllers/openapi.rs` re-export those types; request-only constraints such as a default publish status belong on the corresponding DTO.
 

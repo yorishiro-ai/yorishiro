@@ -231,6 +231,15 @@ tenant 対象の Redis キューはジョブの到着に応じて作られ、ten
 
 ## 永続キューの publisher
 
+relayの待機時間はLocoで解決した型付き設定`settings.dispatch`から読み込みます。
+各値は正数とし、claimの有効期間はproviderへのenqueueのタイムアウトより長く設定してください。
+
+| 環境変数 | 設定名 | デフォルト |
+|---|---|---|
+| `YORISHIRO_DISPATCH_POLL_INTERVAL_MS` | `poll_interval_ms` | 500 ms |
+| `YORISHIRO_DISPATCH_CLAIM_LEASE_SECS` | `claim_lease_seconds` | 30秒 |
+| `YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS` | `enqueue_timeout_ms` | 5000 ms |
+
 アプリケーションの producer は業務状態と dispatch-outbox 行を同じトランザクションでコミットします。
 outbox 行を Loco の queue provider へ公開するのは dispatch relay だけです。
 relay は短い永続 claim を取得してコミットしてから、DB トランザクション外で provider を呼び出します。

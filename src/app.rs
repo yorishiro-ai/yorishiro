@@ -330,7 +330,7 @@ pub(crate) async fn connect_workers(
 ) -> Result<()> {
     initializers::embedding::install_provider(ctx).await?;
     workers.connect(ctx, queue).await?;
-    initializers::queue::start_relay(ctx);
+    initializers::queue::start_relay(ctx)?;
     crate::workers::startup_reindex::run(ctx).await;
     Ok(())
 }

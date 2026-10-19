@@ -14,6 +14,26 @@ pub struct Settings {
     pub(crate) db_load_guard: DbLoadGuard,
     #[serde(default)]
     pub query_embedding: QueryEmbedding,
+    #[serde(default)]
+    pub(crate) dispatch: Dispatch,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Dispatch {
+    pub(crate) poll_interval_ms: u64,
+    pub(crate) claim_lease_seconds: u32,
+    pub(crate) enqueue_timeout_ms: u64,
+}
+
+impl Default for Dispatch {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: 500,
+            claim_lease_seconds: 30,
+            enqueue_timeout_ms: 5_000,
+        }
+    }
 }
 
 fn default_timezone() -> String {

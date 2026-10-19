@@ -60,10 +60,10 @@ fn test_environment(environment: &Environment) -> Environment {
             if let Ok(topology) = crate::data::env::Env::TestTopology.read() {
                 return Environment::Any(format!("test_{}", topology.replace('-', "_")));
             }
-            let url = crate::data::env::Env::DatabaseUrl
+            let sqlite = crate::data::env::Env::DatabaseUrl
                 .read()
-                .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());
-            if url.starts_with("sqlite:") {
+                .is_ok_and(|url| is_sqlite_uri(&url));
+            if sqlite {
                 Environment::Any("test_sqlite".into())
             } else {
                 Environment::Any("test_postgres".into())
@@ -114,6 +114,18 @@ pub fn validate(config: &Config) -> Result<()> {
         ));
     }
     validate_query_embedding(&settings.query_embedding)?;
+    let dispatch = settings.dispatch;
+    if dispatch.poll_interval_ms == 0 || dispatch.enqueue_timeout_ms == 0 {
+        return Err(Error::Message(
+            "settings.dispatch poll_interval_ms and enqueue_timeout_ms must be greater than zero"
+                .into(),
+        ));
+    }
+    if u64::from(dispatch.claim_lease_seconds) * 1000 <= dispatch.enqueue_timeout_ms {
+        return Err(Error::Message(
+            "settings.dispatch.claim_lease_seconds must exceed enqueue_timeout_ms".into(),
+        ));
+    }
     validate_queue_policy(config)
 }
 

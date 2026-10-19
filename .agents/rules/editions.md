@@ -22,6 +22,11 @@ Unclear cases are a question for the user, asked as the classification itself ra
 
 ## Composition
 
+CE follows Loco's generated directory and file names.
+When an overlay changes or extends the same functionality, its path under `ee/` mirrors the path under `src/`.
+An enterprise-only feature does not require an empty counterpart in CE.
+Fix the base API first, then adapt its overlay; temporary build failures during that change are not a reason to put edition branches into CE.
+
 **`ee/` is a module of the application crate, not a package of its own.** `edition/mod.rs` declares it with `#[path = "../ee/mod.rs"]` behind the `enterprise` feature, and `src/lib.rs` declares `edition/` itself with `#[path = "../edition/mod.rs"]` and no feature gate. The files stay at the repository root where `ee/LICENSE` scopes them ("everything under the `ee/` directory") while compiling into the same crate as everything in `src/`. The overlay is therefore `crate::edition::ee`. The root `Cargo.toml`'s `[workspace] members` lists `"."` only; there is one binary, `yorishiro`.
 
 One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module whitelist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
@@ -74,5 +79,6 @@ Tests live in `tests/requests/licence_gate.rs`, covering verification, expiry-bo
 
 ## Config file
 
-This application resolves `config/{environment}.yaml` and defines no `license_key:` field there.
-The only live configuration is the `YORISHIRO_LICENSE_KEY` environment variable.
+This application resolves `config/{environment}.yaml` and reads the licence from `initializers.licence_key`.
+Shipped configurations interpolate `YORISHIRO_LICENSE_KEY` into that field.
+Runtime verification consumes the resolved configuration, not the environment.

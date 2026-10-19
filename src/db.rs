@@ -192,7 +192,7 @@ unsafe extern "C" fn sqlite_current_timestamp(
         }
         .copied()
         .unwrap_or(chrono_tz::UTC);
-        crate::time::sqlite_timestamp(chrono::Utc::now(), timezone)
+        crate::time::sqlite_timestamp(crate::time::now(), timezone)
     });
     match result {
         // SAFETY: `timestamp` remains live for the call and SQLITE_TRANSIENT copies it immediately.

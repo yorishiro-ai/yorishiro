@@ -87,6 +87,13 @@ pub async fn recover_pending(ctx: &AppContext) {
 }
 
 pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnection) {
+    let timing = match ctx.config.settings::<crate::data::settings::Settings>() {
+        Ok(settings) => settings.dispatch,
+        Err(error) => {
+            tracing::error!(error = %error, "dispatch outbox: invalid application settings");
+            return;
+        }
+    };
     let pending = match crate::models::queue_job_dispatch_outbox::due(db).await {
         Ok(rows) => rows,
         Err(error) => {
@@ -96,7 +103,13 @@ pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnecti
     };
     for row in pending {
         let claim = Uuid::now_v7();
-        match crate::models::queue_job_dispatch_outbox::claim_dispatch(db, row.id, claim, 30).await
+        match crate::models::queue_job_dispatch_outbox::claim_dispatch(
+            db,
+            row.id,
+            claim,
+            timing.claim_lease_seconds.into(),
+        )
+        .await
         {
             Ok(true) => {}
             Ok(false) => continue,
@@ -120,7 +133,7 @@ pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnecti
             continue;
         }
         let enqueue_result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(timing.enqueue_timeout_ms),
             enqueue_pending(ctx, &row),
         )
         .await;

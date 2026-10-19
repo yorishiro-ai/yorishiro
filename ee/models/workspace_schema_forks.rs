@@ -133,7 +133,10 @@ async fn latest_source_by_name<C: ConnectionTrait>(
         .filter(SchemaColumn::TenantId.eq(tenant_id))
         .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
         .filter(SchemaColumn::Name.eq(source_schema_name))
-        .filter(SchemaColumn::Status.eq("active"))
+        .filter(
+            SchemaColumn::Status
+                .eq(crate::models::schema_schemas::SchemaStatus::Active.as_db_str()),
+        )
         .order_by_desc(SchemaColumn::Version)
         .one(conn)
         .await
@@ -189,7 +192,7 @@ async fn current_source<C: ConnectionTrait>(
     let source = source_by_id(conn, tenant_id, source_workspace_id, source_schema_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("source schema was not found"))?;
-    if source.status != "active" {
+    if source.status != crate::models::schema_schemas::SchemaStatus::Active.as_db_str() {
         return Err(YorishiroError::ValidationFailed {
             message: "source_schema_id must name the active source schema".into(),
             details: vec![],

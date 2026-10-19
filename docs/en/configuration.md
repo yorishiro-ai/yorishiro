@@ -238,6 +238,15 @@ The relay takes a short durable row claim, commits it, then calls the provider o
 A conditional acknowledgement records provider acceptance only while the same claim token remains current.
 A provider timeout or crash between acceptance and acknowledgement can duplicate work, which the job lifecycle admission absorbs.
 
+The relay uses typed `settings.dispatch` configuration, resolved through Loco at startup.
+All timing values must be positive, and the claim lease must outlast the provider enqueue timeout.
+
+| Variable | Setting | Default |
+|---|---|---|
+| `YORISHIRO_DISPATCH_POLL_INTERVAL_MS` | `poll_interval_ms` | 500 ms |
+| `YORISHIRO_DISPATCH_CLAIM_LEASE_SECS` | `claim_lease_seconds` | 30 seconds |
+| `YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS` | `enqueue_timeout_ms` | 5000 ms |
+
 `YORISHIRO_QUEUE_WORKERS` controls the number of concurrent dequeue loops in one worker process.
 It defaults to 1 for a SQLite queue and 2 for PostgreSQL and Redis-compatible queues.
 SQLite has a single writer, so more workers on a SQLite queue add contention, not throughput, and boot logs a warning when you set them.

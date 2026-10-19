@@ -12,7 +12,6 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::EntityTrait;
 
 use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest;
@@ -29,11 +28,7 @@ async fn set_embedding_key(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
     let workspace =
-        crate::models::_entities::workspace_workspaces::Entity::find_by_id(auth_ctx.workspace_id)
-            .one(&ctx.db)
-            .await
-            .map_err(|err| ApiError(YorishiroError::Internal(err.into())))?
-            .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
+        crate::models::workspace_workspaces::get_workspace(&ctx.db, auth_ctx.workspace_id).await?;
 
     match workspace_embedding_keys::set(
         &ctx.db,

@@ -5,6 +5,10 @@ use std::time::Duration;
 
 pub use super::_entities::timezone_state::{ActiveModel, Entity};
 
+const ACTIVATION_ATTEMPTS: u32 = 5;
+const RETRY_BASE_DELAY: Duration = Duration::from_millis(10);
+const SINGLETON_ID: i32 = 1;
+
 impl ActiveModelBehavior for ActiveModel {}
 
 /// Stores the process-configured zone without changing any persisted timestamp instant.
@@ -14,11 +18,11 @@ impl ActiveModelBehavior for ActiveModel {}
 pub async fn activate(db: &DatabaseConnection, configured: &str) -> loco_rs::Result<()> {
     crate::time::parse_timezone(configured)
         .map_err(|_| loco_rs::Error::Message(format!("invalid IANA timezone {configured:?}")))?;
-    for attempt in 0..5 {
+    for attempt in 0..ACTIVATION_ATTEMPTS {
         let result = activate_once(db, configured).await;
         match result {
-            Err(error) if is_sqlite_busy(db, &error) && attempt < 4 => {
-                tokio::time::sleep(Duration::from_millis(10 << attempt)).await;
+            Err(error) if is_sqlite_busy(db, &error) && attempt + 1 < ACTIVATION_ATTEMPTS => {
+                tokio::time::sleep(RETRY_BASE_DELAY * (1 << attempt)).await;
             }
             result => return result,
         }
@@ -28,7 +32,7 @@ pub async fn activate(db: &DatabaseConnection, configured: &str) -> loco_rs::Res
 
 async fn activate_once(db: &DatabaseConnection, configured: &str) -> loco_rs::Result<()> {
     let txn = crate::db::begin_write(db).await?;
-    let mut current_query = Entity::find_by_id(1);
+    let mut current_query = Entity::find_by_id(SINGLETON_ID);
     if db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
         current_query = current_query.lock_exclusive();
     }

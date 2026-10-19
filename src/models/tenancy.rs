@@ -11,6 +11,53 @@ use crate::models::_entities::{tenant_memberships, workspace_workspaces};
 
 use crate::models::workspace_workspaces::{WorkspaceSummary, workspace_count_lock_key};
 
+pub(crate) struct SetupAccount {
+    pub(crate) user_id: Uuid,
+    pub(crate) email: String,
+    pub(crate) tenant_id: Uuid,
+    pub(crate) workspace_id: Uuid,
+}
+
+pub(crate) async fn setup_first_account(
+    db: &sea_orm::DatabaseConnection,
+    max_tenants: Option<i32>,
+    email: &str,
+    password: &str,
+    display_name: Option<&str>,
+) -> Result<SetupAccount, YorishiroError> {
+    use crate::models::{tenant_memberships, tenant_tenants, user_users};
+
+    if max_tenants.is_none() {
+        return Err(YorishiroError::not_found(
+            "the setup wizard is not enabled on this deployment",
+        ));
+    }
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::db::lock_for_update(&txn, "setup").await.internal()?;
+    if tenant_tenants::count_tenants(&txn).await? > 0 {
+        return Err(YorishiroError::Conflict {
+            message: "this deployment has already been set up".into(),
+        });
+    }
+    let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
+    let workspace = create_workspace(&txn, tenant.id, "default", None, None).await?;
+    let user = user_users::create_user(&txn, email, password, display_name).await?;
+    tenant_memberships::add_member(
+        &txn,
+        tenant.id,
+        user.id,
+        tenant_memberships::MembershipRole::Owner,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok(SetupAccount {
+        user_id: user.id,
+        email: user.email,
+        tenant_id: tenant.id,
+        workspace_id: workspace.id,
+    })
+}
+
 /// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold a membership in.
 /// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
 ///

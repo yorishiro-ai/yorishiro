@@ -9,8 +9,8 @@
 use super::merge;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
-use crate::models::schema_schemas::UpstreamChange;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
+use crate::models::schema_schemas::{SchemaOriginStatus, SchemaStatus, UpstreamChange};
 use chrono::{DateTime, Utc};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder,
@@ -69,8 +69,8 @@ pub(crate) async fn list_with_upstream_changes(
                 .into(),
         )
         .filter(schema::Column::WorkspaceId.eq(workspace_id))
-        .filter(schema::Column::Status.eq("active"))
-        .filter(schema::Column::OriginStatus.eq("linked"))
+        .filter(schema::Column::Status.eq(SchemaStatus::Active.as_db_str()))
+        .filter(schema::Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
         .filter(schema::Column::OriginUpdatedAt.is_null())
         .order_by_desc(template::Column::UpdatedAt)
         .limit(page.limit() as u64)

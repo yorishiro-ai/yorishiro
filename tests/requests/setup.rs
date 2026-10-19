@@ -1,9 +1,84 @@
 use axum::http::StatusCode;
+use sea_orm::{EntityTrait, PaginatorTrait};
 use serial_test::serial;
 use yorishiro::App;
 
 use super::boot_request;
 use super::with_max_tenants;
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn concurrent_setup_creates_only_one_account() {
+    with_max_tenants("1", async {
+        boot_request::<App, _, _>(|request, ctx| async move {
+            let first = request.post("/setup").json(&serde_json::json!({
+                "email": "first@example.com", "password": "hunter2-hunter2",
+            }));
+            let second = request.post("/setup").json(&serde_json::json!({
+                "email": "second@example.com", "password": "hunter2-hunter2",
+            }));
+            let (first, second) = tokio::join!(first, second);
+            let mut statuses = [first.status_code(), second.status_code()];
+            statuses.sort();
+            assert_eq!(
+                statuses,
+                [StatusCode::CREATED, StatusCode::CONFLICT],
+                "first: {}; second: {}",
+                first.text(),
+                second.text()
+            );
+            assert_eq!(
+                yorishiro::models::tenant_tenants::Entity::find()
+                    .count(&ctx.db)
+                    .await
+                    .unwrap(),
+                1
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn failed_setup_rolls_back_before_a_valid_retry() {
+    with_max_tenants("1", async {
+        boot_request::<App, _, _>(|request, ctx| async move {
+            yorishiro::models::user_users::create_user(
+                &ctx.db,
+                "taken@example.com",
+                "hunter2-hunter2",
+                None,
+            )
+            .await
+            .unwrap();
+            let invalid = request
+                .post("/setup")
+                .json(&serde_json::json!({
+                    "email": "taken@example.com", "password": "hunter2-hunter2",
+                }))
+                .await;
+            assert_eq!(invalid.status_code(), StatusCode::CONFLICT);
+            assert_eq!(
+                yorishiro::models::tenant_tenants::Entity::find()
+                    .count(&ctx.db)
+                    .await
+                    .unwrap(),
+                0
+            );
+            let valid = request
+                .post("/setup")
+                .json(&serde_json::json!({
+                    "email": "valid@example.com", "password": "hunter2-hunter2",
+                }))
+                .await;
+            assert_eq!(valid.status_code(), StatusCode::CREATED, "{}", valid.text());
+        })
+        .await;
+    })
+    .await;
+}
 
 /// The source default enables first-run setup with a single-tenant cap, even when the environment does not define an override.
 #[tokio::test]

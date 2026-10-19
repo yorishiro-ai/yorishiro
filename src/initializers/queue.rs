@@ -19,18 +19,21 @@ pub(crate) fn install(ctx: &AppContext) {
 
 struct Relay(tokio::task::JoinHandle<()>);
 
-pub(crate) fn start_relay(ctx: &AppContext) {
+pub(crate) fn start_relay(ctx: &AppContext) -> loco_rs::Result<()> {
     if ctx.shared_store.get_ref::<Relay>().is_some() {
-        return;
+        return Ok(());
     }
+    let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
+    let poll_interval = std::time::Duration::from_millis(settings.dispatch.poll_interval_ms);
     let ctx_for_task = ctx.clone();
     let task = tokio::spawn(async move {
         loop {
             crate::workers::dispatch::recover_pending(&ctx_for_task).await;
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(poll_interval).await;
         }
     });
     ctx.shared_store.insert(Relay(task));
+    Ok(())
 }
 
 pub(crate) async fn shutdown(ctx: &AppContext) {
