@@ -360,8 +360,7 @@ Changing this setting does not change when a recorded event occurred, when a job
 
 PostgreSQL `TIMESTAMPTZ` preserves each instant and renders it using the connection's session timezone; it does not store the IANA zone name. The application, identity, and tenant pools initialize their session timezone from this setting.
 SQLite has no session timezone. Application-pool connections provide `CURRENT_TIMESTAMP` in the configured IANA timezone with an explicit offset, preserving the instant when parsed. The function is installed separately on each application-pool connection; queue database connections are not changed. Existing timestamp strings are not rewritten when the configured zone changes. SQLite pool replacement applies the configured `database.run_on_start` SQL on each physical connection only when it is set; otherwise no startup SQL is applied by the replacement pool.
-Queue timestamps are written with the configured zone while retaining their absolute instants; PostgreSQL due claims compare those instants.
-SQLite stores configured-zone queue timestamps and keeps an exact epoch key for scheduling, including legacy rows with offsets.
+Queue storage, claiming and timestamps are Loco 1.2.0 behaviour for the selected provider; the application does not replace the provider or rewrite queue timestamps.
 Valkey stores job instants and uses configured-zone formatting for new state transitions.
 SQLite queue database operations do not change the application database's connection defaults; Loco's test SQLite configuration retains its normal PRAGMA setup.
 Use the same configured zone for every server and worker sharing a database, and treat queue/database values as instants rather than local civil times.

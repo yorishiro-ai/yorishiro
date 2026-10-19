@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use loco_rs::{Result, app::AppContext};
+use loco_rs::app::AppContext;
 
 use crate::workers::dispatch::{EmbeddingSyncDispatcher, LocoJobDispatcher, ReindexDispatcher};
 
@@ -15,18 +15,6 @@ pub(crate) fn install(ctx: &AppContext) {
         .insert(Arc::new(LocoJobDispatcher) as Arc<dyn EmbeddingSyncDispatcher>);
     ctx.shared_store
         .insert(Arc::new(LocoJobDispatcher) as Arc<dyn ReindexDispatcher>);
-}
-
-pub(crate) async fn replace_provider(ctx: &mut AppContext) -> Result<()> {
-    if ctx.config.workers.mode == loco_rs::config::WorkerMode::BackgroundQueue
-        && let Some(queue) = crate::workers::queue::timezone_queue(ctx).await?
-    {
-        if let Some(old) = ctx.queue_provider.as_ref() {
-            old.shutdown()?;
-        }
-        ctx.queue_provider = Some(Arc::new(queue));
-    }
-    Ok(())
 }
 
 struct Relay(tokio::task::JoinHandle<()>);
