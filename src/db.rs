@@ -49,24 +49,7 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
     let tenant = TenantDb::connect(database_url, max_connections, timezone.clone())
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
-    let identity = connect_postgres_pool(
-        database_url,
-        max_connections,
-        timezone.clone(),
-        false,
-        false,
-        Some(ctx.config.database.min_connections),
-        Some(std::time::Duration::from_millis(
-            ctx.config.database.idle_timeout,
-        )),
-        ctx.config
-            .database
-            .acquire_timeout
-            .map(std::time::Duration::from_millis),
-    )
-    .await
-    .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
-    let identity = identity.get_postgres_connection_pool().clone();
+    let identity = ctx.db.get_postgres_connection_pool().clone();
     ctx.shared_store.insert(DbHandle { tenant, identity });
     Ok(())
 }
@@ -134,7 +117,6 @@ pub(crate) async fn replace_sqlite_app_pool(
         .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
         .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
         .sqlx_logging(config.enable_logging);
-    let run_on_start = config.run_on_start.clone();
     if let Some(timeout) = config.acquire_timeout {
         options.acquire_timeout(std::time::Duration::from_millis(timeout));
     }
@@ -144,16 +126,9 @@ pub(crate) async fn replace_sqlite_app_pool(
         ))
     })?;
     options.map_sqlx_sqlite_pool_opts(move |pool| {
-        let run_on_start = run_on_start.clone();
         pool.after_connect(move |conn, _meta| {
-            let run_on_start = run_on_start.clone();
             Box::pin(async move {
                 register_sqlite_timestamp(conn, zone).await?;
-                if let Some(sql) = run_on_start.as_deref() {
-                    sea_orm::sqlx::raw_sql(sea_orm::sqlx::AssertSqlSafe(sql))
-                        .execute(&mut *conn)
-                        .await?;
-                }
                 Ok(())
             })
         })

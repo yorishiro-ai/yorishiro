@@ -69,9 +69,8 @@ use std::str::FromStr;
 
 /// Close every connection pool this app opens on a PostgreSQL test database.
 ///
-/// `after_context` opens two pools Loco's own request-test harness knows nothing about:
-/// the identity pool (eager) and the tenant pool (lazy).
-/// Leaving either open means a session survives on the throwaway test database,
+/// `after_context` adds a tenant pool and shares the application pool with identity operations.
+/// Leaving a pool open means a session survives on the throwaway test database,
 /// and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
 /// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.

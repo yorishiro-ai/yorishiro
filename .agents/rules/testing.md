@@ -124,7 +124,8 @@ The runner rejects unexpected marker directories and fails when the expected top
 
 One definition, in `tests/requests/mod.rs`. One crate means one binary, so every suite reaches it by path.
 
-`after_context` opens the identity pool (eager) and tenant pool (lazy). `ctx.db`'s own pool is a third connection. `spawn_startup_reindex` holds a session on `ctx.db` for the process lifetime. Without signaling its `StartupReindexHandle` before closing pools, `DROP DATABASE` panics.
+`after_context` shares the application pool with identity operations and opens a separate tenant pool.
+Test teardown must explicitly close both pools before `DROP DATABASE`.
 
 ## Boot failure diagnostics
 

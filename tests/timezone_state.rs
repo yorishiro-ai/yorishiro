@@ -46,6 +46,54 @@ async fn postgres_app_pool_uses_configured_timezone_on_new_and_released_connecti
 }
 
 #[tokio::test]
+#[serial(postgres_cluster)]
+async fn postgres_pool_replacement_keeps_uri_settings_without_replaying_startup() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let mut config = ctx.config.clone();
+        let mut uri = reqwest::Url::parse(&config.database.uri).unwrap();
+        uri.query_pairs_mut()
+            .append_pair("options", "-c application_name=startup-session-test");
+        config.database.uri = uri.into();
+        config.database.run_on_start = Some("CREATE TABLE startup_probe AS SELECT 1 AS id".into());
+        let replacement = loco_rs::boot::create_context::<yorishiro::App>(&ctx.environment, config)
+            .await
+            .unwrap();
+        let handle = replacement
+            .shared_store
+            .get::<yorishiro::db::DbHandle>()
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &replacement
+                .db
+                .get_postgres_connection_pool()
+                .connect_options(),
+            &handle.identity.connect_options()
+        ));
+        for pool in [&handle.identity, handle.tenant.pool()] {
+            let mut first = pool.acquire().await.unwrap();
+            let mut second = pool.acquire().await.unwrap();
+            for connection in [&mut first, &mut second] {
+                let name: String = sea_orm::sqlx::query_scalar("SHOW application_name")
+                    .fetch_one(&mut **connection)
+                    .await
+                    .unwrap();
+                assert_eq!(name, "startup-session-test");
+            }
+        }
+        let count: i64 = sea_orm::sqlx::query_scalar("SELECT count(*) FROM startup_probe")
+            .fetch_one(&handle.identity)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+        crate::requests::close_app_pools(&replacement).await;
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_timezone_state_is_seeded_noop_safe_and_preserves_instants() {
     if !crate::require_sqlite_backend() {
         return;
@@ -247,7 +295,7 @@ async fn sqlite_current_timestamp_default_uses_configured_zone_on_each_boot() {
 
 #[tokio::test]
 #[serial(sqlite_timestamp_policy)]
-async fn sqlite_app_pool_preserves_custom_run_on_start_once() {
+async fn sqlite_app_pool_executes_startup_effects_once_not_per_connection() {
     if !crate::require_sqlite_backend() {
         return;
     }
@@ -267,7 +315,7 @@ async fn sqlite_app_pool_preserves_custom_run_on_start_once() {
     config.database.min_connections = 1;
     config.database.max_connections = 2;
     config.database.run_on_start = Some(
-        "PRAGMA foreign_keys = OFF; PRAGMA journal_mode = DELETE; PRAGMA busy_timeout = 2000;"
+        "CREATE TABLE startup_probe (id INTEGER PRIMARY KEY); INSERT INTO startup_probe VALUES (1);"
             .to_owned(),
     );
     config.database.dangerously_truncate = false;
@@ -282,22 +330,11 @@ async fn sqlite_app_pool_preserves_custom_run_on_start_once() {
     let mut second = pool.acquire().await.unwrap();
     assert_ne!(first.as_mut() as *mut _, second.as_mut() as *mut _);
     for connection in [&mut first, &mut second] {
-        let foreign_keys: i64 = sea_orm::sqlx::query_scalar("PRAGMA foreign_keys")
+        let count: i64 = sea_orm::sqlx::query_scalar("SELECT count(*) FROM startup_probe")
             .fetch_one(&mut **connection)
             .await
             .unwrap();
-        let journal_mode: String = sea_orm::sqlx::query_scalar("PRAGMA journal_mode")
-            .fetch_one(&mut **connection)
-            .await
-            .unwrap();
-        let busy_timeout: i64 = sea_orm::sqlx::query_scalar("PRAGMA busy_timeout")
-            .fetch_one(&mut **connection)
-            .await
-            .unwrap();
-        assert_eq!(
-            (foreign_keys, journal_mode.as_str(), busy_timeout),
-            (0, "delete", 2000)
-        );
+        assert_eq!(count, 1);
         let at: String = sea_orm::sqlx::query_scalar("SELECT CURRENT_TIMESTAMP")
             .fetch_one(&mut **connection)
             .await

@@ -358,7 +358,7 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
 pub(crate) async fn on_shutdown(ctx: &AppContext) {
     initializers::queue::shutdown(ctx).await;
     initializers::db_load_guard::shutdown(ctx).await;
-    initializers::database::shutdown(ctx).await;
+    // Loco drains queue workers after this hook; their contexts keep the pools alive.
 }
 
 /// Seeds the demo tenant and workspace from `fixtures/`.

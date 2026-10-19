@@ -1,8 +1,8 @@
-//! Database startup and shutdown wiring; connection primitives remain in `crate::db`.
+//! Database startup wiring; connection primitives remain in `crate::db`.
 
 use loco_rs::{Result, app::AppContext};
 
-use crate::db::{self, AppContextBackend, DbHandle};
+use crate::db::{self, AppContextBackend};
 
 pub(crate) async fn install(ctx: &mut AppContext) -> Result<()> {
     if ctx.is_sqlite() {
@@ -14,11 +14,4 @@ pub(crate) async fn install(ctx: &mut AppContext) -> Result<()> {
         db::install_pools(ctx).await?;
     }
     Ok(())
-}
-
-pub(crate) async fn shutdown(ctx: &AppContext) {
-    if let Some(db) = ctx.shared_store.get::<DbHandle>() {
-        db.identity.close().await;
-        db.tenant.pool().close().await;
-    }
 }

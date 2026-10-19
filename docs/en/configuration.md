@@ -357,7 +357,15 @@ Workspace detail, API key, and API audit response timestamps, as well as log eve
 Changing this setting does not change when a recorded event occurred, when a job is scheduled to run, or when it expires.
 
 PostgreSQL `TIMESTAMPTZ` preserves each instant and renders it using the connection's session timezone; it does not store the IANA zone name. The application, identity, and tenant pools initialize their session timezone from this setting.
-SQLite has no session timezone. Application-pool connections provide `CURRENT_TIMESTAMP` in the configured IANA timezone with an explicit offset, preserving the instant when parsed. The function is installed separately on each application-pool connection; queue database connections are not changed. Existing timestamp strings are not rewritten when the configured zone changes. SQLite pool replacement applies the configured `database.run_on_start` SQL on each physical connection only when it is set; otherwise no startup SQL is applied by the replacement pool.
+SQLite has no session timezone.
+Application-pool connections provide `CURRENT_TIMESTAMP` in the configured IANA timezone with an explicit offset, preserving the instant when parsed.
+The function is installed separately on each application-pool connection; queue database connections are not changed.
+Existing timestamp strings are not rewritten when the configured zone changes.
+`database.run_on_start` retains Loco's one-shot startup semantics on both backends and is never replayed when application pools are replaced or new connections open.
+Use it for persistent database effects, not connection-local session settings.
+For PostgreSQL, put additional per-connection settings in the connection URI's `options` parameter; these survive pool replacement and also apply to the identity and tenant pools.
+The application and identity handles share one migration-role pool, separate from the RLS-scoped tenant pool.
+During shutdown the application stops its relay and load guard, but leaves database pools alive until Loco drains queue workers and their contexts are dropped.
 Queue storage, claiming and timestamps are Loco 1.2.0 behaviour for the selected provider; the application does not replace the provider or rewrite queue timestamps.
 Valkey stores job instants and uses configured-zone formatting for new state transitions.
 SQLite queue database operations do not change the application database's connection defaults; Loco's test SQLite configuration retains its normal PRAGMA setup.
