@@ -26,6 +26,9 @@ This is a regression guardrail, not a blanket ban on `pub` and not a second visi
 
 ## Review Guidance
 
+Derive OpenAPI schemas on the serialized request and response types instead of maintaining contract-only copies of their fields.
+Enterprise schema names in `ee/controllers/openapi.rs` re-export those types; request-only constraints such as a default publish status belong on the corresponding DTO.
+
 The allowlist records only newly approved declarations with a path, kind, symbol, and specific reason.
 
 When an exception is needed, reviewers should consider these intentional boundaries and require the applicable boundary to be named in the concise reason column:

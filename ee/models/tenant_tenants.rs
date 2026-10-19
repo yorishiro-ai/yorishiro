@@ -10,6 +10,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct TenantUsage {
     pub(crate) tenant_id: Uuid,
     pub(crate) workspace_count: i64,

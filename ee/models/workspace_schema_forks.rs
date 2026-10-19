@@ -21,6 +21,7 @@ use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, Entity, Model};
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ForkRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -33,19 +34,25 @@ pub struct ForkRecord {
     pub fork_schema_version: i32,
     pub customized: bool,
     pub upstream_version: Option<i32>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub definition: MetaSchemaDefinition,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = CreateForkRequest))]
 pub struct CreateInput {
     pub source_workspace_id: Uuid,
     pub source_schema_id: Uuid,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = UpdateForkRequest))]
 pub struct UpdateInput {
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
     pub definition: Option<MetaSchemaDefinition>,
     pub action: Option<String>,
     #[serde(default)]

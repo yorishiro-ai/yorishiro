@@ -15,7 +15,7 @@ use loco_rs::controller::Routes;
 
 use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::inference::{
-    InferFillResponse, InferJobStatusResponse, SetLlmKeyRequest,
+    InferFillResponse, InferFillStatus, InferJobStatusResponse, SetLlmKeyRequest,
 };
 use crate::edition::ee::models::inference_jobs;
 use crate::edition::ee::models::inference_jobs::InferenceJobStatus;
@@ -62,7 +62,7 @@ async fn infer_fill(
 
     Ok(Json(InferFillResponse {
         job_id,
-        status: InferenceJobStatus::Queued,
+        status: InferFillStatus::Queued,
     }))
 }
 

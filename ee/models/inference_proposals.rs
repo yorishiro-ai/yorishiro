@@ -28,6 +28,8 @@ crate::db_enum::db_enum! {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = InferenceProposalResponse))]
 pub struct ProposalRecord {
     pub id: Uuid,
     pub job_id: Uuid,
@@ -62,6 +64,8 @@ impl TryFrom<Model> for ProposalRecord {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = ProposalConfirmResponse))]
 pub struct ConfirmReport {
     pub job_id: Uuid,
     pub confirmed: i64,
@@ -70,6 +74,8 @@ pub struct ConfirmReport {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = ProposalActionResponse))]
 pub struct ProposalActionReport {
     pub job_id: Uuid,
     pub changed: i64,

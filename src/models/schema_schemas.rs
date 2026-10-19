@@ -234,6 +234,7 @@ pub(crate) async fn get_by_id(
 ///
 /// Lives here because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpstreamChange {
     pub schema_id: Uuid,
     pub schema_name: String,
@@ -250,6 +251,7 @@ pub struct UpstreamChange {
 
 /// Counts the decisions in a computed origin merge plan.
 #[derive(Clone, Debug, Default, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeDiffSummary {
     pub total_fields: usize,
     pub auto_add: usize,

@@ -33,6 +33,7 @@ fn require_postgres(conn: &impl ConnectionTrait, what: &str) -> Result<(), Yoris
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
 #[derive(Debug, Serialize, FromQueryResult)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketplaceListing {
     pub template_id: Uuid,
     pub name: String,
@@ -50,10 +51,12 @@ pub struct MarketplaceListing {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TemplateVersionRecord {
     pub id: Uuid,
     pub template_id: Uuid,
     pub version: i32,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub definition: Value,
     pub changelog: Option<String>,
     pub status: TemplateVersionStatus,
@@ -172,6 +175,7 @@ impl TryFrom<crate::models::_entities::template_versions::Model> for TemplateVer
 }
 
 #[derive(Debug, Serialize, FromQueryResult)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TemplateReviewRecord {
     pub id: Uuid,
     pub template_id: Uuid,
@@ -244,6 +248,7 @@ fn default_status() -> TemplateVersionStatus {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SubmitReviewRequest {
     pub rating: i16,
     pub comment: Option<String>,

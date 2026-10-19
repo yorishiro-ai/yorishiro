@@ -47,6 +47,8 @@ impl WorkspaceEmbeddingResolver for EmbeddingKeyResolver {
 ///
 /// `api_key` is deliberately absent rather than masked, matching `workspace_llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = EmbeddingKeyResponse))]
 pub(crate) struct EmbeddingKeyDescription {
     pub(crate) base_url: String,
     pub(crate) model: String,

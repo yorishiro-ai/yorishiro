@@ -1,6 +1,5 @@
 use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    QuerySelect, Set,
+    ActiveModelBehavior, ActiveModelTrait, DatabaseConnection, EntityTrait, QuerySelect, Set,
 };
 use std::time::Duration;
 

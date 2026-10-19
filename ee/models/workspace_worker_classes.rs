@@ -29,6 +29,8 @@ impl WorkerClassResolver for WorkerClassAssignmentResolver {
 
 /// What a workspace has configured, for an endpoint to report.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = WorkerClassResponse))]
 pub(crate) struct WorkerClassAssignment {
     pub(crate) worker_class: WorkerClass,
 }

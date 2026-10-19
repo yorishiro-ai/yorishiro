@@ -18,6 +18,8 @@ use crate::edition::ee::services::inference::InferenceConfig;
 ///
 /// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = LlmKeyResponse))]
 pub(crate) struct LlmKeyDescription {
     pub(crate) base_url: String,
     pub(crate) model: String,
