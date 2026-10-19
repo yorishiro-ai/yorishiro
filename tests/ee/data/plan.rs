@@ -10,10 +10,26 @@ async fn admission_limits_follow_the_resolved_config_not_later_environment_chang
     let guard = EnvGuard::capture(&[
         "YORISHIRO_PLAN_POLICY_ENABLED",
         "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
+        "DATABASE_URL",
+        "QUEUE_URL",
     ]);
     guard.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
     guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "2");
     let directory = tempfile::tempdir().unwrap();
+    guard.set(
+        "DATABASE_URL",
+        format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("app.sqlite3").display()
+        ),
+    );
+    guard.set(
+        "QUEUE_URL",
+        format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("queue.sqlite3").display()
+        ),
+    );
     let env = Environment::Any("test_sqlite".into());
     let mut config = yorishiro::App::load_config(&env).await.unwrap();
     config.database.uri = format!(

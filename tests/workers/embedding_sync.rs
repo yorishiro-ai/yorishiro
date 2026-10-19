@@ -156,7 +156,7 @@ mod conflict {
     use futures::FutureExt;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker, sqlt};
-    use loco_rs::config::{PostgresQueueConfig, RedisQueueConfig, SqliteQueueConfig};
+    use loco_rs::config::{RedisQueueConfig, SqliteQueueConfig};
     use loco_rs::prelude::async_trait;
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, IntoActiveModel,
@@ -338,7 +338,7 @@ mod conflict {
 
     impl QueueHarness {
         /// Builds the harness for whichever queue the lane configured, so a scenario runs on SQLite, PostgreSQL and Redis alike.
-        /// Each call gets its own SQLite file; PostgreSQL and Redis queues are shared, so callers take the queue serialization lock.
+        /// SQLite uses a private file and PostgreSQL uses the app's throwaway database; Redis callers serialize shared-namespace work.
         async fn lane(ctx: AppContext, workers: u32) -> Self {
             match ctx.config.queue.clone().expect("lane queue") {
                 loco_rs::config::QueueConfig::Sqlite(_) => {
@@ -351,8 +351,9 @@ mod conflict {
                     )
                     .await
                 }
-                loco_rs::config::QueueConfig::Postgres(queue) => {
-                    Self::postgres(ctx, queue.uri, workers).await
+                loco_rs::config::QueueConfig::Postgres(_) => {
+                    let uri = ctx.config.database.uri.clone();
+                    Self::postgres(ctx, uri, workers).await
                 }
                 loco_rs::config::QueueConfig::Redis(queue) => {
                     Self::redis(ctx, queue.uri, workers).await
@@ -404,32 +405,24 @@ mod conflict {
         }
 
         async fn postgres(ctx: AppContext, uri: String, workers: u32) -> Self {
-            let queue = Arc::new(
-                bgworker::pg::create_provider(&PostgresQueueConfig {
-                    uri: uri.clone(),
-                    dangerously_flush: true,
-                    enable_logging: false,
-                    max_connections: 2,
-                    min_connections: 1,
-                    connect_timeout: 5_000,
-                    idle_timeout: 5_000,
-                    poll_interval_sec: 1,
+            let pool = sea_orm::sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&uri)
+                .await
+                .expect("PostgreSQL queue pool");
+            let provider = bgworker::pg::PgQueue {
+                pool: pool.clone(),
+                registry: Arc::new(tokio::sync::Mutex::new(bgworker::pg::JobRegistry::new())),
+                run_opts: bgworker::pg::RunOpts {
                     num_workers: workers,
+                    poll_interval_sec: 1,
                     reaper: None,
-                })
-                .await
-                .expect("PostgreSQL queue"),
-            );
+                },
+                token: Default::default(),
+            };
+            let queue = Arc::new(bgworker::Queue::from_provider(Arc::new(provider)));
             queue.setup().await.expect("set up PostgreSQL queue");
-            queue
-                .clear()
-                .await
-                .expect("clear reserved PostgreSQL test queue");
-            let observation = BackendObservation::Postgres(
-                sea_orm::sqlx::PgPool::connect(&uri)
-                    .await
-                    .expect("connect to PostgreSQL queue"),
-            );
+            let observation = BackendObservation::Postgres(pool);
             let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
             queue
                 .register(EmbeddingSyncWorker::build(&ctx))
