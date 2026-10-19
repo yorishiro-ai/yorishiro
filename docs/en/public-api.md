@@ -26,10 +26,15 @@ This is a regression guardrail, not a blanket ban on `pub` and not a second visi
 
 ## Review Guidance
 
+Use Loco's cryptographically secure `hash::random_string` for API keys, invitations and OAuth nonces instead of maintaining separate byte/hex or UUID-based secret generators.
+Choose lengths from the required entropy and protocol grammar; the application no longer depends directly on `rand`, although framework dependencies still use it transitively.
+
 Queue-provider tests must isolate their storage and must not clear a shared configured database.
 Use Loco's throwaway database harness for PostgreSQL routing tests, including tests run concurrently in separate edition processes.
 
 Keep shared behavior in Loco's model extensions, not in controllers or a repository layer.
+Transport adapters use the shared request authentication guard instead of selecting database backends themselves.
+Credential resolution, scope checks and workspace transactions remain separate operations so resolution-only routes do not gain usage writes or hold unnecessary connections.
 Use typed settings for deployment tuning, existing enums for closed domain values, and named constants for protocol limits and retry policies.
 Use structs for coherent state and traits for behavior that actually varies at runtime, not to wrap static edition assembly.
 An overlay implementing the same functionality mirrors the base directory and file name; CE never imports or branches on the overlay.

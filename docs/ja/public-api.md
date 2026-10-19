@@ -26,6 +26,13 @@ CI では `PUBLIC_API_BASE_REF` と `PUBLIC_API_HEAD_REF` に明示的な base �
 
 ## レビュー指針
 
+APIキー、招待、OAuthのnonce生成はLocoの暗号学的に安全な`hash::random_string`を使い、独自の乱数バイト変換やUUIDによる秘密値生成を持たないでください。
+長さは必要なエントロピーとプロトコルの文字制約から決めます。
+アプリケーションの`rand`直接依存は削除しましたが、フレームワークなどの推移依存には残ります。
+
+transport adapterはDBのbackendを自身で選ばず、共通のrequest認証guardを使用します。
+認証情報の解決、scopeの検査、workspace transactionを分け、認証の解決だけを行うrouteに使用履歴の更新や不要な接続保持を追加しないでください。
+
 queue providerの試験は保存先を隔離し、設定された共有DBを全消去しないでください。
 PostgreSQLのrouting試験にはLocoの使い捨てDBを使い、別プロセスで並行するeditionの試験とも干渉しないようにします。
 

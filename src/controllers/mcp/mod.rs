@@ -27,9 +27,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ServerHandler, tool_handler};
 use sea_orm::DatabaseTransaction;
 
-use crate::controllers::extractors::{authenticator, db_handle};
 use crate::controllers::middleware::auth;
-use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 
@@ -245,7 +243,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
 /// The sole entry point for every tool handler.
 /// Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
 ///
-/// Shares `controllers::middleware::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
+/// Shares `RequestAuth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
 pub(crate) async fn authorize(
     ctx: &AppContext,
     parts: &Parts,
@@ -254,26 +252,10 @@ pub(crate) async fn authorize(
     let presented_key = extract_bearer_key(parts)?;
     let headers = auth::header_pairs(parts);
 
-    // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
-    // directly against ctx.db and opens a plain transaction, mirroring the REST adapter's
-    // `Authorized<R>` SQLite extractor.
-    if ctx.is_sqlite() {
-        return match auth::authorize_sqlite(&ctx.db, presented_key, required).await {
-            Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
-            Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
-                Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
-            }
-            Err(YorishiroError::Unauthenticated) => {
-                Err(ErrorData::invalid_request("authentication failed", None))
-            }
-            Err(err) => Err(crate::error::mcp_internal(err)),
-        };
-    }
-
-    let db = db_handle(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
-    let auth_impl = authenticator(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
-
-    match auth::authorize(&db, auth_impl.as_ref(), presented_key, required, &headers).await {
+    match auth::RequestAuth::new(ctx)
+        .authorize(presented_key, required, &headers)
+        .await
+    {
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
@@ -286,7 +268,7 @@ pub(crate) async fn authorize(
 }
 
 /// Connection-less counterpart to `authorize`, used by tools that must run a slow operation (embedding generation) before touching the database.
-/// See `controllers::middleware::auth::authorize_scope`.
+/// See `RequestAuth::verify`.
 pub(super) async fn verify(
     ctx: &AppContext,
     parts: &Parts,
@@ -295,26 +277,10 @@ pub(super) async fn verify(
     let presented_key = extract_bearer_key(parts)?;
     let headers = auth::header_pairs(parts);
 
-    // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
-    // directly against ctx.db instead of going through the Authenticator trait, mirroring the REST
-    // adapter's `AuthContext` extractor (extractors.rs) and `Verified<R>` extractor.
-    if ctx.is_sqlite() {
-        return match auth::authorize_scope_sqlite(&ctx.db, presented_key, required).await {
-            Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
-            Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
-                Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))
-            }
-            Err(YorishiroError::Unauthenticated) => {
-                Err(ErrorData::invalid_request("authentication failed", None))
-            }
-            Err(err) => Err(crate::error::mcp_internal(err)),
-        };
-    }
-
-    let db = db_handle(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
-    let auth_impl = authenticator(ctx).map_err(|err| crate::error::mcp_internal(err.0))?;
-
-    match auth::authorize_scope(&db, auth_impl.as_ref(), presented_key, required, &headers).await {
+    match auth::RequestAuth::new(ctx)
+        .verify(presented_key, required, &headers)
+        .await
+    {
         Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))

@@ -8,6 +8,57 @@ use super::fixtures::{self, TenantArgs};
 use super::{boot_request, boot_request_with_timezone};
 
 #[tokio::test]
+async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
+    use sea_orm::EntityTrait;
+    use yorishiro::models::api_keys::{ApiKeyScope, Entity};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, workspace_id, owner_id, _) =
+            fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
+        let key =
+            fixtures::issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let before = Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.scope == "read")
+            .unwrap();
+        assert!(before.last_used_at.is_none());
+        let denied = request
+            .post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"entity_type":"note", "data":{}}))
+            .await;
+        assert_eq!(denied.status_code(), StatusCode::FORBIDDEN);
+        assert!(
+            Entity::find_by_id(before.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .last_used_at
+                .is_none()
+        );
+        let read = request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(read.status_code(), StatusCode::OK);
+        assert!(
+            Entity::find_by_id(before.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .last_used_at
+                .is_some()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
     boot_request_with_timezone::<App, _, _>("Asia/Tokyo", |request, ctx| async move {
         let timezone = ctx
@@ -49,6 +100,16 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         );
 
         let full_key = created_body["full_key"].as_str().unwrap().to_owned();
+        let parts: Vec<_> = full_key.split('_').collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "ysr");
+        assert_eq!(parts[1].len(), 12);
+        assert_eq!(parts[2].len(), 48);
+        assert!(
+            parts[1..]
+                .iter()
+                .all(|part| part.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        );
         let listed = request
             .get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {owner_key}"))

@@ -6,6 +6,17 @@ const KEY: &[u8] = b"a signing key";
 #[test]
 fn issued_state_verifies_and_the_csrf_hash_matches_the_cookie() {
     let issued = issue_at(KEY, 1_700_000_000);
+    assert_eq!(issued.csrf_cookie_value.len(), 22);
+    assert!(
+        issued
+            .csrf_cookie_value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric())
+    );
+    let verifier = issued.state.split('.').nth(2).unwrap();
+    assert_eq!(verifier.len(), 43);
+    assert!(verifier.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+    assert_ne!(issued.state, issue_at(KEY, 1_700_000_000).state);
     let verified =
         verify_at(KEY, &issued.state, 1_700_000_000).expect("a freshly issued state must verify");
     assert_eq!(

@@ -151,21 +151,11 @@ fn bearer_token(headers: &HeaderMap) -> Result<&str, YorishiroError> {
         .ok_or(YorishiroError::Unauthenticated)
 }
 
-fn db_handle(ctx: &AppContext) -> Result<DbHandle, YorishiroError> {
-    ctx.shared_store
-        .get::<DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))
-}
-
 async fn authenticate(
     ctx: &AppContext,
     headers: &HeaderMap,
 ) -> Result<AuthContext, YorishiroError> {
     let token = bearer_token(headers)?;
-    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return crate::models::api_keys::Entity::authenticate_sqlite(&ctx.db, token).await;
-    }
-    let db = db_handle(ctx)?;
     let forwarded = headers
         .iter()
         .filter_map(|(name, value)| {
@@ -175,9 +165,8 @@ async fn authenticate(
                 .map(|value| (name.as_str().to_owned(), value.to_owned()))
         })
         .collect::<Vec<_>>();
-    crate::controllers::extractors::authenticator(ctx)
-        .map_err(|error| error.0)?
-        .authenticate(&db, token, &forwarded)
+    base_auth::RequestAuth::new(ctx)
+        .resolve(token, &forwarded)
         .await
 }
 

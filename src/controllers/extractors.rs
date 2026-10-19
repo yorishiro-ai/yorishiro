@@ -7,8 +7,7 @@ use axum::http::request::Parts;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
-use crate::controllers::middleware::auth::{self, Authenticator};
-use crate::db::{AppContextBackend, DbHandle};
+use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
 use crate::models::api_keys::{self, ApiKeyScope};
 
@@ -25,41 +24,13 @@ fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
     tracing::warn!(client = %client, path = %parts.uri.path(), error = %err, "request rejected during authentication");
 }
 
-/// Copies the request's headers into the shape [`auth::Authenticator`] takes.
-/// Headers whose value cannot be read as UTF-8 are dropped rather than failing the request.
-/// Shared by every extractor in this file.
+/// Requires a nonempty bearer credential and logs rejection without exposing it.
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
     auth::extract_bearer_key(parts).ok_or_else(|| {
         let err = YorishiroError::Unauthenticated;
         log_auth_rejection(parts, &err);
         ApiError(err)
     })
-}
-
-/// Also used by the MCP adapter (`controllers::mcp`), which authorizes per-tool rather than through this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of `shared_store`.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
-    ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-        ApiError(YorishiroError::Internal(anyhow::anyhow!(
-            "DbHandle missing"
-        )))
-    })
-}
-
-/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, ApiError> {
-    ctx.shared_store
-        .get::<Arc<dyn Authenticator>>()
-        .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "Authenticator missing"
-            )))
-        })
 }
 
 /// The `WorkerClass` `workspace_id`'s queued jobs should carry: its own assignment through the `WorkerClassResolver` trait object if it has one, `WorkerClass::Shared` otherwise.
@@ -83,7 +54,7 @@ pub(crate) async fn resolve_worker_class(
         .unwrap_or(crate::workers::embedding_sync::WorkerClass::Shared))
 }
 
-/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
+/// The workspace search quota shared by REST and MCP.
 pub(crate) fn search_token_limiter(
     ctx: &AppContext,
 ) -> Result<Arc<crate::controllers::middleware::rate_limit::RateLimiter>, ApiError> {
@@ -112,25 +83,11 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
-        if app_ctx.is_sqlite() {
-            let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
-                .await
-                .inspect_err(|err| log_auth_rejection(parts, err))?;
-            api_keys::Entity::touch_last_used(&app_ctx.db, ctx.api_key_id).await;
-            return Ok(AuthContext(ctx));
-        }
-
         let headers = auth::header_pairs(parts);
-        let db = db_handle(&app_ctx)?;
-        let auth_impl = authenticator(&app_ctx)?;
-
-        let ctx = auth_impl
-            .authenticate(&db, presented_key, &headers)
+        let ctx = auth::RequestAuth::new(&app_ctx)
+            .authenticate(presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
-
-        auth::touch_last_used_on(&db, ctx.tenant_id, ctx.workspace_id, ctx.api_key_id).await;
 
         Ok(AuthContext(ctx))
     }
@@ -208,27 +165,11 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // See AuthContext's own SQLite branch: no DbHandle/Authenticator is built for that backend, so this authenticates and begins a plain transaction on ctx.db directly (auth::authorize_sqlite).
-        if app_ctx.is_sqlite() {
-            let (ctx, txn) = auth::authorize_sqlite(&app_ctx.db, presented_key, R::SCOPE)
-                .await
-                .inspect_err(|err| log_auth_rejection(parts, err))?;
-            return Ok(Authorized {
-                app_ctx,
-                ctx,
-                txn,
-                _scope: PhantomData,
-            });
-        }
-
         let headers = auth::header_pairs(parts);
-        let db = db_handle(&app_ctx)?;
-        let auth_impl = authenticator(&app_ctx)?;
-
-        let (ctx, txn) =
-            auth::authorize(&db, auth_impl.as_ref(), presented_key, R::SCOPE, &headers)
-                .await
-                .inspect_err(|err| log_auth_rejection(parts, err))?;
+        let (ctx, txn) = auth::RequestAuth::new(&app_ctx)
+            .authorize(presented_key, R::SCOPE, &headers)
+            .await
+            .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Authorized {
             app_ctx,
@@ -276,23 +217,9 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // See Authorized<R>'s own SQLite branch.
-        if app_ctx.is_sqlite() {
-            let (ctx, txn) = auth::authorize_audit_sqlite(&app_ctx.db, presented_key)
-                .await
-                .inspect_err(|err| log_auth_rejection(parts, err))?;
-            return Ok(AuditAuthorized {
-                app_ctx,
-                ctx,
-                txn: std::sync::Arc::new(tokio::sync::Mutex::new(txn)),
-            });
-        }
-
         let headers = auth::header_pairs(parts);
-        let db = db_handle(&app_ctx)?;
-        let auth_impl = authenticator(&app_ctx)?;
-
-        let (ctx, txn) = auth::authorize_audit(&db, auth_impl.as_ref(), presented_key, &headers)
+        let (ctx, txn) = auth::RequestAuth::new(&app_ctx)
+            .authorize_audit(presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
@@ -325,23 +252,8 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
-        if app_ctx.is_sqlite() {
-            let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
-                .await
-                .inspect_err(|err| log_auth_rejection(parts, err))?;
-            auth::require_scope(&ctx, R::SCOPE)?;
-            api_keys::Entity::touch_last_used(&app_ctx.db, ctx.api_key_id).await;
-            return Ok(Verified {
-                ctx,
-                _scope: PhantomData,
-            });
-        }
-
-        let db = db_handle(&app_ctx)?;
-        let auth_impl = authenticator(&app_ctx)?;
-
-        let ctx = auth::authorize_scope(&db, auth_impl.as_ref(), presented_key, R::SCOPE, &headers)
+        let ctx = auth::RequestAuth::new(&app_ctx)
+            .verify(presented_key, R::SCOPE, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 

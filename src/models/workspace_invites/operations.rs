@@ -9,12 +9,12 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_invites::Column;
-use crate::models::api_keys::{hash_key, random_hex};
+use crate::models::api_keys::hash_key;
 use crate::models::tenant_memberships::MembershipRole;
 
 use super::{ActiveModel, Entity, Model, RedeemedInvite};
 
-const INVITE_TOKEN_BYTES: usize = 24;
+const INVITE_TOKEN_LENGTH: usize = 48;
 
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
 /// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
@@ -44,7 +44,7 @@ pub async fn create_invite_at(
     ttl: Duration,
     now: DateTime<Utc>,
 ) -> Result<(Model, String), YorishiroError> {
-    let token = random_hex(INVITE_TOKEN_BYTES);
+    let token = loco_rs::hash::random_string(INVITE_TOKEN_LENGTH);
     let token_hash = hash_key(&token);
     let expires_at = now + ttl;
 

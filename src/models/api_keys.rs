@@ -1,4 +1,3 @@
-use rand::Rng;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, TransactionTrait};
 use sha2::{Digest, Sha256};
@@ -7,8 +6,8 @@ use crate::db::DbHandle;
 use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 
-const KEY_PREFIX_BYTES: usize = 6;
-const KEY_SECRET_BYTES: usize = 24;
+const KEY_PREFIX_LENGTH: usize = 12;
+const KEY_SECRET_LENGTH: usize = 48;
 
 db_enum! {
     /// Permission level held by an API key.
@@ -56,13 +55,6 @@ pub struct CreatedApiKey {
     /// The raw API key string.
     /// Only its hash is stored in the DB, so this return value is the only place it can ever be obtained.
     pub plaintext: String,
-}
-
-/// Returns `byte_len` CSPRNG bytes as lowercase hex without identifier version bits.
-pub(crate) fn random_hex(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    rand::rng().fill_bytes(&mut bytes);
-    crate::data::encoding::hex(bytes)
 }
 
 /// Hashes a presented key into the form stored in `api_keys.key_hash`.
@@ -248,7 +240,7 @@ impl Entity {
         }
     }
 
-    /// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part (192 bits) is the actual credential.
+    /// Issues a new API key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
     /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or any other flow provisioning a key for an ordinary user.
@@ -284,8 +276,8 @@ impl Entity {
             .internal()?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-        let prefix = format!("ysr_{}", random_hex(KEY_PREFIX_BYTES));
-        let secret = random_hex(KEY_SECRET_BYTES);
+        let prefix = format!("ysr_{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
+        let secret = loco_rs::hash::random_string(KEY_SECRET_LENGTH);
         let plaintext = format!("{prefix}_{secret}");
         let key_hash = hash_key(&plaintext);
 

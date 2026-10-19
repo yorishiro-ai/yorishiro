@@ -162,7 +162,7 @@ pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDo
 }
 
 fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {
-    // `api_key` is a value this process just generated (`ysr_<hex>_<hex>`, see `crate::services::auth::create_api_key`), not provider- or user-supplied input, so no additional encoding is needed for it to appear safely in a URL fragment.
+    // Generated keys contain only alphanumeric characters and underscores, so no fragment encoding is needed.
     let location = format!("/#api_key={api_key}");
     (
         StatusCode::FOUND,
