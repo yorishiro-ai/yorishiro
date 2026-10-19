@@ -43,18 +43,20 @@ pub(crate) async fn fill_defaults_completed(
 ) -> Result<bool, YorishiroError> {
     use crate::models::_entities::api_key_audit_log::Column;
     use sea_orm::QuerySelect;
-    // JSON extraction differs between the two supported backends.
-    let predicate = match conn.get_database_backend() {
-        sea_orm::DatabaseBackend::Postgres => "detail->>'job_id' = $1",
-        _ => "json_extract(detail, '$.job_id') = ?",
+    use sea_orm::{
+        ExprTrait,
+        sea_query::{Alias, Expr, Func, extension::postgres::PgExpr},
+    };
+    let job = match conn.get_database_backend() {
+        sea_orm::DatabaseBackend::Postgres => Expr::col(Column::Detail).cast_json_field("job_id"),
+        _ => Func::cust(Alias::new("json_extract"))
+            .args([Expr::col(Column::Detail), Expr::val("$.job_id")])
+            .into(),
     };
     Ok(Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Action.eq(AuditAction::FillDefaults.as_db_str()))
-        .filter(sea_orm::sea_query::Expr::cust_with_values(
-            predicate,
-            [job_id.to_string()],
-        ))
+        .filter(job.eq(job_id.to_string()))
         .select_only()
         .column(Column::Id)
         .into_tuple::<Uuid>()

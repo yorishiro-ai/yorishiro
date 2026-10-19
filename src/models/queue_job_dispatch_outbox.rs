@@ -4,7 +4,7 @@ use std::fmt;
 use sea_orm::entity::prelude::*;
 use sea_orm::{
     ActiveValue::Set, Condition, ConnectionTrait, DatabaseConnection, DbErr, ExprTrait,
-    IntoActiveModel, QueryOrder, QuerySelect, QueryTrait, Statement, TransactionTrait,
+    IntoActiveModel, QueryOrder, QuerySelect, QueryTrait, TransactionTrait,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -86,14 +86,7 @@ pub(crate) async fn lock_publisher_shared(txn: &impl ConnectionTrait) -> Result<
     if backend == sea_orm::DatabaseBackend::Sqlite {
         reserve_publisher_write(txn).await
     } else {
-        let row = txn
-            .query_one_raw(Statement::from_string(
-                txn.get_database_backend(),
-                "SELECT public.queue_publishing_epoch_shared_lock() AS epoch",
-            ))
-            .await?
-            .ok_or_else(|| DbErr::RecordNotFound("queue publishing state".into()))?;
-        row.try_get("", "epoch")
+        publisher_lock_epoch(txn, "queue_publishing_epoch_shared_lock").await
     }
 }
 
@@ -106,19 +99,22 @@ pub(crate) async fn lock_publisher_exclusive(txn: &impl ConnectionTrait) -> Resu
         reserve_publisher_write(txn).await?;
         return Ok(());
     }
-    let row = txn
-        .query_one_raw(Statement::from_string(
-            txn.get_database_backend(),
-            if backend == sea_orm::DatabaseBackend::Postgres {
-                "SELECT public.queue_publishing_epoch_exclusive_lock() AS epoch"
-            } else {
-                "SELECT epoch FROM queue_publishing_state WHERE id = 1"
-            },
-        ))
-        .await?
-        .ok_or_else(|| DbErr::RecordNotFound("queue publishing state".into()))?;
-    let _: i64 = row.try_get("", "epoch")?;
+    publisher_lock_epoch(txn, "queue_publishing_epoch_exclusive_lock").await?;
     Ok(())
+}
+
+async fn publisher_lock_epoch(txn: &impl ConnectionTrait, function: &str) -> Result<i64, DbErr> {
+    use sea_orm::sea_query::{Alias, Func, Query};
+    let statement = Query::select()
+        .expr_as(
+            Func::cust(Alias::new(format!("public.{function}"))),
+            Alias::new("epoch"),
+        )
+        .to_owned();
+    txn.query_one_raw(txn.get_database_backend().build(&statement))
+        .await?
+        .ok_or_else(|| DbErr::RecordNotFound("queue publishing state".into()))?
+        .try_get("", "epoch")
 }
 
 /// SQLite has no row locks; a no-op write reserves its writer before reading the epoch.
