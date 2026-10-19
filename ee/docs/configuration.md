@@ -41,7 +41,9 @@ Poll `GET /api/inference-jobs/{job_id}` with a read-scoped key until the status 
 The job record stores its status, proposed, applied, and skipped counts, and a serialized error message, so polling continues to work after a server restart.
 Infer-fill stores each model answer as a `pending` proposal instead of writing guessed data to the entity.
 List proposals with `GET /api/inference-jobs/{job_id}/proposals`, then explicitly confirm, reject, or discard them with `POST /api/inference-jobs/{job_id}/confirm`, `/reject`, or `/discard`.
-Confirmation validates the merged entity against the target schema, snapshots accepted writes for `POST /api/migration-jobs/{job_id}/undo`, and marks stale or invalid proposals without changing the entity.
+Confirmation returns 202 with a new confirmation `job_id`; poll `GET /api/inference-jobs/confirmations/{job_id}` with schema scope for its status and result counts.
+The confirmation worker validates the merged entity against the target schema, snapshots accepted writes using the original inference job ID for `POST /api/migration-jobs/{job_id}/undo`, and marks stale or invalid proposals without changing the entity.
+Rejection and discard remain synchronous.
 Proposal delivery is idempotent for the same job, entity, schema version, and source field.
 All proposal actions require the workspace's schema scope, while listing requires read scope.
 The workspace key is never included in job records, proposal responses, or logs, and a missing workspace key rejects the request before a job is created.

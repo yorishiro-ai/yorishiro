@@ -49,7 +49,9 @@ Within a workspace, document and query embeddings resolve the same configured pr
 
 If the worker times out or reports a provider failure, search returns `503`; it does not silently fall back to lexical-only results.
 
-There is one exception: if you import a backup file (`import_jsonl`), the imported entities do not have embeddings yet. They are still searchable through fuzzy text matching (the words you type are matched against the text), but similarity search results will be incomplete until embeddings are generated. You can generate embeddings for all entities with:
+Backup imports (`import_jsonl`) also enqueue document embeddings when the import worker commits the imported entities.
+Import completion does not mean that those embedding jobs have finished, so similarity results may remain incomplete while they run.
+To regenerate embeddings for all entities, use:
 
 ```
 cargo loco task resync_embeddings workspace_id:<uuid>
