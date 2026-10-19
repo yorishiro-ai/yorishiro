@@ -14,7 +14,7 @@ pub(crate) use tenancy::{
 };
 
 /// A workspace summary returned by tenancy lookups and signup.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, sea_orm::FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceSummary {
     pub id: Uuid,

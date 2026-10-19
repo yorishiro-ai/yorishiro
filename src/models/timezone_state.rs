@@ -1,20 +1,12 @@
 use sea_orm::{
-    AccessMode, ActiveModelBehavior, ActiveModelTrait, ConnectionTrait, DatabaseConnection, DbErr,
-    EntityTrait, QuerySelect, Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    ActiveModelBehavior, ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    QuerySelect, Set,
 };
 use std::time::Duration;
 
 pub use super::_entities::timezone_state::{ActiveModel, Entity};
 
-#[loco_rs::prelude::async_trait]
-impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, _db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
-    where
-        C: ConnectionTrait,
-    {
-        Ok(self)
-    }
-}
+impl ActiveModelBehavior for ActiveModel {}
 
 /// Stores the process-configured zone without changing any persisted timestamp instant.
 ///
@@ -36,12 +28,7 @@ pub async fn activate(db: &DatabaseConnection, configured: &str) -> loco_rs::Res
 }
 
 async fn activate_once(db: &DatabaseConnection, configured: &str) -> loco_rs::Result<()> {
-    let options = TransactionOptions {
-        access_mode: Some(AccessMode::ReadWrite),
-        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-        ..Default::default()
-    };
-    let txn = db.begin_with_options(options).await?;
+    let txn = crate::db::begin_write(db).await?;
     let mut current_query = Entity::find_by_id(1);
     if db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
         current_query = current_query.lock_exclusive();
