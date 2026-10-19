@@ -1716,32 +1716,18 @@ mod conflict {
                 }
             });
             tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                while Entity::find_by_id(follower_id)
-                    .one(&ctx.db)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .status
-                    != LifecycleStatus::Queued.as_db_str()
-                {
-                    tokio::task::yield_now().await;
+                let entered = provider.entered.notified();
+                tokio::pin!(entered);
+                entered.as_mut().enable();
+                holder.abort();
+                let join = holder.await.unwrap_err();
+                assert!(join.is_cancelled());
+                // Register before cancellation so a fast hand-off cannot lose notify_waiters.
+                if provider.order.lock().unwrap().len() != 2 {
+                    entered.await;
                 }
-            })
-            .await
-            .unwrap();
-
-            holder.abort();
-            let join = holder.await.unwrap_err();
-            assert!(join.is_cancelled());
-            // Dropping the holder releases the embedding permit, so the follower may enter the provider before this task runs again.
-            // Wait for that hand-off instead of assuming it has not happened yet.
-            // Two recorded calls with exactly one active proves the holder released its provider slot and the follower took it.
-            tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                while provider.order.lock().unwrap().len() != 2
-                    || provider.active.load(Ordering::SeqCst) != 1
-                {
-                    tokio::task::yield_now().await;
-                }
+                assert_eq!(provider.order.lock().unwrap().len(), 2);
+                assert_eq!(provider.active.load(Ordering::SeqCst), 1);
             })
             .await
             .expect(
