@@ -14,6 +14,15 @@ def test_ee_paths_select_ee() -> None:
     assert classify_path("ee/models/example.rs") == {"ee"}
 
 
+def test_root_markdown_runs_no_ci() -> None:
+    assert classify_path("README.md") == set()
+    result = classify(["README.md", "README.jp.md", "CONTRIBUTING.md", "AGENTS.md"])
+    assert not result["full"]
+    assert not any(result[group] for group in ALL)
+    assert not result["rust_validation"] and not result["package_build"]
+    assert classify_path("scripts/notes.md") == ALL
+
+
 def test_packaging_selects_package_and_rust() -> None:
     result = classify(["packaging/nfpm-yorishiro-ce.yaml"])
     assert result["package_build"] and result["package_validation"]
@@ -86,6 +95,7 @@ if __name__ == "__main__":
     for test in (
         test_unknown_defaults_to_full,
         test_ee_paths_select_ee,
+        test_root_markdown_runs_no_ci,
         test_packaging_selects_package_and_rust,
         test_release_workflow_selects_all_validations,
         test_manual_full_run_selects_every_group,

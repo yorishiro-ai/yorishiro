@@ -20,6 +20,8 @@ DOCKER_ACTION_CONSUMERS = {"docker", "release"}
 def classify_path(path: str) -> set[str]:
     p = PurePosixPath(path)
     s = str(p)
+    if "/" not in s and p.suffix == ".md":
+        return set()
     groups: set[str] = set()
 
     if s.startswith((".github/actions/rust-setup/", ".github/actions/sea-orm-cli/")):
