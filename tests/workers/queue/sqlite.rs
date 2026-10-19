@@ -41,6 +41,44 @@ async fn provider() -> (TempDir, SqliteTimezoneQueue) {
 }
 
 #[tokio::test]
+async fn tagged_claim_matches_json_values_not_like_patterns() {
+    let (_directory, provider) = provider().await;
+    provider.setup().await.unwrap();
+    let id = provider
+        .enqueue(
+            "probe".into(),
+            None,
+            serde_json::json!({}),
+            Some(vec!["worker_%_exact".into()]),
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        yorishiro::workers::queue::sqlite::dequeue(
+            &provider.pool,
+            &["worker_%".into()],
+            provider.timezone,
+        )
+        .await
+        .unwrap()
+        .is_none()
+    );
+    let claimed = yorishiro::workers::queue::sqlite::dequeue(
+        &provider.pool,
+        &["worker_%_exact".into()],
+        provider.timezone,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(claimed.id, id);
+    provider.shutdown().unwrap();
+    provider.pool.close().await;
+}
+
+#[tokio::test]
 async fn later_worker_panic_is_observed_while_an_earlier_handler_is_busy() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = config(&dir.path().join("supervision.sqlite"));
