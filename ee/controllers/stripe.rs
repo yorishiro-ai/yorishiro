@@ -11,8 +11,8 @@ use loco_rs::controller::Routes;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
 use crate::db;
-use crate::edition::ee::data::env::Env;
-use crate::edition::ee::data::plan::{Plan, StripePriceMapping};
+use crate::edition::ee::data::plan::Plan;
+use crate::edition::ee::data::stripe::StripeConfig;
 use crate::edition::ee::models::tenant_tenants;
 use crate::edition::ee::models::{stripe_events, tenant_billing};
 use crate::error::ResultExt;
@@ -142,23 +142,6 @@ pub mod inbound {
 /// Stripe's own guidance uses 5 minutes.
 pub const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
-/// Configuration for the Stripe integration.
-/// Both fields are absent by default: a deployment with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of silently accepting unverifiable requests.
-#[derive(Clone, Default)]
-pub struct StripeConfig {
-    pub webhook_secret: Option<String>,
-    pub(crate) price_mapping: StripePriceMapping,
-}
-
-impl StripeConfig {
-    pub fn from_env() -> Self {
-        Self {
-            webhook_secret: Env::StripeWebhookSecret.non_empty(),
-            price_mapping: StripePriceMapping::from_env(),
-        }
-    }
-}
-
 /// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has been applied (or was simply not one we act on).
 ///
 /// Returns `impl IntoResponse` with raw status codes rather than going through `ApiError`: Stripe expects plain-text error bodies from webhooks, not the JSON `{"error": {...}}` envelope the rest of this API uses.
@@ -168,7 +151,17 @@ async fn stripe_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    let config = StripeConfig::from_env();
+    let config = match StripeConfig::from_config(&ctx.config) {
+        Ok(config) => config,
+        Err(_) => {
+            tracing::error!("invalid initializers.stripe configuration");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Stripe configuration is invalid",
+            )
+                .into_response();
+        }
+    };
     let Some(secret) = config.webhook_secret.as_deref() else {
         return (
             StatusCode::NOT_IMPLEMENTED,

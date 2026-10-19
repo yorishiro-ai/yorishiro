@@ -31,7 +31,7 @@ fn licence(ctx: &loco_rs::app::AppContext) {
         })) as std::sync::Arc<LicenceState>);
 }
 
-/// `StripeConfig::from_env` reads process env vars directly, with no DI seam for it, so tests configure the webhook the same way production does: by setting the vars for the duration of the request.
+/// The shipped Loco config interpolates these variables before booting each test app.
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&[
@@ -118,6 +118,23 @@ async fn a_duplicate_event_id_is_not_reapplied() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
+            let changed = crate::EnvGuard::capture(&[
+                "YORISHIRO_STRIPE_WEBHOOK_SECRET",
+                "YORISHIRO_STRIPE_PRICE_PRO",
+                "YORISHIRO_STRIPE_PRICE_TEAM",
+            ]);
+            changed.set(
+                "YORISHIRO_STRIPE_WEBHOOK_SECRET",
+                "changed-after-config-load",
+            );
+            changed.set(
+                "YORISHIRO_STRIPE_PRICE_PRO",
+                "changed-price-after-config-load",
+            );
+            changed.set(
+                "YORISHIRO_STRIPE_PRICE_TEAM",
+                "changed-team-after-config-load",
+            );
             let tenant_id = create_tenant(&ctx.db, "acme").await;
             tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_1")
                 .await

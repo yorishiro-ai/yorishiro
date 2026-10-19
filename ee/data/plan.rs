@@ -151,12 +151,3 @@ pub fn plan_policy_enabled(
         }
     }
 }
-
-impl StripePriceMapping {
-    pub(crate) fn from_env() -> Self {
-        Self {
-            pro_price_id: crate::edition::ee::data::env::Env::StripePricePro.non_empty(),
-            team_price_id: crate::edition::ee::data::env::Env::StripePriceTeam.non_empty(),
-        }
-    }
-}

@@ -53,7 +53,7 @@ const OAUTH_VARS: [&str; 3] = [
     "YORISHIRO_OAUTH_CLIENT_SECRET",
 ];
 
-/// `OAuthConfig::from_env` reads process env vars directly on every request, with no DI seam for it (see `controllers::oauth`'s module doc comment), so tests configure OAuth the same way production does: by setting the vars for the duration of the request.
+/// The shipped Loco configuration interpolates these values before each app boots.
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
@@ -81,19 +81,28 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
         );
 
         with_oauth_env(async {
-            let enabled = request.get("/auth/oauth/status").await;
-            assert_eq!(enabled.status_code(), StatusCode::OK);
+            let unchanged = request.get("/auth/oauth/status").await;
             assert_eq!(
-                enabled.json::<serde_json::Value>(),
-                serde_json::json!({ "enabled": true })
+                unchanged.json::<serde_json::Value>(),
+                serde_json::json!({"enabled": false})
             );
+            boot_request::<App, _, _>(|request, ctx| async move {
+                licence(&ctx);
+                let enabled = request.get("/auth/oauth/status").await;
+                assert_eq!(enabled.status_code(), StatusCode::OK);
+                assert_eq!(
+                    enabled.json::<serde_json::Value>(),
+                    serde_json::json!({ "enabled": true })
+                );
+            })
+            .await;
         })
         .await;
     })
     .await;
 }
 
-/// An issuer set with no `client_id`/`client_secret` is a misconfiguration, not "unconfigured": since `OAuthConfig::from_env` is read per request rather than once at boot, it must report `500` rather than panic and crash the task handling the request, and must not be silently treated as `enabled: false`.
+/// Partial resolved OAuth configuration must report 500 rather than panic or silently disable login.
 #[tokio::test]
 #[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {

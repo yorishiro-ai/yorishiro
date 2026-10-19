@@ -316,6 +316,15 @@ Community builds ignore this initializer block, and admission caps remain disabl
 The plan-policy switch is `initializers.plan_policy_enabled`, populated from `YORISHIRO_PLAN_POLICY_ENABLED` in the shipped files.
 It accepts a boolean or case-insensitive boolean text and is fixed when the context is built.
 
+### Integration Credentials
+
+Stripe reads `initializers.stripe.webhook_secret`, `price_pro` and `price_team` from the resolved Loco configuration.
+OAuth reads `initializers.oauth.issuer_url`, `client_id`, `client_secret`, `redirect_uri` and the optional legacy callback `bind` override.
+The shipped configuration files interpolate the existing `YORISHIRO_STRIPE_*`, `YORISHIRO_OAUTH_*` and `YORISHIRO_BIND` environment variables into these fields.
+Changes to process environment variables after configuration loading do not rotate credentials in a running context; reload the application to apply new values.
+An absent Stripe secret still disables the webhook, and an absent OAuth issuer still disables SSO login.
+Partial OAuth credentials remain a configuration error rather than silently disabling login.
+
 ## Secret handling in logs
 
 API keys, webhook secrets, OAuth credentials, OIDC tokens, and licence owner information are hidden from debug logs.

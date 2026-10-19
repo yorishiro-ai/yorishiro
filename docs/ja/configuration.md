@@ -353,6 +353,15 @@ community buildはこのinitializer設定を無視し、plan policyが無効な�
 plan policyの有効／無効は`initializers.plan_policy_enabled`で指定し、同梱ファイルでは`YORISHIRO_PLAN_POLICY_ENABLED`から展開します。
 真偽値または大文字小文字を区別しない真偽値の文字列を受け付け、context作成時に確定します。
 
+### 外部連携の認証情報
+
+Stripeは解決済みLoco設定の`initializers.stripe.webhook_secret`、`price_pro`、`price_team`を読み込みます。
+OAuthは`initializers.oauth.issuer_url`、`client_id`、`client_secret`、`redirect_uri`、任意の旧callback上書き設定`bind`を読み込みます。
+同梱ファイルは既存の`YORISHIRO_STRIPE_*`、`YORISHIRO_OAUTH_*`、`YORISHIRO_BIND`環境変数をこれらのfieldへ展開します。
+設定読み込み後にプロセスの環境変数を変えても稼働中contextの認証情報は変わらず、反映にはアプリの再読み込みが必要です。
+Stripe secretがなければwebhookは無効、OAuth issuerがなければSSOログインは無効という動作を維持します。
+OAuth認証情報の部分的な指定は、黙ってログインを無効にせず設定エラーとして扱います。
+
 ## ログでの秘密情報の扱い
 
 API キー、webhook secret、OAuth 認証情報、OIDC token、ライセンス所有者情報は debug ログに出力されません。

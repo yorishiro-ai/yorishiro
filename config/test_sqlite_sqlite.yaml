@@ -97,3 +97,13 @@ initializers:
     shared: '<%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="") %>'
     tenant_private: '<%= get_env(name="YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", default="") %>'
     official: '<%= get_env(name="YORISHIRO_WORKER_OFFICIAL_LIMIT", default="") %>'
+  stripe:
+    webhook_secret: '<%= get_env(name="YORISHIRO_STRIPE_WEBHOOK_SECRET", default="") %>'
+    price_pro: '<%= get_env(name="YORISHIRO_STRIPE_PRICE_PRO", default="") %>'
+    price_team: '<%= get_env(name="YORISHIRO_STRIPE_PRICE_TEAM", default="") %>'
+  oauth:
+    issuer_url: '<%= get_env(name="YORISHIRO_OAUTH_ISSUER_URL", default="") %>'
+    client_id: '<%= get_env(name="YORISHIRO_OAUTH_CLIENT_ID", default="") %>'
+    client_secret: '<%= get_env(name="YORISHIRO_OAUTH_CLIENT_SECRET", default="") %>'
+    redirect_uri: '<%= get_env(name="YORISHIRO_OAUTH_REDIRECT_URI", default="") %>'
+    bind: '<%= get_env(name="YORISHIRO_BIND", default="") %>'
