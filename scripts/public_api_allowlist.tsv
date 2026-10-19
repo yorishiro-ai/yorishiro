@@ -721,10 +721,8 @@ ee/db.rs	fn	SchedulerOwnership::release	integration-test: tests/ee/db.rs exercis
 ee/db.rs	fn	acquire_postgres_scheduler_lock	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
 ee/db.rs	fn	acquire_scheduler_ownership	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
 ee/db.rs	fn	acquire_sqlite_scheduler_lock	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
-ee/db.rs	fn	lock_sqlite_scheduler_file	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
 ee/db.rs	fn	sqlite_options_are_in_memory	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
 ee/db.rs	fn	sqlite_scheduler_lock_path	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
-ee/db.rs	fn	unlock_sqlite_scheduler_file	integration-test: tests/ee/db.rs exercises it now that the unit tests moved out of src/.
 ee/mod.rs	mod	data	integration-test: tests/ee/mod.rs exercises it now that the unit tests moved out of src/.
 ee/models/entity_entities.rs	mod	infer_fill	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
 ee/models/inference_jobs.rs	field	InferenceJobRecord::attempt	integration-test: tests/ee/models/inference_jobs.rs exercises it now that the unit tests moved out of src/.

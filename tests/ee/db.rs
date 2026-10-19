@@ -10,10 +10,7 @@ use tempfile::tempdir;
 
 use sea_orm::sqlx::postgres::PgPoolOptions;
 use serial_test::serial;
-use yorishiro::edition::ee::db::{
-    acquire_sqlite_scheduler_lock, lock_sqlite_scheduler_file, sqlite_scheduler_lock_path,
-    unlock_sqlite_scheduler_file,
-};
+use yorishiro::edition::ee::db::{acquire_sqlite_scheduler_lock, sqlite_scheduler_lock_path};
 
 fn postgres_test_url() -> Option<String> {
     let url = std::env::var("DATABASE_URL").ok();
@@ -117,7 +114,7 @@ fn sqlite_scheduler_lock_is_non_blocking_and_releases() {
         file: Some(file), ..
     } = &first
     {
-        unlock_sqlite_scheduler_file(file).unwrap();
+        file.unlock().unwrap();
     } else {
         panic!("expected SQLite ownership");
     }
@@ -140,15 +137,18 @@ fn sqlite_scheduler_lock_works_with_separate_file_handles() {
         .write(true)
         .open(&path)
         .unwrap();
-    lock_sqlite_scheduler_file(&first).unwrap();
+    first.try_lock().unwrap();
     let second = OpenOptions::new()
         .read(true)
         .write(true)
         .open(&path)
         .unwrap();
-    assert!(lock_sqlite_scheduler_file(&second).is_err());
-    unlock_sqlite_scheduler_file(&first).unwrap();
-    lock_sqlite_scheduler_file(&second).unwrap();
+    assert!(matches!(
+        second.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    first.unlock().unwrap();
+    second.try_lock().unwrap();
 }
 
 #[cfg(unix)]
@@ -235,7 +235,7 @@ fn release_sqlite_for_test(ownership: &yorishiro::edition::ee::db::SchedulerOwne
         file: Some(file), ..
     } = ownership
     {
-        unlock_sqlite_scheduler_file(file).unwrap();
+        file.unlock().unwrap();
     } else {
         panic!("expected SQLite ownership");
     }

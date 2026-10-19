@@ -272,6 +272,7 @@ PostgreSQL では、手動、起動時、定期実行のジョブが重なった
 SQLite では、再インデックスワーカーが単一テナント用のモデル所有経路を直接使い、PostgreSQL の advisory lock は取得しません。
 
 SQLite には PostgreSQL のような advisory lock がないため、scheduler ownership には待機しない OS file lock を使います。
+ロックはRust標準の`File::try_lock`と`File::unlock`を使い、独自のプラットフォームFFI実装は持ちません。
 有効な SQLite database path の隣に `.scheduler.lock` suffix の lock file を作り、待機しない OS file lock を取得します。
 競合した task process は直ちにスキップし、handle の close またはプロセス終了で lock が解放されます。
 この取得は task の実行中に行うため、外部の Loco configuration で scheduler job を指定した場合も対象です。

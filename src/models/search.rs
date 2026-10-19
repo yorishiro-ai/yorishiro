@@ -59,34 +59,15 @@ pub struct SearchHit {
 
 #[derive(FromQueryResult)]
 pub(crate) struct SearchRow {
-    id: Uuid,
-    workspace_id: Uuid,
-    schema_id: Uuid,
-    schema_version: i32,
-    entity_type: String,
-    data: Value,
-    created_at: chrono::DateTime<chrono::FixedOffset>,
-    updated_at: chrono::DateTime<chrono::FixedOffset>,
-    created_by: Option<Uuid>,
-    updated_by: Option<Uuid>,
+    #[sea_orm(nested)]
+    entity: EntityRecord,
     distance: Option<f64>,
 }
 
 impl SearchRow {
     pub(crate) fn into_hit(self) -> SearchHit {
         SearchHit {
-            entity: EntityRecord {
-                id: self.id,
-                workspace_id: self.workspace_id,
-                schema_id: self.schema_id,
-                schema_version: self.schema_version,
-                entity_type: self.entity_type,
-                data: self.data,
-                created_at: self.created_at.into(),
-                updated_at: self.updated_at.into(),
-                created_by: self.created_by,
-                updated_by: self.updated_by,
-            },
+            entity: self.entity,
             distance: self.distance,
         }
     }

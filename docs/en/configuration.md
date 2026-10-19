@@ -271,6 +271,7 @@ On PostgreSQL, the reindex worker's existing per-workspace advisory lock seriali
 On SQLite, reindex workers use the direct single-tenant, model-owned reindex path and do not acquire that PostgreSQL advisory lock.
 
 SQLite has no PostgreSQL-style advisory locks, so scheduler ownership uses a non-blocking OS file lock instead.
+The lock uses Rust's standard `File::try_lock` and `File::unlock`, without a custom platform FFI implementation.
 The lock file is adjacent to the effective SQLite database path and has the `.scheduler.lock` suffix.
 Contending task processes skip immediately, and closing the handle or process termination releases the lock.
 This acquisition happens inside the task, so it also covers scheduler jobs supplied through external Loco configuration.

@@ -365,19 +365,8 @@ struct BatchNeighborRow {
     relation_type: String,
     direction: String,
     properties: Value,
-    // Only used to drive the SQL-level ORDER BY; not read on the Rust side.
-    #[sea_orm(alias = "relation_created_at")]
-    _relation_created_at: chrono::DateTime<chrono::FixedOffset>,
-    entity_id: Uuid,
-    entity_workspace_id: Uuid,
-    entity_schema_id: Uuid,
-    entity_schema_version: i32,
-    entity_type: String,
-    entity_data: Value,
-    entity_created_at: chrono::DateTime<chrono::FixedOffset>,
-    entity_updated_at: chrono::DateTime<chrono::FixedOffset>,
-    entity_created_by: Option<Uuid>,
-    entity_updated_by: Option<Uuid>,
+    #[sea_orm(nested(prefix = "entity_"))]
+    entity: EntityRecord,
 }
 
 impl BatchNeighborRow {
@@ -387,18 +376,7 @@ impl BatchNeighborRow {
             relation_type: self.relation_type,
             direction: self.direction,
             properties: self.properties,
-            entity: EntityRecord {
-                id: self.entity_id,
-                workspace_id: self.entity_workspace_id,
-                schema_id: self.entity_schema_id,
-                schema_version: self.entity_schema_version,
-                entity_type: self.entity_type,
-                data: self.entity_data,
-                created_at: self.entity_created_at.into(),
-                updated_at: self.entity_updated_at.into(),
-                created_by: self.entity_created_by,
-                updated_by: self.entity_updated_by,
-            },
+            entity: self.entity,
         }
     }
 }
@@ -473,7 +451,7 @@ async fn neighbor_rows(
             (entity::Column::WorkspaceId, "entity_workspace_id"),
             (entity::Column::SchemaId, "entity_schema_id"),
             (entity::Column::SchemaVersion, "entity_schema_version"),
-            (entity::Column::EntityType, "entity_type"),
+            (entity::Column::EntityType, "entity_entity_type"),
             (entity::Column::Data, "entity_data"),
             (entity::Column::CreatedAt, "entity_created_at"),
             (entity::Column::UpdatedAt, "entity_updated_at"),
