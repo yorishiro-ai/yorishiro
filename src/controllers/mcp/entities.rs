@@ -120,30 +120,15 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
         // Same durable enqueue as REST, committed atomically with the entity.
-        let dispatcher = match self
-            .app_context()
-            .shared_store
-            .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        {
-            Some(value) => value,
-            None => {
-                return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                    anyhow::anyhow!("dispatcher missing"),
-                )));
-            }
-        };
-        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write_with_dispatcher(
+        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write(
             self.app_context(),
             workspace_id,
             record.id,
-            Some(authorized.txn()),
-            dispatcher.as_ref(),
+            authorized.txn(),
         )
         .await
         {
-            return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                anyhow::anyhow!(err.to_string()),
-            )));
+            return Ok(err_to_tool_result(err));
         }
         authorized.commit().await?;
         ok_json(record)
@@ -197,30 +182,15 @@ impl YorishiroMcpServer {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        let dispatcher = match self
-            .app_context()
-            .shared_store
-            .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        {
-            Some(value) => value,
-            None => {
-                return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                    anyhow::anyhow!("dispatcher missing"),
-                )));
-            }
-        };
-        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write_with_dispatcher(
+        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write(
             self.app_context(),
             workspace_id,
             record.id,
-            Some(authorized.txn()),
-            dispatcher.as_ref(),
+            authorized.txn(),
         )
         .await
         {
-            return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                anyhow::anyhow!(err.to_string()),
-            )));
+            return Ok(err_to_tool_result(err));
         }
         authorized.commit().await?;
         ok_json(record)

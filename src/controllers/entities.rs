@@ -28,27 +28,7 @@ pub(crate) async fn create_entity(
     let input = body.into();
     let created_by = authorized.ctx.user_id;
     let record = entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                "dispatcher missing"
-            )))
-        })?;
-    embedding_sync::enqueue_after_write_with_dispatcher(
-        &ctx,
-        workspace_id,
-        record.id,
-        Some(authorized.txn()),
-        dispatcher.as_ref(),
-    )
-    .await
-    .map_err(|e| {
-        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-            e.to_string()
-        )))
-    })?;
+    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id, authorized.txn()).await?;
     authorized.commit().await?;
     Ok((StatusCode::CREATED, Json(record)))
 }
@@ -85,27 +65,7 @@ pub(crate) async fn update_entity(
         },
     )
     .await?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                "dispatcher missing"
-            )))
-        })?;
-    embedding_sync::enqueue_after_write_with_dispatcher(
-        &ctx,
-        workspace_id,
-        record.id,
-        Some(authorized.txn()),
-        dispatcher.as_ref(),
-    )
-    .await
-    .map_err(|e| {
-        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-            e.to_string()
-        )))
-    })?;
+    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id, authorized.txn()).await?;
     authorized.commit().await?;
     Ok(Json(record))
 }

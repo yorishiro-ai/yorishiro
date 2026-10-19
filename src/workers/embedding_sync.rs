@@ -304,13 +304,16 @@ pub async fn enqueue_for_class_with_dispatcher(
     dispatcher.dispatch(ctx, args, txn).await.map(|_job_id| ())
 }
 
-pub(crate) async fn enqueue_after_write_with_dispatcher(
+pub(crate) async fn enqueue_after_write(
     ctx: &AppContext,
     workspace_id: Uuid,
     entity_id: Uuid,
-    txn: Option<&sea_orm::DatabaseTransaction>,
-    dispatcher: &dyn EmbeddingSyncDispatcher,
-) -> loco_rs::Result<()> {
+    txn: &sea_orm::DatabaseTransaction,
+) -> Result<(), YorishiroError> {
+    let dispatcher = ctx
+        .shared_store
+        .get::<Arc<dyn EmbeddingSyncDispatcher>>()
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("dispatcher missing")))?;
     let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
         .await
     {
@@ -326,5 +329,7 @@ pub(crate) async fn enqueue_after_write_with_dispatcher(
         entity_id,
         worker_class,
     };
-    enqueue_for_class_with_dispatcher(ctx, args, txn, dispatcher).await
+    enqueue_for_class_with_dispatcher(ctx, args, Some(txn), dispatcher.as_ref())
+        .await
+        .map_err(|error| YorishiroError::Internal(anyhow::anyhow!(error.to_string())))
 }

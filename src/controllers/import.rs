@@ -28,28 +28,14 @@ pub(crate) async fn import_jsonl(
         body.as_bytes(),
     )
     .await?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                "dispatcher missing"
-            )))
-        })?;
     for entity_id in result.entity_ids.iter().copied() {
-        crate::workers::embedding_sync::enqueue_after_write_with_dispatcher(
+        crate::workers::embedding_sync::enqueue_after_write(
             &ctx,
             workspace_id,
             entity_id,
-            Some(authorized.txn()),
-            dispatcher.as_ref(),
+            authorized.txn(),
         )
-        .await
-        .map_err(|e| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                e.to_string()
-            )))
-        })?;
+        .await?;
     }
     authorized.commit().await?;
     Ok(Json(result))
