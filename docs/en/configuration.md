@@ -116,6 +116,9 @@ The endpoint verifies `Stripe-Signature` against the raw request with a 300-seco
 
 ## Search token quota
 
+REST and MCP both reject semantic searches while workspace embeddings are being reindexed, before charging tokens or asking a worker to embed the query.
+Both entry points use the same model-owned search pipeline and open the workspace transaction only after query embedding completes.
+
 | Variable | Description |
 |---|---|
 | `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | Tokens per minute a workspace can spend on search (default: `100000`). Charged per query, shared between API and MCP. The default is very high and only matters for runaway automated queries. Japanese text is charged at roughly half the token cost of English with the default estimate, so the quota allows more Japanese queries per minute |

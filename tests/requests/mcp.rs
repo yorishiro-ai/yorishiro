@@ -932,6 +932,38 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             hits[0]["entity"]["data"]["title"], "beta plan",
             "nearest entity first: {hits}"
         );
+        let calls = provider.kinds.lock().unwrap().len();
+        let mut workspace = yorishiro::models::_entities::workspace_workspaces::ActiveModel {
+            id: ActiveValue::Set(workspace_id),
+            embedding_reindexing: ActiveValue::Set(true),
+            ..Default::default()
+        };
+        workspace.clone().update(&ctx.db).await.unwrap();
+        let unavailable = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            4,
+            "tools/call",
+            json!({ "name": "search_entities", "arguments": { "query_text": "beta" } }),
+        )
+        .await;
+        assert_eq!(unavailable["result"]["isError"], true, "{unavailable}");
+        assert!(
+            unavailable["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("reindexed")
+        );
+        let rest = request
+            .get("/api/search?query_text=beta")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        assert_eq!(rest.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(rest.json::<Value>()["error"]["code"], "backend_unavailable");
+        assert_eq!(provider.kinds.lock().unwrap().len(), calls);
+        workspace.embedding_reindexing = ActiveValue::Set(false);
+        workspace.update(&ctx.db).await.unwrap();
         // The worker's provider is replaced by one that fails: the tool reports the worker's diagnostic.
         ctx.shared_store.insert(
             Arc::new(FailingProvider(|| YorishiroError::ProviderUnreachable {

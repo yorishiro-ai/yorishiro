@@ -125,6 +125,9 @@ API からもリインデックスを登録できます：`POST /api/migration-j
 |---|---|
 | `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | 1分あたりの検索トークン使用量（既定：100000）。クエリごとに1回課金。API と MCP で共有の予算です。既定値は非常に高く、通常の操作では問題になりません。自動クエリの実行を制限するために存在します |
 
+RESTとMCPはどちらも、workspaceのembeddingを再構築している間は意味検索を拒否し、検索トークンの課金やworkerへの問い合わせを行いません。
+検索処理はmodelで共有し、クエリのembeddingが完了してからworkspaceのtransactionを開きます。
+
 ## データベース負荷ガード
 
 PostgreSQL の負荷ガードは、デプロイメント全体のメンテナンス状態を自動変更するため、デフォルトでは無効です。

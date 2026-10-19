@@ -46,6 +46,34 @@ impl Default for SearchQuery {
     }
 }
 
+pub(crate) async fn ensure_available(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    if super::workspace_workspaces::embedding_reindexing(db, workspace_id).await? {
+        return Err(YorishiroError::BackendUnavailable {
+            message: "semantic search is temporarily unavailable while workspace embeddings are being reindexed".into(),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) async fn search_text(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    text: &str,
+    query: SearchQuery,
+) -> Result<Vec<SearchHit>, YorishiroError> {
+    // Wait for the worker without holding a workspace connection.
+    let vector =
+        crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await?;
+    // The embedding chain joins tenant_tenants, which only the identity pool can read.
+    let table = resolve_query_table(&ctx.db, workspace_id, vector.len()).await?;
+    let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id).await?;
+    search_in_table(&txn, workspace_id, vector, text, query, table).await
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SearchHit {
