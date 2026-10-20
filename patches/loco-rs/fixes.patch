@@ -1,0 +1,688 @@
+--- a/src/bgworker/mod.rs
++++ b/src/bgworker/mod.rs
+@@ -284,6 +284,14 @@
+     /// Does not currently return an error, but implementations might, so
+     /// using Result here as return type.
+     fn shutdown(&self) -> Result<()>;
++
++    /// Releases provider resources after its worker run has drained.
++    ///
++    /// # Errors
++    /// Returns an error if shutdown fails.
++    async fn close(&self) -> Result<()> {
++        self.shutdown()
++    }
+ }
+ 
+ /// Process worker task handles and handle any errors.
+@@ -584,6 +592,15 @@
+     pub fn shutdown(&self) -> Result<()> {
+         tracing::info!("Shutting down background job processing");
+         self.0.shutdown()
++    }
++
++    /// Releases provider resources after shutdown and worker draining.
++    /// Unlike `shutdown`, this waits for SQL connection pools to close.
++    ///
++    /// # Errors
++    /// Returns an error if the provider cannot close.
++    pub async fn close(&self) -> Result<()> {
++        self.0.close().await
+     }
+ 
+     async fn get_jobs(
+--- a/src/bgworker/pg.rs
++++ b/src/bgworker/pg.rs
+@@ -176,6 +176,14 @@
+ 
+     fn shutdown(&self) -> Result<()> {
+         self.token.cancel();
++        Ok(())
++    }
++
++    async fn close(&self) -> Result<()> {
++        self.token.cancel();
++        // Bug fix: handlers retain AppContext and therefore the queue itself.
++        *self.registry.lock().await = JobRegistry::new();
++        self.pool.close().await;
+         Ok(())
+     }
+ }
+--- a/src/bgworker/redis.rs
++++ b/src/bgworker/redis.rs
+@@ -140,7 +140,7 @@
+                         }
+                     };
+ 
+-                    if let Some((job, queue_name)) = job_opt {
++                    if let Some((job, queue_name, claim)) = job_opt {
+                         debug!(job_id = job.id, name = job.name, "working on job");
+                         if let Some(handler) = handlers.get(&job.name) {
+                             match handler(job.id.clone(), job.data.clone()).await {
+@@ -150,18 +150,32 @@
+                                         &job.id,
+                                         &queue_name,
+                                         job.interval,
++                                        &claim,
+                                     )
+                                     .await
+                                     {
+-                                        error!(err = err.to_string(), job = ?job, "cannot complete job");
++                                        error!(
++                                            err = err.to_string(),
++                                            job_id = job.id,
++                                            "cannot complete job"
++                                        );
+                                     }
+                                 }
+                                 Err(err) => {
+-                                    if let Err(err) =
+-                                        fail_job_with_conn(&mut conn, &job.id, &queue_name, &err)
+-                                            .await
++                                    if let Err(err) = fail_job_with_conn(
++                                        &mut conn,
++                                        &job.id,
++                                        &queue_name,
++                                        &err,
++                                        &claim,
++                                    )
++                                    .await
+                                     {
+-                                        error!(err = err.to_string(), job = ?job, "cannot fail job");
++                                        error!(
++                                            err = err.to_string(),
++                                            job_id = job.id,
++                                            "cannot fail job"
++                                        );
+                                     }
+                                 }
+                             }
+@@ -315,8 +329,14 @@
+     // Store job in Redis queue (ZSET, scored by priority) and in its job key.
+     let score = calculate_score(job.priority);
+     let job_key = format!("{JOB_KEY_PREFIX}{}", job.id);
+-    let _: () = conn.set(&job_key, &job_json).await?;
+-    let _: () = conn.zadd(&queue_key, &job.id, score).await?;
++    let _: () = redis::pipe()
++        .atomic()
++        .set(&job_key, &job_json)
++        .ignore()
++        .zadd(&queue_key, &job.id, score)
++        .ignore()
++        .query_async(&mut conn)
++        .await?;
+ 
+     Ok(job_id)
+ }
+@@ -384,11 +404,14 @@
+ local queue_key = KEYS[1]
+ local processing_key = KEYS[2]
+ local job_id = ARGV[1]
+-
++local job_key = KEYS[3]
++local claim_key = KEYS[4]
+ local score = redis.call('ZSCORE', queue_key, job_id)
+-if score then
++if score and redis.call('GET', job_key) == ARGV[2] then
+     redis.call('ZREM', queue_key, job_id)
+     redis.call('SADD', processing_key, job_id)
++    redis.call('SET', job_key, ARGV[3])
++    redis.call('SET', claim_key, ARGV[4])
+     return score
+ else
+     return nil
+@@ -399,7 +422,7 @@
+     conn: &mut Connection,
+     queues: &[String],
+     tags: &[String],
+-) -> Result<Option<(Job, String)>> {
++) -> Result<Option<(Job, String, String)>> {
+     // Paging bounds for scanning the priority-ordered queue.
+     const BATCH_SIZE: isize = 50;
+     const MAX_SEARCH: isize = 1000;
+@@ -417,7 +440,7 @@
+         // Page through the queue (ordered by ZSET score = priority) collecting
+         // jobs whose tags match the worker's tag filter.
+         let mut offset = 0;
+-        let mut candidates: Vec<(String, Job)> = Vec::new();
++        let mut candidates: Vec<(String, Job, String)> = Vec::new();
+         while offset < MAX_SEARCH {
+             let job_ids: Vec<String> = conn
+                 .zrange(&queue_key, offset, offset + BATCH_SIZE - 1)
+@@ -462,7 +485,7 @@
+                                     "Job not due yet, skipping"
+                                 );
+                             } else {
+-                                candidates.push((job_id.clone(), job));
++                                candidates.push((job_id.clone(), job, json));
+                             }
+                         }
+                         Err(err) => {
+@@ -488,7 +511,7 @@
+         // 1. Higher priority first.
+         // 2. Earlier `run_at` first for equal priority.
+         // 3. Smaller id first as a final deterministic tiebreaker.
+-        candidates.sort_by(|(id_a, job_a), (id_b, job_b)| {
++        candidates.sort_by(|(id_a, job_a, _), (id_b, job_b, _)| {
+             job_b
+                 .priority
+                 .cmp(&job_a.priority)
+@@ -496,18 +519,26 @@
+                 .then_with(|| id_a.cmp(id_b))
+         });
+ 
+-        for (job_id, job) in candidates {
++        for (job_id, mut job, original_json) in candidates {
++            let claim = Ulid::new().to_string();
++            job.status = JobStatus::Processing;
++            job.updated_at = Some(Utc::now());
+             // Atomically claim the job: move it from the queue ZSET to the
+             // processing set. Returns None if another worker took it first.
+             let result: Option<f64> = script
+                 .key(&queue_key)
+                 .key(&processing_key)
++                .key(format!("{JOB_KEY_PREFIX}{job_id}"))
++                .key(format!("claim:{job_id}"))
+                 .arg(&job_id)
++                .arg(&original_json)
++                .arg(job.to_json()?)
++                .arg(&claim)
+                 .invoke_async(conn)
+                 .await?;
+ 
+             if result.is_some() {
+-                return Ok(Some((job, queue_name.clone())));
++                return Ok(Some((job, queue_name.clone(), claim)));
+             }
+         }
+     }
+@@ -519,6 +550,7 @@
+     id: &JobId,
+     queue_name: &str,
+     interval_ms: Option<i64>,
++    claim: &str,
+ ) -> Result<()> {
+     let job_key = format!("{JOB_KEY_PREFIX}{id}");
+     let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue_name}");
+@@ -533,18 +565,22 @@
+             let new_json = job.to_json()?;
+             let queue_key = format!("{QUEUE_KEY_PREFIX}{queue_name}");
+             let score = calculate_score(job.priority);
+-            let _: () = redis::pipe()
+-                .set(&job_key, &new_json)
+-                .zadd(&queue_key, id, score)
+-                .query_async(conn)
+-                .await?;
++            finish_claim(
++                conn,
++                id,
++                &processing_key,
++                &queue_key,
++                claim,
++                &new_json,
++                Some(score),
++            )
++            .await?;
+         } else {
+             job.status = JobStatus::Completed;
+             job.updated_at = Some(Utc::now());
+             let updated_json = job.to_json()?;
+-            let _: () = conn.set(&job_key, &updated_json).await?;
+-        }
+-        let _: () = conn.srem(&processing_key, id).await?;
++            finish_claim(conn, id, &processing_key, "", claim, &updated_json, None).await?;
++        }
+     }
+     Ok(())
+ }
+@@ -554,6 +590,7 @@
+     id: &JobId,
+     queue_name: &str,
+     error: &crate::Error,
++    claim: &str,
+ ) -> Result<()> {
+     let job_key = format!("{JOB_KEY_PREFIX}{id}");
+     let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue_name}");
+@@ -576,9 +613,41 @@
+         job.status = JobStatus::Failed;
+         job.updated_at = Some(Utc::now());
+         let updated_json = job.to_json()?;
+-        let _: () = conn.set(&job_key, &updated_json).await?;
+-    }
+-    let _: () = conn.srem(&processing_key, id).await?;
++        finish_claim(conn, id, &processing_key, "", claim, &updated_json, None).await?;
++    }
++    Ok(())
++}
++
++// Bug fix: a reaped worker must not overwrite a newer attempt's outcome.
++async fn finish_claim(
++    conn: &mut Connection,
++    id: &str,
++    processing_key: &str,
++    queue_key: &str,
++    claim: &str,
++    json: &str,
++    score: Option<f64>,
++) -> Result<()> {
++    let _: i64 = Script::new(
++        r"
++        if redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
++        redis.call('SET', KEYS[1], ARGV[3])
++        redis.call('SREM', KEYS[3], ARGV[1])
++        redis.call('DEL', KEYS[2])
++        if ARGV[4] ~= '' then redis.call('ZADD', KEYS[4], ARGV[4], ARGV[1]) end
++        return 1
++    ",
++    )
++    .key(format!("{JOB_KEY_PREFIX}{id}"))
++    .key(format!("claim:{id}"))
++    .key(processing_key)
++    .key(queue_key)
++    .arg(id)
++    .arg(claim)
++    .arg(json)
++    .arg(score.map(|value| value.to_string()).unwrap_or_default())
++    .invoke_async(conn)
++    .await?;
+     Ok(())
+ }
+ 
+@@ -724,7 +793,7 @@
+                 && status.contains(&job.status)
+             {
+                 let _: () = conn.zrem(&queue_key, &job_id).await?;
+-                let _: () = conn.del(&job_key).await?;
++                let _: () = conn.del(&[job_key, format!("claim:{job_id}")]).await?;
+             }
+         }
+     }
+@@ -742,7 +811,7 @@
+                 }
+                 if status.contains(&job.status) {
+                     let _: () = conn.srem(&processing_key, &job_id).await?;
+-                    let _: () = conn.del(&job_key).await?;
++                    let _: () = conn.del(&[job_key, format!("claim:{job_id}")]).await?;
+                 }
+             }
+         }
+@@ -754,7 +823,7 @@
+             && let Ok(job) = Job::from_json(&json)
+             && status.contains(&job.status)
+         {
+-            let _: () = conn.del(&job_key).await?;
++            let _: () = conn.del(&[job_key, format!("claim:{}", job.id)]).await?;
+         }
+     }
+ 
+@@ -816,7 +885,7 @@
+                 });
+                 if should_remove {
+                     let _: () = conn.zrem(&queue_key, &job_id).await?;
+-                    let _: () = conn.del(&job_key).await?;
++                    let _: () = conn.del(&[job_key, format!("claim:{job_id}")]).await?;
+                 }
+             }
+         }
+@@ -838,7 +907,7 @@
+                 });
+                 if should_remove {
+                     let _: () = conn.srem(&processing_key, &job_id).await?;
+-                    let _: () = conn.del(&job_key).await?;
++                    let _: () = conn.del(&[job_key, format!("claim:{job_id}")]).await?;
+                 }
+             }
+         }
+@@ -853,7 +922,7 @@
+                 created_at < cutoff_date && status.is_none_or(|s| s.contains(&job.status))
+             });
+             if should_remove {
+-                let _: () = conn.del(&job_key).await?;
++                let _: () = conn.del(&[job_key, format!("claim:{}", job.id)]).await?;
+             }
+         }
+     }
+@@ -914,6 +983,39 @@
+ /// # Errors
+ ///
+ /// This function will return an error if it fails to interact with Redis
++async fn requeue_unchanged(
++    conn: &mut Connection,
++    id: &str,
++    source: &str,
++    queue: &str,
++    original: &str,
++    updated: &str,
++    score: f64,
++) -> Result<bool> {
++    let changed: i64 = Script::new(
++        r"
++        if redis.call('GET', KEYS[1]) ~= ARGV[2] then return 0 end
++        if redis.call('SISMEMBER', KEYS[2], ARGV[1]) ~= 1 then return 0 end
++        redis.call('SREM', KEYS[2], ARGV[1])
++        redis.call('SET', KEYS[1], ARGV[3])
++        redis.call('ZADD', KEYS[3], ARGV[4], ARGV[1])
++        redis.call('DEL', KEYS[4])
++        return 1
++    ",
++    )
++    .key(format!("{JOB_KEY_PREFIX}{id}"))
++    .key(source)
++    .key(queue)
++    .key(format!("claim:{id}"))
++    .arg(id)
++    .arg(original)
++    .arg(updated)
++    .arg(score)
++    .invoke_async(conn)
++    .await?;
++    Ok(changed == 1)
++}
++
+ pub async fn requeue(client: &RedisPool, age_minutes: &i64) -> Result<()> {
+     let mut conn = get_connection(client).await?;
+     let cutoff_time = Utc::now() - chrono::Duration::minutes(*age_minutes);
+@@ -944,22 +1046,32 @@
+             if let Some(json) = job_json
+                 && let Ok(mut job) = Job::from_json(&json)
+             {
+-                let should_requeue = if let Some(updated_at) = job.updated_at {
+-                    updated_at < cutoff_time
+-                } else if let Some(created_at) = job.created_at {
+-                    created_at < cutoff_time
+-                } else {
+-                    false
+-                };
++                let should_requeue = job.status == JobStatus::Processing
++                    && if let Some(updated_at) = job.updated_at {
++                        updated_at < cutoff_time
++                    } else if let Some(created_at) = job.created_at {
++                        created_at < cutoff_time
++                    } else {
++                        false
++                    };
+                 if should_requeue {
+                     job.status = JobStatus::Queued;
+                     job.updated_at = Some(Utc::now());
+                     let updated_json = job.to_json()?;
+                     let score = calculate_score(job.priority);
+-                    let _: () = conn.srem(&processing_key, &job_id).await?;
+-                    let _: () = conn.set(&job_key, &updated_json).await?;
+-                    let _: () = conn.zadd(&queue_key, &job_id, score).await?;
+-                    *requeued_counts.entry(queue_name.clone()).or_insert(0) += 1;
++                    if requeue_unchanged(
++                        &mut conn,
++                        &job_id,
++                        &processing_key,
++                        &queue_key,
++                        &json,
++                        &updated_json,
++                        score,
++                    )
++                    .await?
++                    {
++                        *requeued_counts.entry(queue_name.clone()).or_insert(0) += 1;
++                    }
+                 }
+             }
+         }
+@@ -992,10 +1104,19 @@
+                     job.updated_at = Some(Utc::now());
+                     let updated_json = job.to_json()?;
+                     let score = calculate_score(job.priority);
+-                    let _: () = conn.srem(&failed_key, &job_id).await?;
+-                    let _: () = conn.set(&job_key, &updated_json).await?;
+-                    let _: () = conn.zadd(&queue_key, &job_id, score).await?;
+-                    *requeued_counts.entry(queue_name.clone()).or_insert(0) += 1;
++                    if requeue_unchanged(
++                        &mut conn,
++                        &job_id,
++                        &failed_key,
++                        &queue_key,
++                        &json,
++                        &updated_json,
++                        score,
++                    )
++                    .await?
++                    {
++                        *requeued_counts.entry(queue_name.clone()).or_insert(0) += 1;
++                    }
+                 }
+             }
+         }
+@@ -1199,6 +1320,12 @@
+ 
+     fn shutdown(&self) -> Result<()> {
+         self.token.cancel();
++        Ok(())
++    }
++
++    async fn close(&self) -> Result<()> {
++        self.token.cancel();
++        *self.registry.lock().await = JobRegistry::new();
+         Ok(())
+     }
+ }
+@@ -1499,7 +1626,7 @@
+ 
+         let queues = vec!["default".to_string()];
+         for expected_user in [2, 1, 3] {
+-            let (job, _) = dequeue_with_conn(&mut conn, &queues, &[])
++            let (job, _, claim) = dequeue_with_conn(&mut conn, &queues, &[])
+                 .await
+                 .expect("dequeue")
+                 .expect("a batched job must be dequeueable");
+@@ -1508,7 +1635,7 @@
+                 Some(&serde_json::json!(expected_user)),
+                 "batched jobs must be dequeued by priority"
+             );
+-            complete_job_with_conn(&mut conn, &job.id, "default", None)
++            complete_job_with_conn(&mut conn, &job.id, "default", None, &claim)
+                 .await
+                 .expect("complete job");
+         }
+@@ -1561,13 +1688,13 @@
+             "an untagged worker must not see tagged jobs"
+         );
+         for _ in 0..2 {
+-            let (job, _) = dequeue_with_conn(&mut conn, &queues, &["email".to_string()])
++            let (job, _, claim) = dequeue_with_conn(&mut conn, &queues, &["email".to_string()])
+                 .await
+                 .expect("dequeue")
+                 .expect("a tagged batched job must be dequeueable by a matching worker");
+             assert!(ids.contains(&job.id));
+             assert_eq!(job.tags, Some(vec!["email".to_string()]));
+-            complete_job_with_conn(&mut conn, &job.id, "mailer", None)
++            complete_job_with_conn(&mut conn, &job.id, "mailer", None, &claim)
+                 .await
+                 .expect("complete job");
+         }
+@@ -1591,12 +1718,14 @@
+         let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
+             .await
+             .expect("dequeue");
+-        let (job, queue) = job_opt.unwrap();
++        let (job, queue, claim) = job_opt.unwrap();
+ 
+         // Complete job
+-        assert!(complete_job_with_conn(&mut conn, &job.id, &queue, None)
+-            .await
+-            .is_ok());
++        assert!(
++            complete_job_with_conn(&mut conn, &job.id, &queue, None, &claim)
++                .await
++                .is_ok()
++        );
+ 
+         // Verify job is not in processing set
+         let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue}");
+@@ -1635,11 +1764,11 @@
+         let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
+             .await
+             .expect("dequeue");
+-        let (job, queue) = job_opt.unwrap();
++        let (job, queue, claim) = job_opt.unwrap();
+ 
+         // Complete job with interval to reschedule
+         assert!(
+-            complete_job_with_conn(&mut conn, &job.id, &queue, Some(1000))
++            complete_job_with_conn(&mut conn, &job.id, &queue, Some(1000), &claim)
+                 .await
+                 .is_ok()
+         );
+@@ -1680,13 +1809,15 @@
+         let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
+             .await
+             .expect("dequeue");
+-        let (job, queue) = job_opt.unwrap();
++        let (job, queue, claim) = job_opt.unwrap();
+ 
+         // Fail job
+         let error = Error::string("test failure");
+-        assert!(fail_job_with_conn(&mut conn, &job.id, &queue, &error)
+-            .await
+-            .is_ok());
++        assert!(
++            fail_job_with_conn(&mut conn, &job.id, &queue, &error, &claim)
++                .await
++                .is_ok()
++        );
+ 
+         // Verify job is not in processing set
+         let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue}");
+@@ -1729,13 +1860,19 @@
+         .expect("enqueue");
+ 
+         let mut conn = get_test_connection(&client).await;
+-        let (job, queue) = dequeue_with_conn(&mut conn, &["default".to_string()], &[])
++        let (job, queue, claim) = dequeue_with_conn(&mut conn, &["default".to_string()], &[])
+             .await
+             .expect("dequeue")
+             .expect("a job to dequeue");
+-        fail_job_with_conn(&mut conn, &job.id, &queue, &Error::string("test failure"))
+-            .await
+-            .expect("fail the job");
++        fail_job_with_conn(
++            &mut conn,
++            &job.id,
++            &queue,
++            &Error::string("test failure"),
++            &claim,
++        )
++        .await
++        .expect("fail the job");
+ 
+         let failed = get_jobs(&client, Some(&vec![JobStatus::Failed]), None)
+             .await
+@@ -1761,13 +1898,19 @@
+         .expect("enqueue");
+ 
+         let mut conn = get_test_connection(&client).await;
+-        let (job, queue) = dequeue_with_conn(&mut conn, &["default".to_string()], &[])
++        let (job, queue, claim) = dequeue_with_conn(&mut conn, &["default".to_string()], &[])
+             .await
+             .expect("dequeue")
+             .expect("a job to dequeue");
+-        fail_job_with_conn(&mut conn, &job.id, &queue, &Error::string("test failure"))
+-            .await
+-            .expect("fail the job");
++        fail_job_with_conn(
++            &mut conn,
++            &job.id,
++            &queue,
++            &Error::string("test failure"),
++            &claim,
++        )
++        .await
++        .expect("fail the job");
+ 
+         assert_eq!(retry_failed(&client, None).await.expect("retry"), 1);
+         assert!(get_jobs(&client, Some(&vec![JobStatus::Failed]), None)
+@@ -1777,7 +1920,7 @@
+ 
+         // Queued is not enough: the id must be back in a queue ZSET, or no
+         // worker will ever see it again.
+-        let (again, _) = dequeue_with_conn(&mut conn, &["default".to_string()], &[])
++        let (again, _, _) = dequeue_with_conn(&mut conn, &["default".to_string()], &[])
+             .await
+             .expect("dequeue")
+             .expect("the retried job is dequeueable");
+@@ -2168,7 +2311,7 @@
+ 
+         let queues = vec!["default".to_string()];
+         for expected_index in [1, 2, 3, 4, 5] {
+-            let (job, _) = dequeue_with_conn(&mut conn, &queues, &[])
++            let (job, _, claim) = dequeue_with_conn(&mut conn, &queues, &[])
+                 .await
+                 .expect("dequeue failed")
+                 .expect("expected a job");
+@@ -2176,7 +2319,7 @@
+                 job.data.get("index"),
+                 Some(&serde_json::json!(expected_index))
+             );
+-            complete_job_with_conn(&mut conn, &job.id, "default", None)
++            complete_job_with_conn(&mut conn, &job.id, "default", None, &claim)
+                 .await
+                 .expect("complete job");
+         }
+@@ -2262,17 +2405,17 @@
+         let mut conn = get_test_connection(&client).await;
+ 
+         // Zero priority is dequeued before the negative one.
+-        let (job, _) = dequeue_with_conn(&mut conn, &queues, &[])
++        let (job, _, claim) = dequeue_with_conn(&mut conn, &queues, &[])
+             .await
+             .expect("dequeue failed")
+             .expect("expected a job");
+         assert_eq!(job.priority, 0);
+         assert_eq!(job.name, "ZeroPriorityJob");
+-        complete_job_with_conn(&mut conn, &job.id, "default", None)
++        complete_job_with_conn(&mut conn, &job.id, "default", None, &claim)
+             .await
+             .expect("complete job");
+ 
+-        let (job, _) = dequeue_with_conn(&mut conn, &queues, &[])
++        let (job, _, _) = dequeue_with_conn(&mut conn, &queues, &[])
+             .await
+             .expect("dequeue failed")
+             .expect("expected a job");
+@@ -2319,7 +2462,7 @@
+         let _: () = conn.zadd(&queue_key, "job2", score2).await.unwrap();
+ 
+         let queues = vec!["default".to_string()];
+-        let (job, _) = dequeue_with_conn(&mut conn, &queues, &[])
++        let (job, _, _) = dequeue_with_conn(&mut conn, &queues, &[])
+             .await
+             .expect("dequeue")
+             .expect("should have dequeued the untagged job");
+--- a/src/bgworker/sqlt.rs
++++ b/src/bgworker/sqlt.rs
+@@ -181,6 +181,13 @@
+         self.token.cancel();
+         Ok(())
+     }
++
++    async fn close(&self) -> Result<()> {
++        self.token.cancel();
++        *self.registry.lock().await = JobRegistry::new();
++        self.pool.close().await;
++        Ok(())
++    }
+ }
+ 
+ async fn connect(cfg: &SqliteQueueConfig) -> Result<SqlitePool> {
+--- a/src/boot.rs
++++ b/src/boot.rs
+@@ -190,7 +190,11 @@
+ 
+     println!("press ctrl-c again to force quit");
+     select! {
+-        _ = handle => {}
++        _ = handle => {
++            if let Some(queue) = &app_context.queue_provider {
++                queue.close().await?;
++            }
++        }
+         () = shutdown_signal() => {}
+     }
+     Ok(())

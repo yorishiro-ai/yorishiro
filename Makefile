@@ -12,6 +12,8 @@ YORISHIRO_VALKEY_TEST_URL ?= redis://localhost:6379/15
 
 check: check-ce
 
+.PHONY: patch-check
+
 check-ce:
 	cargo check --locked --no-default-features --features community --workspace
 
@@ -33,7 +35,7 @@ fmt-check:
 	cargo fmt --all -- --check
 
 python-lint:
-	uv run ruff check scripts
+	uv run ruff check scripts patches/loco-rs/verify.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_ci_matrix.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_ci_matrix.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_classify_ci_changes.py
@@ -131,9 +133,12 @@ entities: build
 	docker compose down -v testdb
 
 # CE is the base boundary. EE compatibility is checked separately after CE work is complete.
-check-all: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ce clippy-ce
+patch-check:
+	python3 patches/loco-rs/verify.py
 
-check-all-ee: fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ee clippy-ee
+check-all: patch-check fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ce clippy-ce
+
+check-all-ee: patch-check fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ee clippy-ee
 
 package-docker-check:
 	@test -n "$(IMAGE)" || { echo 'IMAGE is required' >&2; exit 2; }

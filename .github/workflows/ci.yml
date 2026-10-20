@@ -105,6 +105,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Verify upstream bug-fix patches
+        run: make patch-check
+
       - name: Check generated entity hardener
         run: PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_harden_generated_entities.py
 

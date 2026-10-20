@@ -76,6 +76,7 @@ pub(crate) async fn finish_with_status(ctx: &AppContext, id: Uuid, expected: &st
         .unwrap()
         .unwrap()
         .unwrap();
+    queue.close().await.expect("close drained worker queue");
     result.expect("migration must complete on the configured queue provider");
 }
 

@@ -22,6 +22,9 @@ def classify_path(path: str) -> set[str]:
     s = str(p)
     groups: set[str] = set()
 
+    if s.startswith("patches/"):
+        groups |= {"deps", "rust", "ee"}
+
     if s.startswith((".github/actions/rust-setup/", ".github/actions/sea-orm-cli/")):
         groups |= RUST_SETUP_CONSUMERS | {"shared"}
     elif s.startswith(".github/actions/package-tests/") or s.startswith(".github/actions/build-and-package/"):

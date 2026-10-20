@@ -20,6 +20,14 @@ def test_docs_are_lightweight() -> None:
     assert not result["package_validation"]
 
 
+def test_dependency_patches_always_select_rust_and_security() -> None:
+    for path in ("patches/loco-rs/fixes.patch", "patches/loco-rs/source/src/boot.rs", "patches/serde_yaml/src/lib.rs", "patches/README.md"):
+        result = classify([path])
+        assert result["rust_validation"] and result["security_validation"]
+        assert result["rust"] and result["ee"]
+        assert not result["docs_only"]
+
+
 def test_packaging_selects_package_and_rust() -> None:
     result = classify(["packaging/nfpm-yorishiro-ce.yaml"])
     assert result["package_build"] and result["package_validation"]
@@ -98,6 +106,7 @@ if __name__ == "__main__":
     for test in (
         test_unknown_defaults_to_full,
         test_docs_are_lightweight,
+        test_dependency_patches_always_select_rust_and_security,
         test_packaging_selects_package_and_rust,
         test_release_workflow_selects_all_validations,
         test_manual_full_run_selects_every_group,

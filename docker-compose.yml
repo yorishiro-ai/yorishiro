@@ -44,6 +44,8 @@ x-yorishiro: &yorishiro
 services:
   db:
     image: pgvector/pgvector:pg18
+    # Reap orphan children outside PostgreSQL so their exit cannot trigger cluster recovery.
+    init: true
     container_name: db
     environment:
       POSTGRES_USER: yorishiro
@@ -55,13 +57,14 @@ services:
       # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
       - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yorishiro"]
+      test: ["CMD", "pg_isready", "-U", "yorishiro"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   testdb:
     image: pgvector/pgvector:pg18
+    init: true
     container_name: testdb
     environment:
       POSTGRES_USER: yorishiro
@@ -73,7 +76,7 @@ services:
       # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
       - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yorishiro"]
+      test: ["CMD", "pg_isready", "-U", "yorishiro"]
       interval: 5s
       timeout: 3s
       retries: 5

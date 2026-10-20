@@ -1,0 +1,10 @@
+[package]
+name = "paste"
+version = "1.0.15"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Temporary compatibility export of maintained pastey for upstream paste consumers"
+
+[dependencies]
+pastey = "=0.2.3"

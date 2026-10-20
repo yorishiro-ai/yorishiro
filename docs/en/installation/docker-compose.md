@@ -82,6 +82,7 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg18
+    init: true
     restart: unless-stopped
     environment:
       POSTGRES_USER: user
@@ -102,3 +103,7 @@ volumes:
 ```
 
 See [configuration](../configuration.md) for all settings.
+
+PostgreSQL containers must use `init: true`, as the repository's `db` and `testdb` services do.
+The init process reaps orphan children instead of PostgreSQL; an unrelated child's abnormal exit must not trigger PostgreSQL cluster recovery.
+For an existing deployment, schedule a container recreation to activate this setting; changing the Compose file does not change a running container.

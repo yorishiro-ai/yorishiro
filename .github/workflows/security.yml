@@ -15,6 +15,7 @@ on:
       - "Cargo.lock"
       - "**/Cargo.toml"
       - ".cargo/audit.toml"
+      - "patches/**"
   workflow_dispatch:
 
 concurrency:

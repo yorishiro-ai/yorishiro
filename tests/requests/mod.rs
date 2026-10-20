@@ -76,7 +76,7 @@ use std::str::FromStr;
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
     if let Some(queue) = &ctx.queue_provider {
-        queue.shutdown().expect("shutdown test queue");
+        queue.close().await.expect("close test queue");
     }
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
@@ -132,7 +132,7 @@ fn sqlite_queue_cleanup_removes_database_and_journal_siblings() {
 /// When a queue provider is configured, shutdown cancels its workers before file cleanup.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
     if let Some(queue) = &ctx.queue_provider {
-        queue.shutdown().expect("shutdown sqlite test queue");
+        queue.close().await.expect("close sqlite test queue");
     }
     ctx.db.get_sqlite_connection_pool().close().await;
     if let Some(path) = sqlite_queue_path(&ctx.config) {

@@ -1,0 +1,10 @@
+[package]
+name = "serde_yaml_ng"
+version = "0.10.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Temporary YAML compatibility export for Loco's unmaintained dependency"
+
+[dependencies]
+serde_yaml_bw = "=2.5.8"
