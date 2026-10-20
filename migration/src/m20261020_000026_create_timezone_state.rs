@@ -1,15 +1,12 @@
 use super::helpers;
 use sea_orm_migration::prelude::*;
-
 #[derive(DeriveMigrationName)]
 pub struct Migration;
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     fn use_transaction(&self) -> Option<bool> {
         helpers::use_transaction()
     }
-
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .create_table(
@@ -34,17 +31,23 @@ impl MigrationTrait for Migration {
             .await?;
         manager
             .get_connection()
-            .execute_unprepared(
-                "INSERT INTO timezone_state (id, active_timezone) VALUES (1, 'UTC') ON CONFLICT (id) DO NOTHING",
+            .execute(
+                &Query::insert()
+                    .into_table(Alias::new("timezone_state"))
+                    .columns([Alias::new("id"), Alias::new("active_timezone")])
+                    .values_panic([1.into(), "UTC".into()])
+                    .on_conflict(OnConflict::column(Alias::new("id")).do_nothing().to_owned())
+                    .to_owned(),
             )
             .await?;
         helpers::grant(manager, "SELECT, UPDATE", "timezone_state").await?;
         Ok(())
     }
-
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_table(Table::drop().table(Alias::new("timezone_state")).to_owned())
-            .await
+            .await?;
+
+        Ok(())
     }
 }

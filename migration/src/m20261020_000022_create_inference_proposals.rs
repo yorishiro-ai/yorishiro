@@ -1,32 +1,13 @@
-//! Persist reviewable infer-fill proposals and their terminal decisions.
-
 use super::helpers;
 use sea_orm_migration::prelude::*;
-
 #[derive(DeriveMigrationName)]
 pub struct Migration;
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     fn use_transaction(&self) -> Option<bool> {
         helpers::use_transaction()
     }
-
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(Alias::new("inference_jobs"))
-                    .add_column(
-                        ColumnDef::new(Alias::new("proposed"))
-                            .big_integer()
-                            .not_null()
-                            .default(0),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
         let [created_at, updated_at] = helpers::timestamps(manager);
         let table = Table::create()
             .table(Alias::new("inference_proposals"))
@@ -112,35 +93,18 @@ impl MigrationTrait for Migration {
             "inference_proposals",
         )
         .await?;
-        // Proposal delivery validates the parent job while running on the RLS-scoped tenant pool.
-        // The job row itself remains workspace-checked in the model because inference_jobs has no
-        // RLS policy.
-        helpers::grant(manager, "SELECT", "inference_jobs").await?;
 
         Ok(())
     }
-
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        helpers::pg_only(
-            manager,
-            "REVOKE SELECT ON inference_jobs FROM yorishiro_app;",
-        )
-        .await?;
         manager
             .drop_table(
                 Table::drop()
                     .table(Alias::new("inference_proposals"))
-                    .if_exists()
                     .to_owned(),
             )
             .await?;
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(Alias::new("inference_jobs"))
-                    .drop_column(Alias::new("proposed"))
-                    .to_owned(),
-            )
-            .await
+
+        Ok(())
     }
 }

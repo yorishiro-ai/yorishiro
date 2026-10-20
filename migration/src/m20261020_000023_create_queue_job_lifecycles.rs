@@ -1,17 +1,13 @@
-//! Persist the provider-neutral lifecycle observed around background jobs.
-
 use super::helpers;
 use sea_orm_migration::prelude::*;
-
+use sea_orm_migration::sea_orm::DbBackend;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     fn use_transaction(&self) -> Option<bool> {
         helpers::use_transaction()
     }
-
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let [created_at, updated_at] = helpers::timestamps(manager);
         manager
@@ -28,6 +24,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("status")).string().not_null())
                     .col(helpers::ts_tz_col(manager, Alias::new("enqueue_at")).not_null())
                     .col(helpers::ts_tz_col(manager, Alias::new("claim_at")))
+.col(helpers::ts_tz_col(manager, Alias::new("admitted_at")))
+.col(helpers::ts_tz_col(manager, Alias::new("lease_until")))
                     .col(helpers::ts_tz_col(manager, Alias::new("start_at")))
                     .col(helpers::ts_tz_col(manager, Alias::new("retry_at")))
                     .col(helpers::ts_tz_col(manager, Alias::new("completed_at")))
@@ -44,11 +42,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
         for (name, column) in [
-            (
-                "queue_job_lifecycles_provider_job_id_idx",
-                "provider_job_id",
-            ),
-            ("queue_job_lifecycles_status_class_idx", "status"),
+            ("queue_job_lifecycles_status_idx", "status"),
             ("queue_job_lifecycles_enqueue_at_idx", "enqueue_at"),
         ] {
             manager
@@ -61,17 +55,44 @@ impl MigrationTrait for Migration {
                 )
                 .await?;
         }
+        manager
+            .create_index(
+                Index::create()
+                    .name(ACTIVE_REINDEX_INDEX)
+                    .unique()
+                    .table(Alias::new("queue_job_lifecycles"))
+                    .col(Alias::new("job_name"))
+                    .col(Alias::new("workspace_id"))
+                    .and_where(
+                        Expr::col(Alias::new("job_name"))
+                            .eq("startup_reindex")
+                            .and(Expr::col(Alias::new("workspace_id")).is_not_null())
+                            .and(
+                                Expr::col(Alias::new("status"))
+                                    .is_in(["queued", "running", "retrying"]),
+                            ),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        if manager.get_database_backend() != DbBackend::Sqlite {
+            manager.get_connection().execute_unprepared(
+                "ALTER TABLE queue_job_lifecycles ENABLE ROW LEVEL SECURITY; GRANT SELECT, INSERT, UPDATE ON queue_job_lifecycles TO yorishiro_app; CREATE POLICY workspace_lifecycle_select ON queue_job_lifecycles AS PERMISSIVE FOR SELECT USING (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid); CREATE POLICY workspace_lifecycle_insert ON queue_job_lifecycles AS PERMISSIVE FOR INSERT WITH CHECK (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid); CREATE POLICY workspace_lifecycle_update ON queue_job_lifecycles AS PERMISSIVE FOR UPDATE USING (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid) WITH CHECK (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid);",
+            ).await?;
+        }
+
         Ok(())
     }
-
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_table(
                 Table::drop()
                     .table(Alias::new("queue_job_lifecycles"))
-                    .if_exists()
                     .to_owned(),
             )
-            .await
+            .await?;
+
+        Ok(())
     }
 }
+const ACTIVE_REINDEX_INDEX: &str = "queue_startup_reindex_active_workspace_idx";

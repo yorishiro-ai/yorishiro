@@ -131,33 +131,18 @@ pub async fn grant(
 
 /// Creates `table`, with each `(constraint_name, expr)` in `checks` applied as a table-level CHECK.
 ///
-/// SQLite's `ALTER TABLE` supports only rename/add-column/drop-column, so a named `ADD CONSTRAINT` after the fact (Postgres's usual shape in this crate) doesn't work there: the checks go inline into the `CREATE TABLE` for SQLite instead, and as `ALTER TABLE ... ADD CONSTRAINT` statements for Postgres.
-///
-/// SeaORM's `TableAlterStatement` has no `add_constraint` builder — `execute_unprepared` is Loco's own documented pattern for these.
+/// Named constraints are emitted inline by SeaQuery on both backends.
 /// The `expr` values are CHECK constraint expressions (hardcoded migration constants), not user input.
 pub async fn create_table_with_checks(
     manager: &SchemaManager<'_>,
-    table_name: &str,
+    _table_name: &str,
     mut table: TableCreateStatement,
     checks: &[(&str, &str)],
 ) -> Result<(), DbErr> {
-    let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
-    if sqlite {
-        for (_, expr) in checks {
-            table = table.check(Expr::cust((*expr).to_owned())).to_owned();
-        }
+    for (name, expr) in checks {
+        table.check((Alias::new(*name), Expr::cust(String::from(*expr))));
     }
     manager.create_table(table).await?;
-    if !sqlite {
-        for (name, expr) in checks {
-            manager
-                .get_connection()
-                .execute_unprepared(&format!(
-                    "ALTER TABLE {table_name} ADD CONSTRAINT {name} CHECK ({expr});"
-                ))
-                .await?;
-        }
-    }
     Ok(())
 }
 

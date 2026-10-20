@@ -11,7 +11,6 @@ mod integration;
 mod config;
 mod licence;
 mod metaschema;
-pub(crate) mod migration;
 mod models;
 mod requests;
 mod services;

@@ -2,61 +2,68 @@
 #![allow(clippy::wildcard_imports)]
 pub use sea_orm_migration::prelude::*;
 mod helpers;
-
-mod m20260829_000000_initial_schema;
-mod m20260909_000001_embedding_width_partitions;
-mod m20260911_000002_add_tenant_memberships_user_id_index;
-mod m20260912_000003_schema_origin_updated_at;
-mod m20260912_000004_compute_credit_ledger;
-mod m20260912_000005_fill_defaults_audit_action;
-mod m20260913_000006_inference_jobs;
-mod m20260914_000007_workspace_schema_forks;
-mod m20260929_000008_inference_proposals;
-mod m20260930_000009_queue_job_lifecycle;
-mod m20260930_000010_queue_job_admission;
-mod m20260930_000011_queue_job_lease;
-mod m20260930_000012_inference_job_attempt;
-mod m20260930_000013_inference_job_attempt_privileges;
-mod m20261002_000015_api_key_name;
-mod m20261005_000016_add_entity_embedding_sync_token;
-mod m20261005_000017_embedding_tables_tenant_read;
-mod m20261006_000018_embedding_queue_state;
-mod m20261009_000019_template_tags_json;
-mod m20261011_000020_inference_one_running_job_per_workspace;
-mod m20261015_160234_queue_job_outbox_scope;
-mod m20261015_160332_query_embedding_deadline;
-mod m20261016_000022_timezone_state;
-mod m20261020_000023_background_job_completion;
+mod m20261020_000000_create_tenants;
+mod m20261020_000001_create_users;
+mod m20261020_000002_create_tenant_memberships;
+mod m20261020_000003_create_workspaces;
+mod m20261020_000004_create_workspace_invites;
+mod m20261020_000005_create_templates;
+mod m20261020_000006_create_schemas;
+mod m20261020_000007_create_api_keys;
+mod m20261020_000008_create_entities;
+mod m20261020_000009_create_entity_relations;
+mod m20261020_000010_create_entity_snapshots;
+mod m20261020_000011_create_billing;
+mod m20261020_000012_create_template_catalog;
+mod m20261020_000013_create_workspace_credentials;
+mod m20261020_000014_create_entity_column_preferences;
+mod m20261020_000015_create_api_key_audit_log;
+mod m20261020_000016_create_maintenance;
+mod m20261020_000017_create_reindex_schedules;
+mod m20261020_000018_create_compute_credit_ledger;
+mod m20261020_000019_create_workspace_schema_forks;
+mod m20261020_000020_create_workspace_schema_fork_heads;
+mod m20261020_000021_create_inference_jobs;
+mod m20261020_000022_create_inference_proposals;
+mod m20261020_000023_create_queue_job_lifecycles;
+mod m20261020_000024_create_queue_job_dispatch_outbox;
+mod m20261020_000025_create_query_embedding_requests;
+mod m20261020_000026_create_timezone_state;
+mod m20261020_000027_create_entity_embeddings;
 pub struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
-            Box::new(m20260829_000000_initial_schema::Migration),
-            Box::new(m20260909_000001_embedding_width_partitions::Migration),
-            Box::new(m20260911_000002_add_tenant_memberships_user_id_index::Migration),
-            Box::new(m20260912_000003_schema_origin_updated_at::Migration),
-            Box::new(m20260912_000004_compute_credit_ledger::Migration),
-            Box::new(m20260912_000005_fill_defaults_audit_action::Migration),
-            Box::new(m20260913_000006_inference_jobs::Migration),
-            Box::new(m20260914_000007_workspace_schema_forks::Migration),
-            Box::new(m20260929_000008_inference_proposals::Migration),
-            Box::new(m20260930_000009_queue_job_lifecycle::Migration),
-            Box::new(m20260930_000010_queue_job_admission::Migration),
-            Box::new(m20260930_000011_queue_job_lease::Migration),
-            Box::new(m20260930_000012_inference_job_attempt::Migration),
-            Box::new(m20260930_000013_inference_job_attempt_privileges::Migration),
-            Box::new(m20261002_000015_api_key_name::Migration),
-            Box::new(m20261005_000016_add_entity_embedding_sync_token::Migration),
-            Box::new(m20261005_000017_embedding_tables_tenant_read::Migration),
-            Box::new(m20261006_000018_embedding_queue_state::Migration),
-            Box::new(m20261009_000019_template_tags_json::Migration),
-            Box::new(m20261011_000020_inference_one_running_job_per_workspace::Migration),
-            Box::new(m20261015_160234_queue_job_outbox_scope::Migration),
-            Box::new(m20261015_160332_query_embedding_deadline::Migration),
-            Box::new(m20261016_000022_timezone_state::Migration),
-            Box::new(m20261020_000023_background_job_completion::Migration),
+            Box::new(m20261020_000000_create_tenants::Migration),
+            Box::new(m20261020_000001_create_users::Migration),
+            Box::new(m20261020_000002_create_tenant_memberships::Migration),
+            Box::new(m20261020_000003_create_workspaces::Migration),
+            Box::new(m20261020_000004_create_workspace_invites::Migration),
+            Box::new(m20261020_000005_create_templates::Migration),
+            Box::new(m20261020_000006_create_schemas::Migration),
+            Box::new(m20261020_000007_create_api_keys::Migration),
+            Box::new(m20261020_000008_create_entities::Migration),
+            Box::new(m20261020_000009_create_entity_relations::Migration),
+            Box::new(m20261020_000010_create_entity_snapshots::Migration),
+            Box::new(m20261020_000011_create_billing::Migration),
+            Box::new(m20261020_000012_create_template_catalog::Migration),
+            Box::new(m20261020_000013_create_workspace_credentials::Migration),
+            Box::new(m20261020_000014_create_entity_column_preferences::Migration),
+            Box::new(m20261020_000015_create_api_key_audit_log::Migration),
+            Box::new(m20261020_000016_create_maintenance::Migration),
+            Box::new(m20261020_000017_create_reindex_schedules::Migration),
+            Box::new(m20261020_000018_create_compute_credit_ledger::Migration),
+            Box::new(m20261020_000019_create_workspace_schema_forks::Migration),
+            Box::new(m20261020_000020_create_workspace_schema_fork_heads::Migration),
+            Box::new(m20261020_000021_create_inference_jobs::Migration),
+            Box::new(m20261020_000022_create_inference_proposals::Migration),
+            Box::new(m20261020_000023_create_queue_job_lifecycles::Migration),
+            Box::new(m20261020_000024_create_queue_job_dispatch_outbox::Migration),
+            Box::new(m20261020_000025_create_query_embedding_requests::Migration),
+            Box::new(m20261020_000026_create_timezone_state::Migration),
+            Box::new(m20261020_000027_create_entity_embeddings::Migration),
             // inject-above (do not remove this comment)
         ]
     }

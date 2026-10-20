@@ -69,7 +69,6 @@ The integration tests are one binary rooted at `tests/mod.rs`:
 - `tests/db.rs`, `tests/db_enum.rs` — connection primitives and the `db_enum!` conversions
 - `tests/initializers/` — process-lifetime initializers (`db_load_guard`)
 - `tests/metaschema/` — nesting, projection, validation, type resolution, versioning
-- `tests/migration/` — `postgres.rs`, `sqlite.rs`
 - `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle
 - `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
 - `tests/services/` — embedding, rate limiting
@@ -111,7 +110,6 @@ Dedicated SQLite files use this gate:
 - `tests/requests/auth_sqlite.rs` — authentication
 - `tests/requests/schemas_sqlite.rs` — schema CRUD
 - `tests/requests/workspaces_sqlite.rs` — workspace CRUD
-- `tests/migration/sqlite.rs` — migration verification
 
 `uv run scripts/test_topology.py` runs the suite with explicit CE or EE feature flags and verifies a configured-app marker emitted after `Hooks::load_config(Environment::Test)` resolves the expected database URI and `QueueConfig` variant.
 The runner rejects unexpected marker directories and fails when the expected topology has no configured-app evidence.

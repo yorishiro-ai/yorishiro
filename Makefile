@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_VALKEY_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-pg-migrations test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -79,10 +79,6 @@ test-postgres: build
 		docker compose up -d --wait testdb; \
 	fi
 	DATABASE_URL='$(DATABASE_URL)' QUEUE_URL='$(DATABASE_URL)' YORISHIRO_TEST_TOPOLOGY=postgres-postgres YORISHIRO_TEST_QUEUE=postgres RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/test_topology.py postgres-postgres
-
-test-pg-migrations: patch-check
-	docker compose up -d --wait testdb
-	DATABASE_URL='$(DATABASE_URL)' YORISHIRO_TEST_BACKEND=postgres-postgres DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --test mod --features enterprise migration::postgres::
 
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' YORISHIRO_TEST_TOPOLOGY=sqlite-sqlite YORISHIRO_TEST_QUEUE=sqlite RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite

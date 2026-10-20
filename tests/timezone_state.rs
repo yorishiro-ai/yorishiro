@@ -1,8 +1,12 @@
 use chrono::Offset;
+use futures::FutureExt;
 use loco_rs::app::Hooks;
 use migration::MigratorTrait;
+use sea_orm::Database;
 use sea_orm::{ConnectionTrait, EntityTrait, Statement, TransactionTrait};
 use serial_test::serial;
+use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Barrier;
 
@@ -566,7 +570,7 @@ async fn postgres_timezone_state_serializes_concurrent_activations_without_dml_n
         return;
     }
     crate::require_sqlite_backend();
-    crate::migration::postgres::with_timezone_scratch_db(|db, database_url| {
+    with_timezone_scratch_db(|db, database_url| {
         Box::pin(async move {
             postgres_timezone_state_scenario(db, database_url)
                 .await
@@ -810,4 +814,111 @@ async fn sqlite_connection(url: &str) -> sea_orm::DatabaseConnection {
     options.max_connections(2);
     options.map_sqlx_sqlite_opts(|opts| opts.busy_timeout(Duration::from_secs(5)));
     Database::connect(options).await.unwrap()
+}
+
+static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A throwaway database, dropped and recreated so each run starts from nothing.
+///
+/// A `DATABASE_URL` that is present but unusable panics rather than skipping.
+async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String, String) {
+    let base = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
+
+    // Split the path from the query, so `?sslmode=require` and friends survive onto both derived
+    // URLs. Dropping them silently produced a connection failure that the old `.ok()?` turned into
+    // a skip, so an SSL-requiring server reported two passing tests that had not run.
+    let (without_query, query) = match base.split_once('?') {
+        Some((head, q)) => (head, format!("?{q}")),
+        None => (base.as_str(), String::new()),
+    };
+    // Rewrite only the last path segment, so a password or host containing the database's name is left alone.
+    let prefix = without_query
+        .rsplit_once('/')
+        .expect("DATABASE_URL has no database path segment")
+        .0;
+    let admin_url = format!("{prefix}/postgres{query}");
+    let unique_name = format!(
+        "yorishiro_tz_{}_{}_{}",
+        std::process::id(),
+        SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        name
+    );
+    let target_url = format!("{prefix}/{unique_name}{query}");
+
+    let admin = Database::connect(&admin_url)
+        .await
+        .expect("connect to the admin database named by DATABASE_URL");
+    for sql in [
+        format!("DROP DATABASE IF EXISTS {unique_name}"),
+        format!("CREATE DATABASE {unique_name}"),
+    ] {
+        admin
+            .execute_unprepared(&sql)
+            .await
+            .expect("prepare scratch database");
+    }
+    drop(admin);
+
+    let db = Database::connect(&target_url)
+        .await
+        .expect("connect to scratch database");
+    (db, unique_name, target_url)
+}
+
+async fn close_scratch_db(db: sea_orm::DatabaseConnection, name: &str) -> Result<(), String> {
+    let mut errors = Vec::new();
+    if let Err(error) = db.close().await {
+        errors.push(format!("close scratch database pool: {error}"));
+    }
+    let base = std::env::var("DATABASE_URL")
+        .map_err(|error| format!("read DATABASE_URL for scratch cleanup: {error}"))?;
+    let (without_query, query) = match base.split_once('?') {
+        Some((head, q)) => (head, format!("?{q}")),
+        None => (base.as_str(), String::new()),
+    };
+    let prefix = without_query
+        .rsplit_once('/')
+        .ok_or_else(|| "DATABASE_URL has no database path segment".to_owned())?
+        .0;
+    let admin = Database::connect(format!("{prefix}/postgres{query}"))
+        .await
+        .map_err(|error| format!("connect to the admin database for scratch cleanup: {error}"))?;
+    if let Err(error) = admin
+        .execute_unprepared(&format!("DROP DATABASE IF EXISTS {name}"))
+        .await
+    {
+        errors.push(format!("drop scratch database {name}: {error}"));
+    }
+    if let Err(error) = admin.close().await {
+        errors.push(format!("close scratch admin pool: {error}"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+async fn with_timezone_scratch_db<F>(test: F)
+where
+    F: for<'a> FnOnce(
+            &'a sea_orm::DatabaseConnection,
+            &'a str,
+        ) -> futures::future::BoxFuture<'a, ()>
+        + Send,
+{
+    let (db, database_name, target_url) = scratch_db("timezone_state").await;
+    let result = AssertUnwindSafe(test(&db, &target_url))
+        .catch_unwind()
+        .await;
+    let cleanup = close_scratch_db(db, &database_name).await;
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(error)) => panic!("scratch database cleanup failed: {error}"),
+        (Err(panic), Ok(())) => std::panic::resume_unwind(panic),
+        (Err(panic), Err(error)) => {
+            eprintln!("scratch database cleanup also failed: {error}");
+            std::panic::resume_unwind(panic);
+        }
+    }
 }
