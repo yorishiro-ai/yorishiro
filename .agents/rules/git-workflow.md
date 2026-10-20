@@ -76,7 +76,8 @@ When unclear, prefer a merge commit: losing an empirical record is the more expe
 
 ## Docs
 
-Every PR that changes source code must update docs (English + Japanese). The `doc-check` workflow warns if this is missing.
+`docs/` and `ee/docs/` are managed separately and are outside code-change scope.
+Do not require documentation updates or English/Japanese synchronization for source changes.
 
 ## Versioning
 
