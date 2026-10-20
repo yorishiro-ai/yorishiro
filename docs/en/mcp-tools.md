@@ -11,18 +11,6 @@ An intentional breaking change must update this document and explain the migrati
 The inventory does not claim protocol scope metadata.
 Authorization remains enforced by the existing centralized MCP authorization path and the tool descriptions only describe required scopes for humans.
 
-## Queued bulk operations
-
-`import_jsonl` returns a `job_id`; use `import_job_status` with schema scope to poll its status and result counts.
-REST `POST /api/import.jsonl` returns 202 and the same acceptance shape; poll `GET /api/import-jobs/{job_id}`.
-The worker commits imported records, embedding dispatch, and its completion result together, or rolls them all back.
-The import body is persisted in the queue, so protect queue access and retention as application data.
-`POST /api/migration-jobs/{job_id}/undo` returns 202 with a new `job_id` and the original `snapshot_job_id` without restoring data in the request.
-Poll `GET /api/migration-jobs/{job_id}` with migration scope for undo or fill-defaults results.
-Proposal confirmation returns 202 from `POST /api/inference-jobs/{job_id}/confirm`; poll `GET /api/inference-jobs/confirmations/{job_id}` with schema scope.
-Incomplete or failed inference jobs are rejected with 409 before enqueue.
-Status endpoints expose only matching job types within the authenticated workspace and never return raw internal errors.
-
 <!-- BEGIN GENERATED MCP INVENTORY -->
 ## Community tools
 
@@ -163,7 +151,7 @@ Input schema:
 
 ### `fill_defaults`
 
-Enqueue a fill-defaults job (requires migration scope). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log.
+Fill absent required fields in entities behind a schema's active version (requires migration scope). Takes a snapshot so the operation can be undone with the migration undo endpoint.
 
 Input schema:
 
@@ -341,31 +329,9 @@ Input schema:
 }
 ```
 
-### `import_job_status`
-
-Poll a queued JSON Lines import (requires schema scope)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "properties": {
-    "job_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "job_id"
-  ],
-  "type": "object"
-}
-```
-
 ### `import_jsonl`
 
-Bulk-import schemas/entities/relations from a JSON Lines document in the export format (requires schema scope, since importing schemas is itself a schema-scope-only operation). Returns a job_id; poll import_job_status. The worker applies every record in one transaction or rolls everything back.
+Bulk-import schemas/entities/relations from a JSON Lines document in the export format (requires schema scope, since importing schemas is itself a schema-scope-only operation). Runs as a single transaction: either every record in `jsonl` is applied, or the first error rolls back everything imported so far.
 
 Input schema:
 

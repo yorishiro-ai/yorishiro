@@ -23,31 +23,31 @@ runs:
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./packaging/test-artifacts.sh dist "$VERSION"
+      run: ./.github/packaging/test-artifacts.sh dist "$VERSION"
 
     - name: Verify artifact metadata checks reject invalid packages
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./packaging/test-artifacts-self.sh dist "$VERSION"
+      run: ./.github/packaging/test-artifacts-self.sh dist "$VERSION"
 
     - name: Verify installed-path policy allows the optional admin override
       shell: bash
-      run: ./packaging/test-install-paths-self.sh
+      run: ./.github/packaging/test-install-paths-self.sh
 
     - name: Test package transitions and co-install refusal
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./packaging/test-transitions.sh dist "$VERSION"
+      run: ./.github/packaging/test-transitions.sh dist "$VERSION"
 
     - name: Test representative installed packages
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
       run: |
-        ./packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
-        ./packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
+        ./.github/packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
+        ./.github/packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
 
     - name: Test Docker configuration ownership and fallback
       shell: bash

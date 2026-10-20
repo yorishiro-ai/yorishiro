@@ -7,23 +7,6 @@ This page describes how the source tree follows Loco 1.2.0's generator layout, a
 Every entry point authenticates, parses input, calls a model operation, and renders the result.
 None of them owns domain logic or builds ordinary queries.
 
-Use SeaORM for ordinary persistence and SeaQuery for atomic statements such as snapshot inserts and guarded embedding upserts.
-Atomicity alone is not a reason to use handwritten SQL.
-Prefer Loco's public APIs before application-owned SeaORM/SeaQuery operations, and use Tokio only where neither provides the required lifecycle behavior.
-The PostgreSQL queue delegates handler registration, execution, recovery and supported administration to Loco's `PgQueue` while retaining application-required enqueue collision protection.
-Valkey delegates supported administration to Loco; its recovery keeps a guarded atomic membership move because Loco 1.2.0 issues separate commands that can race with completion.
-Outbox recovery, marketplace aggregates and next-version inserts use SeaORM/SeaQuery even when they need joins, correlated subqueries or a single atomic statement.
-SQLite queue persistence and schema extensions also use SeaORM/SeaQuery, including exact-instant claims and legacy timestamp backfill.
-Neighbor batching uses SeaQuery LATERAL queries on PostgreSQL and partitioned window queries on SQLite to retain the per-pivot limit in one round trip.
-Vector search and text fallback queries use SeaQuery, including workspace scope, reindex exclusion, JSON containment, FTS5 and pg_trgm expressions.
-The pgvector cosine-distance operator is the only custom operator in those search queries.
-Authentication queries also use SeaQuery while retaining the SECURITY DEFINER functions and RLS-scoped pools.
-The API key usage timestamp is updated on its dedicated scoped connection, outside the request transaction, so read-only requests cannot roll it back.
-Valkey collision tests call the production enqueue operations with explicit IDs instead of copying their Lua scripts.
-Database-specific transaction setup belongs in `src/db.rs`, not in individual workers.
-Tests call production operations instead of rebuilding enqueue or persistence logic in fixture helpers.
-Fixtures for old persisted formats still test current compatibility code and are not obsolete merely because the input format is old.
-
 | Directory | Role | Laravel counterpart |
 | --- | --- | --- |
 | `src/controllers/` | Entry points: REST handlers, MCP tools (`controllers/mcp/`), request middleware (`controllers/middleware/`), extractors | Controllers, Middleware |

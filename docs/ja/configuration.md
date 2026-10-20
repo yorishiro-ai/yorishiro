@@ -54,9 +54,7 @@ Yorishiro はテキストを数値に変換し、類似検索を有効にでき�
 
 ワーカーがタイムアウトした場合やプロバイダが失敗した場合、検索は `503` を返します。字句検索だけに黙ってフォールバックすることはありません。
 
-バックアップのインポート（`import_jsonl`）でも、インポートworkerがエンティティをコミットするときにドキュメント埋め込みのジョブを投入します。
-インポート完了は埋め込みジョブの完了を意味しないため、処理中は類似検索の結果が不完全な場合があります。
-すべてのエンティティの埋め込みを再生成するには、次のコマンドを実行してください：
+ただし例外があります：バックアップファイル（`import_jsonl`）から復元した場合、インポートされたエンティティには埋め込みがありません。単語を直接一致させるあいまい検索で検索は可能ですが、埋め込みが生成されるまで類似検索の結果は不完全になります。すべてのエンティティの埋め込みを生成するには次のコマンドを実行してください：
 
 ```
 cargo loco task resync_embeddings workspace_id:<uuid>
@@ -67,8 +65,6 @@ cargo loco task resync_embeddings workspace_id:<uuid>
 ### 埋め込みプロバイダの選択
 
 マシン上で動くローカルモデルか、OpenAI 互換のサービス（LM Studio、Ollama、vLLM、OpenAI など）のどちらかを選べます。
-埋め込みと推論のHTTP呼び出しはreqwestを直接使い、リクエストをタイムアウトで制限し、レスポンス本文を読む前にステータスを判定します。
-providerのエラーにはレスポンス本文を含めず、推論の呼び出しではworkspaceの認証情報を伴うリダイレクトを追跡しません。
 
 | 変数 | 説明 |
 |---|---|
@@ -126,9 +122,6 @@ API からもリインデックスを登録できます：`POST /api/migration-j
 | 変数 | 説明 |
 |---|---|
 | `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | 1分あたりの検索トークン使用量（既定：100000）。クエリごとに1回課金。API と MCP で共有の予算です。既定値は非常に高く、通常の操作では問題になりません。自動クエリの実行を制限するために存在します |
-
-RESTとMCPはどちらも、workspaceのembeddingを再構築している間は意味検索を拒否し、検索トークンの課金やworkerへの問い合わせを行いません。
-検索処理はmodelで共有し、クエリのembeddingが完了してからworkspaceのtransactionを開きます。
 
 ## データベース負荷ガード
 
@@ -231,22 +224,35 @@ Official と tenant の自動起動は運用者がプロセスマネージャー
 tenant 対象の Redis キューはジョブの到着に応じて作られ、tenant を削除しても自動削除されません。
 キューの増加を監視し、その tenant のジョブを処理し終えた後に不要なキューを削除してください。
 
-## 永続キューの publisher
+## 永続キューパブリッシャーの切り替え
 
-relayの待機時間はLocoで解決した型付き設定`settings.dispatch`から読み込みます。
-各値は正数とし、claimの有効期間はproviderへのenqueueのタイムアウトより長く設定してください。
+プロデューサーは業務データとディスパッチ outbox を同一トランザクションでコミットします。
+outbox を公開するのは dispatch relay のみです。
+通常の回復では queued 行と `retry_at` 到来済みの再試行を公開し、running 行の引き継ぎは証跡付きの明示的な replay に限定します。
+期限切れの QueryEmbedding 要求は除外します。
+relay は publisher epoch のフェンス下で短時間の永続 claim を取得・コミットしてから、DB トランザクション外で provider を呼び出します。
+条件付き ack は同じ epoch と claim token が有効な場合だけ provider 受理を記録しますが、provider timeout やプロセス停止では at-least-once の重複が起こり得ます。
 
-| 環境変数 | 設定名 | デフォルト |
-|---|---|---|
-| `YORISHIRO_DISPATCH_POLL_INTERVAL_MS` | `poll_interval_ms` | 500 ms |
-| `YORISHIRO_DISPATCH_CLAIM_LEASE_SECS` | `claim_lease_seconds` | 30秒 |
-| `YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS` | `enqueue_timeout_ms` | 5000 ms |
+プロバイダー切り替えでは、直接公開を停止するリリースを先にデプロイし、旧プロデューサーとワーカーを停止して `old_workers_exited:true` を運用者が記録します。
+`cargo loco task set_queue_publishing_epoch expected_epoch:<n> active:false` で公開を停止します。
+この操作後の epoch を E とします。
+スナップショット証跡を記録した後、停止状態のまま `cargo loco task replay_queue_dispatch_snapshot phase:prepare expected_epoch:<E> old_workers_exited:true cutoff_at:<RFC3339> snapshot_id:<evidence-id>` を実行します。
+prepare は表現可能な queued、retrying、running、および期限内の pending QueryEmbedding を原子的に付け替え、global state を E+1 に進めます。
+停止中に受け付けた仕事もこの snapshot に含めます。
+未来の `retry_at` は維持し、running は旧 lease を待たずに回収します。
+次に新ワーカープールを起動し、停止 epoch E を検証した上で、epoch を進めずに準備済み E+1 を `phase:activate expected_epoch:<E> old_workers_exited:true snapshot_id:<evidence-id>` で有効化します。
+有効化後にプロデューサーを再開します。
+attestation と snapshot ID は運用者が入力する証跡であり、システムが検証するものではありません。
+隔離、期限切れ、または表現できない legacy 行は再投入されず、別途照合が必要です。
+epoch 変更で受理済みメッセージは取り消せず、enqueue の結果が不明な場合は重複処理が起きる可能性があります。
 
-アプリケーションの producer は業務状態と dispatch-outbox 行を同じトランザクションでコミットします。
-outbox 行を Loco の queue provider へ公開するのは dispatch relay だけです。
-relay は短い永続 claim を取得してコミットしてから、DB トランザクション外で provider を呼び出します。
-条件付き ack は同じ claim token が有効な場合だけ provider 受理を記録します。
-provider 受理から ack までの間にタイムアウトやプロセス停止が起きると重複処理が起こり得ますが、job lifecycle の admission が吸収します。
+各ワーカープロセスには、同じキュー設定と、そのジョブに必要な埋め込みまたは推論の設定が必要です。
+ワーカーは HTTP サーバと同じホストでも別サーバでも動かせます。
+別サーバのワーカーは、サーバと同じ `QUEUE_URL` を必ず使ってください。
+SQLite ファイルを共有キューにする場合は絶対パスを使ってください。
+相対パスはホストごとに別々に解決され、共有キューになりません。
+PostgreSQL では複数のワーカープロセスが並列にジョブを取り出せます。
+SQLite では取り出し処理は直列ですが、永続キューによる障害回復は利用できます。
 
 `YORISHIRO_QUEUE_WORKERS` は 1 ワーカープロセス内の並列取り出しループ数を設定します。
 既定値は SQLite キューで 1、PostgreSQL と Redis 互換キューで 2 です。
@@ -288,7 +294,6 @@ PostgreSQL では、手動、起動時、定期実行のジョブが重なった
 SQLite では、再インデックスワーカーが単一テナント用のモデル所有経路を直接使い、PostgreSQL の advisory lock は取得しません。
 
 SQLite には PostgreSQL のような advisory lock がないため、scheduler ownership には待機しない OS file lock を使います。
-ロックはRust標準の`File::try_lock`と`File::unlock`を使い、独自のプラットフォームFFI実装は持ちません。
 有効な SQLite database path の隣に `.scheduler.lock` suffix の lock file を作り、待機しない OS file lock を取得します。
 競合した task process は直ちにスキップし、handle の close またはプロセス終了で lock が解放されます。
 この取得は task の実行中に行うため、外部の Loco configuration で scheduler job を指定した場合も対象です。
@@ -315,17 +320,9 @@ settings:
 設定を変更しても、記録済みの出来事が起きた時点や、ジョブの実行予定・有効期限は変わりません。
 
 PostgreSQL の `TIMESTAMPTZ` は瞬間を保持し、接続のセッションタイムゾーンで表示しますが、IANA タイムゾーン名は保存しません。アプリケーション、identity、tenant の各プールはこの設定からセッションタイムゾーンを初期化します。
-SQLiteにセッションタイムゾーンはありません。
-アプリケーションプールの接続では、スキーマ既定値の`CURRENT_TIMESTAMP`が設定されたIANAタイムゾーンと明示的なオフセットを返すため、解析後も絶対時刻が保たれます。
-この関数は各アプリケーション接続に登録し、キュー接続には適用しません。
-設定変更時に既存のtimestamp文字列は書き換えません。
-`database.run_on_start`は両backendともLoco本来の起動時一度だけの実行とし、プール置き換えや接続追加時には再実行しません。
-接続ローカルな設定ではなく、永続的なDB操作に使用してください。
-PostgreSQLの追加の接続設定は、接続URIの`options`へ指定してください。
-URIの設定はプール置き換え後も引き継がれ、identityとtenantの両プールに適用されます。
-applicationとidentityはmigration roleの同じプールを共有し、RLS用tenantプールとは分離します。
-終了時はrelayとload guardを停止しますが、Locoによるqueue workerの終了待ちとcontextの破棄が済むまでDBプールを閉じません。
-キューの保存・取得・timestamp は、選択した provider の Loco 1.2.0 の動作です。アプリケーションは provider を置き換えず、キューの timestamp も書き換えません。
+SQLite にセッションタイムゾーンはありません。アプリケーションプールの接続では、スキーマ既定値の `CURRENT_TIMESTAMP` が設定された IANA タイムゾーンと明示的なオフセットを返すため、解析後も絶対時刻が保たれます。この関数はアプリケーションプールの各接続に個別に登録し、キュー用データベース接続には適用しません。設定変更時に既存の timestamp 文字列は書き換えません。SQLite プールの置き換え時には、設定されている場合に限り `database.run_on_start` の SQL を各物理接続の初期化時に実行します。未設定の場合、置き換え後のプールは起動 SQL を実行しません。
+キューの timestamp は設定したタイムゾーンで書き込みますが、絶対時刻は維持します。PostgreSQL の実行対象判定も絶対時刻で比較します。
+SQLite は設定タイムゾーンのキュー timestamp と、実行時刻判定用の正確な epoch キーを保存します。offset 付きの既存行も扱います。
 Valkey はジョブの瞬間を保持し、新しい状態遷移を設定タイムゾーンで書き込みます。
 SQLite キューデータベースの処理はアプリケーションデータベースの接続既定値を変更しません。Loco の SQLite テスト設定では通常の PRAGMA を維持します。
 共有データベースを使うサーバーとワーカーには同じタイムゾーンを設定し、データベースやキューの値は現地時刻ではなく瞬間として扱ってください。
@@ -341,33 +338,6 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 タスクは、ベクトル検索クエリの 5 回反復にわたって中央値、最小値、最大値のレイテンシを測定します。エンティティ数が 1000 以上で中央値レイテンシが 200 ms を超える場合、vec0 の採用を推奨します。`min_entities` と `max_latency_ms` CLI 引数で両方の閾値を変更できます。
 
 このタスクは計測専用です。スキーマや構成を変更しません。vec0 仮想テーブルの採用がデプロイメントにとって価値があるかどうかを判断するのに役立ちます。
-任意の比較用テーブルは`<embedding_table>_vec0`という名前で、正規のUUID文字列を格納する`entity_id TEXT PRIMARY KEY`、`workspace_id TEXT PARTITION KEY`、`embedding FLOAT[<width>] distance_metric=cosine`列を必要とします。
-workspaceのpartition制約をKNN選択の内側に適用し、別workspaceのデータが近傍候補の枠を消費しないようにします。
-件数は対象workspaceの非NULL embeddingだけを数え、対応するエンティティが1件も返らない比較はエラーにします。
-
-### Worker Admission設定
-
-enterprise overlayは、解決済みのLoco設定にある`initializers.worker_admission`からtargetの同時実行上限を読み込みます。
-`shared`と`tenant_private`の既定値は1で、`official`が未指定ならplanのofficial worker上限を使います。
-値は正の整数で指定し、空文字列は上書きなしとして扱います。
-同梱の設定ファイルは`YORISHIRO_WORKER_CLASS_SHARED_LIMIT`、`YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT`、`YORISHIRO_WORKER_OFFICIAL_LIMIT`を各fieldへ展開します。
-設定ファイルで上書きでき、読み込み後の環境変数変更は反映されません。
-community buildはこのinitializer設定を無視し、plan policyが無効なら同時実行上限も適用されません。
-plan policyの有効／無効は`initializers.plan_policy_enabled`で指定し、同梱ファイルでは`YORISHIRO_PLAN_POLICY_ENABLED`から展開します。
-真偽値または大文字小文字を区別しない真偽値の文字列を受け付け、context作成時に確定します。
-
-### 外部連携の認証情報
-
-ライセンスキーは解決済み設定の`initializers.licence_key`から読み込み、同梱設定は`YORISHIRO_LICENSE_KEY`をこのfieldへ展開します。
-キーは起動時に検証し、有効期限は引き続き各enterprise gateで確認します。
-キーが未指定、空、無効、または設定の型が不正な場合は、communityの起動を妨げずenterprise機能を無効にします。
-
-Stripeは解決済みLoco設定の`initializers.stripe.webhook_secret`、`price_pro`、`price_team`を読み込みます。
-OAuthは`initializers.oauth.issuer_url`、`client_id`、`client_secret`、`redirect_uri`、任意の旧callback上書き設定`bind`を読み込みます。
-同梱ファイルは既存の`YORISHIRO_STRIPE_*`、`YORISHIRO_OAUTH_*`、`YORISHIRO_BIND`環境変数をこれらのfieldへ展開します。
-設定読み込み後にプロセスの環境変数を変えても稼働中contextの認証情報は変わらず、反映にはアプリの再読み込みが必要です。
-Stripe secretがなければwebhookは無効、OAuth issuerがなければSSOログインは無効という動作を維持します。
-OAuth認証情報の部分的な指定は、黙ってログインを無効にせず設定エラーとして扱います。
 
 ## ログでの秘密情報の扱い
 

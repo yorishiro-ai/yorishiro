@@ -7,24 +7,6 @@
 すべてのエントリポイントは、認証し、入力を解析し、モデルの操作を呼び出し、結果を返します。
 ドメインロジックを持つことも、通常のクエリを組み立てることもしません。
 
-通常の永続化にはSeaORMを使い、snapshotの作成や競合防止付きupsertなどの単一文にはSeaQueryを使います。
-原子性が必要という理由だけではRaw SQLを使いません。
-独自のSeaORM／SeaQuery処理より先にLocoの公開APIを使い、必要なライフサイクルをどちらでも扱えない場合にだけTokioを使います。
-PostgreSQLキューのhandler登録、実行、復旧、対応する管理操作はLocoの`PgQueue`に委譲し、投入時の衝突拒否など必要な差分だけを残します。
-Valkeyの対応する管理操作もLocoへ委譲しますが、復旧ではmembershipを条件付きで原子的に移動します。
-Loco 1.2.0の復旧はコマンドが分かれており、完了処理との競合を防げないためです。
-outboxの復旧、marketplaceの集計、次versionの作成も、JOIN、相関サブクエリ、単一文の原子性を理由にRaw SQLを残さず、SeaORM／SeaQueryで組み立てます。
-SQLiteキューの永続化とschema拡張も、時刻精度を維持したclaimや旧timestampのbackfillを含めてSeaORM／SeaQueryを使います。
-隣接検索はPostgreSQLではLATERAL、SQLiteではpartition付きwindowをSeaQueryで組み立て、1回の問い合わせでpivotごとの件数制限を維持します。
-ベクトル検索とテキストの補完検索も、workspace制約、reindex中の除外、JSON包含、FTS5、pg_trgmを含めてSeaQueryを使います。
-これらの検索で独自演算子の指定が必要なのは、pgvectorのcosine距離演算子だけです。
-認証の問い合わせもSeaQueryを使い、SECURITY DEFINER関数とRLS付きpoolを維持します。
-API keyの最終使用時刻は要求のtransactionとは別の専用接続で更新し、読み取り専用の要求でもrollbackされないようにします。
-Valkeyの衝突テストはLuaを複製せず、本体の投入処理に明示的なIDを渡して検証します。
-DB固有のトランザクション設定は個々のworkerではなく`src/db.rs`に集約します。
-テストのhelperでenqueueや永続化を再実装せず、本体の操作を呼びます。
-旧形式データのfixtureでも、現行の互換処理を検証していれば不要なテストではありません。
-
 | ディレクトリ | 役割 | Laravel での対応 |
 | --- | --- | --- |
 | `src/controllers/` | エントリポイント。REST ハンドラー、MCP ツール（`controllers/mcp/`）、リクエストミドルウェア（`controllers/middleware/`）、エクストラクター | Controllers、Middleware |

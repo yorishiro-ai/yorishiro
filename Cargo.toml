@@ -1,13 +1,10 @@
 [workspace]
 resolver = "2"
-exclude = ["patches/paste", "patches/serde_yaml", "patches/serde_yaml_ng", "patches/loco-rs/source"]
+exclude = ["patches/loco-rs/source"]
 
-# Temporary upstream bug/maintenance fixes, with rationale and removal criteria in patches/.
+# Temporary upstream bug fixes, with rationale and removal criteria in patches/.
 [patch.crates-io]
 loco-rs = { path = "patches/loco-rs/source" }
-paste = { path = "patches/paste" }
-serde_yaml = { path = "patches/serde_yaml" }
-serde_yaml_ng = { path = "patches/serde_yaml_ng" }
 
 [package]
 name = "yorishiro"

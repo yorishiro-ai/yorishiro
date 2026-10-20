@@ -82,7 +82,6 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg18
-    init: true
     restart: unless-stopped
     environment:
       POSTGRES_USER: user
@@ -103,8 +102,3 @@ volumes:
 ```
 
 設定項目は [設定](../configuration.md) を参照してください。
-
-PostgreSQLコンテナには、リポジトリの`db`・`testdb`と同じく`init: true`を設定してください。
-initプロセスが孤児プロセスを回収することで、無関係な子プロセスの異常終了によるPostgreSQLクラスタのリカバリーを防ぎます。
-既存環境へ反映するには、計画したタイミングでコンテナを再作成してください。
-Composeファイルを変更しただけでは、稼働中のコンテナには反映されません。

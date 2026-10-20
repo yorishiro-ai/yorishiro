@@ -710,12 +710,12 @@ src/workers/mod.rs	mod	queue	integration-test: tests/workers/mod.rs exercises it
 src/time.rs	type	Timezone	integration-test: provider integration tests configure concrete queue providers with parsed IANA zones.
 src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
-src/lib.rs	mod	edition	ce-ee-composition: the only Hooks implementation lives in this module, which sits outside src/ so that nothing under src/ names an edition overlay.
+src/lib.rs	mod	edition	ce-ee-composition: inline crate-root assembly retains the public module path without a separate directory.
 src/lib.rs	use	edition::App	ce-ee-composition: the binary and the integration tests boot the application through the single composition root, without src naming it elsewhere.
-edition/app.rs	struct	App	ce-ee-composition: the crate's only Hooks implementation, delegating to src/app.rs and the active edition.
-edition/app.rs	fn	workers	ce-ee-composition: the composed worker registry that Loco registration reads.
-edition/mod.rs	use	app::{App,workers}	ce-ee-composition: re-exports the Hooks implementation and the worker registry from the module that defines them, for the binary and the integration tests.
-edition/mod.rs	mod	ee	ce-ee-composition: the enterprise overlay is compiled in here, behind the enterprise feature, rather than from src/.
+src/lib.rs	struct	edition::App	ce-ee-composition: the only Hooks implementation delegates to base and overlay wiring.
+src/lib.rs	fn	edition::workers	ce-ee-composition: composed registry consumed by worker registration and integration tests.
+src/lib.rs	mod	ee	ce-ee-composition: the crate root declares the overlay behind its feature.
+src/lib.rs	use	edition::crate::ee	ce-ee-composition: preserve the public overlay module path after directory consolidation.
 src/workers/mod.rs	mod	registry	worker-registry: the single registration list Loco registration reads.
 src/workers/registry.rs	struct	WorkerRegistry	worker-registry: typed value holding one registration per worker type; the composition root extends the community baseline with an edition's workers.
 src/workers/registry.rs	fn	WorkerRegistry::community	worker-registry: the base application's workers, which the composition root and the integration tests start from.

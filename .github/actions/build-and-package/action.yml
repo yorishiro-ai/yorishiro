@@ -54,7 +54,7 @@ runs:
         mkdir -p dist
         case "$ARCH" in amd64) deb_arch=amd64; rpm_arch=x86_64 ;; arm64) deb_arch=arm64; rpm_arch=aarch64 ;; *) echo "unsupported package architecture: $ARCH" >&2; exit 2 ;; esac
         for pkg in deb rpm; do
-          nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
+          nfpm package --config ".github/packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
           if [ "$pkg" = deb ]; then
             source="dist/yorishiro-${EDITION}_${VERSION}_${ARCH}.deb"
           else

@@ -143,12 +143,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arraydeque"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2366,16 +2360,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "granit-parser"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e20f99e46474f56bd905c56e817ebddcf377a611f94c53ac4649e4d3fa3c0cd0"
-dependencies = [
- "arraydeque",
- "smallvec",
-]
-
-[[package]]
 name = "h2"
 version = "0.4.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3935,9 +3919,8 @@ dependencies = [
 [[package]]
 name = "paste"
 version = "1.0.15"
-dependencies = [
- "pastey",
-]
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pastey"
@@ -5389,32 +5372,27 @@ dependencies = [
 [[package]]
 name = "serde_yaml"
 version = "0.9.34+deprecated"
-dependencies = [
- "serde_yaml_bw",
-]
-
-[[package]]
-name = "serde_yaml_bw"
-version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05a3e7274c11e80a92d65caffb73d1932718027421f3765a36248dae14356b41"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
 dependencies = [
- "base64 0.22.1",
- "granit-parser",
  "indexmap",
  "itoa",
- "num-traits",
- "regex",
+ "ryu",
  "serde",
- "unsafe-libyaml-norway",
- "zmij",
+ "unsafe-libyaml",
 ]
 
 [[package]]
 name = "serde_yaml_ng"
 version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b4db627b98b36d4203a7b458cf3573730f2bb591b28871d916dfa9efabfd41f"
 dependencies = [
- "serde_yaml_bw",
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -6736,10 +6714,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
-name = "unsafe-libyaml-norway"
-version = "0.2.15"
+name = "unsafe-libyaml"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b39abd59bf32521c7f2301b52d05a6a2c975b6003521cbd0c6dc1582f0a22104"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

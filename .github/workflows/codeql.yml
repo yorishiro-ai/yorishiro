@@ -31,6 +31,9 @@ jobs:
           # write-scoped token out of reach of anything running as part of the checkout.
           persist-credentials: false
 
+      - name: Restore patched Loco source
+        run: python3 patches/loco-rs/verify.py --prepare
+
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}

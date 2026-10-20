@@ -6,7 +6,7 @@ This repository is a [Loco](https://loco.rs) 1.2.0 application with a Laravel-li
 
 ## Repository layout
 
-Root crate + `migration/` crate + `ee/` module + `edition/` composition root.
+Root crate + `migration/` crate + `ee/` module, assembled in `src/lib.rs`.
 `ee/` is an overlay on `src/`: it mirrors CE's folder hierarchy and file names, so a CE path tells you where its enterprise counterpart lives.
 CE therefore follows Loco's generator layout exactly; a directory Loco does not generate needs a written reason below.
 
@@ -22,7 +22,9 @@ CE therefore follows Loco's generator layout exactly; a directory Loco does not 
 | `src/fixtures/` | Seed data | Seeders |
 | `src/services/` | **External clients only** (embedding providers). Loco has no equivalent, and nothing else may live here | Services |
 | `src/app.rs` | The community wiring, one function per `Hooks` method, plus the edition-neutral inputs an overlay extends it with (`RouteMounts`, `WorkerRegistry`, `McpToolSet`) | Application bootstrap |
-| `edition/` | **Composition root, assembly only.** The one `Hooks` implementation (`edition::App`), delegating to `src/app.rs` and to the active edition. Outside `src/` on purpose | Service container |
+| `src/lib.rs` | Crate-root assembly and the only `Hooks` implementation, delegating to base and overlay wiring | Service container |
+| `src/templates/` | Built-in JSON template assets embedded by `src/data/templates.rs` | Static data |
+| `.github/packaging/` | Package definitions, service units, install hooks and package verification | Distribution |
 | `src/db.rs`, `src/error.rs` | Cross-cutting infrastructure Loco leaves to the application | Exception handler, DB config |
 
 Every entry point (REST, MCP, CLI) authenticates, parses input, calls model operations, and renders.
@@ -30,13 +32,13 @@ None of them owns domain logic or builds ordinary queries.
 
 ### Edition boundary
 
-`src/` is the community base and never refers to the enterprise overlay.
-It contains no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, and no overlay names, queues, branches, or registrations.
-`make edition-boundary-check` (part of `make check-all` and `make check-all-ee`) enforces this over `src/`, including aliases and paths split across spaces or lines: only `src/lib.rs` may name `edition`, to declare the composition root and re-export from it.
+`src/` is the community base; only `src/lib.rs` assembles the enterprise overlay.
+Other source modules contain no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, and no overlay names, queues, branches, or registrations.
+`make edition-boundary-check` (part of `make check-all` and `make check-all-ee`) enforces this outside `src/lib.rs`, including aliases and paths split across spaces or lines.
 
-`edition/` is the only place that knows which editions exist.
-It declares `ee/` behind the `enterprise` feature, implements `Hooks` once by delegating to `src/app.rs` and the active edition, and holds nothing but assembly.
-`ee/app.rs` and `edition/community.rs` expose the same functions; the build of each edition checks the signatures.
+`src/lib.rs` declares `ee/` behind the `enterprise` feature and implements `Hooks` once by delegating to `src/app.rs` and the active edition.
+The inline `edition` module preserves public paths; there is no separate composition directory.
+`ee/app.rs` and the inline community contribution expose the same functions; each build checks their signatures.
 Worker tags, Redis queues, and Loco registration derive from one composed `WorkerRegistry`.
 A trait is for a behaviour that really varies at runtime, such as `QueuePolicy` or `Authenticator`, and not for wiring one overlay.
 
@@ -53,7 +55,7 @@ A trait is for a behaviour that really varies at runtime, such as `QueuePolicy` 
 ### Not a model
 
 - `migration/src/` and `src/db.rs` are database concerns, not model concerns. They stay outside `models/`.
-- Built-in template JSON is static data: `src/data/templates.rs` embeds `data/templates/*.json`.
+- Built-in template JSON is static data: `src/data/templates.rs` embeds `src/templates/*.json`.
 - `src/db.rs` handles connection pooling, two-pool architecture (identity pool for control plane, tenant pool for RLS-scoped requests), and session primitives (`SET ROLE`, `RESET`, `set_config`).
 
 ### Raw SQL
@@ -131,7 +133,7 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - Branch from latest `develop`. Merge commits preferred.
 - Run `make check-all` for CE changes and `make check-all-ee` for EE changes or shared API compatibility.
 - Run the PostgreSQL or SQLite suites relevant to the change before pushing.
-- Every PR updates English + Japanese docs.
+- `docs/` and `ee/docs/` are managed separately; do not update them as part of code changes or require documentation synchronization.
 
 ## Rules
 

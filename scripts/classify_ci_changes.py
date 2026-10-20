@@ -38,7 +38,7 @@ def classify_path(path: str) -> set[str]:
         groups |= {"rust"}
     if s.startswith("ee/") and not s.startswith("ee/docs/"):
         groups |= {"ee"}
-    if s.startswith("edition/"):
+    if s == "src/lib.rs":
         groups |= {"shared", "rust", "ee"}
     if s.startswith("migration/"):
         groups |= {"migration", "shared", "rust", "ee"}
@@ -48,9 +48,9 @@ def classify_path(path: str) -> set[str]:
         groups |= {"topology", "rust", "ee"}
     if s.startswith(("scripts/classify_ci_changes.py", "scripts/test_classify_ci_changes.py")):
         groups |= {"shared", "rust", "ee"}
-    if s.startswith("packaging/") or s.startswith(".github/actions/package-tests/"):
+    if s.startswith(".github/packaging/") or s.startswith(".github/actions/package-tests/"):
         groups |= {"packaging"}
-    if s.startswith("packaging/"):
+    if s.startswith(".github/packaging/"):
         groups |= {"rust", "ee"}
     if s.startswith(("Dockerfile", "docker-compose", "docker/")):
         groups |= {"docker"}
@@ -64,7 +64,6 @@ def classify_path(path: str) -> set[str]:
         ".github/workflows/ci.yml": {"shared", "rust", "ee"},
         ".github/workflows/release.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/release_pre.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
-        ".github/workflows/doc-check.yml": {"docs"},
         ".github/workflows/security.yml": {"deps"},
         ".github/workflows/dep-audit.yml": {"deps"},
         ".github/workflows/coverage.yml": {"rust", "ee"},
@@ -106,7 +105,6 @@ def classify(paths: list[str], force_full: bool = False) -> dict[str, bool]:
     selected["package_validation"] = force_full or package_related
     selected["docker_validation"] = force_full or bool(groups & {"docker", "release"})
     selected["rust_validation"] = force_full or bool(groups & {"rust", "ee", "shared", "config", "migration", "topology", "deps"})
-    selected["doc_validation"] = force_full or bool(groups & {"docs"}) or any(p.startswith(".github/workflows/doc-check.yml") for p in paths)
     selected["security_validation"] = force_full or "deps" in groups
     return selected
 

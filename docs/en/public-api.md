@@ -26,25 +26,6 @@ This is a regression guardrail, not a blanket ban on `pub` and not a second visi
 
 ## Review Guidance
 
-Use Loco's cryptographically secure `hash::random_string` for API keys, invitations and OAuth nonces instead of maintaining separate byte/hex or UUID-based secret generators.
-Choose lengths from the required entropy and protocol grammar; the application no longer depends directly on `rand`, although framework dependencies still use it transitively.
-
-Queue-provider tests must isolate their storage and must not clear a shared configured database.
-Use Loco's throwaway database harness for PostgreSQL routing tests, including tests run concurrently in separate edition processes.
-
-Keep shared behavior in Loco's model extensions, not in controllers or a repository layer.
-Transport adapters use the shared request authentication guard instead of selecting database backends themselves.
-Reindex workers and their regression tests use the same context-aware database entry point, which owns backend-specific advisory locking.
-Use typed SeaQuery operators such as `PgBinOper::CosineDistance` instead of custom SQL operator strings when the public API supports them.
-Keep raw SQL for connection/session primitives, security boundaries and query shapes whose atomicity or measured performance requires it, not ordinary record lookups.
-Credential resolution, scope checks and workspace transactions remain separate operations so resolution-only routes do not gain usage writes or hold unnecessary connections.
-Use typed settings for deployment tuning, existing enums for closed domain values, and named constants for protocol limits and retry policies.
-Use structs for coherent state and traits for behavior that actually varies at runtime, not to wrap static edition assembly.
-An overlay implementing the same functionality mirrors the base directory and file name; CE never imports or branches on the overlay.
-
-Derive OpenAPI schemas on the serialized request and response types instead of maintaining contract-only copies of their fields.
-Enterprise schema names in `ee/controllers/openapi.rs` re-export those types; request-only constraints such as a default publish status belong on the corresponding DTO.
-
 The allowlist records only newly approved declarations with a path, kind, symbol, and specific reason.
 
 When an exception is needed, reviewers should consider these intentional boundaries and require the applicable boundary to be named in the concise reason column:

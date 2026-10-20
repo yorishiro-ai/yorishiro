@@ -49,9 +49,7 @@ Within a workspace, document and query embeddings resolve the same configured pr
 
 If the worker times out or reports a provider failure, search returns `503`; it does not silently fall back to lexical-only results.
 
-Backup imports (`import_jsonl`) also enqueue document embeddings when the import worker commits the imported entities.
-Import completion does not mean that those embedding jobs have finished, so similarity results may remain incomplete while they run.
-To regenerate embeddings for all entities, use:
+There is one exception: if you import a backup file (`import_jsonl`), the imported entities do not have embeddings yet. They are still searchable through fuzzy text matching (the words you type are matched against the text), but similarity search results will be incomplete until embeddings are generated. You can generate embeddings for all entities with:
 
 ```
 cargo loco task resync_embeddings workspace_id:<uuid>
@@ -62,8 +60,6 @@ An entity without an embedding does not cause errors. Search simply returns less
 ### Choosing an embedding provider
 
 You can choose between a local model that runs on your machine, or an OpenAI-compatible service (LM Studio, Ollama, vLLM, OpenAI, etc.).
-Outbound embedding and inference HTTP calls use reqwest directly, with request timeouts and status handling before reading the response body.
-Provider errors do not include the response body, and inference calls do not follow redirects carrying workspace credentials.
 
 | Variable | Description |
 |---|---|
@@ -117,9 +113,6 @@ Set `YORISHIRO_STRIPE_WEBHOOK_SECRET` to enable inbound Stripe webhook processin
 The endpoint verifies `Stripe-Signature` against the raw request with a 300-second timestamp tolerance before processing an event.
 
 ## Search token quota
-
-REST and MCP both reject semantic searches while workspace embeddings are being reindexed, before charging tokens or asking a worker to embed the query.
-Both entry points use the same model-owned search pipeline and open the workspace transaction only after query embedding completes.
 
 | Variable | Description |
 |---|---|
@@ -232,22 +225,25 @@ When that URL names a shared SQLite file, use an absolute path because a relativ
 With PostgreSQL, multiple worker processes can dequeue in parallel.
 With SQLite, dequeueing is serialized, while durable queue recovery still works.
 
-## Durable queue publisher
+## Durable queue publisher transition
 
 Application producers commit business state and a dispatch-outbox row together.
-Only the dispatch relay publishes outbox rows to the Loco queue provider.
-The relay takes a short durable row claim, commits it, then calls the provider outside the database transaction.
-A conditional acknowledgement records provider acceptance only while the same claim token remains current.
-A provider timeout or crash between acceptance and acknowledgement can duplicate work, which the job lifecycle admission absorbs.
+Only the dispatch relay publishes outbox rows.
+Ordinary recovery publishes queued rows and retries whose `retry_at` is due; running rows are taken over only by explicit attested replay, and expired QueryEmbedding requests are excluded.
+The relay takes a short durable row claim under the publisher epoch fence, commits it, then calls the provider outside the database transaction.
+A conditional acknowledgement records provider acceptance only while the same epoch and claim token remain current; a provider timeout or crash can still cause at-least-once duplicates.
 
-The relay uses typed `settings.dispatch` configuration, resolved through Loco at startup.
-All timing values must be positive, and the claim lease must outlast the provider enqueue timeout.
-
-| Variable | Setting | Default |
-|---|---|---|
-| `YORISHIRO_DISPATCH_POLL_INTERVAL_MS` | `poll_interval_ms` | 500 ms |
-| `YORISHIRO_DISPATCH_CLAIM_LEASE_SECS` | `claim_lease_seconds` | 30 seconds |
-| `YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS` | `enqueue_timeout_ms` | 5000 ms |
+For a provider cutover, deploy the release that stops direct producer publication, stop all old producers and workers, and record the operator attestation `old_workers_exited:true`.
+Pause publication with `cargo loco task set_queue_publishing_epoch expected_epoch:<n> active:false`; this advances the epoch to E.
+Then record provider snapshot evidence and prepare replay while still paused: `cargo loco task replay_queue_dispatch_snapshot phase:prepare expected_epoch:<E> old_workers_exited:true cutoff_at:<RFC3339> snapshot_id:<evidence-id>`.
+Prepare atomically retags representable queued, retrying, running, and unexpired pending QueryEmbedding work and advances global state to E+1.
+Work admitted during the pause is included in that prepared snapshot.
+Future `retry_at` values remain unchanged, and running rows are reclaimed without waiting for their old lease.
+Start the new worker pool and activate the prepared E+1 with `cargo loco task replay_queue_dispatch_snapshot phase:activate expected_epoch:<E> old_workers_exited:true snapshot_id:<evidence-id>`; activation validates paused epoch E and enables its prepared successor without incrementing again.
+Producers remain stopped until activation completes.
+The attestation and snapshot ID are operator-provided evidence, not machine verification.
+Quarantined, expired, or unrepresentable legacy rows are not replayed and must be reconciled separately.
+Epoch changes cannot retract provider-accepted messages; ambiguous enqueue outcomes may duplicate work.
 
 `YORISHIRO_QUEUE_WORKERS` controls the number of concurrent dequeue loops in one worker process.
 It defaults to 1 for a SQLite queue and 2 for PostgreSQL and Redis-compatible queues.
@@ -287,7 +283,6 @@ On PostgreSQL, the reindex worker's existing per-workspace advisory lock seriali
 On SQLite, reindex workers use the direct single-tenant, model-owned reindex path and do not acquire that PostgreSQL advisory lock.
 
 SQLite has no PostgreSQL-style advisory locks, so scheduler ownership uses a non-blocking OS file lock instead.
-The lock uses Rust's standard `File::try_lock` and `File::unlock`, without a custom platform FFI implementation.
 The lock file is adjacent to the effective SQLite database path and has the `.scheduler.lock` suffix.
 Contending task processes skip immediately, and closing the handle or process termination releases the lock.
 This acquisition happens inside the task, so it also covers scheduler jobs supplied through external Loco configuration.
@@ -306,33 +301,6 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 The task measures median, min, and max latency across five iterations of a vector search query. When the entity count is 1000 or more and the median latency exceeds 200 ms, the task recommends adopting vec0. You can adjust both thresholds with `min_entities` and `max_latency_ms` CLI arguments.
 
 This task is measurement only: it does not change any schema or configuration. It helps you decide whether the vec0 virtual table is worth adopting on your deployment.
-The optional comparison table is named `<embedding_table>_vec0` and must have `entity_id TEXT PRIMARY KEY` containing canonical UUID strings, `workspace_id TEXT PARTITION KEY`, and an `embedding FLOAT[<width>] distance_metric=cosine` column.
-The workspace partition is applied inside KNN selection, so another workspace cannot consume its nearest-neighbor slots.
-The task counts only non-null embeddings in the selected workspace and refuses a comparison that returns no matching entities.
-
-### Worker Admission Configuration
-
-The enterprise overlay reads target concurrency limits from `initializers.worker_admission` in the resolved Loco configuration.
-The `shared` and `tenant_private` fields default to 1, while an absent `official` field uses the plan's official-worker limit.
-Values must be positive integers; empty strings mean no override.
-The shipped configuration files interpolate `YORISHIRO_WORKER_CLASS_SHARED_LIMIT`, `YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT` and `YORISHIRO_WORKER_OFFICIAL_LIMIT` into these fields.
-Configuration-file overrides take precedence, and later environment changes do not change a loaded configuration.
-Community builds ignore this initializer block, and admission caps remain disabled unless plan policy is enabled.
-The plan-policy switch is `initializers.plan_policy_enabled`, populated from `YORISHIRO_PLAN_POLICY_ENABLED` in the shipped files.
-It accepts a boolean or case-insensitive boolean text and is fixed when the context is built.
-
-### Integration Credentials
-
-The licence key is read from resolved `initializers.licence_key`, populated from `YORISHIRO_LICENSE_KEY` in shipped configurations.
-The key is verified at startup, while its expiry is still checked at every enterprise gate.
-Missing, empty, invalid or incorrectly typed licence settings disable enterprise features without blocking community startup.
-
-Stripe reads `initializers.stripe.webhook_secret`, `price_pro` and `price_team` from the resolved Loco configuration.
-OAuth reads `initializers.oauth.issuer_url`, `client_id`, `client_secret`, `redirect_uri` and the optional legacy callback `bind` override.
-The shipped configuration files interpolate the existing `YORISHIRO_STRIPE_*`, `YORISHIRO_OAUTH_*` and `YORISHIRO_BIND` environment variables into these fields.
-Changes to process environment variables after configuration loading do not rotate credentials in a running context; reload the application to apply new values.
-An absent Stripe secret still disables the webhook, and an absent OAuth issuer still disables SSO login.
-Partial OAuth credentials remain a configuration error rather than silently disabling login.
 
 ## Secret handling in logs
 
@@ -368,16 +336,9 @@ Workspace detail, API key, and API audit response timestamps, as well as log eve
 Changing this setting does not change when a recorded event occurred, when a job is scheduled to run, or when it expires.
 
 PostgreSQL `TIMESTAMPTZ` preserves each instant and renders it using the connection's session timezone; it does not store the IANA zone name. The application, identity, and tenant pools initialize their session timezone from this setting.
-SQLite has no session timezone.
-Application-pool connections provide `CURRENT_TIMESTAMP` in the configured IANA timezone with an explicit offset, preserving the instant when parsed.
-The function is installed separately on each application-pool connection; queue database connections are not changed.
-Existing timestamp strings are not rewritten when the configured zone changes.
-`database.run_on_start` retains Loco's one-shot startup semantics on both backends and is never replayed when application pools are replaced or new connections open.
-Use it for persistent database effects, not connection-local session settings.
-For PostgreSQL, put additional per-connection settings in the connection URI's `options` parameter; these survive pool replacement and also apply to the identity and tenant pools.
-The application and identity handles share one migration-role pool, separate from the RLS-scoped tenant pool.
-During shutdown the application stops its relay and load guard, but leaves database pools alive until Loco drains queue workers and their contexts are dropped.
-Queue storage, claiming and timestamps are Loco 1.2.0 behaviour for the selected provider; the application does not replace the provider or rewrite queue timestamps.
+SQLite has no session timezone. Application-pool connections provide `CURRENT_TIMESTAMP` in the configured IANA timezone with an explicit offset, preserving the instant when parsed. The function is installed separately on each application-pool connection; queue database connections are not changed. Existing timestamp strings are not rewritten when the configured zone changes. SQLite pool replacement applies the configured `database.run_on_start` SQL on each physical connection only when it is set; otherwise no startup SQL is applied by the replacement pool.
+Queue timestamps are written with the configured zone while retaining their absolute instants; PostgreSQL due claims compare those instants.
+SQLite stores configured-zone queue timestamps and keeps an exact epoch key for scheduling, including legacy rows with offsets.
 Valkey stores job instants and uses configured-zone formatting for new state transitions.
 SQLite queue database operations do not change the application database's connection defaults; Loco's test SQLite configuration retains its normal PRAGMA setup.
 Use the same configured zone for every server and worker sharing a database, and treat queue/database values as instants rather than local civil times.

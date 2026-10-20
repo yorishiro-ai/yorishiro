@@ -14,24 +14,24 @@ check: check-ce
 
 .PHONY: patch-check
 
-check-ce:
+check-ce: patch-check
 	cargo check --locked --no-default-features --features community --workspace
 
-check-ee:
+check-ee: patch-check
 	cargo check --locked --features enterprise --workspace
 
 clippy: clippy-ce
 
-clippy-ce:
+clippy-ce: patch-check
 	cargo clippy --locked --no-default-features --features community --workspace --all-targets -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc
 
-clippy-ee:
+clippy-ee: patch-check
 	cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc
 
-fmt:
+fmt: patch-check
 	cargo fmt --all
 
-fmt-check:
+fmt-check: patch-check
 	cargo fmt --all -- --check
 
 python-lint:
@@ -41,7 +41,7 @@ python-lint:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_classify_ci_changes.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_topology_self.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_package_ids.py
-	bash -n packaging/test-artifacts.sh packaging/test-artifacts-self.sh packaging/test-transitions.sh
+	bash -n .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh
 
 public-api-check:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_public_api.py
@@ -70,7 +70,7 @@ debug-macro-check:
 
 # Nightly is required because LLVM branch coverage is not available on stable.
 # Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
-coverage:
+coverage: patch-check
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/coverage_report.py
 
 # Run the full suite against the selected backend (postgres by default).
@@ -80,7 +80,7 @@ test-postgres: build
 	fi
 	DATABASE_URL='$(DATABASE_URL)' QUEUE_URL='$(DATABASE_URL)' YORISHIRO_TEST_TOPOLOGY=postgres-postgres YORISHIRO_TEST_QUEUE=postgres RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/test_topology.py postgres-postgres
 
-test-pg-migrations:
+test-pg-migrations: patch-check
 	docker compose up -d --wait testdb
 	DATABASE_URL='$(DATABASE_URL)' YORISHIRO_TEST_BACKEND=postgres-postgres DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --test mod --features enterprise migration::postgres::
 
@@ -88,16 +88,16 @@ test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' YORISHIRO_TEST_TOPOLOGY=sqlite-sqlite YORISHIRO_TEST_QUEUE=sqlite RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite
 
 # Valkey DB 15 on the Compose Redis service is reserved for tests.
-test-valkey:
+test-valkey: patch-check
 	@if [ "$(YORISHIRO_VALKEY_TEST_URL)" = "redis://localhost:6379/15" ]; then docker compose up -d --wait redis; fi
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='redis://localhost:6379/15' YORISHIRO_TEST_TOPOLOGY=sqlite-valkey YORISHIRO_TEST_QUEUE=valkey LOCO_ENV=test_sqlite_valkey uv run scripts/test_topology.py sqlite-valkey
 
 build: build-ce
 
-build-ce:
+build-ce: patch-check
 	cargo build --locked --no-default-features --features community --workspace
 
-build-ee:
+build-ee: patch-check
 	cargo build --locked --features enterprise --workspace
 
 # make task NAME=seed_official_templates [ARGS="key:value"]
@@ -134,7 +134,7 @@ entities: build
 
 # CE is the base boundary. EE compatibility is checked separately after CE work is complete.
 patch-check:
-	python3 patches/loco-rs/verify.py
+	python3 patches/loco-rs/verify.py --prepare
 
 check-all: patch-check fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ce clippy-ce
 
@@ -142,4 +142,4 @@ check-all-ee: patch-check fmt-check python-lint public-api-check edition-boundar
 
 package-docker-check:
 	@test -n "$(IMAGE)" || { echo 'IMAGE is required' >&2; exit 2; }
-	./packaging/test-docker.sh "$(IMAGE)"
+	./.github/packaging/test-docker.sh "$(IMAGE)"

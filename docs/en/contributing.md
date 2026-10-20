@@ -1,20 +1,5 @@
 # Contributing
 
-## Public framework APIs
-
-Prefer existing public Loco, SeaORM, SeaQuery, Tokio, and dependency APIs over application-owned substitutes.
-Use SeaORM's `SelectExt::exists` for existence checks and `lock_exclusive` for row locks; SeaQuery already omits unsupported SQLite row-lock clauses.
-Use Loco's `create_queue_provider` rather than copying native queue construction into tests.
-Exercise production HTTP clients against a local HTTP server instead of adding a production trait solely for test doubles.
-Keep raw SQL only where the ORM cannot preserve the required semantics, including RLS session setup, advisory locks, vector operations, and atomic guarded writes.
-
-## Dependency bug fixes
-
-Temporary upstream fixes live in [`patches/`](../../patches/README.md), selected by the root Cargo manifest.
-Each fix records its original version, bug or maintenance problem, exact change, regression checks and removal condition.
-For the vendored Loco source, `make patch-check` verifies the original archive checksum and reproduces `fixes.patch` before comparing the complete source tree.
-It runs in CI and both `check-all` targets; do not edit Cargo's registry cache or suppress an advisory instead of correcting its cause.
-
 ## Tests
 
 Use `make test-postgres`, `make test-sqlite`, or `make test-valkey` for the common local topologies.

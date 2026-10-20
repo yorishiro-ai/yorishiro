@@ -6,6 +6,7 @@ import difflib
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -23,7 +24,10 @@ def files(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--refresh", action="store_true", help="regenerate the reviewable diff after intentional source edits")
+    parser.add_argument("--prepare", action="store_true", help="restore ignored source when missing, then verify it")
     args = parser.parse_args()
+    if args.prepare and args.refresh:
+        parser.error("--prepare and --refresh are mutually exclusive")
     cargo = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo"))
     archives = list((cargo / "registry/cache").glob(f"*/loco-rs-{VERSION}.crate"))
     with tempfile.TemporaryDirectory(prefix="loco-patch-") as temporary:
@@ -41,7 +45,10 @@ def main():
                 member.name = str(Path(member.name).relative_to(f"loco-rs-{VERSION}"))
                 if member.name != ".":
                     tar.extract(member, pristine, filter="data")
-        before, after = files(pristine), files(HERE / "source")
+        source = HERE / "source"
+        if not source.exists() and not args.prepare:
+            raise SystemExit("source is missing; run python3 patches/loco-rs/verify.py --prepare")
+        before, after = files(pristine), files(source)
         if args.refresh:
             diff = []
             for path in sorted(before.keys() | after.keys()):
@@ -54,6 +61,9 @@ def main():
                     ))
             (HERE / "fixes.patch").write_text("".join(diff))
         subprocess.run(["patch", "-p1", "--fuzz=0", "--batch", "-i", str(HERE / "fixes.patch")], cwd=pristine, check=True)
+        if args.prepare and not source.exists():
+            shutil.copytree(pristine, source)
+            after = files(source)
         actual = files(pristine)
         changed = [str(path) for path in actual.keys() | after.keys() if actual.get(path) != after.get(path)]
         if changed:

@@ -1,3 +1,2 @@
-# Preserve the published archive and unified-diff context byte for byte.
-patches/loco-rs/source/** -whitespace
+# Preserve unified-diff context byte for byte.
 patches/loco-rs/fixes.patch -whitespace

@@ -2,12 +2,15 @@
 
 ## Provenance and application
 
-`source/` is the published `loco-rs` 1.2.0 crate with the bug fixes in `fixes.patch` applied.
+`source/` is ignored generated material: the published `loco-rs` 1.2.0 crate with `fixes.patch` applied.
+Only the patch, provenance and restoration script are tracked in Git.
+Run `python3 patches/loco-rs/verify.py --prepare` before direct Cargo commands on a fresh checkout.
+Make build/check targets, CI toolchain setup and Docker builds restore it automatically.
 The archive SHA-256 is `5386baf405736a2620001f4561b00fa4874dae99eac3ccf01713fabc9ef13af4`, matching the registry checksum before the path override.
 The crate's upstream revision is `43b3fe60db487758c195d6947f1c37e5246cedf2` in [loco-rs/loco](https://github.com/loco-rs/loco).
 Its Apache-2.0 licence remains in `source/LICENSE`.
 The upstream files, including their original whitespace and `Cargo.lock`, are retained byte for byte except for `fixes.patch`.
-The two `.gitattributes` whitespace exceptions preserve this archive and the unified diff's required context prefixes; the verifier still compares every byte.
+The `.gitattributes` whitespace exception preserves the unified diff's required context prefixes; the verifier still compares every byte.
 `source/Cargo.lock` is archival upstream material, not the application's resolution; builds and audits use the root `Cargo.lock`.
 The root `[patch.crates-io]` selects this source for both editions.
 No Cargo registry cache, shared database, or running container is modified.
@@ -44,7 +47,8 @@ No upstream issue or accepted upstream fix is implied by these local defect IDs.
 
 これはアプリ機能の追加ではなく、公開済みLoco 1.2.0のキューに対する上流バグ修正です。
 元ソースとライセンスを保持し、変更差分を `fixes.patch` に分離しています。
-元の空白と `Cargo.lock` も保持し、`.gitattributes` の空白検査の例外は同梱ソースと差分ファイルだけに限定します。
+`source/` はGit管理せず、`python3 patches/loco-rs/verify.py --prepare` で復元します。
+元の空白と `Cargo.lock` も復元し、差分ファイルだけを空白検査の例外にします。
 `source/Cargo.lock` は上流配布物の記録であり、アプリのビルドと監査にはルートの `Cargo.lock` を使います。
 `verify.py` は配布アーカイブのハッシュ、パッチ適用結果、同梱ソースの一致を検証します。
 LQ-01は単一投入の途中失敗、LQ-02は取得直後の誤った再配信、LQ-03はreaperと古いworkerによる状態の上書き、LQ-04はログへのpayload露出、LQ-05は終了時のプールとworker contextの保持を修正します。

@@ -91,6 +91,7 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
 
           cp Cargo.lock Cargo.lock.before
+          python3 patches/loco-rs/verify.py --prepare
           cargo check
           python3 - "$VERSION" <<'PY'
           import copy

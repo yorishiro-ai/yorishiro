@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "packaging/test-transitions.sh"
+SCRIPT = ROOT / ".github/packaging/test-transitions.sh"
 
 
 def current_package_id(source: str) -> str:

@@ -17,6 +17,10 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Restore patched Loco source
+      shell: bash
+      run: python3 patches/loco-rs/verify.py --prepare
+
     - name: Resolve the toolchain
       id: resolve
       shell: bash

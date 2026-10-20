@@ -1,27 +1,9 @@
 # 貢献ガイドライン
 
-## フレームワークの公開 API
-
-アプリケーション独自の代替実装より、Loco、SeaORM、SeaQuery、Tokio、既存依存の公開 API を優先します。
-存在確認には SeaORM の `SelectExt::exists`、行ロックには `lock_exclusive` を使います。
-SeaQuery は SQLite が対応しない行ロック句を自動的に省略します。
-テストでもキューの生成処理を複製せず、Loco の `create_queue_provider` を使います。
-テスト用の代替実装のためだけに本番コードへ trait を追加せず、本番の HTTP クライアントをローカル HTTP サーバーに接続して検証します。
-Raw SQL は、RLS のセッション設定、advisory lock、ベクトル操作、条件付きの原子的な書き込みなど、ORM では必要な意味を保てない箇所に限定します。
-
-## 依存のバグ修正
-
-上流依存への一時的な修正は [`patches/`](../../patches/README.md) に置き、ルートの Cargo manifest から参照します。
-元バージョン、バグまたは保守停止の問題、変更差分、回帰試験、削除条件を修正ごとに記録します。
-同梱した Loco ソースは、`make patch-check` が元アーカイブのハッシュと `fixes.patch` の再適用結果を検証し、ソース全体と比較します。
-CI と両方の `check-all` で実行します。
-Cargo のキャッシュを書き換えたり、原因を直さず監査除外だけを追加したりしません。
-
 ## データベースプール
 
 データベース接続プールは、ワーカープールやキューとは別のものです。
-PostgreSQL では、`AppContext.db` は migration role を使う SeaORM プール、`TenantDb` は `ROLE yorishiro_app` を設定する RLS 用の別プールです。
-`DbHandle.identity` は `AppContext.db` の接続プールを共有し、追加のプールは作りません。
+PostgreSQL では、`AppContext.db` は migration role を使う Loco の SeaORM プール、`TenantDb` は `ROLE yorishiro_app` を設定する RLS 用の別プール、`DbHandle.identity` は migration role を使うもう一つの raw sqlx プールです。
 Loco のキュープロバイダも独立したプールを持ちます。
 SQLite には `DbHandle` はなく、`AppContext.db` とキュープロバイダの別 SQLite プールを使います。
 

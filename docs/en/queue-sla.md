@@ -29,22 +29,6 @@ The `attempt` counter increments only when a delivery is admitted to running wor
 Lifecycle records remain in the application database, even when Redis stores the queue.
 Check both the queue's job status and the lifecycle record when diagnosing a job.
 
-## Job Execution And Backend Selection
-
-Embedding sync, workspace reindex (including startup and scheduled reindex), query embedding, fill-defaults migration, and Enterprise infer-fill execute as registered Loco `BackgroundWorker` jobs.
-The selected PostgreSQL, SQLite, or Valkey queue provider stores and delivers those jobs to Loco handlers.
-The transactional outbox records delivery intent alongside application writes; it is not where the business job executes.
-Switching to Valkey moves delivery and queue polling away from SQL queue tables, but application data, audit history, lifecycle admission and transactional publication remain in the application database.
-It does not eliminate database access from a job that reads or changes entities.
-
-`POST /api/migration-jobs/fill-defaults` now returns 202 with `schema_name` and `job_id`, instead of waiting for updates and returning counts.
-The MCP tool returns the same acceptance payload.
-Completed counts appear in the fill-defaults audit record, and undo uses the accepted `job_id` after completion.
-
-Operational CLI tasks remain tasks when the caller intentionally waits for their result.
-The reindex scheduler is a thin task calling the schedule model, which dispatches reindex jobs rather than embedding documents itself.
-Queue consumers, outbox publication, lifecycle heartbeats and database-load monitoring remain infrastructure loops: making them depend on the queue they support would prevent recovery when that queue is unavailable.
-
 If an entity write fails after a lifecycle record is saved, the dispatch failure appears in lifecycle diagnostics and logs.
 If the queue is unavailable, the job is marked `unavailable` and the request receives an error.
 

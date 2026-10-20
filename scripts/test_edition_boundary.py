@@ -69,10 +69,12 @@ class EditionBoundaryTest(unittest.TestCase):
         ):
             self.assertTrue(self.rules_for(source), source)
 
-    def test_ee_is_found_even_where_the_crate_root_may_name_edition(self) -> None:
+    def test_crate_root_owns_assembly_but_other_modules_cannot(self) -> None:
         self.assertEqual(self.rules_for("pub mod edition;\npub use edition::App;\n", "src/lib.rs"), [])
         for source in ("pub use edition::ee as x;\n", "pub use edition::ee;\n", "pub use edition :: ee;\n", "pub use edition::\nee;\n", "use edition as e;\npub use e::ee;\n"):
-            self.assertTrue(self.rules_for(source, "src/lib.rs"), source)
+            self.assertEqual(self.rules_for(source, "src/lib.rs"), [])
+            self.assertTrue(self.rules_for(source, "src/app.rs"), source)
+        self.assertEqual(self.rules_for('#[cfg(feature = "enterprise")]\n#[path = "../ee/mod.rs"]\npub mod ee;\n', "src/lib.rs"), [])
 
     def test_a_variable_named_ee_is_rejected_because_it_cannot_be_told_from_the_module(self) -> None:
         self.assertIn("the ee module as an identifier", self.rules_for("let ee = 1;\n"))
@@ -112,10 +114,8 @@ class EditionBoundaryTest(unittest.TestCase):
             root = Path(directory)
             (root / "src" / "nested").mkdir(parents=True)
             (root / "ee").mkdir()
-            (root / "edition").mkdir()
             (root / "src" / "lib.rs").write_text("pub mod nested;\n")
             (root / "ee" / "mod.rs").write_text("// enterprise\n")
-            (root / "edition" / "mod.rs").write_text('#[cfg(feature = "enterprise")]\n')
             self.assertEqual(CHECKER.check_tree(root), [])
 
             (root / "src" / "nested" / "leak.rs").write_text("use crate::ee::app;\n")
@@ -126,9 +126,9 @@ class EditionBoundaryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "src").mkdir()
-            (root / "src" / "lib.rs").write_text('#[cfg(feature = "enterprise")]\nmod ee;\n')
+            (root / "src" / "app.rs").write_text('#[cfg(feature = "enterprise")]\nmod ee;\n')
             self.assertEqual(CHECKER.main(["check", str(root)]), 1)
-            (root / "src" / "lib.rs").write_text("mod models;\n")
+            (root / "src" / "app.rs").write_text("mod models;\n")
             self.assertEqual(CHECKER.main(["check", str(root)]), 0)
 
     def test_the_repository_itself_is_clean(self) -> None:
