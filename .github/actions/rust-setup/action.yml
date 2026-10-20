@@ -53,10 +53,8 @@ runs:
         sudo apt-get install --yes mold
         mold --version
 
+    # Prebuilt binary: building it from source took about four minutes in every job.
     - name: Install sccache
-      shell: bash
-      run: |
-        if ! command -v sccache >/dev/null 2>&1; then
-          RUSTC_WRAPPER= RUSTFLAGS= cargo install sccache --locked --version 0.10.0
-        fi
-        sccache --version
+      uses: taiki-e/install-action@v2
+      with:
+        tool: sccache@0.10.0

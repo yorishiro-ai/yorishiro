@@ -163,8 +163,9 @@ jobs:
           toolchain="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
           grep -qx "ARG RUST_VERSION=${toolchain}" Dockerfile \
             || { echo "::error::Dockerfile's RUST_VERSION default is not rust-toolchain.toml's channel ${toolchain}"; exit 1; }
-          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+' 'sccache --locked --version [0-9.]+'; do
-            found="$(grep -rhoE "$pattern" .github docker-compose.yml Dockerfile Makefile | sort -u)"
+          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+' 'sccache(@| --locked --version )[0-9.]+'; do
+            # Compare only the version: the install action and the Dockerfile spell the pin differently.
+            found="$(grep -rhoE "$pattern" .github docker-compose.yml Dockerfile Makefile | grep -oE '[0-9][0-9.]*$' | sort -u)"
             if [ "$(wc -l <<<"$found")" -ne 1 ]; then
               echo "::error::pinned versions disagree for '$pattern':"
               echo "$found"
