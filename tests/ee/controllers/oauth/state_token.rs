@@ -1,4 +1,3 @@
-use yorishiro::edition::ee::controllers::hmac_sign;
 use yorishiro::edition::ee::controllers::oauth::state_token::*;
 
 const KEY: &[u8] = b"a signing key";
@@ -55,11 +54,7 @@ fn verify_rejects_a_malformed_state() {
 fn verify_rejects_an_expired_state() {
     let now = 1_700_000_000;
     let issued_at = now - STATE_TTL_SECS - 1;
-    let csrf_hash = "deadbeef";
-    let pkce_verifier = "verifier";
-    let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
-    let signature = hmac_sign::sign(KEY, payload.as_bytes());
-    let state = format!("{payload}.{signature}");
+    let state = issue_at(KEY, issued_at).state;
 
     assert!(verify_at(KEY, &state, now).is_none());
 }
@@ -68,11 +63,7 @@ fn verify_rejects_an_expired_state() {
 fn verify_accepts_the_expiry_and_future_skew_boundaries() {
     let now = 1_700_000_000;
     for issued_at in [now - STATE_TTL_SECS, now + 5] {
-        let csrf_hash = "deadbeef";
-        let pkce_verifier = "verifier";
-        let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
-        let signature = hmac_sign::sign(KEY, payload.as_bytes());
-        let state = format!("{payload}.{signature}");
+        let state = issue_at(KEY, issued_at).state;
 
         assert!(verify_at(KEY, &state, now).is_some());
     }
@@ -82,11 +73,7 @@ fn verify_accepts_the_expiry_and_future_skew_boundaries() {
 fn verify_rejects_a_state_outside_the_future_skew_boundary() {
     let now = 1_700_000_000;
     let issued_at = now + 6;
-    let csrf_hash = "deadbeef";
-    let pkce_verifier = "verifier";
-    let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
-    let signature = hmac_sign::sign(KEY, payload.as_bytes());
-    let state = format!("{payload}.{signature}");
+    let state = issue_at(KEY, issued_at).state;
 
     assert!(verify_at(KEY, &state, now).is_none());
 }
@@ -94,9 +81,7 @@ fn verify_rejects_a_state_outside_the_future_skew_boundary() {
 #[test]
 fn verify_handles_extreme_timestamps_without_overflow() {
     for (issued_at, now) in [(i64::MIN, i64::MAX), (i64::MAX, i64::MIN)] {
-        let payload = format!("{issued_at}.deadbeef.verifier");
-        let signature = hmac_sign::sign(KEY, payload.as_bytes());
-        let state = format!("{payload}.{signature}");
+        let state = issue_at(KEY, issued_at).state;
 
         assert!(verify_at(KEY, &state, now).is_none());
     }

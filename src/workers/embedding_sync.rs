@@ -20,7 +20,6 @@ use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
 use crate::models::entity_embeddings;
 use crate::models::entity_entities;
-use crate::workers::dispatch::EmbeddingSyncDispatcher;
 
 db_enum! {
     /// What kind of compute a queued job is meant for.
@@ -36,43 +35,6 @@ db_enum! {
         /// Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.
         Shared = "shared",
     }
-}
-
-/// Resolves a workspace's own worker-class assignment, if it has one.
-///
-/// A trait, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`], letting a deployment pin a workspace's jobs to particular compute without touching the callers that enqueue them.
-/// `DefaultWorkerClassResolver` keeps every workspace on `Shared`.
-///
-/// `conn` is `ctx.db` rather than the RLS-scoped pool: which compute a tenant pays for is deployment configuration, not tenant content.
-///
-/// Returns `Ok(None)` for a workspace with no assignment, leaving the fallback to the caller rather than deciding it here.
-#[async_trait]
-pub trait WorkerClassResolver: Send + Sync {
-    async fn resolve(
-        &self,
-        conn: &sea_orm::DatabaseConnection,
-        workspace_id: Uuid,
-    ) -> Result<Option<WorkerClass>, YorishiroError>;
-}
-
-/// This crate's own rule: no workspace has a worker-class assignment, so every job stays `Shared`.
-pub(crate) struct DefaultWorkerClassResolver;
-
-#[async_trait]
-impl WorkerClassResolver for DefaultWorkerClassResolver {
-    async fn resolve(
-        &self,
-        _conn: &sea_orm::DatabaseConnection,
-        _workspace_id: Uuid,
-    ) -> Result<Option<WorkerClass>, YorishiroError> {
-        Ok(None)
-    }
-}
-
-/// The resolver a deployment gets when it does not choose one.
-#[must_use]
-pub(crate) fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
-    Arc::new(DefaultWorkerClassResolver)
 }
 
 /// Ids only, not the `EntityRecord` or the provider's model name: everything is re-read inside `perform`, so an update racing ahead of a still-queued job is picked up as the entity's current state rather than overwritten with what was true at enqueue time.
@@ -111,23 +73,19 @@ fn classify_embedding_error(error: YorishiroError) -> Result<EmbeddingSyncOutcom
 /// `Ok(None)` means neither exists, which is what a process that never installed a default provider sees.
 ///
 /// # Errors
-/// Returns `Internal` when the resolver seam is missing, or the resolver's own error.
+/// Returns the workspace assignment lookup error.
 pub(crate) async fn resolve_worker_provider(
     ctx: &AppContext,
     workspace_id: Uuid,
 ) -> Result<Option<Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError> {
-    let resolver = ctx
-        .shared_store
-        .get::<Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>>()
-        .ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("WorkspaceEmbeddingResolver missing"))
-        })?;
-    Ok(match resolver.resolve(&ctx.db, workspace_id).await? {
-        Some(provider) => Some(provider),
-        None => ctx
-            .shared_store
-            .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
-    })
+    Ok(
+        match crate::workspace_embedding_provider(&ctx.db, workspace_id).await? {
+            Some(provider) => Some(provider),
+            None => ctx
+                .shared_store
+                .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
+        },
+    )
 }
 
 /// Runs one embedding attempt. It never re-enqueues itself.
@@ -280,28 +238,14 @@ impl BackgroundWorker<EmbeddingSyncArgs> for EmbeddingSyncWorker {
     }
 }
 
-/// Enqueues `args` through the installed dispatcher, which picks the target from `args.worker_class` and the workspace.
+/// Enqueues embedding work through the durable outbox.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the durable enqueue fails.
 pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-    let dispatcher = ctx
-        .shared_store
-        .get::<Arc<dyn EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| loco_rs::Error::Message("EmbeddingSyncDispatcher missing".into()))?;
-    enqueue_for_class_with_dispatcher(ctx, args, None, dispatcher.as_ref()).await
-}
-
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn enqueue_for_class_with_dispatcher(
-    ctx: &AppContext,
-    args: EmbeddingSyncArgs,
-    txn: Option<&sea_orm::DatabaseTransaction>,
-    dispatcher: &dyn EmbeddingSyncDispatcher,
-) -> loco_rs::Result<()> {
-    dispatcher.dispatch(ctx, args, txn).await.map(|_job_id| ())
+    crate::workers::dispatch::dispatch_embedding(ctx, args, None)
+        .await
+        .map(|_| ())
 }
 
 pub(crate) async fn enqueue_after_write(
@@ -310,26 +254,17 @@ pub(crate) async fn enqueue_after_write(
     entity_id: Uuid,
     txn: &sea_orm::DatabaseTransaction,
 ) -> Result<(), YorishiroError> {
-    let dispatcher = ctx
-        .shared_store
-        .get::<Arc<dyn EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("dispatcher missing")))?;
-    let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
         .await
-    {
-        Ok(worker_class) => worker_class,
-        Err(err) => {
-            tracing::warn!(entity_id = %entity_id, error = %err.0, "failed to resolve worker class, defaulting to shared");
-            WorkerClass::Shared
-        }
-    };
+        .map_err(|error| error.0)?;
     let args = EmbeddingSyncArgs {
         lifecycle_id: None,
         workspace_id,
         entity_id,
         worker_class,
     };
-    enqueue_for_class_with_dispatcher(ctx, args, Some(txn), dispatcher.as_ref())
+    crate::workers::dispatch::dispatch_embedding(ctx, args, Some(txn))
         .await
+        .map(|_| ())
         .map_err(|error| YorishiroError::Internal(anyhow::anyhow!(error.to_string())))
 }

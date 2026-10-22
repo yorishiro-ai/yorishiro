@@ -36,20 +36,6 @@ impl InferFillArgs {
     pub(crate) const JOB_NAME: &'static str = "infer_fill";
 }
 
-/// The dispatch seam for infer-fill jobs.
-///
-/// `compose_context` stores the production adapter as `Arc<dyn InferFillDispatcher>` in `AppContext::shared_store`.
-/// A caller that needs a different dispatcher inserts its own `Arc<dyn InferFillDispatcher>` there afterwards.
-#[async_trait]
-pub trait InferFillDispatcher: Send + Sync {
-    async fn dispatch(
-        &self,
-        ctx: &AppContext,
-        args: InferFillArgs,
-        txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String>;
-}
-
 /// Opens the transaction an infer-fill run reads and writes in, scoped the way a request for this workspace would be.
 ///
 /// The queued arguments carry the workspace only, so the tenant is not known to the worker until it is read from the workspace row.
@@ -462,45 +448,18 @@ pub async fn enqueue_infer_fill(
     inference_jobs::create(&txn, job_id, workspace_id, &schema_name)
         .await
         .internal()?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn InferFillDispatcher>>()
-        .ok_or_else(|| loco_rs::Error::Message("InferFillDispatcher missing".into()))?;
+    crate::edition::ee::workers::dispatch::dispatch_infer_fill(
+        ctx,
+        InferFillArgs {
+            lifecycle_id: None,
+            job_id,
+            workspace_id,
+            schema_name,
+        },
+        Some(&txn),
+    )
+    .await?;
     txn.commit().await.internal()?;
-    if let Err(error) = dispatcher
-        .dispatch(
-            ctx,
-            InferFillArgs {
-                lifecycle_id: None,
-                job_id,
-                workspace_id,
-                schema_name,
-            },
-            None,
-        )
-        .await
-    {
-        let diagnostic = format!("failed to enqueue infer-fill job: {error}");
-        let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id)
-            .await
-            .internal()?;
-        inference_jobs::fail(&txn, job_id, &diagnostic)
-            .await
-            .internal()?;
-        txn.commit().await.internal()?;
-        return Err(error);
-    }
 
     Ok(job_id.to_string())
-}
-
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn enqueue_infer_fill_with_dispatcher(
-    ctx: &AppContext,
-    args: InferFillArgs,
-    dispatcher: &dyn InferFillDispatcher,
-) -> loco_rs::Result<String> {
-    dispatcher.dispatch(ctx, args, None).await
 }

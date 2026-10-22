@@ -185,7 +185,6 @@ pub(crate) async fn tick(
     use crate::db::AppContextBackend;
     use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
     use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
-    use crate::workers::embedding_sync::WorkerClass;
     use crate::workers::reindex::ReindexArgs;
 
     // Ownership is held on a detached PostgreSQL session or an OS file handle through every
@@ -280,9 +279,9 @@ pub(crate) async fn tick(
                     tracing::warn!(
                         workspace_id = %ws.id,
                         error = %err.0,
-                        "reindex scheduler: failed to resolve worker class, defaulting to shared"
+                        "reindex scheduler: failed to resolve worker class, skipping workspace"
                     );
-                    WorkerClass::Shared
+                    continue;
                 }
             };
             let args = ReindexArgs {

@@ -349,15 +349,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-      valkey:
-        image: valkey/valkey:9.1
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "valkey-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -417,6 +408,13 @@ jobs:
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
+      - name: Configure the matrix Valkey service
+        if: matrix.queue_key == 'valkey'
+        run: |
+          docker run --detach --name matrix-valkey --publish 127.0.0.1:6379:6379 \
+            valkey/valkey:9.1 valkey-server --databases 65536 --save '' --appendonly no
+          docker exec matrix-valkey sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
+
       - name: Run migrations (postgres)
         if: matrix.backend == 'postgres'
         env:
@@ -458,6 +456,16 @@ jobs:
           echo "Generated $count entity files (had $count_before before)"
           git diff --exit-code -- src/models/_entities
 
+      - name: Require the EE test licence
+        if: matrix.edition == 'ee'
+        env:
+          YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+        run: |
+          if [ -z "$YORISHIRO_LICENSE_KEY" ]; then
+            echo "::error::Set the YORISHIRO_LICENSE_KEY Actions secret for licensed EE integration tests."
+            exit 1
+          fi
+
       - name: Run tests
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
@@ -468,7 +476,12 @@ jobs:
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
           YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+          YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
         run: uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }}
+
+      - name: Remove the matrix Valkey service
+        if: always() && matrix.queue_key == 'valkey'
+        run: docker rm --force matrix-valkey
 
       - name: Verify topology gate rejects a mismatch
         env:

@@ -1,106 +1,16 @@
-use super::boot_request;
+use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use super::{boot_request, boot_request_isolated};
 use axum::http::StatusCode;
 use yorishiro::App;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-
-async fn issue_key_for(
-    ctx: &loco_rs::app::AppContext,
-    workspace_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-    role: MembershipRole,
-) -> String {
-    api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace_id,
-        role.max_scope(),
-        Some(user_id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext
-}
-
-/// An owner's key carries `migration` scope, which is what guards these routes.
-async fn owner_key(ctx: &loco_rs::app::AppContext, name: &str) -> String {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(name.to_string()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".to_string()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-    let owner = yorishiro::models::user_users::create_user(
-        &ctx.db,
-        "owner@example.com",
-        "hunter2-hunter2",
-        None,
-    )
-    .await
-    .expect("create owner");
-    yorishiro::models::tenant_memberships::add_member(
-        &ctx.db,
-        tenant.id,
-        owner.id,
-        MembershipRole::Owner,
-    )
-    .await
-    .expect("add owner");
-    issue_key_for(ctx, workspace.id, owner.id, MembershipRole::Owner).await
-}
-
-/// A member's key tops out at `write`, which is below `migration`.
-async fn member_key(ctx: &loco_rs::app::AppContext, name: &str) -> String {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(name.to_string()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".to_string()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-    let member = yorishiro::models::user_users::create_user(
-        &ctx.db,
-        "member@example.com",
-        "hunter2-hunter2",
-        None,
-    )
-    .await
-    .expect("create member");
-    yorishiro::models::tenant_memberships::add_member(
-        &ctx.db,
-        tenant.id,
-        member.id,
-        MembershipRole::Member,
-    )
-    .await
-    .expect("add member");
-    issue_key_for(ctx, workspace.id, member.id, MembershipRole::Member).await
-}
 
 #[tokio::test]
 async fn maintenance_is_readable_and_settable_over_rest() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let key = owner_key(&ctx, "acme").await;
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let key = TestTenant::create(&request, &ctx, TenantArgs::default())
+            .await
+            .api_key;
 
         let response = request
             .get("/api/system/maintenance")
@@ -142,8 +52,10 @@ async fn maintenance_is_readable_and_settable_over_rest() {
 /// This test fails if the route ever moves behind the guard.
 #[tokio::test]
 async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let key = owner_key(&ctx, "acme").await;
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let key = TestTenant::create(&request, &ctx, TenantArgs::default())
+            .await
+            .api_key;
 
         let response = request
             .put("/api/system/maintenance")
@@ -191,7 +103,31 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
 #[tokio::test]
 async fn a_member_key_cannot_touch_maintenance() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let key = member_key(&ctx, "beta").await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let member = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("member"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .expect("create member");
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            member.id,
+            MembershipRole::Member,
+        )
+        .await
+        .expect("add member");
+        let key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            member.id,
+            ApiKeyScope::Write,
+            false,
+        )
+        .await;
 
         let response = request
             .get("/api/system/maintenance")
@@ -214,7 +150,9 @@ async fn a_member_key_cannot_touch_maintenance() {
 #[tokio::test]
 async fn an_unknown_mode_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let key = owner_key(&ctx, "acme").await;
+        let key = TestTenant::create(&request, &ctx, TenantArgs::default())
+            .await
+            .api_key;
 
         let response = request
             .put("/api/system/maintenance")

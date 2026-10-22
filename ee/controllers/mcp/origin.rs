@@ -88,16 +88,8 @@ impl YorishiroMcpServer {
         };
 
         let auth_ctx = authorized.auth_context();
-        let schema_txn = crate::db::begin_workspace(
-            self.app_context(),
-            auth_ctx.tenant_id,
-            auth_ctx.workspace_id,
-        )
-        .await
-        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
-
         let plan = match crate::edition::ee::models::schema_schemas::merge_preview(
-            &schema_txn,
+            authorized.txn(),
             self.app_context(),
             auth_ctx.tenant_id,
             auth_ctx.workspace_id,
@@ -129,16 +121,8 @@ impl YorishiroMcpServer {
         };
 
         let auth_ctx = authorized.auth_context();
-        let schema_txn = crate::db::begin_workspace(
-            self.app_context(),
-            auth_ctx.tenant_id,
-            auth_ctx.workspace_id,
-        )
-        .await
-        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
-
         let (schema, diff, summary) = match crate::edition::ee::models::schema_schemas::merge_apply(
-            &schema_txn,
+            authorized.txn(),
             self.app_context(),
             auth_ctx.tenant_id,
             auth_ctx.workspace_id,
@@ -149,10 +133,7 @@ impl YorishiroMcpServer {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        schema_txn
-            .commit()
-            .await
-            .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+        authorized.commit().await?;
         ok_json(serde_json::json!({
             "schema": schema,
             "diff": diff,

@@ -207,7 +207,7 @@ impl Authorized {
 
     /// Commits the transaction.
     /// Every write handler must call this before returning `Ok`.
-    pub(super) async fn commit(self) -> Result<(), ErrorData> {
+    pub(crate) async fn commit(self) -> Result<(), ErrorData> {
         self.txn.commit().await.map_err(crate::error::mcp_internal)
     }
 

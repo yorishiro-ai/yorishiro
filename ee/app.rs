@@ -9,6 +9,24 @@ use crate::edition::ee::controllers::middleware::edition;
 use crate::edition::ee::workers::infer_fill::{InferFillArgs, InferFillWorker};
 use crate::workers::registry::WorkerRegistry;
 
+pub(crate) async fn workspace_worker_class(
+    conn: &sea_orm::DatabaseConnection,
+    workspace_id: uuid::Uuid,
+) -> std::result::Result<Option<crate::workers::embedding_sync::WorkerClass>, crate::YorishiroError>
+{
+    crate::edition::ee::models::workspace_worker_classes::get(conn, workspace_id).await
+}
+
+pub(crate) async fn workspace_embedding_provider(
+    conn: &sea_orm::DatabaseConnection,
+    workspace_id: uuid::Uuid,
+) -> std::result::Result<
+    Option<Arc<dyn crate::services::embedding::EmbeddingProvider>>,
+    crate::YorishiroError,
+> {
+    crate::edition::ee::models::workspace_embedding_keys::resolve(conn, workspace_id).await
+}
+
 pub(crate) fn tenant_creation_cap(
     configured: i32,
     ctx: &AppContext,
@@ -41,7 +59,6 @@ pub(crate) fn tenant_cap_for_licence(configured: i32, licensed: bool) -> Option<
 pub(crate) fn compose_context(ctx: &AppContext) -> Result<()> {
     crate::edition::ee::initializers::queue::install(ctx)?;
     crate::edition::ee::initializers::auth::install(ctx);
-    crate::edition::ee::initializers::embedding::install(ctx);
     Ok(())
 }
 

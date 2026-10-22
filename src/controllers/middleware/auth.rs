@@ -200,7 +200,7 @@ impl<'a> RequestAuth<'a> {
     ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
         require_scope(&ctx, required)?;
-        self.begin(ctx).await
+        self.begin(ctx, required >= ApiKeyScope::Write).await
     }
 
     pub(crate) async fn authorize_audit(
@@ -210,16 +210,21 @@ impl<'a> RequestAuth<'a> {
     ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
         require_audit(&ctx)?;
-        self.begin(ctx).await
+        self.begin(ctx, false).await
     }
 
     async fn begin(
         &self,
         ctx: AuthContext,
+        write: bool,
     ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
-        let txn = crate::db::begin_workspace(self.app, ctx.tenant_id, ctx.workspace_id).await?;
         // Touch independently: read handlers roll their workspace transaction back on drop.
         self.touch(&ctx).await?;
+        let txn = if write {
+            crate::db::begin_workspace_write(self.app, ctx.tenant_id, ctx.workspace_id).await?
+        } else {
+            crate::db::begin_workspace(self.app, ctx.tenant_id, ctx.workspace_id).await?
+        };
         Ok((ctx, txn))
     }
 }

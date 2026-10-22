@@ -1,44 +1,21 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use chrono::Utc;
 use serde_json::json;
+use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-use yorishiro::models::api_keys::ApiKeyScope;
+use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
-use super::fixtures::{self, TenantArgs};
+use super::fixtures::{TenantArgs, TestTenant};
 
-/// `shared_store.insert` is keyed by `TypeId` (see `App::after_context`'s own doc comment), so this overwrites the enterprise-edition state the test process booted with, the same way production code layers a later insert over an earlier one.
-/// Simpler than round-tripping a real RSA-signed token through `YORISHIRO_LICENSE_KEY`, which `controllers::middleware::edition`'s own tests already cover.
-fn licence(ctx: &loco_rs::app::AppContext) {
-    ctx.shared_store
-        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
-            sub: "acme-corp".into(),
-            plan: "enterprise".into(),
-            exp: Utc::now().timestamp() + 60 * 60,
-        })) as std::sync::Arc<LicenceState>);
-}
-
-struct Setup {
-    tenant_id: Uuid,
-    owner_key: String,
-}
-
-/// Builds a tenant, its one workspace, and an owner with a migration-scope key, directly on `ctx.db`: same shape as base's own `tests/requests/template_library.rs`, and needed here because `POST /setup` refuses a second call once any tenant exists (`setup_bootstraps_once_and_refuses_a_second_call`), which every test below that needs two tenants would otherwise hit.
-async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
-    let args = TenantArgs {
-        tenant_name: name.into(),
-        owner_email: format!("owner-{name}@example.com"),
-        key_scope: ApiKeyScope::Migration,
-        key_audit: false,
-        ..Default::default()
-    };
-    let (tenant_id, _, _, owner_key) = fixtures::create_tenant_workspace_owner(ctx, args).await;
-    Setup {
-        tenant_id,
-        owner_key,
-    }
+fn require_licence(ctx: &loco_rs::app::AppContext) {
+    assert!(
+        ctx.shared_store
+            .get::<std::sync::Arc<LicenceState>>()
+            .expect("production boot installs licence state")
+            .is_active(),
+        "licensed marketplace tests require a valid YORISHIRO_LICENSE_KEY at boot"
+    );
 }
 
 fn note_definition() -> serde_json::Value {
@@ -50,15 +27,36 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
+async fn listings(request: &loco_rs::TestServer, key: &str) -> Vec<serde_json::Value> {
+    let mut templates = Vec::new();
+    for page in 1.. {
+        let response = request
+            .get(&format!("/api/marketplace?page={page}&page_size=200"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+        let batch: Vec<serde_json::Value> = response.json();
+        let last = batch.len() < 200;
+        templates.extend(batch);
+        if last {
+            return templates;
+        }
+    }
+    unreachable!()
+}
+
 /// An unlicensed deployment answers 404, matching an unconfigured setup wizard: the deployment genuinely does not serve this, not 401/403, which would confirm the route exists.
 #[tokio::test]
+#[serial(process_environment)]
 async fn without_a_licence_the_marketplace_is_not_served() {
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx, "acme").await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
             .get("/api/marketplace")
-            .add_header("Authorization", format!("Bearer {}", setup.owner_key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             response.status_code(),
@@ -72,7 +70,10 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 
 /// The gate runs before authentication: an unlicensed deployment answers the same 404 whether or not the caller holds a valid key, so an anonymous prober cannot tell the route exists.
 #[tokio::test]
+#[serial(process_environment)]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .get("/api/marketplace")
@@ -92,7 +93,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 #[tokio::test]
 async fn a_licence_does_not_replace_authentication() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
+        require_licence(&ctx);
 
         let response = request
             .get("/api/marketplace")
@@ -115,12 +116,12 @@ async fn the_marketplace_answers_501_on_sqlite() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let owner = setup(&ctx, "acme").await;
+        require_licence(&ctx);
+        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let listing = request
             .get("/api/marketplace")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .await;
         assert_eq!(listing.status_code(), StatusCode::NOT_IMPLEMENTED);
         let body: serde_json::Value = listing.json();
@@ -137,13 +138,13 @@ async fn publish_list_fork_and_review_round_trip() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let owner = setup(&ctx, "acme").await;
+        require_licence(&ctx);
+        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // Publishing a version of a template that doesn't exist must 404.
         let draft = request
             .post("/api/marketplace/00000000-0000-0000-0000-000000000000/versions")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"definition": note_definition()}))
             .await;
         assert_eq!(
@@ -156,7 +157,7 @@ async fn publish_list_fork_and_review_round_trip() {
         // Create a template via base's own template library, then publish it visible.
         let create_template = request
             .post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({
                 "name": "crm-starter",
                 "definition": note_definition(),
@@ -176,7 +177,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         let invalid_visibility = request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"visibility": "paused"}))
             .await;
         assert_eq!(
@@ -195,7 +196,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         let unchanged = request
             .get(&format!("/api/template-library/{template_id}"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .await;
         assert_eq!(unchanged.status_code(), StatusCode::OK);
         assert_eq!(
@@ -205,7 +206,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         let make_community = request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"visibility": "community"}))
             .await;
         assert_eq!(
@@ -216,20 +217,17 @@ async fn publish_list_fork_and_review_round_trip() {
         );
 
         // Still not listed: no published (non-draft) version exists yet.
-        let empty_listing = request
-            .get("/api/marketplace")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
-            .await;
-        assert_eq!(empty_listing.status_code(), StatusCode::OK);
-        let empty_body: Vec<serde_json::Value> = empty_listing.json();
+        let empty_body = listings(&request, &owner.api_key).await;
         assert!(
-            empty_body.is_empty(),
+            empty_body
+                .iter()
+                .all(|template| template["template_id"] != template_id.to_string()),
             "a community template with no published version must not be listed: {empty_body:?}"
         );
 
         let invalid_publish = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"definition": note_definition(), "status": "paused"}))
             .await;
         assert_eq!(
@@ -239,14 +237,14 @@ async fn publish_list_fork_and_review_round_trip() {
 
         let versions_after_invalid: Vec<serde_json::Value> = request
             .get(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .await
             .json();
         assert!(versions_after_invalid.is_empty());
 
         let publish_draft = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"definition": note_definition()}))
             .await;
         assert_eq!(
@@ -259,7 +257,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         let publish_v1 = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
         assert_eq!(
@@ -270,7 +268,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         let publish_pre = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"definition": note_definition(), "status": "pre"}))
             .await;
         assert_eq!(publish_pre.status_code(), StatusCode::CREATED);
@@ -278,7 +276,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         let publish_v2 = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
         assert_eq!(
@@ -287,17 +285,16 @@ async fn publish_list_fork_and_review_round_trip() {
             "the next publish must be numbered one past the last, not caller-supplied"
         );
 
-        let listing = request
-            .get("/api/marketplace")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
-            .await;
-        let listing_body: Vec<serde_json::Value> = listing.json();
-        assert_eq!(listing_body.len(), 1, "listing: {listing_body:?}");
-        assert_eq!(listing_body[0]["latest_stable_version"].as_i64(), Some(4));
+        let listing_body = listings(&request, &owner.api_key).await;
+        let listed = listing_body
+            .iter()
+            .find(|template| template["template_id"] == template_id.to_string())
+            .expect("published template must be listed");
+        assert_eq!(listed["latest_stable_version"].as_i64(), Some(4));
 
         let versions: Vec<serde_json::Value> = request
             .get(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .await
             .json();
         assert_eq!(
@@ -309,12 +306,12 @@ async fn publish_list_fork_and_review_round_trip() {
         );
 
         // A second tenant forks it.
-        let forker = setup(&ctx, "beta").await;
+        let forker = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(forker.tenant_id, owner.tenant_id);
 
         let fork = request
             .post(&format!("/api/marketplace/{template_id}/fork"))
-            .add_header("Authorization", format!("Bearer {}", forker.owner_key))
+            .add_header("Authorization", format!("Bearer {}", forker.api_key))
             .await;
         assert_eq!(
             fork.status_code(),
@@ -333,14 +330,11 @@ async fn publish_list_fork_and_review_round_trip() {
         );
 
         // The fork does not itself appear in the marketplace: it starts private ('tenant').
-        let listing_after_fork = request
-            .get("/api/marketplace")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
-            .await;
-        let listing_after_fork_body: Vec<serde_json::Value> = listing_after_fork.json();
-        assert_eq!(
-            listing_after_fork_body.len(),
-            1,
+        let listing_after_fork_body = listings(&request, &owner.api_key).await;
+        assert!(
+            listing_after_fork_body
+                .iter()
+                .all(|template| template["template_id"] != forked_id.to_string()),
             "a freshly forked template must not itself be community-visible: \
              {listing_after_fork_body:?}"
         );
@@ -348,7 +342,7 @@ async fn publish_list_fork_and_review_round_trip() {
         // The forker reviews the original.
         let review = request
             .post(&format!("/api/marketplace/{template_id}/reviews"))
-            .add_header("Authorization", format!("Bearer {}", forker.owner_key))
+            .add_header("Authorization", format!("Bearer {}", forker.api_key))
             .json(&json!({"rating": 5, "comment": "does the job"}))
             .await;
         assert_eq!(
@@ -358,31 +352,25 @@ async fn publish_list_fork_and_review_round_trip() {
             review.text()
         );
 
-        let listing_with_review = request
-            .get("/api/marketplace")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
-            .await;
-        let listing_with_review_body: Vec<serde_json::Value> = listing_with_review.json();
-        assert_eq!(
-            listing_with_review_body[0]["review_count"].as_i64(),
-            Some(1)
-        );
-        assert_eq!(
-            listing_with_review_body[0]["average_rating"].as_f64(),
-            Some(5.0)
-        );
+        let listing_with_review_body = listings(&request, &owner.api_key).await;
+        let reviewed = listing_with_review_body
+            .iter()
+            .find(|template| template["template_id"] == template_id.to_string())
+            .expect("reviewed template must be listed");
+        assert_eq!(reviewed["review_count"].as_i64(), Some(1));
+        assert_eq!(reviewed["average_rating"].as_f64(), Some(5.0));
 
         // Forking a template that has been taken back down to 'tenant' visibility 404s.
         let take_down = request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"visibility": "tenant"}))
             .await;
         assert_eq!(take_down.status_code(), StatusCode::NO_CONTENT);
 
         let fork_after_takedown = request
             .post(&format!("/api/marketplace/{template_id}/fork"))
-            .add_header("Authorization", format!("Bearer {}", forker.owner_key))
+            .add_header("Authorization", format!("Bearer {}", forker.api_key))
             .await;
         assert_eq!(
             fork_after_takedown.status_code(),
@@ -398,14 +386,17 @@ async fn publish_list_fork_and_review_round_trip() {
 /// A tenant may not set another tenant's template's visibility, or publish a version onto it: ownership is enforced by the service, not the role, and is reported as 404 rather than 403 so a caller that cannot act on a template does not learn it exists from the difference.
 #[tokio::test]
 async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let owner = setup(&ctx, "acme").await;
-        let other = setup(&ctx, "beta").await;
+        require_licence(&ctx);
+        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let create_template = request
             .post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"name": "private-one", "definition": note_definition()}))
             .await;
         let template_id: Uuid = create_template.json::<serde_json::Value>()["id"]
@@ -416,7 +407,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
 
         let steal_visibility = request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
-            .add_header("Authorization", format!("Bearer {}", other.owner_key))
+            .add_header("Authorization", format!("Bearer {}", other.api_key))
             .json(&json!({"visibility": "community"}))
             .await;
         assert_eq!(
@@ -428,7 +419,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
 
         let steal_publish = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", other.owner_key))
+            .add_header("Authorization", format!("Bearer {}", other.api_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
         assert_eq!(
@@ -444,14 +435,17 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
 /// A rating outside 1-5 is rejected before it ever reaches the database.
 #[tokio::test]
 async fn a_rating_outside_the_range_is_rejected() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let owner = setup(&ctx, "acme").await;
-        let reviewer = setup(&ctx, "beta").await;
+        require_licence(&ctx);
+        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let reviewer = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let create_template = request
             .post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"name": "reviewable", "definition": note_definition()}))
             .await;
         let template_id: Uuid = create_template.json::<serde_json::Value>()["id"]
@@ -461,18 +455,18 @@ async fn a_rating_outside_the_range_is_rejected() {
             .unwrap();
         request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"visibility": "community"}))
             .await;
         request
             .post(&format!("/api/marketplace/{template_id}/versions"))
-            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
 
         let bad_review = request
             .post(&format!("/api/marketplace/{template_id}/reviews"))
-            .add_header("Authorization", format!("Bearer {}", reviewer.owner_key))
+            .add_header("Authorization", format!("Bearer {}", reviewer.api_key))
             .json(&json!({"rating": 6}))
             .await;
         assert_eq!(

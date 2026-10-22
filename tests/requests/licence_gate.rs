@@ -1,8 +1,8 @@
 //! The licence gate, exercised from both sides of the boundary it draws.
 //!
-//! A gate is not a gate until a deliberate violation makes it fire, so these boot the whole
-//! application twice, once with no licence and once with a valid one, and compare what the router
-//! actually serves. Asserting only the licensed side would pass just as well with the gate deleted.
+//! Unlicensed and licensed cases use the application boot verifier.
+//! Licensed cases also inject missing process state to check that the router fails closed.
+//! Asserting only the licensed side would pass just as well with the gate deleted.
 //!
 //! The routes fall into three groups, and the reason each is here differs:
 //!
@@ -29,29 +29,24 @@
 //! handler produces, so it cannot be reached unless the request got past the gate.
 //!
 //! **Ungated** (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`) must stay
-//! reachable in *both* boots. Nothing in the current code can make these 404 for licence reasons:
+//! reachable in both boot states. Nothing in the current code can make these 404 for licence reasons:
 //! `Routes::layer` wraps each handler's own `MethodRouter`, so a layer cannot reach a route it was
 //! not attached to. That is exactly why the assertion is worth keeping: it does not guard a leak
 //! this code can produce, it guards the change that widens where the layer is applied. Without it,
 //! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
 use super::boot_request;
+use serial_test::serial;
 use yorishiro::App;
-use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
-/// Overwrites the enterprise-edition state the test process booted with.
-///
-/// `shared_store.insert` is keyed by `TypeId`, so the later insert wins, and the gate reads the
-/// state per request rather than capturing it at boot, which is the property that makes this
-/// possible at all, and the same one that lets a key expiring mid-process take effect without a
-/// restart.
-fn install_licence(ctx: &loco_rs::app::AppContext, expires_in_secs: i64) {
-    ctx.shared_store
-        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
-            sub: "acme-corp".into(),
-            plan: "enterprise".into(),
-            exp: chrono::Utc::now().timestamp() + expires_in_secs,
-        })) as std::sync::Arc<LicenceState>);
+fn require_licence(ctx: &loco_rs::app::AppContext) {
+    assert!(
+        ctx.shared_store
+            .get::<std::sync::Arc<LicenceState>>()
+            .is_some_and(|state| state.is_active()),
+        "this case requires a valid YORISHIRO_LICENSE_KEY at application boot"
+    );
 }
 
 /// One representative gated route, with a method that reaches the layer.
@@ -88,10 +83,12 @@ const UNGATED: &[&str] = &[
 ];
 
 #[tokio::test]
+#[serial(process_environment)]
 async fn gated_routes_are_absent_without_a_licence() {
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
     boot_request::<App, _, _>(|request, _ctx| async move {
-        // No licence installed: the process booted with whatever `from_env` found, which in a test
-        // environment is nothing.
+        // Boot the real verifier without a key, even when licensed cases have one available.
         for path in GATED {
             let response = request.get(path).await;
             assert_eq!(
@@ -130,7 +127,7 @@ async fn gated_routes_are_absent_without_a_licence() {
 #[tokio::test]
 async fn gated_routes_are_served_with_a_licence() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        install_licence(&ctx, 60 * 60);
+        require_licence(&ctx);
 
         for path in GATED {
             let response = request.get(path).await;
@@ -156,20 +153,11 @@ async fn gated_routes_are_served_with_a_licence() {
     .await;
 }
 
-/// A key that verified and then lapsed closes the gate again with no restart, which is the property
-/// `ee::controllers::middleware::edition::licence_gate` is a per-request layer to keep.
+/// Missing process state closes the gate without a restart.
 #[tokio::test]
-async fn an_expired_licence_closes_the_gate_again() {
+async fn missing_licence_state_closes_the_gate_again() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        // Unlicensed first, so the 404 below is known to be reachable on this path at all. Without
-        // this the test would pass against a gate that never opens.
-        let unlicensed = request.get(GATED[0]).await.status_code();
-        assert_eq!(
-            unlicensed, 404,
-            "precondition: no licence must close the gate; got {unlicensed}"
-        );
-
-        install_licence(&ctx, 60 * 60);
+        require_licence(&ctx);
         let licensed = request.get(GATED[0]).await.status_code();
         // 401 here rather than 200: the request carries no API key, and the point is only that the
         // *licence* is not what rejects it. Asserting the exact code rather than `!= 404` matters:
@@ -180,12 +168,16 @@ async fn an_expired_licence_closes_the_gate_again() {
             "an active licence must let the request reach authentication; got {licensed}"
         );
 
-        // Same shape of state, expiry in the past. Nothing is restarted between these two calls.
-        install_licence(&ctx, -1);
-        let expired = request.get(GATED[0]).await.status_code();
+        // Inject missing state without bypassing signature verification or replacing the clock.
+        assert!(
+            ctx.shared_store
+                .remove::<std::sync::Arc<LicenceState>>()
+                .is_some()
+        );
+        let unavailable = request.get(GATED[0]).await.status_code();
         assert_eq!(
-            expired, 404,
-            "an expired licence must close the gate again without a restart; got {expired}"
+            unavailable, 404,
+            "missing licence state must close the gate without a restart; got {unavailable}"
         );
     })
     .await;
@@ -201,19 +193,21 @@ async fn an_expired_licence_closes_the_gate_again() {
 #[tokio::test]
 async fn stripe_webhook_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let unlicensed = request.post("/api/stripe/webhook").await.status_code();
-        assert_eq!(
-            unlicensed, 404,
-            "the Stripe webhook must answer 404 with no licence; got {unlicensed}"
-        );
-
-        install_licence(&ctx, 60 * 60);
+        require_licence(&ctx);
         let licensed = request.post("/api/stripe/webhook").await.status_code();
         assert_eq!(
             licensed, 501,
             "an active licence must let the request reach the handler, which then refuses for want \
              of a configured secret; got {licensed}"
         );
+        // Missing state is a fault injection; the active state came from the boot verifier.
+        assert!(
+            ctx.shared_store
+                .remove::<std::sync::Arc<LicenceState>>()
+                .is_some()
+        );
+        let unlicensed = request.post("/api/stripe/webhook").await.status_code();
+        assert_eq!(unlicensed, 404);
     })
     .await;
 }
@@ -231,19 +225,21 @@ async fn stripe_webhook_is_gated() {
 #[tokio::test]
 async fn oauth_login_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let unlicensed = request.get("/auth/oauth/status").await.status_code();
-        assert_eq!(
-            unlicensed, 404,
-            "OAuth login must answer 404 with no licence; got {unlicensed}"
-        );
-
-        install_licence(&ctx, 60 * 60);
+        require_licence(&ctx);
         let licensed = request.get("/auth/oauth/status").await.status_code();
         assert_eq!(
             licensed, 200,
             "an active licence must let the request reach `status`, which answers 200 whether or \
              not OAuth is configured; got {licensed}"
         );
+        // Missing state is a fault injection; the active state came from the boot verifier.
+        assert!(
+            ctx.shared_store
+                .remove::<std::sync::Arc<LicenceState>>()
+                .is_some()
+        );
+        let unlicensed = request.get("/auth/oauth/status").await.status_code();
+        assert_eq!(unlicensed, 404);
     })
     .await;
 }

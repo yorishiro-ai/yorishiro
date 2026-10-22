@@ -11,7 +11,6 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::Barrier;
 
 #[tokio::test]
-#[serial(postgres_cluster)]
 async fn postgres_app_pool_uses_configured_timezone_on_new_and_released_connections() {
     if !crate::require_postgres_backend() {
         return;
@@ -50,12 +49,11 @@ async fn postgres_app_pool_uses_configured_timezone_on_new_and_released_connecti
 }
 
 #[tokio::test]
-#[serial(postgres_cluster)]
 async fn postgres_pool_replacement_keeps_uri_settings_without_replaying_startup() {
     if !crate::require_postgres_backend() {
         return;
     }
-    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
         let mut config = ctx.config.clone();
         let mut uri = reqwest::Url::parse(&config.database.uri).unwrap();
         uri.query_pairs_mut()
@@ -102,7 +100,8 @@ async fn sqlite_timezone_state_is_seeded_noop_safe_and_preserves_instants() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    let db = sqlite_database().await;
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    let db = ctx.db.clone();
     let lifecycle_id = uuid::Uuid::now_v7();
     yorishiro::models::queue_job_lifecycles::Entity::record_enqueue(
         &db,
@@ -178,10 +177,11 @@ async fn sqlite_timezone_state_is_seeded_noop_safe_and_preserves_instants() {
         .unwrap();
     let name: String = row.try_get_by_index(0).unwrap();
     assert_eq!(name, "Europe/Paris");
+    })
+    .await;
 }
 
 #[tokio::test]
-#[serial(sqlite_timestamp_policy)]
 async fn sqlite_current_timestamp_default_uses_configured_zone_on_each_boot() {
     if !crate::require_sqlite_backend() {
         return;
@@ -298,7 +298,6 @@ async fn sqlite_current_timestamp_default_uses_configured_zone_on_each_boot() {
 }
 
 #[tokio::test]
-#[serial(sqlite_timestamp_policy)]
 async fn sqlite_app_pool_executes_startup_effects_once_not_per_connection() {
     if !crate::require_sqlite_backend() {
         return;
@@ -353,7 +352,7 @@ async fn sqlite_app_pool_executes_startup_effects_once_not_per_connection() {
 }
 
 #[tokio::test]
-#[serial(process_environment, sqlite_timestamp_policy)]
+#[serial(process_environment)]
 async fn sqlite_timestamp_fixture_is_independent_of_redis_queue_url() {
     if !crate::require_sqlite_backend() {
         return;
@@ -390,37 +389,40 @@ async fn sqlite_timezone_state_serializes_concurrent_activations() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    let db = sqlite_database().await;
-    let barrier = Arc::new(Barrier::new(3));
-    let first = db.clone();
-    let first_barrier = barrier.clone();
-    let a = tokio::spawn(async move {
-        first_barrier.wait().await;
-        yorishiro::models::timezone_state::activate(&first, "Asia/Tokyo").await
-    });
-    let second = db.clone();
-    let second_barrier = barrier.clone();
-    let b = tokio::spawn(async move {
-        second_barrier.wait().await;
-        yorishiro::models::timezone_state::activate(&second, "America/New_York").await
-    });
-    barrier.wait().await;
-    let (a, b) = tokio::time::timeout(Duration::from_secs(8), async { (a.await, b.await) })
-        .await
-        .expect("concurrent activation must finish within its lock timeout");
-    a.unwrap().unwrap();
-    b.unwrap().unwrap();
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let db = ctx.db.clone();
+        let barrier = Arc::new(Barrier::new(3));
+        let first = db.clone();
+        let first_barrier = barrier.clone();
+        let a = tokio::spawn(async move {
+            first_barrier.wait().await;
+            yorishiro::models::timezone_state::activate(&first, "Asia/Tokyo").await
+        });
+        let second = db.clone();
+        let second_barrier = barrier.clone();
+        let b = tokio::spawn(async move {
+            second_barrier.wait().await;
+            yorishiro::models::timezone_state::activate(&second, "America/New_York").await
+        });
+        barrier.wait().await;
+        let (a, b) = tokio::time::timeout(Duration::from_secs(8), async { (a.await, b.await) })
+            .await
+            .expect("concurrent activation must finish within its lock timeout");
+        a.unwrap().unwrap();
+        b.unwrap().unwrap();
 
-    let row = db
-        .query_one_raw(Statement::from_string(
-            sea_orm::DbBackend::Sqlite,
-            "SELECT active_timezone FROM timezone_state WHERE id = 1",
-        ))
-        .await
-        .unwrap()
-        .unwrap();
-    let name: String = row.try_get_by_index(0).unwrap();
-    assert!(name == "Asia/Tokyo" || name == "America/New_York");
+        let row = db
+            .query_one_raw(Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT active_timezone FROM timezone_state WHERE id = 1",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let name: String = row.try_get_by_index(0).unwrap();
+        assert!(name == "Asia/Tokyo" || name == "America/New_York");
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -428,13 +430,12 @@ async fn sqlite_timezone_state_serializes_writers_on_separate_connections() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    let path = tempfile::tempdir()
-        .unwrap()
-        .keep()
-        .join("timezone-state-race.sqlite3");
-    let url = format!("sqlite://{}?mode=rwc", path.display());
-    let db = sqlite_connection(&url).await;
-    migration::Migrator::up(&db, None).await.unwrap();
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    let db = ctx.db.clone();
+    let url = ctx.config.database.uri.clone();
+    yorishiro::models::timezone_state::activate(&db, "UTC")
+        .await
+        .unwrap();
     let audit_db = sqlite_connection(&url).await;
     let initial: String = audit_db
         .query_one_raw(Statement::from_string(
@@ -460,10 +461,14 @@ async fn sqlite_timezone_state_serializes_writers_on_separate_connections() {
     let first = sqlite_connection(&url).await;
     let second = sqlite_connection(&url).await;
     let first_task = tokio::spawn(async move {
-        yorishiro::models::timezone_state::activate(&first, "Asia/Tokyo").await
+        let result = yorishiro::models::timezone_state::activate(&first, "Asia/Tokyo").await;
+        first.close().await.unwrap();
+        result
     });
     let second_task = tokio::spawn(async move {
-        yorishiro::models::timezone_state::activate(&second, "America/New_York").await
+        let result = yorishiro::models::timezone_state::activate(&second, "America/New_York").await;
+        second.close().await.unwrap();
+        result
     });
     for task in [first_task, second_task] {
         tokio::time::timeout(Duration::from_secs(15), task)
@@ -510,6 +515,10 @@ async fn sqlite_timezone_state_serializes_writers_on_separate_connections() {
         .execute_unprepared("DROP TABLE timezone_state_update_audit")
         .await
         .unwrap();
+    same_zone.close().await.unwrap();
+    audit_db.close().await.unwrap();
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -517,7 +526,11 @@ async fn failed_activation_rolls_back_the_singleton_update() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    let db = sqlite_database().await;
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    let db = ctx.db.clone();
+    yorishiro::models::timezone_state::activate(&db, "UTC")
+        .await
+        .unwrap();
     let transaction = db.begin().await.unwrap();
     transaction
         .execute_unprepared(
@@ -561,10 +574,11 @@ async fn failed_activation_rolls_back_the_singleton_update() {
     yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
         .await
         .unwrap();
+    })
+    .await;
 }
 
 #[tokio::test]
-#[serial(postgres_cluster)]
 async fn postgres_timezone_state_serializes_concurrent_activations_without_dml_noop() {
     if !crate::require_postgres_backend() {
         return;
@@ -791,22 +805,6 @@ async fn read_probe_instant(db: &sea_orm::DatabaseConnection) -> chrono::DateTim
     .unwrap()
 }
 
-async fn sqlite_database() -> sea_orm::DatabaseConnection {
-    use sea_orm::Database;
-
-    let path = tempfile::tempdir()
-        .unwrap()
-        .keep()
-        .join("timezone-state.sqlite3");
-    let url = format!("sqlite://{}?mode=rwc", path.display());
-    let mut options = sea_orm::ConnectOptions::new(url);
-    options.map_sqlx_sqlite_opts(|opts| opts.busy_timeout(Duration::from_secs(5)));
-    options.max_connections(2);
-    let db = Database::connect(options).await.unwrap();
-    migration::Migrator::up(&db, None).await.unwrap();
-    db
-}
-
 async fn sqlite_connection(url: &str) -> sea_orm::DatabaseConnection {
     use sea_orm::Database;
 
@@ -821,7 +819,7 @@ static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// A throwaway database, dropped and recreated so each run starts from nothing.
 ///
 /// A `DATABASE_URL` that is present but unusable panics rather than skipping.
-async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String, String) {
+pub(crate) async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String, String) {
     let base = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
 
     // Split the path from the query, so `?sslmode=require` and friends survive onto both derived
@@ -865,7 +863,10 @@ async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String, String)
     (db, unique_name, target_url)
 }
 
-async fn close_scratch_db(db: sea_orm::DatabaseConnection, name: &str) -> Result<(), String> {
+pub(crate) async fn close_scratch_db(
+    db: sea_orm::DatabaseConnection,
+    name: &str,
+) -> Result<(), String> {
     let mut errors = Vec::new();
     if let Err(error) = db.close().await {
         errors.push(format!("close scratch database pool: {error}"));

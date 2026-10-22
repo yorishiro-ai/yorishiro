@@ -72,22 +72,25 @@ def main() -> int:
     status, _, stderr, _ = run_gate(None, valkey_url="redis://localhost:6380/2")
     assert status != 0 and MISMATCH_TOKEN in stderr.splitlines()
 
-    # Valkey tests accept explicit non-local endpoints without connecting during the runner gate.
+    # The runner passes the matrix service through without provisioning another service.
     status, _, stderr, env = run_gate(
         "postgres-valkey",
         valkey_url="rediss://cache.example.test:7443/6",
         extra_env={"YORISHIRO_TOPOLOGY_MARKER_DIR": "/not-created-yet"},
     )
     assert status == 0 and env["YORISHIRO_VALKEY_TEST_URL"] == "rediss://cache.example.test:7443/6"
+    assert env["QUEUE_URL"] == env["YORISHIRO_TEST_VALKEY_BASE_URL"] == env["YORISHIRO_VALKEY_TEST_URL"]
     assert env["YORISHIRO_TEST_QUEUE"] == "valkey"
 
     status, _, stderr, env = run_gate(
         "sqlite-sqlite",
         queue_url="sqlite:///caller/queue.sqlite3?mode=rwc",
         topology="sqlite-sqlite",
+        extra_env={"YORISHIRO_TEST_VALKEY_BASE_URL": "redis://localhost:6379/15"},
     )
     assert status == 0 and env["YORISHIRO_TEST_QUEUE"] == "sqlite"
     assert "YORISHIRO_VALKEY_TEST_URL" not in env
+    assert "YORISHIRO_TEST_VALKEY_BASE_URL" not in env
 
     status, stdout, stderr, _ = run_gate("postgres-valkey", evidence=False, valkey_url="redis://localhost:6379/15")
     assert status != 0 and "configured_app=0" in stdout

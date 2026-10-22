@@ -6,14 +6,12 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::post,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-};
 use yorishiro::{
     YorishiroError,
     services::embedding::{EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider},
 };
+
+use crate::http_stub::HttpStub;
 
 fn config(base_url: String) -> OpenAiCompatibleConfig {
     OpenAiCompatibleConfig {
@@ -29,11 +27,7 @@ async fn provider(
     status: u16,
     body: &str,
     retry_after: Option<&str>,
-) -> (OpenAiCompatibleProvider, tokio::task::JoinHandle<()>) {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
+) -> (OpenAiCompatibleProvider, HttpStub) {
     let body = body.to_owned();
     let mut headers = HeaderMap::new();
     if let Some(after) = retry_after {
@@ -43,19 +37,15 @@ async fn provider(
         "/embeddings",
         post(move || async move { (StatusCode::from_u16(status).unwrap(), headers, body) }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = HttpStub::start(app).await;
     (
-        OpenAiCompatibleProvider::new(config(format!("http://{address}/"))),
+        OpenAiCompatibleProvider::new(config(server.url.clone())),
         server,
     )
 }
 
 #[tokio::test]
 async fn production_transport_preserves_request_and_provider_order() {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
     let (sent, received) = tokio::sync::oneshot::channel();
     let sent = std::sync::Arc::new(tokio::sync::Mutex::new(Some(sent)));
     let app = Router::new().route(
@@ -70,8 +60,8 @@ async fn production_transport_preserves_request_and_provider_order() {
             Json(serde_json::json!({"data":[{"embedding":[1.0,2.0]},{"embedding":[3.0,4.0]}]}))
         }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let vectors = OpenAiCompatibleProvider::new(config(format!("http://{address}/")))
+    let server = HttpStub::start(app).await;
+    let vectors = OpenAiCompatibleProvider::new(config(server.url.clone()))
         .embed_batch(&["first", "second"])
         .await
         .unwrap();
@@ -85,7 +75,6 @@ async fn production_transport_preserves_request_and_provider_order() {
         serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
         serde_json::json!({"model":"test-model","input":["first","second"],"dimensions":2})
     );
-    server.abort();
 }
 
 #[tokio::test]
@@ -97,10 +86,9 @@ async fn production_status_mapping_preserves_retry_bound_and_redacts_body() {
         (429, Some("invalid"), 5),
         (500, None, 0),
     ] {
-        let (provider, server) =
+        let (provider, _server) =
             provider(status, "provider-secret-body test-api-key", header).await;
         let error = provider.embed_batch(&["text"]).await.unwrap_err();
-        server.abort();
         if seconds > 0 {
             assert!(
                 matches!(&error, YorishiroError::ProviderBusy { retry_after, .. } if *retry_after == Duration::from_secs(seconds))
@@ -128,9 +116,8 @@ async fn production_response_validation_rejects_invalid_json_count_and_width() {
             Some("length 1 but expected 2"),
         ),
     ] {
-        let (provider, server) = provider(200, body, None).await;
+        let (provider, _server) = provider(200, body, None).await;
         let error = provider.embed_batch(&inputs).await.unwrap_err();
-        server.abort();
         assert!(matches!(&error, YorishiroError::Internal(_)));
         if let Some(diagnostic) = diagnostic {
             assert!(error.to_string().contains(diagnostic));
@@ -142,42 +129,27 @@ async fn production_response_validation_rejects_invalid_json_count_and_width() {
 
 #[tokio::test]
 async fn real_request_timeout_and_connection_failure_are_unreachable() {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
+    let server = HttpStub::stalled().await;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(100))
         .build()
         .unwrap();
-    let provider =
-        OpenAiCompatibleProvider::with_client(config(format!("http://{address}")), client);
-    // Keeping the listener open without replying forces the actual reqwest timeout path.
+    let provider = OpenAiCompatibleProvider::with_client(config(server.url.clone()), client);
     let error = provider.embed_batch(&["text"]).await.unwrap_err();
     assert!(matches!(error, YorishiroError::ProviderUnreachable { .. }));
     assert!(!error.to_string().contains("test-api-key"));
-    drop(listener);
+    drop(server);
     let error = provider.embed_batch(&["text"]).await.unwrap_err();
     assert!(matches!(error, YorishiroError::ProviderUnreachable { .. }));
 }
 
 #[tokio::test]
 async fn truncated_success_body_is_internal() {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut request = [0; 4096];
-        assert!(socket.read(&mut request).await.unwrap() > 0);
-        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 99999\r\nConnection: close\r\n\r\n{\"secret\":\"test-api-key\"}").await.unwrap();
-    });
-    let error = OpenAiCompatibleProvider::new(config(format!("http://{address}")))
+    let server = HttpStub::raw("HTTP/1.1 200 OK\r\nContent-Length: 99999\r\nConnection: close\r\n\r\n{\"secret\":\"test-api-key\"}".into()).await;
+    let error = OpenAiCompatibleProvider::new(config(server.url.clone()))
         .embed_batch(&["text"])
         .await
         .unwrap_err();
     assert!(matches!(&error, YorishiroError::Internal(_)));
     assert!(!error.to_string().contains("test-api-key"));
-    server.await.unwrap();
 }

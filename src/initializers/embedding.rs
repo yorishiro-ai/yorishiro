@@ -1,10 +1,8 @@
-//! Resolver and concurrency setup, with expensive providers loaded only by worker processes.
+//! Concurrency setup, with expensive providers loaded only by worker processes.
 
 use loco_rs::{Result, app::AppContext};
 
 pub(crate) fn install(ctx: &AppContext, settings: &crate::data::settings::Settings) {
-    ctx.shared_store
-        .insert(crate::services::embedding::default_embedding_resolver());
     ctx.shared_store
         .insert(std::sync::Arc::new(tokio::sync::Semaphore::new(
             settings.embedding.provider_concurrency,

@@ -1,70 +1,26 @@
 use super::boot_request;
+use super::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use yorishiro::App;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenant_memberships::MembershipRole;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-
-struct Setup {
-    key: String,
-}
-
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("acme".into()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-    let owner = yorishiro::models::user_users::create_user(
-        &ctx.db,
-        "owner@example.com",
-        "hunter2-hunter2",
-        None,
-    )
-    .await
-    .expect("create owner");
-    yorishiro::models::tenant_memberships::add_member(
-        &ctx.db,
-        tenant.id,
-        owner.id,
-        MembershipRole::Owner,
-    )
-    .await
-    .expect("add owner");
-    let key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Write,
-        Some(owner.id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext;
-    Setup { key }
-}
 
 /// A workspace that never chose reads as absent (an empty list, not a 404, since `list` is "every stored preference" and there being none is not an error); setting, then resetting, round-trips through the exact stored order and back to absence.
 #[tokio::test]
 async fn set_get_and_reset_round_trip_in_display_order() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Write,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let before = request
             .get("/api/workspace/entity-columns")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             before.status_code(),
@@ -76,7 +32,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 
         let put = request
             .put("/api/workspace/entity-columns/task")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "columns": ["priority", "title", "done"] }))
             .await;
         assert_eq!(
@@ -94,7 +50,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 
         let after = request
             .get("/api/workspace/entity-columns")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let stored: Vec<serde_json::Value> = after.json();
         assert_eq!(stored.len(), 1);
@@ -108,13 +64,13 @@ async fn set_get_and_reset_round_trip_in_display_order() {
         // Saving again replaces rather than appending: one row, the new order.
         let put_again = request
             .put("/api/workspace/entity-columns/task")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "columns": ["done", "title"] }))
             .await;
         assert_eq!(put_again.status_code(), StatusCode::OK);
         let after_again = request
             .get("/api/workspace/entity-columns")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let stored_again: Vec<serde_json::Value> = after_again.json();
         assert_eq!(
@@ -129,7 +85,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 
         let reset = request
             .delete("/api/workspace/entity-columns/task")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             reset.status_code(),
@@ -140,7 +96,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 
         let after_reset = request
             .get("/api/workspace/entity-columns")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert!(after_reset.json::<Vec<serde_json::Value>>().is_empty());
     })
@@ -152,11 +108,19 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 #[tokio::test]
 async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Write,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let duplicate = request
             .put("/api/workspace/entity-columns/task")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "columns": ["title", "title"] }))
             .await;
         assert_eq!(
@@ -172,7 +136,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
             .collect();
         let too_many = request
             .put("/api/workspace/entity-columns/task")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "columns": over_limit }))
             .await;
         assert_eq!(
@@ -184,7 +148,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
 
         let after = request
             .get("/api/workspace/entity-columns")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert!(
             after.json::<Vec<serde_json::Value>>().is_empty(),
@@ -198,11 +162,19 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
 #[tokio::test]
 async fn an_empty_selection_is_stored_as_a_choice() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Write,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let put = request
             .put("/api/workspace/entity-columns/task")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "columns": [] }))
             .await;
         assert_eq!(
@@ -214,7 +186,7 @@ async fn an_empty_selection_is_stored_as_a_choice() {
 
         let after = request
             .get("/api/workspace/entity-columns")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let stored: Vec<serde_json::Value> = after.json();
         assert_eq!(

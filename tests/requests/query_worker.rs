@@ -3,93 +3,20 @@
 //! The server under test holds no embedding model, so every semantic search needs a worker serving the shared target, where `query-embedding` jobs go.
 //! The worker runs against the booted app's own queue provider, the one the HTTP handlers enqueue to.
 //! On SQLite the worker uses the same queue file that request boot creates for the test.
-//! PostgreSQL and Valkey queue tests share `serial(queue_backend)`.
-//! Callers take `serial(process_environment)`: the queue location and the query embedding settings are read from the environment at boot.
+//! Callers that override query embedding settings still take `serial(process_environment)`.
 
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
+use futures::FutureExt;
 use loco_rs::TestServer;
-use loco_rs::app::AppContext;
-use loco_rs::bgworker::BackgroundWorker;
-use loco_rs::prelude::async_trait;
+use loco_rs::app::{AppContext, Hooks};
 use yorishiro::App;
-use yorishiro::error::YorishiroError;
-use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
-use yorishiro::workers::query_embedding::QueryEmbeddingWorker;
+use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::workers::target::WorkerTarget;
 
-use super::boot_request;
-
-/// Embeds text as a one-hot vector whose axis comes from a keyword, so a query and a document that share a keyword are at distance zero and every other pair is orthogonal.
-/// Records the kind of every call and can be made slow, to model a worker that answers after the search gave up.
-pub(crate) struct KeywordProvider {
-    pub(crate) kinds: Arc<Mutex<Vec<EmbedKind>>>,
-    pub(crate) width: usize,
-    pub(crate) delay: Duration,
-}
-
-impl KeywordProvider {
-    pub(crate) fn new(width: usize) -> Self {
-        Self {
-            kinds: Arc::new(Mutex::new(Vec::new())),
-            width,
-            delay: Duration::ZERO,
-        }
-    }
-
-    fn vector(&self, text: &str) -> Vec<f32> {
-        let axis = ["alpha", "beta", "gamma"]
-            .iter()
-            .position(|word| text.contains(word))
-            .unwrap_or(3);
-        let mut vector = vec![0.0; self.width];
-        vector[axis] = 1.0;
-        vector
-    }
-}
-
-#[async_trait]
-impl EmbeddingProvider for KeywordProvider {
-    fn dimensions(&self) -> usize {
-        self.width
-    }
-
-    fn model_name(&self) -> String {
-        "keyword-test-provider".into()
-    }
-
-    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-        Ok(texts.iter().map(|text| self.vector(text)).collect())
-    }
-
-    async fn embed_as(&self, kind: EmbedKind, text: &str) -> Result<Vec<f32>, YorishiroError> {
-        self.kinds.lock().unwrap().push(kind);
-        if !self.delay.is_zero() {
-            tokio::time::sleep(self.delay).await;
-        }
-        Ok(self.vector(text))
-    }
-}
-
-/// Fails every embedding with the error `make` builds.
-pub(crate) struct FailingProvider(pub(crate) fn() -> YorishiroError);
-
-#[async_trait]
-impl EmbeddingProvider for FailingProvider {
-    fn dimensions(&self) -> usize {
-        768
-    }
-
-    fn model_name(&self) -> String {
-        "failing-test-provider".into()
-    }
-
-    async fn embed_batch(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-        Err((self.0)())
-    }
-}
+use super::boot_request_isolated;
 
 /// The queue a worker for the shared target runs on.
 ///
@@ -107,12 +34,12 @@ pub(crate) async fn target_queue(
     match config.queue.as_mut().expect("configured queue") {
         loco_rs::config::QueueConfig::Redis(redis) => {
             redis.dangerously_flush = false;
-            redis.queues = Some(vec![target.queue()]);
         }
         loco_rs::config::QueueConfig::Postgres(queue) => queue.dangerously_flush = false,
         loco_rs::config::QueueConfig::Sqlite(queue) => queue.dangerously_flush = false,
         _ => panic!("unsupported queue configuration"),
     }
+    yorishiro::data::config::serve_worker_queues(&mut config, &[target.queue()]);
     // A shutdown provider stays cancelled; every worker process needs a fresh one.
     let queue = loco_rs::bgworker::create_queue_provider(&config)
         .await
@@ -131,41 +58,50 @@ pub(crate) async fn boot_with_query_worker<F, Fut>(
     F: FnOnce(TestServer, AppContext) -> Fut,
     Fut: Future<Output = ()>,
 {
-    let guard = crate::EnvGuard::capture(&["QUEUE_URL"]);
-    if let Ok(url) = std::env::var("QUEUE_URL")
-        && url.starts_with("redis")
-    {
-        // Keep the reserved database unchanged; queue tests share a serialization lock.
-        guard.set("QUEUE_URL", url);
-    }
+    boot_with_query_worker_and_drain(provider, callback, |_| async {}).await;
+}
+
+#[allow(clippy::future_not_send)]
+pub(crate) async fn boot_with_query_worker_and_drain<F, Fut, D, Done>(
+    provider: Arc<dyn EmbeddingProvider>,
+    callback: F,
+    after_drain: D,
+) where
+    F: FnOnce(TestServer, AppContext) -> Fut,
+    Fut: Future<Output = ()>,
+    D: FnOnce(AppContext) -> Done,
+    Done: Future<Output = ()>,
+{
     let run = move |request: TestServer, ctx: AppContext| async move {
         ctx.shared_store.insert(provider);
         let queue = shared_target_queue(&ctx).await;
-        queue
-            .register(QueryEmbeddingWorker::build(&ctx))
+        let mut worker_ctx = ctx.clone();
+        worker_ctx.queue_provider = Some(queue.clone());
+        App::connect_workers(&worker_ctx, &queue)
             .await
-            .expect("register the query embedding worker");
+            .expect("connect production workers and dispatch relay");
         let running = queue.clone();
         let worker =
             tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
-        let relay_ctx = ctx.clone();
-        let relay_queue = queue.clone();
-        let relay = tokio::spawn(async move {
-            let mut relay_ctx = relay_ctx;
-            relay_ctx.queue_provider = Some(relay_queue);
-            loop {
-                yorishiro::workers::dispatch::recover_pending(&relay_ctx).await;
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        });
 
-        callback(request, ctx).await;
+        let outcome = std::panic::AssertUnwindSafe(callback(request, ctx.clone()))
+            .catch_unwind()
+            .await;
 
-        relay.abort();
-        let _ = relay.await;
-        let _ = queue.shutdown();
-        let _ = worker.await;
+        App::on_shutdown(&worker_ctx).await;
+        let shutdown_result = queue.shutdown();
+        let worker_result = tokio::time::timeout(Duration::from_secs(10), worker).await;
+        let close_result = queue.close().await;
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+        shutdown_result.expect("stop query worker");
+        worker_result
+            .expect("drain query worker")
+            .expect("join query worker")
+            .expect("run query worker");
+        close_result.expect("close query worker queue");
+        after_drain(ctx).await;
     };
-    boot_request::<App, _, _>(run).await;
-    drop(guard);
+    boot_request_isolated::<App, _, _>(run).await;
 }

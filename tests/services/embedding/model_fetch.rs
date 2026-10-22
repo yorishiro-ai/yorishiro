@@ -4,8 +4,6 @@ use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
 use yorishiro::services::embedding::model_fetch::*;
 
 fn client() -> reqwest::Client {
@@ -49,32 +47,17 @@ fn assert_no_partials(dir: &Path) {
     assert!(partial_files(dir).is_empty());
 }
 
-async fn read_request(socket: &mut TcpStream) -> Vec<u8> {
-    let mut request = Vec::new();
-    let mut buffer = [0; 1024];
-    loop {
-        let read = socket.read(&mut buffer).await.unwrap();
-        assert_ne!(read, 0, "client closed before sending headers");
-        request.extend_from_slice(&buffer[..read]);
-        if request.windows(4).any(|window| window == b"\r\n\r\n") {
-            return request;
-        }
-    }
-}
-
-async fn loopback_server(response: &[u8]) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let url = format!("http://{}/artifact", listener.local_addr().unwrap());
-    let response = response.to_vec();
-    let task = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let request = read_request(&mut socket).await;
-        socket.write_all(&response).await.unwrap();
-        request
-    });
-    (url, task)
+async fn loopback_server(
+    response: &[u8],
+) -> (
+    String,
+    crate::http_stub::HttpStub,
+    tokio::sync::oneshot::Receiver<Vec<u8>>,
+) {
+    let (stub, request) =
+        crate::http_stub::HttpStub::raw_with_request(String::from_utf8(response.to_vec()).unwrap())
+            .await;
+    (format!("{}/artifact", stub.url), stub, request)
 }
 
 #[test]
@@ -113,22 +96,17 @@ fn sweep_removes_only_stale_partials_for_one_artifact() {
 #[tokio::test]
 async fn non_success_status_does_not_expose_or_wait_for_response_body() {
     let dir = tempdir().unwrap();
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let url = format!("http://{}/artifact", listener.local_addr().unwrap());
-    let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        read_request(&mut socket).await;
-        socket.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 1000\r\n\r\nsecret upstream body").await.unwrap();
-        std::future::pending::<()>().await;
-    });
+    let server = crate::http_stub::HttpStub::stalled_after_response(
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 1000\r\n\r\nsecret upstream body",
+    )
+    .await;
+    let url = format!("{}/artifact", server.url);
     let result = tokio::time::timeout(
         Duration::from_secs(5),
         ensure_file_with_client(dir.path(), &url, &artifact(b"payload"), &client()),
     )
     .await;
-    server.abort();
+    drop(server);
     let error = result
         .expect("error status must not wait for the remaining body")
         .unwrap_err()
@@ -141,7 +119,7 @@ async fn non_success_status_does_not_expose_or_wait_for_response_body() {
 #[tokio::test]
 async fn truncated_download_is_rejected_and_removed() {
     let dir = tempdir().unwrap();
-    let (url, server) = loopback_server(
+    let (url, _stub, server) = loopback_server(
         b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\ntruncated",
     )
     .await;
@@ -163,7 +141,7 @@ async fn digest_mismatch_is_rejected_and_removed() {
         sha256: "0000000000000000000000000000000000000000000000000000000000000000",
         ..artifact(b"payload")
     };
-    let (url, server) = loopback_server(
+    let (url, _stub, server) = loopback_server(
         b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\npayload",
     )
     .await;
@@ -186,7 +164,7 @@ async fn verified_download_sweeps_stale_partials_and_sends_get() {
         .unwrap()
         .set_modified(SystemTime::now() - STALE_PARTIAL_AGE - Duration::from_secs(1))
         .unwrap();
-    let (url, server) = loopback_server(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\npay\r\n4\r\nload\r\n0\r\n\r\n").await;
+    let (url, _stub, server) = loopback_server(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\npay\r\n4\r\nload\r\n0\r\n\r\n").await;
     let path = ensure_file_with_client(dir.path(), &url, &artifact(b"payload"), &client())
         .await
         .unwrap();
@@ -214,7 +192,7 @@ async fn cache_hit_skips_transport_and_wrong_length_cache_is_replaced() {
         destination
     );
     fs::write(&destination, b"bad").unwrap();
-    let (url, server) = loopback_server(
+    let (url, _stub, server) = loopback_server(
         b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\npayload",
     )
     .await;
@@ -229,41 +207,42 @@ async fn cache_hit_skips_transport_and_wrong_length_cache_is_replaced() {
 #[tokio::test]
 async fn concurrent_fetches_use_distinct_staging_paths_and_rename_only_verified_bytes() {
     let dir = tempdir().unwrap();
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let url = format!("http://{}/artifact", listener.local_addr().unwrap());
     let partial_dir = dir.path().to_path_buf();
-    let server = tokio::spawn(async move {
-        let mut sockets = Vec::new();
-        for _ in 0..2 {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            read_request(&mut socket).await;
-            socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n")
-                .await
-                .unwrap();
-            sockets.push(socket);
-        }
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while partial_files(&partial_dir).len() != 2 {
-                tokio::task::yield_now().await;
+    let staged = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
+        "/artifact",
+        axum::routing::get(move || {
+            let partial_dir = partial_dir.clone();
+            let staged = staged.clone();
+            async move {
+                let body = futures::stream::once(async move {
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        while partial_files(&partial_dir).len() != 2 {
+                            tokio::task::yield_now().await;
+                        }
+                        assert!(!partial_dir.join("test.bin").exists());
+                        staged.wait().await;
+                    })
+                    .await
+                    .expect("both clients must stage before either body is sent");
+                    Ok::<_, std::io::Error>("payload")
+                });
+                (
+                    [(axum::http::header::CONTENT_LENGTH, "7")],
+                    axum::body::Body::from_stream(body),
+                )
             }
-        })
-        .await
-        .expect("both clients must stage before either body is sent");
-        assert!(!partial_dir.join("test.bin").exists());
-        for socket in &mut sockets {
-            socket.write_all(b"payload").await.unwrap();
-        }
-    });
+        }),
+    ))
+    .await;
+    let url = format!("{}/artifact", server.url);
     let artifact = artifact(b"payload");
     let client = client();
     let (first, second) = tokio::join!(
         ensure_file_with_client(dir.path(), &url, &artifact, &client),
         ensure_file_with_client(dir.path(), &url, &artifact, &client),
     );
-    server.await.unwrap();
+    drop(server);
     let successes = [first, second]
         .iter()
         .filter(|result| result.is_ok())
@@ -285,7 +264,7 @@ async fn request_and_stream_errors_clean_staging() {
         .to_string();
     assert!(error.contains("request failed"), "{error}");
     assert_no_partials(dir.path());
-    let (url, server) =
+    let (url, _stub, server) =
         loopback_server(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nshort")
             .await;
     let error = ensure_file_with_client(dir.path(), &url, &artifact(b"payload"), &client())
@@ -301,21 +280,13 @@ async fn request_and_stream_errors_clean_staging() {
 async fn request_and_stream_timeouts_keep_timeout_mapping_and_clean_staging() {
     for headers in [false, true] {
         let dir = tempdir().unwrap();
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-            .await
-            .unwrap();
-        let url = format!("http://{}/artifact", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            read_request(&mut socket).await;
-            if headers {
-                socket
-                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n")
-                    .await
-                    .unwrap();
-            }
-            std::future::pending::<()>().await;
-        });
+        let response = if headers {
+            "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n"
+        } else {
+            ""
+        };
+        let server = crate::http_stub::HttpStub::stalled_after_response(response).await;
+        let url = format!("{}/artifact", server.url);
         let short_client = reqwest::Client::builder()
             .read_timeout(Duration::from_millis(100))
             .build()
@@ -325,7 +296,7 @@ async fn request_and_stream_timeouts_keep_timeout_mapping_and_clean_staging() {
             ensure_file_with_client(dir.path(), &url, &artifact(b"payload"), &short_client),
         )
         .await;
-        server.abort();
+        drop(server);
         let error = error
             .expect("reqwest read timeout must fire")
             .unwrap_err()

@@ -33,21 +33,73 @@
      async fn get_jobs(
 --- a/src/bgworker/pg.rs
 +++ b/src/bgworker/pg.rs
-@@ -176,6 +176,14 @@
- 
-     fn shutdown(&self) -> Result<()> {
+@@ -178,6 +178,14 @@
          self.token.cancel();
-+        Ok(())
-+    }
+         Ok(())
+     }
 +
 +    async fn close(&self) -> Result<()> {
 +        self.token.cancel();
 +        // Bug fix: handlers retain AppContext and therefore the queue itself.
 +        *self.registry.lock().await = JobRegistry::new();
 +        self.pool.close().await;
-         Ok(())
-     }
++        Ok(())
++    }
  }
+ 
+ async fn connect(cfg: &PostgresQueueConfig) -> Result<PgPool> {
+@@ -203,6 +211,13 @@
+ pub async fn initialize_database(pool: &PgPool) -> Result<()> {
+     debug!("Initializing job database tables");
+ 
++    // Processes sharing one database start concurrently; check-then-create otherwise races on the
++    // table's catalog entries. The transaction-scoped lock serialises initialisation.
++    let mut tx = pool.begin().await?;
++    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('pg_loco_queue'))")
++        .execute(&mut *tx)
++        .await?;
++
+     // Check if the table already exists.
+     let table_exists: bool = sqlx::query_scalar(
+         "SELECT EXISTS (
+@@ -210,7 +225,7 @@
+             WHERE table_name = 'pg_loco_queue'
+         )",
+     )
+-    .fetch_one(pool)
++    .fetch_one(&mut *tx)
+     .await?;
+ 
+     if table_exists {
+@@ -222,13 +237,13 @@
+                 AND column_name = 'priority'
+             )",
+         )
+-        .fetch_one(pool)
++        .fetch_one(&mut *tx)
+         .await?;
+ 
+         if !priority_exists {
+             debug!("Adding priority column to existing pg_loco_queue table");
+             sqlx::query("ALTER TABLE pg_loco_queue ADD COLUMN priority INT NOT NULL DEFAULT 0")
+-                .execute(pool)
++                .execute(&mut *tx)
+                 .await?;
+         }
+     } else {
+@@ -249,10 +264,11 @@
+                 ",
+             JobStatus::Queued
+         )))
+-        .execute(pool)
++        .execute(&mut *tx)
+         .await?;
+     }
+ 
++    tx.commit().await?;
+     Ok(())
+ }
+ 
 --- a/src/bgworker/redis.rs
 +++ b/src/bgworker/redis.rs
 @@ -140,7 +140,7 @@

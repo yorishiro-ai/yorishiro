@@ -68,9 +68,12 @@ def main() -> int:
                 print("YORISHIRO_VALKEY_TEST_URL must be an explicit Redis URL for Valkey topology", file=sys.stderr)
                 return 2
             env["YORISHIRO_VALKEY_TEST_URL"] = valkey_url
+            env["QUEUE_URL"] = valkey_url
+            env["YORISHIRO_TEST_VALKEY_BASE_URL"] = valkey_url
         else:
             # The CI matrix also sets this variable in SQLite/PostgreSQL cells; do not feed those URLs to Valkey tests.
             env.pop("YORISHIRO_VALKEY_TEST_URL", None)
+            env.pop("YORISHIRO_TEST_VALKEY_BASE_URL", None)
         result = subprocess.run(
             ["cargo", "test", "--locked", "--workspace", *feature_args, *cargo_args],
             cwd=ROOT,

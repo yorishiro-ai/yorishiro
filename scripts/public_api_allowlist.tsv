@@ -47,9 +47,7 @@ src/models/workspace_invites/operations.rs	fn	create_invite	integration-test: in
 src/models/workspace_invites/operations.rs	fn	create_invite_at	integration-test: the injected-time variant lets backend tests pin the `expires_at == now` boundary without a clock.
 src/models/workspace_invites/operations.rs	fn	redeem_invite_at	integration-test: the injected-time variant lets backend tests pin the expiry boundary without a clock.
 src/workers/mod.rs	mod	dispatch	integration-test: the module that names the dispatcher seam traits integration tests substitute through `AppContext::shared_store`.
-src/workers/dispatch.rs	trait	ReindexDispatcher	integration-test: reindex dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
 src/workers/reindex.rs	field	ReindexArgs::startup	queue-protocol: serialized worker arguments expose whether the job uses startup-only admission; production dispatch and external integration fixtures construct this transport type.
-ee/workers/infer_fill.rs	trait	InferFillDispatcher	integration-test: infer-fill dispatcher seam, so request tests can insert a typed dispatcher into `AppContext::shared_store`.
 ee/controllers/inference.rs	field	InferJobStatus::proposed	Public JSON response field for the durable proposal count.
 ee/models/inference_jobs.rs	field	InferenceJobRecord::proposed	Public durable job record field for the proposal count.
 ee/models/inference_jobs.rs	fn	complete_proposals	Enterprise worker lifecycle operation for proposal-producing jobs.
@@ -195,20 +193,15 @@ ee/models/api_keys.rs	field	CreatedTenantApiKey::id	integration-test: task-compa
 ee/models/api_keys.rs	field	CreatedTenantApiKey::plaintext	integration-test: request tests authenticate with the one-time tenant key secret.
 ee/models/api_keys.rs	fn	create_tenant_api_key	integration-test: request tests issue tenant-scoped credentials against the identity pool.
 ee/models/api_keys.rs	struct	CreatedTenantApiKey	integration-test: typed result of tenant-scoped key issuance.
-ee/models/workspace_embedding_keys.rs	struct	EmbeddingKeyResolver	integration-test: request tests exercise the installed provider resolver seam.
 ee/models/mod.rs	mod	api_keys	integration-test: exposes enterprise API-key persistence to request tests.
-ee/models/mod.rs	mod	schema_schemas	integration-test: exposes the schema merge race-test seam.
+ee/models/mod.rs	mod	schema_schemas	integration-test: exposes schema merge comparison types.
 ee/models/mod.rs	mod	template_templates	integration-test: exposes official-template seeding operations to request tests.
-ee/models/schema_schemas.rs	use	origin::{MergeReadHook,merge_apply_with_read_hook}	integration-test: exposes only the read-race coordination seam and operation.
-ee/models/schema_schemas/origin.rs	fn	merge_apply_with_read_hook	integration-test: deterministically coordinates the origin acknowledgement race.
-ee/models/schema_schemas/origin.rs	trait	MergeReadHook	integration-test: injects a barrier after the origin revision read.
 ee/models/template_templates.rs	const	OFFICIAL_TENANT_ID	integration-test: official-template tests assert ownership by the infrastructure tenant.
 ee/models/template_templates.rs	field	SeedOutcome::published	integration-test: seed idempotency tests inspect the published set.
 ee/models/template_templates.rs	field	SeedOutcome::unchanged	integration-test: seed idempotency tests inspect unchanged templates.
 ee/models/template_templates.rs	field	SeedOutcome::updated	integration-test: seed idempotency tests inspect updated templates.
 ee/models/template_templates.rs	fn	seed_official_templates	integration-test: seed tests run the same model operation as the Loco task.
 ee/models/template_templates.rs	struct	SeedOutcome	integration-test: typed result inspected by official-template tests.
-ee/models/workspace_worker_classes.rs	struct	WorkerClassAssignmentResolver	integration-test: request tests exercise the installed worker-class resolver seam.
 ee/controllers/middleware/mod.rs	mod	auth	integration-test: exposes the tenant workspace header used by request tests.
 ee/models/user_users.rs	use	provisioning::find_or_create	integration-test: exposes first-login provisioning through the canonical OAuth user model facade.
 ee/models/user_users/provisioning.rs	field	ProvisionedLogin::workspace_id	integration-test: provisioning tests verify the created workspace contents.
@@ -601,7 +594,6 @@ ee/models/tenant_reindex_schedules.rs	fn	dispatch_reindex_batch	integration-test
 ee/models/tenant_reindex_schedules.rs	fn	is_due	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
 ee/models/tenant_reindex_schedules.rs	fn	scheduler_failure_message	integration-test: tests/ee/tasks/reindex_scheduler.rs exercises it now that the unit tests moved out of src/.
 ee/workers/infer_fill.rs	field	InferFillArgs::lifecycle_id	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
-ee/workers/infer_fill.rs	fn	enqueue_infer_fill_with_dispatcher	integration-test: tests/ee/workers/infer_fill.rs exercises it now that the unit tests moved out of src/.
 ee/workers/infer_fill.rs	fn	open_workspace_scope	integration-test: tests/requests/inference.rs asserts the tenant the worker's scope carries.
 ee/models/inference_jobs.rs	fn	is_workspace_busy	integration-test: tests/ee/workers/infer_fill.rs exercises the busy-workspace refusal through the worker.
 src/controllers/mcp/entities.rs	struct	CreateEntityArgs	integration-test: the integration tests exercises it now that the unit tests moved out of src/.
@@ -703,13 +695,10 @@ src/services/embedding/model_fetch.rs	fn	sweep_stale_partials	integration-test: 
 src/services/embedding/model_fetch.rs	struct	Artifact	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/model_fetch.rs	struct	LocalModelDef	integration-test: tests/services/embedding/model_fetch.rs exercises it now that the unit tests moved out of src/.
 src/services/embedding/openai.rs	fn	OpenAiCompatibleProvider::with_client	integration-test: loopback tests exercise the production reqwest transport with a bounded timeout.
-src/workers/dispatch.rs	trait	EmbeddingSyncDispatcher	integration-test: tests/workers/dispatch.rs exercises it now that the unit tests moved out of src/.
-src/workers/embedding_sync.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/embedding_sync.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	lifecycle	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
 src/workers/mod.rs	mod	queue	integration-test: tests/workers/mod.rs exercises it now that the unit tests moved out of src/.
 src/time.rs	type	Timezone	integration-test: provider integration tests configure concrete queue providers with parsed IANA zones.
-src/workers/reindex.rs	fn	enqueue_for_class_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
-src/workers/reindex.rs	fn	enqueue_reindex_with_dispatcher	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
+src/workers/reindex.rs	fn	enqueue_reindex	integration-test: tests/workers/reindex.rs exercises it now that the unit tests moved out of src/.
 src/lib.rs	mod	edition	ce-ee-composition: inline crate-root assembly retains the public module path without a separate directory.
 src/lib.rs	use	edition::App	ce-ee-composition: the binary and the integration tests boot the application through the single composition root, without src naming it elsewhere.
 src/lib.rs	struct	edition::App	ce-ee-composition: the only Hooks implementation delegates to base and overlay wiring.
@@ -757,7 +746,6 @@ src/models/queue_job_dispatch_outbox.rs	fn	record	integration-test: tests/models
 src/models/queue_job_dispatch_outbox.rs	fn	due	integration-test: tests/models/queue_job_dispatch_outbox.rs exercises it now that the unit test moved out of src/.
 src/models/queue_job_dispatch_outbox.rs	fn	claim_dispatch	integration-test: tests cover competing durable relay claims.
 src/models/queue_job_dispatch_outbox.rs	fn	acknowledge_dispatch	integration-test: tests cover stale acknowledgement fencing.
-src/workers/dispatch.rs	fn	recover_pending_on	integration-test: tests exercise the production relay against an isolated SQLite queue.
 src/workers/dispatch.rs	fn	recover_pending	integration-test: request and worker tests invoke the production relay against their owned queue fixtures.
 src/models/queue_job_dispatch_outbox.rs	fn	record_in_transaction	integration-test: producer tests verify atomic lifecycle and outbox admission.
 src/models/queue_job_dispatch_outbox.rs	fn	record_lifecycle_payload	integration-test: producer tests verify atomic retry payload updates.

@@ -1,77 +1,118 @@
 use std::sync::Arc;
 
-use loco_rs::app::AppContext;
+use futures::FutureExt;
+use loco_rs::app::{AppContext, Hooks};
 use loco_rs::bgworker::BackgroundWorker;
-use sea_orm::{ActiveModelTrait, EntityTrait, TransactionTrait};
+use loco_rs::bgworker::JobStatus;
+use sea_orm::EntityTrait;
+use std::time::Duration;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::error::YorishiroError;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
-use yorishiro::models::queue_job_dispatch_outbox;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::embedding::EmbeddingProvider;
+use yorishiro::services::embedding::{
+    EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
+};
 use yorishiro::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
 use yorishiro::workers::target::WorkerTarget;
 
-use crate::requests::boot_request;
+use crate::requests::boot_request_isolated as boot_request;
 
-async fn workspace(ctx: &AppContext) -> Uuid {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("query-worker".into()),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .expect("insert tenant");
-    workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .expect("insert workspace")
-    .id
+async fn workspace(request: &loco_rs::TestServer, ctx: &AppContext) -> Uuid {
+    crate::requests::fixtures::TestTenant::create(request, ctx, Default::default())
+        .await
+        .workspace_id
 }
 
-async fn perform(ctx: &AppContext, workspace_id: Uuid, request_id: Uuid) -> loco_rs::Result<()> {
-    let dispatch_id = Uuid::now_v7();
-    let deadline_at = Requests::find_by_id(request_id)
-        .one(&ctx.db)
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-        .and_then(|request| request.deadline_at)
-        .unwrap_or_else(|| chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1));
-    let txn = ctx
-        .db
-        .begin()
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    queue_job_dispatch_outbox::record_query_in_transaction(
-        &txn,
-        dispatch_id,
-        deadline_at,
-        serde_json::json!({
-            "request_id": request_id,
-            "workspace_id": workspace_id,
+async fn provider() -> (
+    Arc<dyn EmbeddingProvider>,
+    crate::http_stub::HttpStub,
+    Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
+        "/embeddings",
+        axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+            let calls = observed.clone();
+            async move {
+                assert_eq!(body["model"], "query-http-test");
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let data = body["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, text)| {
+                        let mut vector = vec![0.0_f32; 768];
+                        vector[usize::from(text.as_str().unwrap().contains("beta"))] = 1.0;
+                        serde_json::json!({"index": index, "embedding": vector})
+                    })
+                    .collect::<Vec<_>>();
+                axum::Json(serde_json::json!({"data": data}))
+            }
         }),
-        QueryEmbeddingWorker::class_name(),
-        Some(WorkerTarget::Shared.queue()),
-        Some(vec![WorkerTarget::Shared.tag()]),
-    )
-    .await
-    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    txn.commit()
+    ))
+    .await;
+    let provider = Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+        base_url: server.url.clone(),
+        api_key: "test-key".into(),
+        model: "query-http-test".into(),
+        dimensions: 768,
+        send_dimensions_param: false,
+    }));
+    (provider, server, calls)
+}
+
+async fn deliver_stale_request(ctx: &AppContext, workspace_id: Uuid, request_id: Uuid) {
+    let queue = crate::requests::query_worker::shared_target_queue(ctx).await;
+    let mut worker_ctx = ctx.clone();
+    worker_ctx.queue_provider = Some(queue.clone());
+    App::connect_workers(&worker_ctx, &queue).await.unwrap();
+    // Inject a late provider delivery after its caller's request is gone or expired.
+    let provider_id = queue
+        .enqueue(
+            QueryEmbeddingWorker::class_name(),
+            Some(WorkerTarget::Shared.queue()),
+            serde_json::to_value(QueryEmbeddingArgs {
+                request_id,
+                workspace_id,
+            })
+            .unwrap(),
+            Some(vec![WorkerTarget::Shared.tag()]),
+            None,
+        )
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    QueryEmbeddingWorker::build(ctx)
-        .perform(QueryEmbeddingArgs {
-            request_id,
-            workspace_id,
-        })
-        .await
+        .unwrap()
+        .expect("provider returns the injected delivery ID");
+    let running = queue.clone();
+    let worker = tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
+    let directory = tempfile::tempdir().unwrap();
+    let outcome =
+        std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                let jobs: Vec<loco_rs::bgworker::Job> =
+                    serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                if jobs
+                    .iter()
+                    .any(|job| job.id == provider_id && job.status == JobStatus::Completed)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }))
+        .catch_unwind()
+        .await;
+    App::on_shutdown(&worker_ctx).await;
+    queue.shutdown().unwrap();
+    let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;
+    queue.close().await.unwrap();
+    match outcome {
+        Ok(result) => result.expect("real queue finishes the query delivery"),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+    drained.unwrap().unwrap().unwrap();
 }
 
 /// Search jobs travel to the shared target when they are enqueued, so the worker declares no tag or queue of its own.
@@ -96,15 +137,13 @@ fn the_job_payload_carries_ids_only() {
 
 #[tokio::test]
 async fn a_job_for_a_request_that_is_gone_or_finished_does_nothing() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let ws = workspace(&ctx).await;
-        let provider = Arc::new(crate::requests::query_worker::KeywordProvider::new(768));
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let ws = workspace(&request, &ctx).await;
+        let (provider, _server, calls) = provider().await;
         ctx.shared_store
             .insert(provider.clone() as Arc<dyn EmbeddingProvider>);
 
-        perform(&ctx, ws, Uuid::now_v7())
-            .await
-            .expect("an unknown request is a late delivery");
+        deliver_stale_request(&ctx, ws, Uuid::now_v7()).await;
 
         let expired = Requests::open(
             &ctx.db,
@@ -116,11 +155,9 @@ async fn a_job_for_a_request_that_is_gone_or_finished_does_nothing() {
         .await
         .unwrap();
         assert!(Requests::expire(&ctx.db, ws, expired).await.unwrap());
-        perform(&ctx, ws, expired)
-            .await
-            .expect("an expired request is a late delivery");
+        deliver_stale_request(&ctx, ws, expired).await;
         assert!(
-            provider.kinds.lock().unwrap().is_empty(),
+            calls.load(std::sync::atomic::Ordering::SeqCst) == 0,
             "no embedding work was done for either"
         );
         assert_eq!(
@@ -133,97 +170,88 @@ async fn a_job_for_a_request_that_is_gone_or_finished_does_nothing() {
 
 #[tokio::test]
 async fn the_worker_stores_a_vector_of_the_width_the_workspace_holds() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let ws = workspace(&ctx).await;
-        ctx.shared_store.insert(
-            Arc::new(crate::requests::query_worker::KeywordProvider::new(768))
-                as Arc<dyn EmbeddingProvider>,
-        );
-        let id = Requests::open(
-            &ctx.db,
-            ws,
-            "beta",
-            60,
-            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
-        )
-        .await
-        .unwrap();
-
-        perform(&ctx, ws, id).await.expect("embedded");
-
-        match Requests::take(&ctx.db, ws, id).await.unwrap() {
-            Some(QueryOutcome::Ready { vector, model }) => {
-                assert_eq!(vector.len(), 768);
-                assert_eq!(vector[1], 1.0, "beta is the second axis");
-                assert_eq!(model, "keyword-test-provider");
-            }
-            other => panic!("expected a stored vector, got {other:?}"),
-        }
+    let (provider, _server, _) = provider().await;
+    crate::requests::query_worker::boot_with_query_worker(provider, |request, ctx| async move {
+        let ws = workspace(&request, &ctx).await;
+        let tenant = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(ws)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .tenant_id;
+        let vector = yorishiro::workers::query_embedding::embed_query(&ctx, tenant, ws, "beta")
+            .await
+            .unwrap();
+        assert_eq!(vector.len(), 768);
+        assert_eq!(vector[1], 1.0, "beta is the second axis");
     })
     .await;
 }
 
 #[tokio::test]
 async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let ws = workspace(&ctx).await;
-        ctx.shared_store
-            .insert(Arc::new(crate::requests::query_worker::FailingProvider(|| {
-                YorishiroError::ProviderBusy {
-                    message: "model is warming up".into(),
-                    retry_after: std::time::Duration::from_secs(3),
-                }
-            })) as Arc<dyn EmbeddingProvider>);
-        let id = Requests::open(
-            &ctx.db,
-            ws,
-            "alpha",
-            60,
-            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
-        )
-        .await
-        .unwrap();
-
-        let error = perform(&ctx, ws, id)
-            .await
-            .expect_err("the provider failed");
-        assert!(error.to_string().contains("model is warming up"), "{error}");
-        match Requests::take(&ctx.db, ws, id).await.unwrap() {
-            Some(QueryOutcome::Failed(message)) => assert!(message.contains("warming up")),
-            other => panic!("expected a recorded failure, got {other:?}"),
-        }
-    })
+    let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
+        "/embeddings",
+        axum::routing::post(|| async {
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                [("Retry-After", "3")],
+                "model is warming up",
+            )
+        }),
+    ))
     .await;
-}
-
-/// A worker process that never installed a provider cannot embed, and says so instead of guessing.
-#[tokio::test]
-async fn a_worker_without_any_provider_records_an_accurate_failure() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let ws = workspace(&ctx).await;
+    let provider = Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+        base_url: server.url.clone(),
+        api_key: "test-key".into(),
+        model: "test-model".into(),
+        dimensions: 768,
+        send_dimensions_param: false,
+    })) as Arc<dyn EmbeddingProvider>;
+    crate::requests::query_worker::boot_with_query_worker(provider, |request, ctx| async move {
+        let ws = workspace(&request, &ctx).await;
+        let tenant = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(ws)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .tenant_id;
+        let error = yorishiro::workers::query_embedding::embed_query(&ctx, tenant, ws, "alpha")
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("HTTP 503"), "{message}");
         assert!(
-            ctx.shared_store
-                .get::<Arc<dyn EmbeddingProvider>>()
-                .is_none(),
-            "a booted server holds no provider"
+            !message.contains("model is warming up"),
+            "provider response bodies must stay private"
         );
-        let id = Requests::open(
-            &ctx.db,
-            ws,
-            "alpha",
-            60,
-            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
-        )
-        .await
-        .unwrap();
-
-        perform(&ctx, ws, id).await.expect_err("no provider");
-        match Requests::take(&ctx.db, ws, id).await.unwrap() {
-            Some(QueryOutcome::Failed(message)) => {
-                assert!(message.contains("no embedding provider"), "{message}");
+        let directory = tempfile::tempdir().unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let dump = ctx
+                    .queue_provider
+                    .as_ref()
+                    .unwrap()
+                    .dump(directory.path(), None, None)
+                    .await
+                    .unwrap();
+                let jobs: Vec<loco_rs::bgworker::Job> =
+                    serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                if let Some(job) = jobs.iter().find(|job| {
+                    job.data["workspace_id"] == ws.to_string()
+                        && job.name == QueryEmbeddingWorker::class_name()
+                        && job.status == JobStatus::Failed
+                }) {
+                    let diagnostic = job.data.to_string();
+                    assert!(diagnostic.contains("HTTP 503"));
+                    assert!(!diagnostic.contains("model is warming up"));
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            other => panic!("expected a recorded failure, got {other:?}"),
-        }
+        })
+        .await
+        .expect("Loco records the query delivery failure");
     })
     .await;
 }

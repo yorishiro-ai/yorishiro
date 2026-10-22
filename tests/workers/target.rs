@@ -185,38 +185,36 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
 
 /// Target keys group a tenant's workspaces, while shared and official keys span the deployment; limits are opt-in.
 mod concurrency {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
     use uuid::Uuid;
-    use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
     use yorishiro::models::queue_job_lifecycles::{
         Admission, Column, Entity, LifecycleStatus, Model,
     };
-    use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
     use yorishiro::workers::embedding_sync::WorkerClass;
     use yorishiro::workers::reindex::{self, ReindexArgs};
 
-    async fn workspace_of_new_tenant(ctx: &loco_rs::app::AppContext) -> (Uuid, Uuid) {
-        let tenant = tenant_tenants::ActiveModel {
-            name: Set(format!("target-test-{}", Uuid::now_v7())),
-            ..Default::default()
-        }
-        .insert(&ctx.db)
-        .await
-        .expect("insert tenant");
-        (tenant.id, workspace_of(ctx, tenant.id).await)
+    async fn workspace_of_new_tenant(
+        request: &loco_rs::TestServer,
+        ctx: &loco_rs::app::AppContext,
+    ) -> (Uuid, Uuid) {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(request, ctx, Default::default()).await;
+        (fixture.tenant_id, fixture.workspace_id)
     }
 
     async fn workspace_of(ctx: &loco_rs::app::AppContext, tenant_id: Uuid) -> Uuid {
-        workspace_workspaces::ActiveModel {
-            tenant_id: Set(tenant_id),
-            name: Set(format!("target-test-{}", Uuid::now_v7())),
-            status: Set(WORKSPACE_STATUS_ACTIVE.to_owned()),
-            ..Default::default()
-        }
-        .insert(&ctx.db)
+        let txn = ctx.db.begin().await.expect("begin workspace setup");
+        let workspace = yorishiro::models::tenancy::create_workspace(
+            &txn,
+            tenant_id,
+            &format!("target-test-{}", Uuid::now_v7()),
+            None,
+            None,
+        )
         .await
-        .expect("insert workspace")
-        .id
+        .expect("create workspace");
+        txn.commit().await.expect("commit workspace setup");
+        workspace.id
     }
 
     /// Dispatches one reindex job through the production dispatcher and returns the lifecycle row it recorded.
@@ -257,16 +255,19 @@ mod concurrency {
     #[tokio::test]
     #[serial_test::serial(process_environment)]
     async fn tenant_private_jobs_keep_their_key_without_a_default_cap() {
+        if !crate::require_postgres_backend() {
+            return;
+        }
         let guard = crate::EnvGuard::capture(&[
             "YORISHIRO_PLAN_POLICY_ENABLED",
             "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
         ]);
         guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
         guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "1");
-        crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-            let (tenant_a, a_first) = workspace_of_new_tenant(&ctx).await;
+        crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+            let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
             let a_second = workspace_of(&ctx, tenant_a).await;
-            let (tenant_b, b_first) = workspace_of_new_tenant(&ctx).await;
+            let (tenant_b, b_first) = workspace_of_new_tenant(&request, &ctx).await;
 
             let first = dispatch(&ctx, a_first, WorkerClass::TenantPrivate).await;
             let second = dispatch(&ctx, a_second, WorkerClass::TenantPrivate).await;
@@ -302,13 +303,18 @@ mod concurrency {
         guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
         guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "1");
         guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "1");
-        crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+            let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
             for (class, key) in [
                 (WorkerClass::Shared, "shared:shared"),
                 (WorkerClass::Official, "official:official"),
             ] {
-                let (_, first_workspace) = workspace_of_new_tenant(&ctx).await;
-                let (_, second_workspace) = workspace_of_new_tenant(&ctx).await;
+                let first_workspace = workspace_of(&ctx, tenant_id).await;
+                let second_workspace = if crate::require_postgres_backend() {
+                    workspace_of_new_tenant(&request, &ctx).await.1
+                } else {
+                    workspace_of(&ctx, tenant_id).await
+                };
                 let first = dispatch(&ctx, first_workspace, class).await;
                 let second = dispatch(&ctx, second_workspace, class).await;
 
@@ -328,10 +334,9 @@ mod concurrency {
 
     /// The plan a workspace's tenant is on never enters the key, so it cannot split the deployment-wide limit into one per plan.
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn the_plan_label_is_recorded_but_is_not_part_of_the_key() {
-        crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-            let (_, workspace) = workspace_of_new_tenant(&ctx).await;
+        crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+            let (_, workspace) = workspace_of_new_tenant(&request, &ctx).await;
             let row = dispatch(&ctx, workspace, WorkerClass::Official).await;
             assert!(row.plan.is_some(), "the plan label stays on the row");
             let key = row.concurrency_key.expect("a concurrency key");
@@ -342,7 +347,6 @@ mod concurrency {
 
     /// A tenant-private job for a workspace that no longer exists has no target, so it is refused and recorded rather than sent to some other worker.
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn a_tenant_private_job_for_an_unknown_workspace_is_refused_and_recorded() {
         crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
             let missing = Uuid::now_v7();

@@ -1,14 +1,23 @@
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
-use axum::{Json, Router, body::Bytes, http::HeaderMap, routing::post};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
+use axum::{
+    Json, Router,
+    body::Bytes,
+    http::HeaderMap,
+    routing::{any, post},
 };
 use yorishiro::{
     YorishiroError,
     edition::ee::services::inference::{InferenceClient, InferenceConfig},
 };
+
+use crate::http_stub::HttpStub;
 
 fn config(base_url: String) -> InferenceConfig {
     InferenceConfig {
@@ -16,20 +25,6 @@ fn config(base_url: String) -> InferenceConfig {
         model: "test-model".into(),
         api_key: "test-api-key".into(),
     }
-}
-
-async fn start_server(response: String) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut request = [0; 4096];
-        assert!(socket.read(&mut request).await.unwrap() > 0);
-        socket.write_all(response.as_bytes()).await.unwrap();
-    });
-    (format!("http://{address}/v1"), task)
 }
 
 fn response(status: u16, body: &str, extra_headers: &str) -> String {
@@ -41,18 +36,14 @@ fn response(status: u16, body: &str, extra_headers: &str) -> String {
 
 #[tokio::test]
 async fn production_transport_parses_completion_and_preserves_request_schema() {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
     let (sent, received) = tokio::sync::oneshot::channel();
     let sent = std::sync::Arc::new(tokio::sync::Mutex::new(Some(sent)));
     let app = Router::new().route("/v1/chat/completions", post(move |headers: HeaderMap, body: Bytes| async move {
         sent.lock().await.take().unwrap().send((headers, body)).unwrap();
         Json(serde_json::json!({"choices":[{"message":{"content":"{\"category\":\"news\",\"ignored\":true}"}}]}))
     }));
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let proposals = InferenceClient::new(config(format!("http://{address}/v1/")))
+    let server = HttpStub::start(app).await;
+    let proposals = InferenceClient::new(config(format!("{}/v1/", server.url)))
         .propose_fields(&serde_json::json!({"title":"A report"}), &["category"])
         .await
         .unwrap();
@@ -79,7 +70,6 @@ async fn production_transport_parses_completion_and_preserves_request_schema() {
             .unwrap()
             .contains("Missing fields: category")
     );
-    server.abort();
 }
 
 #[tokio::test]
@@ -92,12 +82,11 @@ async fn malformed_completions_and_outer_responses_remain_safe() {
         (r#"{"choices":"invalid"}"#, false),
         ("provider-secret-body test-api-key", false),
     ] {
-        let (url, server) = start_server(response(200, body, "")).await;
-        let error = InferenceClient::new(config(url))
+        let server = HttpStub::raw(response(200, body, "")).await;
+        let error = InferenceClient::new(config(format!("{}/v1", server.url)))
             .propose_fields(&serde_json::json!({}), &["category"])
             .await
             .unwrap_err();
-        server.await.unwrap();
         if validation {
             assert!(matches!(&error, YorishiroError::ValidationFailed { .. }));
         } else {
@@ -121,12 +110,11 @@ async fn non_success_responses_do_not_consume_even_truncated_bodies() {
         (401, "", 0),
     ] {
         // A truncated success body is a read error, but a failure status must be handled before reading it.
-        let (url, server) = start_server(format!("HTTP/1.1 {status} Test\r\nContent-Length: 99999\r\nConnection: close\r\n{headers}\r\nprovider-secret-body test-api-key")).await;
-        let error = InferenceClient::new(config(url))
+        let server = HttpStub::raw(format!("HTTP/1.1 {status} Test\r\nContent-Length: 99999\r\nConnection: close\r\n{headers}\r\nprovider-secret-body test-api-key")).await;
+        let error = InferenceClient::new(config(format!("{}/v1", server.url)))
             .propose_fields(&serde_json::json!({}), &["category"])
             .await
             .unwrap_err();
-        server.await.unwrap();
         if seconds > 0 {
             assert!(
                 matches!(&error, YorishiroError::ProviderBusy { retry_after, .. } if *retry_after == Duration::from_secs(seconds))
@@ -141,37 +129,38 @@ async fn non_success_responses_do_not_consume_even_truncated_bodies() {
 
 #[tokio::test]
 async fn production_client_does_not_follow_redirects() {
-    let target = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let target_address = target.local_addr().unwrap();
-    let (url, server) = start_server(response(
-        302,
-        "",
-        &format!("Location: http://{target_address}/v1/chat/completions\r\n"),
+    let redirected = Arc::new(AtomicUsize::new(0));
+    let observed = redirected.clone();
+    let target = HttpStub::start(Router::new().route(
+        "/v1/chat/completions",
+        any(move || {
+            let observed = observed.clone();
+            async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Json(serde_json::json!({}))
+            }
+        }),
     ))
     .await;
-    let error = InferenceClient::new(config(url))
+    let server = HttpStub::raw(response(
+        302,
+        "",
+        &format!("Location: {}/v1/chat/completions\r\n", target.url),
+    ))
+    .await;
+    let error = InferenceClient::new(config(format!("{}/v1", server.url)))
         .propose_fields(&serde_json::json!({}), &["category"])
         .await
         .unwrap_err();
     assert!(matches!(error, YorishiroError::ValidationFailed { .. }));
-    server.await.unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), target.accept())
-            .await
-            .is_err()
-    );
+    assert_eq!(redirected.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
 async fn timeout_and_connection_failure_are_unreachable_and_empty_fields_skip_http() {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
+    let server = HttpStub::stalled().await;
     let client = InferenceClient::with_client(
-        config(format!("http://{address}")),
+        config(server.url.clone()),
         reqwest::Client::builder()
             .timeout(Duration::from_millis(100))
             .build()
@@ -190,7 +179,7 @@ async fn timeout_and_connection_failure_are_unreachable_and_empty_fields_skip_ht
         .unwrap_err();
     assert!(matches!(error, YorishiroError::ProviderUnreachable { .. }));
     assert!(!error.to_string().contains("test-api-key"));
-    drop(listener);
+    drop(server);
     let error = client
         .propose_fields(&serde_json::json!({}), &["category"])
         .await
@@ -201,12 +190,11 @@ async fn timeout_and_connection_failure_are_unreachable_and_empty_fields_skip_ht
 
 #[tokio::test]
 async fn truncated_success_body_is_internal_and_redacted() {
-    let (url, server) = start_server("HTTP/1.1 200 OK\r\nContent-Length: 99999\r\nConnection: close\r\n\r\nprovider-secret-body test-api-key".into()).await;
-    let error = InferenceClient::new(config(url))
+    let server = HttpStub::raw("HTTP/1.1 200 OK\r\nContent-Length: 99999\r\nConnection: close\r\n\r\nprovider-secret-body test-api-key".into()).await;
+    let error = InferenceClient::new(config(format!("{}/v1", server.url)))
         .propose_fields(&serde_json::json!({}), &["category"])
         .await
         .unwrap_err();
-    server.await.unwrap();
     assert!(matches!(&error, YorishiroError::Internal(_)));
     assert!(!format!("{error:?}").contains("test-api-key"));
     assert!(!format!("{error:?}").contains("provider-secret-body"));

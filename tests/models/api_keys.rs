@@ -1,36 +1,33 @@
 use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
+use sea_orm::TransactionTrait;
 use yorishiro::App;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::api_keys::Entity as ApiKeys;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::tenancy;
 
-async fn setup_workspace(ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("api-key-test".into()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
+async fn empty_workspace(ctx: &loco_rs::app::AppContext, tenant_id: uuid::Uuid) -> uuid::Uuid {
+    let txn = ctx.db.begin().await.expect("begin workspace creation");
+    let workspace = tenancy::create_workspace(
+        &txn,
+        tenant_id,
+        &format!("keys-{}", uuid::Uuid::new_v4().simple()),
+        None,
+        None,
+    )
+    .await
+    .expect("create workspace without keys");
+    txn.commit().await.expect("commit workspace creation");
     workspace.id
 }
 
 /// `list_for_workspace` must return every key issued for the workspace, oldest first, and never leak into another workspace's listing.
 #[tokio::test]
 async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let workspace_id = setup_workspace(&ctx).await;
-        let other_workspace_id = setup_workspace(&ctx).await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let workspace_id = empty_workspace(&ctx, tenant.tenant_id).await;
+        let other_workspace_id = empty_workspace(&ctx, tenant.tenant_id).await;
 
         let first = ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None, false)
             .await
@@ -71,8 +68,9 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
 /// `revoke` deletes the row so authentication (a lookup on every request) can no longer find it, and a second revoke of the same id must report not-found rather than succeeding silently.
 #[tokio::test]
 async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let workspace_id = setup_workspace(&ctx).await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let workspace_id = empty_workspace(&ctx, tenant.tenant_id).await;
         let created =
             ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None, false)
                 .await

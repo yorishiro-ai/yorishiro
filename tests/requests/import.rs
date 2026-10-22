@@ -4,20 +4,24 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
-use super::fixtures::{self, TenantArgs};
-
-struct Setup {
-    key: String,
-}
+use super::fixtures::{self, TenantArgs, TestTenant};
 
 #[test]
 fn concurrent_import_workers_keep_each_apps_database() {
     let run = || {
         super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
-            let setup = setup(&ctx).await;
+            let setup = TestTenant::create(
+                &request,
+                &ctx,
+                TenantArgs {
+                    key_scope: ApiKeyScope::Schema,
+                    ..Default::default()
+                },
+            )
+            .await;
             let accepted = request
                 .post("/api/import.jsonl")
-                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .text("")
                 .await;
             assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
@@ -26,10 +30,17 @@ fn concurrent_import_workers_keep_each_apps_database() {
                 .unwrap()
                 .parse()
                 .unwrap();
-            super::fill_defaults::finish(&ctx, id).await;
+            super::fill_defaults::finish_via_api(
+                &request,
+                &ctx,
+                id,
+                &setup.api_key,
+                &format!("/api/import-jobs/{id}"),
+            )
+            .await;
             let status = request
                 .get(&format!("/api/import-jobs/{id}"))
-                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .await;
             assert_eq!(status.status_code(), StatusCode::OK);
             assert_eq!(status.json::<serde_json::Value>()["status"], "completed");
@@ -51,20 +62,15 @@ fn concurrent_import_workers_keep_each_apps_database() {
     });
 }
 
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let args = TenantArgs {
-        key_scope: ApiKeyScope::Schema,
-        ..Default::default()
-    };
-    let (_, _, _, key) = fixtures::create_tenant_workspace_owner(ctx, args).await;
-    Setup { key }
-}
-
 #[tokio::test]
 async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (_, workspace_id, user_id, key) =
-            fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
+        let TestTenant {
+            tenant_id,
+            workspace_id,
+            owner_id: user_id,
+            api_key: key,
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let read_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             workspace_id,
@@ -74,13 +80,23 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
         )
         .await
         .unwrap();
-        let (_, _, _, other_key) = fixtures::create_tenant_workspace_owner(
+        let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+        let other_workspace = yorishiro::models::tenancy::create_workspace(
+            &txn,
+            tenant_id,
+            &format!("other-{}", uuid::Uuid::new_v4()),
+            None,
+            None,
+        )
+        .await
+        .expect("create another workspace");
+        txn.commit().await.unwrap();
+        let other_key = fixtures::issue_api_key(
             &ctx,
-            TenantArgs {
-                tenant_name: "other".into(),
-                owner_email: "other@example.com".into(),
-                ..Default::default()
-            },
+            other_workspace.id,
+            user_id,
+            ApiKeyScope::Migration,
+            false,
         )
         .await;
         let accepted = request
@@ -127,7 +143,15 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
 #[tokio::test]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
     super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
-        let Setup { key } = setup(&ctx).await;
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
         let auth = format!("Bearer {key}");
 
         let schema_response = request
@@ -193,7 +217,14 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .add_header("Authorization", auth.clone())
             .await;
         assert!(before.json::<Vec<serde_json::Value>>().is_empty());
-        super::fill_defaults::finish(&ctx, id).await;
+        super::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            id,
+            &key,
+            &format!("/api/import-jobs/{id}"),
+        )
+        .await;
         let status = request
             .get(&format!("/api/import-jobs/{id}"))
             .add_header("Authorization", auth.clone())
@@ -235,7 +266,14 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
         )
         .await
         .unwrap();
-        super::fill_defaults::finish(&ctx, id).await;
+        super::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            id,
+            &key,
+            &format!("/api/import-jobs/{id}"),
+        )
+        .await;
 
         let list_response = request
             .get("/api/entities?entity_type=project")

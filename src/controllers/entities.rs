@@ -177,26 +177,13 @@ pub(crate) async fn reindex_workspace(
         serde_json::json!({ "workspace_id": workspace_id }),
     )
     .await?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::workers::dispatch::ReindexDispatcher>>()
-        .ok_or_else(|| {
+    let job_id = reindex::enqueue_reindex(&ctx, workspace_id, Some(authorized.txn()))
+        .await
+        .map_err(|e| {
             ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                "dispatcher missing"
+                e.to_string()
             )))
         })?;
-    let job_id = reindex::enqueue_reindex_with_dispatcher(
-        &ctx,
-        workspace_id,
-        Some(authorized.txn()),
-        dispatcher.as_ref(),
-    )
-    .await
-    .map_err(|e| {
-        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-            e.to_string()
-        )))
-    })?;
     authorized.commit().await?;
 
     Ok(Json(ReindexResponse { job_id }))

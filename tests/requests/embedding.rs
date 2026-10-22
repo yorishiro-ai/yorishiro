@@ -1,79 +1,27 @@
 use super::boot_request;
+use super::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
-use sea_orm::EntityTrait;
-use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::edition::ee::models::workspace_embedding_keys::EmbeddingKeyResolver;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenant_memberships::MembershipRole;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::embedding::WorkspaceEmbeddingResolver;
-
-struct Setup {
-    key: String,
-    workspace_id: Uuid,
-}
-
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("acme".into()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-    let owner = yorishiro::models::user_users::create_user(
-        &ctx.db,
-        "owner@example.com",
-        "hunter2-hunter2",
-        None,
-    )
-    .await
-    .expect("create owner");
-    yorishiro::models::tenant_memberships::add_member(
-        &ctx.db,
-        tenant.id,
-        owner.id,
-        MembershipRole::Owner,
-    )
-    .await
-    .expect("add owner");
-    let key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Schema,
-        Some(owner.id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext;
-    Setup {
-        key,
-        workspace_id: workspace.id,
-    }
-}
 
 /// Setting, reading and clearing a workspace's own embedding provider over REST.
 /// The key itself never comes back from GET, only what it configured, matching `llm_key_set_get_and_clear_round_trip`.
 #[tokio::test]
 async fn embedding_key_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let missing = request
             .get("/api/workspace/embedding-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             missing.status_code(),
@@ -84,7 +32,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 
         let put = request
             .put("/api/workspace/embedding-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://embed.example.com/v1/",
                 "model": "text-embedding-3-small",
@@ -101,7 +49,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 
         let get = request
             .get("/api/workspace/embedding-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             get.status_code(),
@@ -123,7 +71,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 
         let delete = request
             .delete("/api/workspace/embedding-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             delete.status_code(),
@@ -134,7 +82,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 
         let after_delete = request
             .get("/api/workspace/embedding-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(after_delete.status_code(), StatusCode::NOT_FOUND);
     })
@@ -145,7 +93,15 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 #[tokio::test]
 async fn a_non_http_base_url_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         for bad_url in [
             "file:///etc/passwd",
@@ -154,7 +110,7 @@ async fn a_non_http_base_url_is_refused() {
         ] {
             let put = request
                 .put("/api/workspace/embedding-key")
-                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .json(&serde_json::json!({
                     "base_url": bad_url,
                     "model": "m",
@@ -177,25 +133,62 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_reindex() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
-        // The workspace was created via ActiveModel::insert directly (not POST /setup), so it
-        // carries no embedding_dimensions stamp yet; stamp it explicitly to exercise the check.
-        let mut active: workspace_workspaces::ActiveModel =
-            workspace_workspaces::Entity::find_by_id(setup.workspace_id)
-                .one(&ctx.db)
+        let definition = serde_json::from_value(serde_json::json!({
+            "name": "note",
+            "entity_types": { "note": { "fields": {
+                "title": { "type": "string", "x-embed": true }
+            } } }
+        }))
+        .expect("parse schema");
+        yorishiro::models::schema_schemas::create_schema(
+            &ctx.db,
+            setup.tenant_id,
+            setup.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .expect("create schema");
+        let entity = yorishiro::models::entity_entities::create(
+            &ctx.db,
+            setup.workspace_id,
+            yorishiro::models::entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "alpha" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+        let record =
+            yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity.id)
                 .await
-                .expect("find workspace")
-                .expect("workspace exists")
-                .into();
-        active.embedding_dimensions = sea_orm::ActiveValue::Set(Some(768));
-        sea_orm::ActiveModelTrait::update(active, &ctx.db)
-            .await
-            .expect("stamp workspace dimensions");
+                .expect("read entity");
+        let (provider, _server, _) = crate::http_stub::keyword_provider(768).await;
+        yorishiro::models::entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            setup.workspace_id,
+            &record,
+            provider.as_ref(),
+        )
+        .await
+        .expect("persist vector and workspace stamp");
 
         let put = request
             .put("/api/workspace/embedding-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://embed.example.com/v1",
                 "model": "embed-1024",
@@ -214,7 +207,7 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
         // Stored with WidthChanged: GET now returns the new assignment.
         let get = request
             .get("/api/workspace/embedding-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             get.status_code(),
@@ -226,147 +219,46 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
     .await;
 }
 
-/// The `WorkspaceEmbeddingResolver` seam returns the workspace's own assignment when one exists, and `None` (falling back to the deployment default) when it does not: the two outcomes every caller of `resolve_embedding_provider` branches on.
-#[tokio::test]
-async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let setup = setup(&ctx).await;
-        let resolver = EmbeddingKeyResolver;
-
-        let before = resolver
-            .resolve(&ctx.db, setup.workspace_id)
-            .await
-            .expect("resolve before assignment");
-        assert!(
-            before.is_none(),
-            "an unassigned workspace must resolve to None so the caller falls back to the deployment default"
-        );
-
-        let result = yorishiro::edition::ee::models::workspace_embedding_keys::set(
-            &ctx.db,
-            setup.workspace_id,
-            "https://embed.example.com/v1",
-            "text-embedding-3-small",
-            "sk-secret-value",
-            1536,
-            false,
-            None,
-        )
-        .await
-        .expect("assign workspace embedding key");
-        assert!(
-            matches!(result, yorishiro::edition::ee::models::workspace_embedding_keys::SetOutcome::Stored),
-            "assigning with no expected dimensions must yield Stored"
-        );
-
-        let after = resolver
-            .resolve(&ctx.db, setup.workspace_id)
-            .await
-            .expect("resolve after assignment");
-        let provider = after.expect("an assigned workspace must resolve to Some");
-        assert_eq!(
-            provider.dimensions(),
-            1536,
-            "the resolved provider must carry the assigned dimensions, not the deployment default"
-        );
-
-        // A different workspace can select another supported width without changing the first.
-        let other = setup_second_workspace(&ctx, &setup).await;
-        let other_result = resolver
-            .resolve(&ctx.db, other)
-            .await
-            .expect("resolve unrelated workspace");
-        assert!(
-            other_result.is_none(),
-            "an unassigned workspace must not inherit another workspace's assignment"
-        );
-
-        yorishiro::edition::ee::models::workspace_embedding_keys::set(
-            &ctx.db,
-            other,
-            "https://embed.example.com/v1",
-            "embed-1024",
-            "sk-other-secret",
-            1024,
-            false,
-            None,
-        )
-        .await
-        .expect("assign a different supported width");
-        assert_eq!(resolver.resolve(&ctx.db, setup.workspace_id).await.unwrap().unwrap().dimensions(), 1536);
-        assert_eq!(resolver.resolve(&ctx.db, other).await.unwrap().unwrap().dimensions(), 1024);
-
-    })
-    .await;
-}
-
-/// A second workspace under the same tenant as `setup`, for the cross-workspace isolation check above.
-async fn setup_second_workspace(ctx: &loco_rs::app::AppContext, first: &Setup) -> Uuid {
-    let first_workspace = workspace_workspaces::Entity::find_by_id(first.workspace_id)
-        .one(&ctx.db)
-        .await
-        .expect("find first workspace")
-        .expect("first workspace exists");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(first_workspace.tenant_id),
-        name: sea_orm::ActiveValue::Set("second".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert second workspace");
-    workspace.id
-}
-
 /// `set` takes the width list from the community edition's embedding tables instead of keeping its own.
 /// A width with no table is refused up front and stores nothing, and a supported width stores the key without the old request-path DDL creating a stray `content_entity_embeddings_*` table.
 #[tokio::test]
 async fn set_checks_the_width_against_the_community_embedding_tables() {
     use sea_orm::{ConnectionTrait, Statement};
-    use yorishiro::edition::ee::models::workspace_embedding_keys::{SetOutcome, set};
-    use yorishiro::error::YorishiroError;
 
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let setup = setup(&ctx).await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
 
-        let refused = set(
-            &ctx.db,
-            setup.workspace_id,
-            "https://embed.example.com/v1",
-            "text-embedding-3-large",
-            "sk-secret-value",
-            3072,
-            false,
-            None,
-        )
-        .await;
+        let refused = request
+            .put("/api/workspace/embedding-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({
+                "base_url": "https://embed.example.com/v1",
+                "model": "text-embedding-3-large",
+                "api_key": "sk-secret-value",
+                "dimensions": 3072
+            }))
+            .await;
+        assert_eq!(refused.status_code(), StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.text());
         assert!(
-            matches!(refused, Err(YorishiroError::ValidationFailed { .. })),
-            "a width with no embedding table must be refused, got: {refused:?}"
-        );
-        assert!(
-            EmbeddingKeyResolver
-                .resolve(&ctx.db, setup.workspace_id)
+            request
+                .get("/api/workspace/embedding-key")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .await
-                .expect("resolve after a refused assignment")
-                .is_none(),
+                .status_code() == StatusCode::NOT_FOUND,
             "a refused assignment must store nothing"
         );
 
-        let stored = set(
-            &ctx.db,
-            setup.workspace_id,
-            "https://embed.example.com/v1",
-            "embed-1024",
-            "sk-secret-value",
-            1024,
-            false,
-            None,
-        )
-        .await
-        .expect("a width with an embedding table is accepted");
-        assert!(matches!(stored, SetOutcome::Stored));
+        let stored = request
+            .put("/api/workspace/embedding-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({
+                "base_url": "https://embed.example.com/v1",
+                "model": "embed-1024",
+                "api_key": "sk-secret-value",
+                "dimensions": 1024
+            }))
+            .await;
+        assert_eq!(stored.status_code(), StatusCode::NO_CONTENT, "{}", stored.text());
 
         let backend = ctx.db.get_database_backend();
         let stray_tables = if backend == sea_orm::DatabaseBackend::Sqlite {

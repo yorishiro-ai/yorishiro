@@ -1,7 +1,6 @@
 use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use yorishiro::App;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{entity_entities, schema_schemas};
 
 /// `migration_dry_run` uses `select_only().group_by(...).into_model::<GroupedCount>()`.
@@ -9,24 +8,8 @@ use yorishiro::models::{entity_entities, schema_schemas};
 /// This test forces a second version so the loop actually executes.
 #[tokio::test]
 async fn drift_and_migration_dry_run_see_a_second_version() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = tenant_tenants::ActiveModel {
-            name: sea_orm::ActiveValue::Set("drift-test".into()),
-            ..Default::default()
-        };
-        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-            .await
-            .expect("insert tenant");
-
-        let workspace = workspace_workspaces::ActiveModel {
-            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-            name: sea_orm::ActiveValue::Set("main".into()),
-            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-            ..Default::default()
-        };
-        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-            .await
-            .expect("insert workspace");
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // v1: one required field.
         let v1: serde_json::Value = serde_json::json!({
@@ -40,13 +23,20 @@ async fn drift_and_migration_dry_run_see_a_second_version() {
             }
         });
         let v1_def = serde_json::from_value(v1).expect("parse v1");
-        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, v1_def, None, None)
-            .await
-            .expect("create v1");
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            v1_def,
+            None,
+            None,
+        )
+        .await
+        .expect("create v1");
 
         let entity = entity_entities::create(
             &ctx.db,
-            workspace.id,
+            fixture.workspace_id,
             entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
@@ -70,11 +60,18 @@ async fn drift_and_migration_dry_run_see_a_second_version() {
             }
         });
         let v2_def = serde_json::from_value(v2).expect("parse v2");
-        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, v2_def, None, None)
-            .await
-            .expect("create v2");
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            v2_def,
+            None,
+            None,
+        )
+        .await
+        .expect("create v2");
 
-        let drift = entity_entities::drift(&ctx.db, workspace.id, entity.id)
+        let drift = entity_entities::drift(&ctx.db, fixture.workspace_id, entity.id)
             .await
             .expect("drift");
         assert_eq!(drift.schema_version, 1);
@@ -83,7 +80,7 @@ async fn drift_and_migration_dry_run_see_a_second_version() {
         assert_eq!(drift.missing_fields[0].name, "body");
         assert!(drift.missing_fields[0].required);
 
-        let report = entity_entities::migration_dry_run(&ctx.db, workspace.id, "note")
+        let report = entity_entities::migration_dry_run(&ctx.db, fixture.workspace_id, "note")
             .await
             .expect("migration_dry_run");
         assert_eq!(report.active_version, 2);

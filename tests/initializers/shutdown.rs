@@ -6,7 +6,7 @@ async fn shutdown_hook_keeps_database_available_until_loco_drains_workers() {
     if !crate::require_postgres_backend() {
         return;
     }
-    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
         let db = ctx.shared_store.get::<yorishiro::db::DbHandle>().unwrap();
         yorishiro::App::on_shutdown(&ctx).await;
         // Loco signals and awaits its queue runner only after this hook returns.

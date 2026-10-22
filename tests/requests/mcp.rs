@@ -1,17 +1,15 @@
 use axum::http::StatusCode;
 use chrono::Utc;
 use loco_rs::TestServer;
-use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-use yorishiro::models::_entities::template_templates;
+use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::{entity_entities, schema_schemas, template_templates as templates};
+use yorishiro::models::{entity_entities, schema_schemas};
 
 use super::boot_request;
-use super::fixtures::{self, TenantArgs, issue_api_key};
+use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use crate::EnvGuard;
 
 fn rpc_body(text: &str) -> Value {
@@ -101,20 +99,6 @@ fn tool_inventory(response: &Value) -> Vec<Value> {
         .clone()
 }
 
-fn install_licence(ctx: &loco_rs::app::AppContext, active: bool) {
-    let state = if active {
-        LicenceState::licensed(LicenceClaims {
-            sub: "acme-corp".into(),
-            plan: "enterprise".into(),
-            exp: Utc::now().timestamp() + 60 * 60,
-        })
-    } else {
-        LicenceState::default()
-    };
-    ctx.shared_store
-        .insert(std::sync::Arc::new(state) as std::sync::Arc<LicenceState>);
-}
-
 fn tool_result_json(response: &Value) -> Value {
     serde_json::from_str(
         response["result"]["content"][0]["text"]
@@ -125,7 +109,6 @@ fn tool_result_json(response: &Value) -> Value {
 }
 
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 async fn mcp_authentication_database_failure_is_redacted() {
     if !crate::require_sqlite_backend() {
         return;
@@ -157,17 +140,6 @@ async fn mcp_authentication_database_failure_is_redacted() {
 /// Transport compatibility regressions from the MCP HTTP issues.
 #[tokio::test]
 async fn mcp_transport_rejects_unconfigured_host_by_default() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
-    if std::env::var("DATABASE_URL").is_err() {
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/mcp-transport.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/mcp-transport-queue.sqlite3?mode=rwc",
-        );
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .post("/mcp")
@@ -184,17 +156,7 @@ async fn mcp_transport_rejects_unconfigured_host_by_default() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn mcp_transport_allows_configured_host_and_common_accept_headers() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_MCP_ALLOWED_HOSTS"]);
-    if std::env::var("DATABASE_URL").is_err() {
-        guard.set(
-            "DATABASE_URL",
-            "sqlite:///tmp/mcp-transport-allowed.sqlite3?mode=rwc",
-        );
-        guard.set(
-            "QUEUE_URL",
-            "sqlite:///tmp/mcp-transport-allowed-queue.sqlite3?mode=rwc",
-        );
-    }
+    let guard = EnvGuard::capture(&["YORISHIRO_MCP_ALLOWED_HOSTS"]);
     guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "mcp.remote.test");
     boot_request::<App, _, _>(|request, _ctx| async move {
         let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
@@ -212,20 +174,29 @@ async fn mcp_transport_allows_configured_host_and_common_accept_headers() {
 }
 
 /// A server instance is retained by rmcp for the whole session.
-/// Licence changes must therefore gate discovery and dispatch dynamically, not only at construction.
+/// Losing the boot-installed licence state must fail closed even in an existing session.
 #[tokio::test]
-async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
+async fn mcp_origin_tools_disappear_when_same_session_licence_state_is_missing() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        install_licence(&ctx, true);
-        let (_tenant_id, workspace_id, owner_id, _schema_key) =
-            fixtures::create_tenant_workspace_owner(
-                &ctx,
-                TenantArgs {
-                    key_scope: ApiKeyScope::Schema,
-                    ..Default::default()
-                },
-            )
-            .await;
+        assert!(
+            ctx.shared_store
+                .get::<std::sync::Arc<LicenceState>>()
+                .is_some_and(|state| state.is_active()),
+            "this case requires a valid YORISHIRO_LICENSE_KEY at application boot"
+        );
+        let TestTenant {
+            workspace_id,
+            owner_id,
+            ..
+        } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
         let key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Schema, false).await;
         let session = initialize(&request).await;
 
@@ -238,7 +209,12 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
             assert_eq!(tool["inputSchema"]["type"], "object");
         }
 
-        install_licence(&ctx, false);
+        // Inject missing process state without manufacturing a licence or replacing its verifier.
+        assert!(
+            ctx.shared_store
+                .remove::<std::sync::Arc<LicenceState>>()
+                .is_some()
+        );
         let community = mcp_call(&request, &session, &key, 3, "tools/list", json!({})).await;
         let community_tools = tool_inventory(&community);
         for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
@@ -263,16 +239,27 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
 #[tokio::test]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        install_licence(&ctx, true);
-        let (tenant_id, workspace_id, owner_id, schema_key) =
-            fixtures::create_tenant_workspace_owner(
-                &ctx,
-                TenantArgs {
-                    key_scope: ApiKeyScope::Schema,
-                    ..Default::default()
-                },
-            )
-            .await;
+        assert!(
+            ctx.shared_store
+                .get::<std::sync::Arc<LicenceState>>()
+                .expect("production boot installs licence state")
+                .is_active(),
+            "licensed MCP merge tests require a valid YORISHIRO_LICENSE_KEY at boot"
+        );
+        let TestTenant {
+            workspace_id,
+            owner_id,
+            api_key: schema_key,
+            ..
+        } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
         let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
 
         let original = json!({
@@ -281,22 +268,27 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
                 "note": { "fields": { "title": { "type": "string", "required": true } } }
             }
         });
-        let template = template_templates::ActiveModel {
-            tenant_id: ActiveValue::Set(tenant_id),
-            name: ActiveValue::Set("library-note".into()),
-            definition: ActiveValue::Set(original),
-            visibility: ActiveValue::Set("tenant".into()),
-            tags: ActiveValue::Set(serde_json::json!([])),
-            ..Default::default()
-        }
-        .insert(&ctx.db)
-        .await
-        .expect("insert library template");
+        let template = request
+            .post("/api/template-library")
+            .add_header("Authorization", format!("Bearer {schema_key}"))
+            .json(&json!({ "name": "library-note", "definition": original }))
+            .await;
+        assert_eq!(
+            template.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            template.text()
+        );
+        let template_id: Uuid = template.json::<Value>()["id"]
+            .as_str()
+            .expect("template id")
+            .parse()
+            .expect("template UUID");
 
         let create = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {schema_key}"))
-            .json(&json!({ "template_id": template.id.to_string() }))
+            .json(&json!({ "template_id": template_id.to_string() }))
             .await;
         assert_eq!(
             create.status_code(),
@@ -310,7 +302,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             .parse()
             .expect("schema UUID");
 
-        let updated = serde_json::from_value(json!({
+        let updated = json!({
             "name": "library-note",
             "entity_types": {
                 "note": { "fields": {
@@ -318,24 +310,13 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
                     "category": { "type": "string" }
                 } }
             }
-        }))
-        .expect("parse updated definition");
-        let template_txn = ctx.db.begin().await.expect("begin template update");
-        templates::update_template(
-            &template_txn,
-            tenant_id,
-            template.id,
-            templates::UpdateTemplateInput {
-                name: None,
-                description: None,
-                definition: Some(updated),
-                tags: None,
-                locale: None,
-            },
-        )
-        .await
-        .expect("update template");
-        template_txn.commit().await.expect("commit template update");
+        });
+        let update = request
+            .put(&format!("/api/template-library/{template_id}"))
+            .add_header("Authorization", format!("Bearer {schema_key}"))
+            .json(&json!({ "definition": updated }))
+            .await;
+        assert_eq!(update.status_code(), StatusCode::OK, "{}", update.text());
 
         let session = initialize(&request).await;
         let changes = mcp_call(
@@ -422,18 +403,23 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// writes and snapshot, and leave an audit record. A lower-scope key receives an isError result
 /// and cannot change the entity.
 #[tokio::test]
-#[serial_test::serial(process_environment, queue_backend)]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, workspace_id, owner_id, migration_key) =
-            fixtures::create_tenant_workspace_owner(
-                &ctx,
-                TenantArgs {
-                    key_scope: ApiKeyScope::Migration,
-                    ..Default::default()
-                },
-            )
-            .await;
+        let TestTenant {
+            tenant_id,
+            workspace_id,
+            owner_id,
+            api_key: migration_key,
+            ..
+        } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Migration,
+                ..Default::default()
+            },
+        )
+        .await;
         let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
         let audit_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, true).await;
 
@@ -528,7 +514,14 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             .await
             .unwrap();
         assert_eq!(pending.data, json!({"title": "before"}));
-        super::fill_defaults::finish(&ctx, job_id).await;
+        super::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            job_id,
+            &migration_key,
+            &format!("/api/migration-jobs/{job_id}"),
+        )
+        .await;
 
         let updated = entity_entities::get(&ctx.db, workspace_id, entity.id)
             .await
@@ -547,13 +540,17 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             "response: {}",
             undo.text()
         );
-        super::fill_defaults::finish(
+        let undo_id = undo.json::<Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        super::fill_defaults::finish_via_api(
+            &request,
             &ctx,
-            undo.json::<Value>()["job_id"]
-                .as_str()
-                .unwrap()
-                .parse()
-                .unwrap(),
+            undo_id,
+            &migration_key,
+            &format!("/api/migration-jobs/{undo_id}"),
         )
         .await;
         let restored = entity_entities::get(&ctx.db, workspace_id, entity.id)
@@ -590,14 +587,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
 #[tokio::test]
 async fn community_mcp_entities_relations_and_schema_tools_execute_over_protocol() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (_, workspace_id, owner_id, schema_key) = fixtures::create_tenant_workspace_owner(
-            &ctx,
-            TenantArgs {
+        let TestTenant { workspace_id, owner_id, api_key: schema_key, .. } = TestTenant::create(&request, &ctx, TenantArgs {
                 key_scope: ApiKeyScope::Schema,
                 ..Default::default()
             },
-        )
-        .await;
+        ).await;
         let write_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Write, false).await;
         let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
 
@@ -756,15 +750,20 @@ async fn community_mcp_entities_relations_and_schema_tools_execute_over_protocol
 #[tokio::test]
 async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
     super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, workspace_id, _owner_id, schema_key) =
-            fixtures::create_tenant_workspace_owner(
-                &ctx,
-                TenantArgs {
-                    key_scope: ApiKeyScope::Schema,
-                    ..Default::default()
-                },
-            )
-            .await;
+        let TestTenant {
+            tenant_id,
+            workspace_id,
+            api_key: schema_key,
+            ..
+        } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
         let session = initialize(&request).await;
         let schema_id = Uuid::new_v4();
         let jsonl = format!(
@@ -802,7 +801,14 @@ async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
         .await;
         let accepted = tool_result_json(&result);
         let id = accepted["job_id"].as_str().unwrap().parse().unwrap();
-        super::fill_defaults::finish_with_status(&ctx, id, "failed").await;
+        super::fill_defaults::fail_via_api(
+            &request,
+            &ctx,
+            id,
+            &schema_key,
+            &format!("/api/import-jobs/{id}"),
+        )
+        .await;
         let status = mcp_call(
             &request,
             &session,
@@ -825,7 +831,12 @@ async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
 #[tokio::test]
 async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (_, workspace_id, owner_id, _) = fixtures::create_tenant_workspace_owner(
+        let TestTenant {
+            workspace_id,
+            owner_id,
+            ..
+        } = TestTenant::create(
+            &request,
             &ctx,
             TenantArgs {
                 key_scope: ApiKeyScope::Read,
@@ -886,18 +897,19 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
 
 /// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
 #[tokio::test]
-#[serial_test::serial(queue_backend)]
-#[serial_test::serial(process_environment)]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {
-    use super::query_worker::{FailingProvider, KeywordProvider, boot_with_query_worker};
-    use std::sync::Arc;
-    use yorishiro::error::YorishiroError;
+    use super::query_worker::boot_with_query_worker;
+    use crate::http_stub::{keyword_provider, unavailable_provider};
     use yorishiro::models::entity_embeddings;
 
-    let provider = Arc::new(KeywordProvider::new(768));
+    let (provider, _server, inputs) = keyword_provider(768).await;
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
-        let (tenant_id, workspace_id, owner_id, _schema_key) =
-            fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
+        let TestTenant {
+            tenant_id,
+            workspace_id,
+            owner_id,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
         let definition = serde_json::from_value(json!({
             "name": "note",
@@ -909,6 +921,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
         schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, definition, None, None)
             .await
             .expect("create schema");
+        let mut candidates = Vec::new();
         for title in ["alpha plan", "beta plan"] {
             let record = entity_entities::create(
                 &ctx.db,
@@ -930,6 +943,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             )
             .await
             .expect("embed entity");
+            candidates.push(record.id);
         }
 
         let session = initialize(&request).await;
@@ -948,13 +962,17 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             hits[0]["entity"]["data"]["title"], "beta plan",
             "nearest entity first: {hits}"
         );
-        let calls = provider.kinds.lock().unwrap().len();
-        let mut workspace = yorishiro::models::_entities::workspace_workspaces::ActiveModel {
-            id: ActiveValue::Set(workspace_id),
-            embedding_reindexing: ActiveValue::Set(true),
-            ..Default::default()
-        };
-        workspace.clone().update(&ctx.db).await.unwrap();
+        let calls = inputs.lock().unwrap().len();
+        let (failed_provider, _failed_server) = unavailable_provider().await;
+        let reindex = entity_embeddings::reindex_workspace(
+            &ctx.db,
+            workspace_id,
+            &candidates,
+            failed_provider.as_ref(),
+        )
+        .await
+        .expect("record failed reindex");
+        assert_eq!(reindex.failures.len(), candidates.len());
         let unavailable = mcp_call(
             &request,
             &session,
@@ -977,16 +995,18 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             .await;
         assert_eq!(rest.status_code(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(rest.json::<Value>()["error"]["code"], "backend_unavailable");
-        assert_eq!(provider.kinds.lock().unwrap().len(), calls);
-        workspace.embedding_reindexing = ActiveValue::Set(false);
-        workspace.update(&ctx.db).await.unwrap();
+        assert_eq!(inputs.lock().unwrap().len(), calls);
+        let recovered = entity_embeddings::reindex_workspace(
+            &ctx.db,
+            workspace_id,
+            &candidates,
+            provider.as_ref(),
+        )
+        .await
+        .expect("recover reindex");
+        assert!(recovered.failures.is_empty());
         // The worker's provider is replaced by one that fails: the tool reports the worker's diagnostic.
-        ctx.shared_store.insert(
-            Arc::new(FailingProvider(|| YorishiroError::ProviderUnreachable {
-                url: "http://embedding.invalid".into(),
-                message: "connection refused".into(),
-            })) as Arc<dyn yorishiro::services::embedding::EmbeddingProvider>,
-        );
+        ctx.shared_store.insert(failed_provider);
         let failed = mcp_call(
             &request,
             &session,
@@ -1000,8 +1020,9 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
         assert!(
             failed["result"]["content"][0]["text"]
                 .as_str()
-                .is_some_and(|text| text.contains("connection refused"))
+                .is_some_and(|text| text.contains("HTTP 503"))
         );
+        assert!(!failed.to_string().contains("private upstream diagnostic"));
     })
     .await;
 }

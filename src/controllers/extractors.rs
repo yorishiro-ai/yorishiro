@@ -33,22 +33,12 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
     })
 }
 
-/// The `WorkerClass` `workspace_id`'s queued jobs should carry: its own assignment through the `WorkerClassResolver` trait object if it has one, `WorkerClass::Shared` otherwise.
+/// Resolves the workspace's persisted assignment, falling back to shared compute.
 pub(crate) async fn resolve_worker_class(
     ctx: &AppContext,
     workspace_id: Uuid,
 ) -> Result<crate::workers::embedding_sync::WorkerClass, ApiError> {
-    let resolver = ctx
-        .shared_store
-        .get::<Arc<dyn crate::workers::embedding_sync::WorkerClassResolver>>()
-        .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "WorkerClassResolver missing"
-            )))
-        })?;
-
-    Ok(resolver
-        .resolve(&ctx.db, workspace_id)
+    Ok(crate::workspace_worker_class(&ctx.db, workspace_id)
         .await
         .map_err(ApiError)?
         .unwrap_or(crate::workers::embedding_sync::WorkerClass::Shared))

@@ -1,4 +1,3 @@
-use loco_rs::prelude::async_trait;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
 use uuid::Uuid;
 
@@ -7,86 +6,58 @@ use super::reindex::{ReindexArgs, ReindexWorker};
 use super::target::WorkerTarget;
 use crate::models::queue_job_lifecycles::{Enqueue, Entity, LifecycleStatus};
 
-/// The typed dispatch seam used by the selected application enqueue paths.
-#[async_trait]
-pub trait EmbeddingSyncDispatcher: Send + Sync {
-    async fn dispatch(
-        &self,
-        ctx: &AppContext,
-        args: EmbeddingSyncArgs,
-        txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String>;
+pub(crate) async fn dispatch_embedding(
+    ctx: &AppContext,
+    args: EmbeddingSyncArgs,
+    txn: Option<&sea_orm::DatabaseTransaction>,
+) -> loco_rs::Result<String> {
+    let spec = JobSpec {
+        job_name: EmbeddingSyncArgs::JOB_NAME,
+        workspace_id: args.workspace_id,
+        class: args.worker_class,
+        dispatch_payload: serde_json::to_value(&args)
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
+        worker_name: EmbeddingSyncWorker::class_name(),
+        use_queue_concurrency: false,
+    };
+    dispatch_job(ctx, spec, txn).await
 }
 
-/// The dispatch seam for reindex jobs.
-///
-/// `App::after_context` stores the production adapter as `Arc<dyn ReindexDispatcher>` in `AppContext::shared_store`.
-/// A caller that needs a different dispatcher inserts its own `Arc<dyn ReindexDispatcher>` there afterwards.
-#[async_trait]
-pub trait ReindexDispatcher: Send + Sync {
-    async fn dispatch(
-        &self,
-        ctx: &AppContext,
-        args: ReindexArgs,
-        txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String>;
-}
-
-/// The single production adapter at Loco's worker integration point.
-pub(crate) struct LocoJobDispatcher;
-
-#[async_trait]
-impl EmbeddingSyncDispatcher for LocoJobDispatcher {
-    async fn dispatch(
-        &self,
-        ctx: &AppContext,
-        args: EmbeddingSyncArgs,
-        txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String> {
-        let spec = JobSpec {
-            job_name: EmbeddingSyncArgs::JOB_NAME,
-            workspace_id: args.workspace_id,
-            class: args.worker_class,
-            dispatch_payload: serde_json::to_value(&args)
-                .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
-            worker_name: EmbeddingSyncWorker::class_name(),
-            use_queue_concurrency: false,
-        };
-        dispatch_job(ctx, spec, txn).await
-    }
-}
-
-#[async_trait]
-impl ReindexDispatcher for LocoJobDispatcher {
-    async fn dispatch(
-        &self,
-        ctx: &AppContext,
-        args: ReindexArgs,
-        txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String> {
-        let spec = JobSpec {
-            job_name: args.job_name(),
-            workspace_id: args.workspace_id,
-            class: args.worker_class,
-            dispatch_payload: serde_json::to_value(&args)
-                .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
-            worker_name: ReindexWorker::class_name(),
-            use_queue_concurrency: true,
-        };
-        dispatch_job(ctx, spec, txn).await
-    }
+pub(crate) async fn dispatch_reindex(
+    ctx: &AppContext,
+    args: ReindexArgs,
+    txn: Option<&sea_orm::DatabaseTransaction>,
+) -> loco_rs::Result<String> {
+    let spec = JobSpec {
+        job_name: args.job_name(),
+        workspace_id: args.workspace_id,
+        class: args.worker_class,
+        dispatch_payload: serde_json::to_value(&args)
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
+        worker_name: ReindexWorker::class_name(),
+        use_queue_concurrency: true,
+    };
+    dispatch_job(ctx, spec, txn).await
 }
 
 /// Re-enqueues durable dispatch records left queued after a process or provider failure.
 pub async fn recover_pending(ctx: &AppContext) {
+    recover_pending_while(ctx, || true).await;
+}
+
+pub(crate) async fn recover_pending_while(ctx: &AppContext, keep_running: impl Fn() -> bool) {
     let db_handle = ctx.shared_store.get::<crate::db::DbHandle>();
     let db = db_handle
         .as_ref()
         .map(crate::db::DbHandle::identity_connection);
-    recover_pending_on(ctx, db.as_ref().unwrap_or(&ctx.db)).await;
+    recover_pending_on_while(ctx, db.as_ref().unwrap_or(&ctx.db), keep_running).await;
 }
 
-pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnection) {
+async fn recover_pending_on_while(
+    ctx: &AppContext,
+    db: &sea_orm::DatabaseConnection,
+    keep_running: impl Fn() -> bool,
+) {
     let timing = match ctx.config.settings::<crate::data::settings::Settings>() {
         Ok(settings) => settings.dispatch,
         Err(error) => {
@@ -102,6 +73,9 @@ pub async fn recover_pending_on(ctx: &AppContext, db: &sea_orm::DatabaseConnecti
         }
     };
     for row in pending {
+        if !keep_running() {
+            break;
+        }
         let claim = Uuid::now_v7();
         match crate::models::queue_job_dispatch_outbox::claim_dispatch(
             db,
@@ -219,7 +193,11 @@ pub(crate) async fn dispatch_job(
         Ok(target) => target,
         Err(error) => {
             let diagnostic = format!("worker target lookup failed: {error}");
-            refuse(ctx, &spec, lifecycle_id, None, class, 0, &diagnostic).await;
+            if let Some(txn) = caller_txn {
+                refuse(txn, &spec, lifecycle_id, None, class, 0, &diagnostic).await;
+            } else {
+                refuse(&ctx.db, &spec, lifecycle_id, None, class, 0, &diagnostic).await;
+            }
             tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, error = %diagnostic, "queue dispatch refused because the worker target is unknown");
             return Err(loco_rs::Error::Message(diagnostic));
         }
@@ -229,7 +207,11 @@ pub(crate) async fn dispatch_job(
         let policy = match super::queue::concurrency_for(ctx, spec.workspace_id, spec.class).await {
             Ok(policy) => policy,
             Err(error) => {
-                refuse(ctx, &spec, lifecycle_id, None, class, 0, &error).await;
+                if let Some(txn) = caller_txn {
+                    refuse(txn, &spec, lifecycle_id, None, class, 0, &error).await;
+                } else {
+                    refuse(&ctx.db, &spec, lifecycle_id, None, class, 0, &error).await;
+                }
                 tracing::error!(workspace_id = %spec.workspace_id, worker_class = class, error = %error, "queue policy unavailable");
                 return Err(loco_rs::Error::Message(error));
             }
@@ -302,7 +284,7 @@ pub(crate) async fn dispatch_job(
 
 /// Records a job that was refused before it reached the queue, so the refusal is visible next to the jobs that ran.
 async fn refuse(
-    ctx: &AppContext,
+    db: &impl sea_orm::ConnectionTrait,
     spec: &JobSpec,
     lifecycle_id: Uuid,
     plan: Option<&str>,
@@ -311,7 +293,7 @@ async fn refuse(
     diagnostic: &str,
 ) {
     if let Err(error) = Entity::record_enqueue(
-        &ctx.db,
+        db,
         Enqueue {
             id: lifecycle_id,
             job_name: spec.job_name,
@@ -327,12 +309,16 @@ async fn refuse(
         tracing::warn!(lifecycle_id = %lifecycle_id, error = %error, "refused job could not be recorded");
         return;
     }
-    close_unavailable(ctx, lifecycle_id, diagnostic).await;
+    close_unavailable(db, lifecycle_id, diagnostic).await;
 }
 
-async fn close_unavailable(ctx: &AppContext, lifecycle_id: Uuid, diagnostic: &str) {
+async fn close_unavailable(
+    db: &impl sea_orm::ConnectionTrait,
+    lifecycle_id: Uuid,
+    diagnostic: &str,
+) {
     if let Err(error) = Entity::finish(
-        &ctx.db,
+        db,
         lifecycle_id,
         None,
         LifecycleStatus::Unavailable,

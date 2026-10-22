@@ -68,12 +68,18 @@ async fn migration_bootstrap_seeds_state_for_the_task_gate() {
     .unwrap();
     assert!(yorishiro::app::cli_timezone_gate_result(["app", "task", "sync"], None).is_err());
     migration::Migrator::up(&db, None).await.unwrap();
+    let state = yorishiro::models::timezone_state::Entity::find_by_id(1)
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("migration seeds the timezone singleton");
+    assert_eq!(state.active_timezone, "UTC");
     assert!(
-        yorishiro::models::timezone_state::Entity::find_by_id(1)
-            .one(&db)
-            .await
-            .unwrap()
-            .is_some()
+        yorishiro::app::cli_timezone_gate_result(
+            ["app", "task", "sync"],
+            Some(&state.active_timezone),
+        )
+        .is_ok()
     );
-    assert!(yorishiro::app::cli_timezone_gate_result(["app", "task", "sync"], Some("UTC")).is_ok());
+    db.close().await.unwrap();
 }

@@ -29,6 +29,7 @@ Changing the pinned version requires reviewing these fixes against the new upstr
 | LQ-03 | A reaper could overwrite a job completed or reclaimed after its read; a stale worker could overwrite the replacement attempt. | Reaper transitions compare the exact record and set membership atomically; completion/failure compare the attempt token atomically. | The same regression test holds two real workers across redelivery and checks both stale success and failure. |
 | LQ-04 | Completion/failure persistence errors logged the entire job, including import bodies and credentials. | Log the job ID instead of `Debug`-formatting its payload. | Review `fixes.patch`; this changes diagnostic fields, not stored job arguments. |
 | LQ-05 | Queue shutdown only cancelled polling; SQL pools and handlers retaining `AppContext` were not released. | Add awaited `close()`, clear retained handlers and close SQL pools; boot calls it after workers drain. | `sql_queue_close_releases_pool_and_retained_worker_context` and real request teardown. |
+| LQ-06 | PostgreSQL queue initialisation checked for the table and then created it, so processes sharing a database that start together failed on duplicate catalog entries. | Serialise initialisation with a transaction-scoped advisory lock. | `postgres_queue_initialisation_tolerates_concurrent_first_starts` fails without the lock and passes with it. |
 
 `shutdown()` remains a stop signal.
 Call `close().await` after the `run()` future has drained; do not close a SQL pool underneath active jobs.
@@ -51,7 +52,7 @@ No upstream issue or accepted upstream fix is implied by these local defect IDs.
 元の空白と `Cargo.lock` も復元し、差分ファイルだけを空白検査の例外にします。
 `source/Cargo.lock` は上流配布物の記録であり、アプリのビルドと監査にはルートの `Cargo.lock` を使います。
 `verify.py` は配布アーカイブのハッシュ、パッチ適用結果、同梱ソースの一致を検証します。
-LQ-01は単一投入の途中失敗、LQ-02は取得直後の誤った再配信、LQ-03はreaperと古いworkerによる状態の上書き、LQ-04はログへのpayload露出、LQ-05は終了時のプールとworker contextの保持を修正します。
+LQ-01は単一投入の途中失敗、LQ-02は取得直後の誤った再配信、LQ-03はreaperと古いworkerによる状態の上書き、LQ-04はログへのpayload露出、LQ-05は終了時のプールとworker contextの保持、LQ-06はPostgreSQLキュー初期化の同時初回起動での競合を修正します。
 回帰試験では実際のproviderとValkeyを使い、古い試行の成功・失敗が新しい試行を上書きしないことを確認します。
 `shutdown()` は停止通知のままで、workerの終了後に `close().await` でリソース解放を待ちます。
 稼働中workerのプールを先に閉じてはいけません。

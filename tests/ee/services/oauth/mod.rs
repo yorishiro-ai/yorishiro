@@ -16,7 +16,13 @@ fn config(issuer_url: String) -> OAuthConfig {
     }
 }
 
-async fn json_server(body: serde_json::Value) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
+async fn json_server(
+    body: serde_json::Value,
+) -> (
+    String,
+    crate::http_stub::HttpStub,
+    tokio::sync::oneshot::Receiver<Vec<u8>>,
+) {
     let body = body.to_string();
     discovery::start_server(&format!(
         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -27,7 +33,7 @@ async fn json_server(body: serde_json::Value) -> (String, tokio::task::JoinHandl
 
 #[tokio::test]
 async fn authorize_uses_production_discovery() {
-    let (issuer, server) = json_server(json!({
+    let (issuer, _server_stub, server) = json_server(json!({
         "authorization_endpoint": "https://idp.example/authorize",
         "token_endpoint": "https://idp.example/token",
         "jwks_uri": "https://idp.example/jwks",
@@ -45,9 +51,10 @@ async fn authorize_uses_production_discovery() {
 
 #[tokio::test]
 async fn callback_uses_production_discovery_exchange_and_jwks_before_verifying_token() {
-    let (token_endpoint, token_server) = json_server(json!({"id_token": "not-a-jwt"})).await;
-    let (jwks_uri, jwks_server) = json_server(json!({"keys": []})).await;
-    let (issuer, discovery_server) = json_server(json!({
+    let (token_endpoint, _token_server_stub, token_server) =
+        json_server(json!({"id_token": "not-a-jwt"})).await;
+    let (jwks_uri, _jwks_server_stub, jwks_server) = json_server(json!({"keys": []})).await;
+    let (issuer, _discovery_server_stub, discovery_server) = json_server(json!({
         "authorization_endpoint": "https://idp.example/authorize",
         "token_endpoint": token_endpoint,
         "jwks_uri": jwks_uri,

@@ -8,23 +8,25 @@ async fn registered_diagnostic_task_queries_real_database_activity() {
         app::Hooks,
         task::{Tasks, Vars},
     };
-    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, mut ctx| async move {
-        ctx.config.settings.as_mut().unwrap()["db_load_guard"]["threshold"] = 1.into();
-        let before = yorishiro::models::system_maintenance::get(&ctx.db)
-            .await
-            .unwrap();
-        let mut tasks = Tasks::default();
-        yorishiro::App::register_tasks(&mut tasks);
-        tasks
-            .run(&ctx, "db_load_guard", &Vars::default())
-            .await
-            .unwrap();
-        let after = yorishiro::models::system_maintenance::get(&ctx.db)
-            .await
-            .unwrap();
-        assert_eq!(before.mode, after.mode);
-        assert_eq!(before.reason, after.reason);
-    })
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(
+        |_request, mut ctx| async move {
+            ctx.config.settings.as_mut().unwrap()["db_load_guard"]["threshold"] = 1.into();
+            let before = yorishiro::models::system_maintenance::get(&ctx.db)
+                .await
+                .unwrap();
+            let mut tasks = Tasks::default();
+            yorishiro::App::register_tasks(&mut tasks);
+            tasks
+                .run(&ctx, "db_load_guard", &Vars::default())
+                .await
+                .unwrap();
+            let after = yorishiro::models::system_maintenance::get(&ctx.db)
+                .await
+                .unwrap();
+            assert_eq!(before.mode, after.mode);
+            assert_eq!(before.reason, after.reason);
+        },
+    )
     .await;
 }
 

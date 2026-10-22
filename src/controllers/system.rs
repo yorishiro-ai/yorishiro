@@ -11,7 +11,7 @@ use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, MigrationScope};
+use crate::controllers::extractors::{MigrationScope, Verified};
 use crate::dtos::system::{MaintenanceResponse, SetMaintenanceRequest};
 use crate::error::YorishiroError;
 use crate::models::api_key_audit_log;
@@ -20,7 +20,7 @@ use crate::models::system_maintenance::{self, DEFAULT_RETRY_AFTER_SECONDS};
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/system/maintenance", responses((status = 200, body = crate::dtos::system::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub(crate) async fn get_maintenance(
     State(ctx): State<AppContext>,
-    _authorized: Authorized<MigrationScope>,
+    _authorized: Verified<MigrationScope>,
 ) -> Result<Json<MaintenanceResponse>, ApiError> {
     let current = system_maintenance::get(&ctx.db).await?;
     Ok(Json(current.into()))
@@ -29,7 +29,7 @@ pub(crate) async fn get_maintenance(
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/system/maintenance", request_body = crate::dtos::system::SetMaintenanceRequest, responses((status = 200, body = crate::dtos::system::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub(crate) async fn set_maintenance(
     State(ctx): State<AppContext>,
-    authorized: Authorized<MigrationScope>,
+    authorized: Verified<MigrationScope>,
     body: Result<Json<SetMaintenanceRequest>, JsonRejection>,
 ) -> Result<Json<MaintenanceResponse>, ApiError> {
     let Json(body) = body.map_err(|err| {
@@ -48,7 +48,7 @@ pub(crate) async fn set_maintenance(
     )
     .await?;
 
-    // Recorded on ctx.db, the same migration-role connection the write itself just went through: authorized.txn() is an RLS-scoped transaction this handler never commits (get_maintenance's sibling extractor exists only to gate the scope check, not to hold a connection this deployment-wide write needs), so writing the audit row there would silently discard it the same way an uncommitted write anywhere else in this codebase does.
+    // Deployment-wide writes use the identity pool; authorization must not hold a workspace writer reservation.
     api_key_audit_log::record(
         &ctx.db,
         api_key_audit_log::AuditActor {

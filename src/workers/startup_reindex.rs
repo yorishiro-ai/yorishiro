@@ -8,10 +8,9 @@
 //! The lifecycle insert is also protected by a backend-parity unique admission index, so separate processes cannot both record an active reindex.
 
 use loco_rs::app::AppContext;
-use loco_rs::environment::Environment;
 use sea_orm::TransactionTrait;
 
-use crate::workers::embedding_sync::{WorkerClass, resolve_worker_provider};
+use crate::workers::embedding_sync::resolve_worker_provider;
 
 /// The advisory lock key every replica contends on.
 const SCAN_LOCK: &str = "startup-reindex-scan";
@@ -19,10 +18,6 @@ const SCAN_LOCK: &str = "startup-reindex-scan";
 /// Runs the scan once.
 /// A failure is logged and never stops the worker from starting: a missed scan is repaired by the next start or by an explicit reindex.
 pub async fn run(ctx: &AppContext) {
-    // Test boots skip the scan: it would outlive the test's own database.
-    if matches!(ctx.environment, Environment::Test) {
-        return;
-    }
     // Held to the end of this function, so the lock covers the whole scan and is released by the commit or by dropping the transaction.
     let guard = match ctx.db.begin().await {
         Ok(txn) => txn,
@@ -109,9 +104,9 @@ async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
                 tracing::warn!(
                     %workspace_id,
                     error = %err.0,
-                    "startup reindex: failed to resolve worker class, defaulting to shared"
+                    "startup reindex: failed to resolve worker class, skipping workspace"
                 );
-                WorkerClass::Shared
+                return;
             }
         };
     let args = crate::workers::reindex::ReindexArgs {

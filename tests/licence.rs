@@ -47,39 +47,14 @@ fn test_keypair() -> TestKeypair {
 }
 
 fn sign(private_key_path: &std::path::Path, claims: &LicenceClaims) -> String {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let header = base64_url(br#"{"alg":"RS256","typ":"JWT"}"#);
-    let payload = base64_url(serde_json::to_string(claims).unwrap().as_bytes());
-    let signing_input = format!("{header}.{payload}");
-
-    let mut child = Command::new("openssl")
-        .args([
-            "dgst",
-            "-sha256",
-            "-sign",
-            private_key_path.to_str().unwrap(),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("openssl must be on PATH to sign the test JWT");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(signing_input.as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(output.status.success(), "openssl sign failed: {output:?}");
-
-    format!("{signing_input}.{}", base64_url(&output.stdout))
-}
-
-fn base64_url(bytes: &[u8]) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    let pem = std::fs::read(private_key_path).expect("read the test signing key");
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(&pem).expect("test RSA signing key");
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+        claims,
+        &key,
+    )
+    .expect("sign the test JWT")
 }
 
 #[test]

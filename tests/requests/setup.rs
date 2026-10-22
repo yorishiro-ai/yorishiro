@@ -3,14 +3,14 @@ use sea_orm::{EntityTrait, PaginatorTrait};
 use serial_test::serial;
 use yorishiro::App;
 
-use super::boot_request;
+use super::boot_request_isolated;
 use super::with_max_tenants;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial(process_environment)]
 async fn concurrent_setup_creates_only_one_account() {
     with_max_tenants("1", async {
-        boot_request::<App, _, _>(|request, ctx| async move {
+        boot_request_isolated::<App, _, _>(|request, ctx| async move {
             let first = request.post("/setup").json(&serde_json::json!({
                 "email": "first@example.com", "password": "hunter2-hunter2",
             }));
@@ -44,7 +44,7 @@ async fn concurrent_setup_creates_only_one_account() {
 #[serial(process_environment)]
 async fn failed_setup_rolls_back_before_a_valid_retry() {
     with_max_tenants("1", async {
-        boot_request::<App, _, _>(|request, ctx| async move {
+        boot_request_isolated::<App, _, _>(|request, ctx| async move {
             yorishiro::models::user_users::create_user(
                 &ctx.db,
                 "taken@example.com",
@@ -86,7 +86,7 @@ async fn failed_setup_rolls_back_before_a_valid_retry() {
 async fn setup_uses_the_single_tenant_source_default() {
     let ambient = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
     ambient.remove("YORISHIRO_MAX_TENANTS");
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    boot_request_isolated::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), StatusCode::OK);
         let body: serde_json::Value = status.json();
@@ -115,7 +115,7 @@ async fn setup_uses_the_single_tenant_source_default() {
 #[serial(process_environment)]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {
     with_max_tenants("1", async move {
-        boot_request::<App, _, _>(|request, _ctx| async move {
+        boot_request_isolated::<App, _, _>(|request, _ctx| async move {
             let status = request.get("/setup/status").await;
             assert_eq!(status.status_code(), StatusCode::OK);
             let body: serde_json::Value = status.json();
