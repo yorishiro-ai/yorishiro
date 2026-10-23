@@ -78,6 +78,7 @@ fn test_environment(environment: &Environment) -> Environment {
 /// # Errors
 /// Returns an error when a setting is invalid.
 pub fn validate(config: &Config) -> Result<()> {
+    validate_queue_policy(config)?;
     let settings = config.settings::<crate::data::settings::Settings>()?;
     crate::time::parse_timezone(&settings.timezone).map_err(|_| {
         Error::Message(format!(
@@ -126,7 +127,7 @@ pub fn validate(config: &Config) -> Result<()> {
             "settings.dispatch.claim_lease_seconds must exceed enqueue_timeout_ms".into(),
         ));
     }
-    validate_queue_policy(config)
+    Ok(())
 }
 
 /// The longest a search may be told to wait for a worker, so a typo cannot hold a request open for hours.
