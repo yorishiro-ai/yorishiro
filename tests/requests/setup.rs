@@ -84,8 +84,9 @@ async fn failed_setup_rolls_back_before_a_valid_retry() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn setup_uses_the_single_tenant_source_default() {
-    let ambient = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
+    let ambient = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS", "YORISHIRO_LICENSE_KEY"]);
     ambient.remove("YORISHIRO_MAX_TENANTS");
+    ambient.remove("YORISHIRO_LICENSE_KEY");
     boot_request_isolated::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), StatusCode::OK);
