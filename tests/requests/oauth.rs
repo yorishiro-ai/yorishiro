@@ -304,7 +304,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 /// The workspace is provisioned with a schema from the built-in `general-notes` template and left `active`.
 #[tokio::test]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
+    super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
@@ -362,7 +362,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
             None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
         }
-        boot_request::<App, _, _>(|_request, ctx| async move {
+        super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
             let policy_enabled =
                 yorishiro::edition::ee::data::plan::plan_policy_enabled(&ctx.config)
                     .expect("resolve provisioning policy");

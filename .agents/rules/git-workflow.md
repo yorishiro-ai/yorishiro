@@ -26,6 +26,17 @@ Confirm the relevant backend suites pass before pushing.
 
 Wait for PR/CI events using `gh-wait` (`gh extension install k1LoW/gh-wait`):
 
+Use `gh wait`, not `gh run watch`, `gh pr checks --watch`, or an agent polling loop.
+After pushing, identify the workflow run whose `headSha` matches the pushed commit and register one completion rule:
+
+```bash
+gh wait workflow <run-id> --repo yorishiro-ai/yorishiro --completed
+```
+
+The command registers a background server rule and returns; returning does not mean CI completed.
+Do other independent work or yield until a completion event arrives, without repeated status checks, duplicate rules, or repeated waiting replies.
+After completion, inspect `gh run view <run-id>` and failed logs before reporting success.
+
 **Wait for CI completion:**
 
 ```bash
@@ -64,7 +75,8 @@ gh wait delete <id>       # Delete a specific rule
 gh wait delete --all      # Delete all rules
 ```
 
-Polling interval defaults to `1min` for issue/discussion. Custom interval: `--interval 5min`.
+The server's default polling interval is `1min` for PR/workflow and `30min` for issue/discussion.
+Custom interval: `--interval 5min`.
 
 For full workflow reference, see `.github/workflows/`.
 

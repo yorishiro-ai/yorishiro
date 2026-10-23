@@ -287,6 +287,8 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
     if !crate::require_postgres_backend() {
         return;
     }
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
     super::with_max_tenants("100", async move {
         boot_request_isolated::<App, _, _>(|request, _ctx| async move {
             for email in ["first@example.com", "second@example.com"] {

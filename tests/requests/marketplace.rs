@@ -51,7 +51,7 @@ async fn listings(request: &loco_rs::TestServer, key: &str) -> Vec<serde_json::V
 async fn without_a_licence_the_marketplace_is_not_served() {
     let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
     guard.remove("YORISHIRO_LICENSE_KEY");
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request

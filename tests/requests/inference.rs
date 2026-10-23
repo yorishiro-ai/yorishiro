@@ -170,7 +170,7 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
     guard.remove("YORISHIRO_LICENSE_KEY");
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let with_key = request
