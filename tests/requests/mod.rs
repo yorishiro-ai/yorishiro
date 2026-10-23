@@ -166,16 +166,35 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let started = std::time::Instant::now();
+    let name = std::thread::current()
+        .name()
+        .unwrap_or("unnamed")
+        .to_owned();
     let _environment = crate::EnvironmentRead::enter();
+    let admitted = std::time::Instant::now();
     if is_sqlite_backend() {
+        record_request_timing(&name, "sqlite", &[("environment", admitted - started)]);
         boot_sqlite::<H, _, _>(callback).await;
     } else {
         request_with_shared_postgres::<H, _, _>(|request, ctx| {
+            let booted = std::time::Instant::now();
             let result =
                 std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
             async move {
                 let outcome = result.await;
+                let finished = std::time::Instant::now();
                 close_app_pools(&ctx).await;
+                record_request_timing(
+                    &name,
+                    "shared",
+                    &[
+                        ("environment", admitted - started),
+                        ("boot", booted - admitted),
+                        ("callback", finished - booted),
+                        ("shutdown", finished.elapsed()),
+                    ],
+                );
                 if let Err(panic) = outcome {
                     std::panic::resume_unwind(panic);
                 }
@@ -197,8 +216,15 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let started = std::time::Instant::now();
+    let name = std::thread::current()
+        .name()
+        .unwrap_or("unnamed")
+        .to_owned();
     let _environment = crate::EnvironmentRead::enter();
+    let admitted = std::time::Instant::now();
     if is_sqlite_backend() {
+        record_request_timing(&name, "sqlite", &[("environment", admitted - started)]);
         boot_sqlite::<H, _, _>(callback).await;
     } else {
         let mut config = H::load_config(&loco_rs::environment::Environment::Test)
@@ -207,6 +233,7 @@ where
         let database = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
             .expect("prepare isolated database");
         database.init_db().await;
+        let created = std::time::Instant::now();
         if let Some(loco_rs::config::QueueConfig::Postgres(queue)) = config.queue.as_mut()
             && queue.uri == config.database.uri
         {
@@ -215,21 +242,51 @@ where
         config.database.uri = database.get_connection_str().to_owned();
         let outcome = std::panic::AssertUnwindSafe(async {
             let (request, ctx) = serve::<H>(config).await;
+            let booted = std::time::Instant::now();
             let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone()))
                 .catch_unwind()
                 .await;
+            let finished = std::time::Instant::now();
             close_app_pools(&ctx).await;
+            record_request_timing(
+                &name,
+                "isolated",
+                &[
+                    ("environment", admitted - started),
+                    ("create", created - admitted),
+                    ("boot", booted - created),
+                    ("callback", finished - booted),
+                    ("shutdown", finished.elapsed()),
+                ],
+            );
             if let Err(panic) = result {
                 std::panic::resume_unwind(panic);
             }
         })
         .catch_unwind()
         .await;
+        let cleanup = std::time::Instant::now();
         database.cleanup_db();
+        record_request_timing(&name, "isolated", &[("cleanup", cleanup.elapsed())]);
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
         }
     }
+}
+
+fn record_request_timing(name: &str, scope: &str, phases: &[(&str, std::time::Duration)]) {
+    let Some(directory) = std::env::var_os("YORISHIRO_REQUEST_TIMING_DIR") else {
+        return;
+    };
+    let rows = phases
+        .iter()
+        .map(|(phase, elapsed)| format!("{name}\t{scope}\t{phase}\t{:.6}\n", elapsed.as_secs_f64()))
+        .collect::<String>();
+    std::fs::write(
+        std::path::Path::new(&directory).join(format!("{}.tsv", uuid::Uuid::now_v7())),
+        rows,
+    )
+    .expect("write request phase timings");
 }
 
 #[allow(clippy::future_not_send)]
@@ -238,6 +295,11 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let started = std::time::Instant::now();
+    let name = std::thread::current()
+        .name()
+        .unwrap_or("unnamed")
+        .to_owned();
     // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
     // SQLite must not open a path whose parent can disappear during concurrent test teardown.
     let directory = tempfile::tempdir().expect("create sqlite test directory");
@@ -247,10 +309,21 @@ where
         .to_string_lossy()
         .into_owned();
     request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
+        let booted = std::time::Instant::now();
         let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
         async move {
             let outcome = result.await;
+            let finished = std::time::Instant::now();
             close_app_pools_sqlite(&ctx, &db_path).await;
+            record_request_timing(
+                &name,
+                "sqlite",
+                &[
+                    ("boot", booted - started),
+                    ("callback", finished - booted),
+                    ("shutdown", finished.elapsed()),
+                ],
+            );
             if let Err(panic) = outcome {
                 std::panic::resume_unwind(panic);
             }

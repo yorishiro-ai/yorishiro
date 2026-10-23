@@ -559,9 +559,19 @@ jobs:
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
           YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+          YORISHIRO_REQUEST_TIMING_DIR: ${{ runner.temp }}/request-timings
           YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
         run: |
+          mkdir -p "$YORISHIRO_REQUEST_TIMING_DIR"
           RUSTC_BOOTSTRAP=1 uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- -Z unstable-options --report-time
+
+      - name: Upload request phase timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: request-timings-${{ matrix.edition }}-${{ matrix.backend }}-${{ matrix.queue_key }}
+          path: ${{ runner.temp }}/request-timings
+          if-no-files-found: error
 
       - name: Remove the matrix Valkey service
         if: always() && matrix.queue_key == 'valkey'
