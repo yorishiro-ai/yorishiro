@@ -1,3 +1,4 @@
+use futures::{StreamExt, stream};
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
 use uuid::Uuid;
 
@@ -72,9 +73,11 @@ async fn recover_pending_on_while(
             return;
         }
     };
-    for row in pending {
+    // Bound provider pressure while letting unrelated deliveries pass a slow publish.
+    let keep_running = &keep_running;
+    stream::iter(pending).for_each_concurrent(4, |row| async move {
         if !keep_running() {
-            break;
+            return;
         }
         let claim = Uuid::now_v7();
         match crate::models::queue_job_dispatch_outbox::claim_dispatch(
@@ -86,17 +89,17 @@ async fn recover_pending_on_while(
         .await
         {
             Ok(true) => {}
-            Ok(false) => continue,
+            Ok(false) => return,
             Err(error) => {
                 tracing::warn!(dispatch_id = %row.id, error = %error, "dispatch outbox: could not claim row");
-                continue;
+                return;
             }
         }
         if row.lifecycle_id.is_none()
             && row.worker_name
                 != crate::workers::query_embedding::QueryEmbeddingWorker::class_name()
         {
-            continue;
+            return;
         }
         if let Some(deadline) = row.deadline_at
             && deadline <= crate::time::now().fixed_offset()
@@ -104,7 +107,7 @@ async fn recover_pending_on_while(
             if let Err(error) = crate::models::queue_job_dispatch_outbox::expire(db, row.id).await {
                 tracing::warn!(dispatch_id = %row.id, error = %error, "could not expire deadline-bound dispatch");
             }
-            continue;
+            return;
         }
         let enqueue_result = tokio::time::timeout(
             std::time::Duration::from_millis(timing.enqueue_timeout_ms),
@@ -142,7 +145,7 @@ async fn recover_pending_on_while(
                 "dispatch outbox: enqueue failed and will be retried"
             ),
         }
-    }
+    }).await;
 }
 
 async fn enqueue_pending(

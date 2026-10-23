@@ -87,7 +87,7 @@
                  .await?;
          }
      } else {
-@@ -249,10 +264,11 @@
+@@ -249,10 +264,20 @@
                  ",
              JobStatus::Queued
          )))
@@ -96,6 +96,15 @@
          .await?;
      }
  
++    // Retained completed jobs must not turn every dequeue or acknowledgement into a table scan.
++    // The existing startup lock also serializes index upgrades on older installations.
++    sqlx::raw_sql(
++        "CREATE INDEX IF NOT EXISTS pg_loco_queue_id_idx ON pg_loco_queue (id);
++         CREATE INDEX IF NOT EXISTS pg_loco_queue_dequeue_idx ON pg_loco_queue (status, priority DESC, run_at, id);",
++    )
++    .execute(&mut *tx)
++    .await?;
++
 +    tx.commit().await?;
      Ok(())
  }

@@ -32,9 +32,15 @@ async fn reindex_embedding_for_record(
     workspace_id: Uuid,
     record: &EmbeddingSnapshot,
     provider: &dyn EmbeddingProvider,
+    schemas: &mut std::collections::HashMap<Uuid, crate::models::schema_schemas::SchemaRecord>,
 ) -> Result<ReindexStep, YorishiroError> {
-    let schema =
-        crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
+    // Schema definitions are versioned by ID; a new version cannot change this snapshot's schema.
+    let schema = match schemas.entry(record.schema_id) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+            crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?,
+        ),
+    };
     let entity_type_def = schema
         .definition
         .entity_types
@@ -87,6 +93,7 @@ pub async fn reindex_workspace(
 
     let mut reindexed = 0;
     let mut failures = Vec::new();
+    let mut schemas = std::collections::HashMap::new();
     for &entity_id in candidate_ids {
         let Some(record) = records.get(&entity_id) else {
             failures.push(ReindexFailure {
@@ -95,7 +102,8 @@ pub async fn reindex_workspace(
             });
             continue;
         };
-        match reindex_embedding_for_record(conn, workspace_id, record, provider).await {
+        match reindex_embedding_for_record(conn, workspace_id, record, provider, &mut schemas).await
+        {
             Ok(ReindexStep::Reindexed | ReindexStep::NothingToEmbed) => reindexed += 1,
             Ok(ReindexStep::Deleted) => failures.push(ReindexFailure {
                 entity_id,

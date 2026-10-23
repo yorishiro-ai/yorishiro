@@ -63,11 +63,6 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
             "embedding provider disabled".into(),
         ));
     }
-    provider
-        .embed_batch(&[])
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("provider must be configured: {e}")))?;
-
     // Fetch all entity IDs for this workspace.
     let candidate_ids =
         crate::models::entity_entities::ids_for_workspace(&ctx.db, args.workspace_id)

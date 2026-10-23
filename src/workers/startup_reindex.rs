@@ -78,7 +78,9 @@ async fn detect_startup_reindex(ctx: &AppContext) {
                 continue;
             }
         };
-        if provider.embed_batch(&[]).await.is_err() {
+        if provider.availability()
+            == crate::services::embedding::EmbeddingProviderAvailability::Disabled
+        {
             tracing::warn!(
                 workspace_id = %workspace.id,
                 "startup reindex: embedding provider must be configured"

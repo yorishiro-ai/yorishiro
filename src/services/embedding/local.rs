@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::Duration;
 
 use candle_core::{DType, Device, Tensor};
@@ -80,15 +80,13 @@ fn multilingual_e5_base_config() -> XlmRobertaConfig {
 /// Token embeddings are aggregated into a sentence vector via mean pooling weighted by the attention mask, then L2-normalized for stable cosine-distance search: both models this provider loads were trained and evaluated this way, and neither definition carries a pooling field of its own for exactly that reason.
 /// A field with one legal value on every definition so far would encode a future constraint on the field; one arrives the day a model that pools differently does.
 pub struct LocalEmbeddingProvider {
-    // candle's `Tensor` ops on CPU are not internally parallel across an inference the way onnxruntime's
-    // intra-op threading was, but the model is `Send + Sync` regardless; the Mutex here still exists to bound
-    // memory: without it, concurrent requests would each build their own batch of activations on a CPU-only
-    // process, which is worse than queuing them.
     inner: Arc<Inner>,
+    // Bound activation memory before allocating tensors or occupying a blocking thread.
+    inference: Arc<tokio::sync::Semaphore>,
 }
 
 struct Inner {
-    model: Mutex<LoadedModel>,
+    model: LoadedModel,
     tokenizer: Tokenizer,
     def: &'static LocalModelDef,
     device: Device,
@@ -170,7 +168,7 @@ impl LocalEmbeddingProvider {
         };
 
         let inner = Inner {
-            model: Mutex::new(model),
+            model,
             tokenizer,
             def,
             device,
@@ -182,6 +180,7 @@ impl LocalEmbeddingProvider {
 
         Ok(Self {
             inner: Arc::new(inner),
+            inference: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
 }
@@ -226,15 +225,10 @@ impl Inner {
             Tensor::from_vec(attention_mask.clone(), (batch, seq), &self.device)
                 .map_err(|err| internal(format!("failed to build attention_mask tensor: {err}")))?;
 
-        // Recovers from poisoning: even if a panic occurs while the lock is held, the model carries no
-        // mutable state across inferences (`&mut` is only an artifact of holding it behind a Mutex for
-        // memory bounding, not something `forward` itself needs), so the invariant isn't actually broken.
-        // Permanently disabling embedding until a process restart over a poison would cause more harm.
-        let model = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-        let hidden_states = model
+        let hidden_states = self
+            .model
             .forward(&input_ids, &token_type_ids, &attention_mask_tensor)
             .map_err(|err| internal(format!("model inference failed: {err}")))?;
-        drop(model);
 
         let dims = hidden_states.dims();
         if dims.len() != 3 || dims[0] != batch || dims[1] != seq {
@@ -348,15 +342,29 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
         // Inference is CPU-bound and blocks for tens to hundreds of ms, so it's offloaded to the blocking pool to avoid stalling tokio worker threads.
-        // On timeout, the blocking task itself still runs to completion (it can't be cancelled), but the caller returns an error immediately instead of waiting, freeing up whatever resources it holds.
+        // Timeout includes admission; a started inference retains its permit until completion.
         let texts: Vec<String> = texts.iter().map(|text| text.to_string()).collect();
         let inner = Arc::clone(&self.inner);
-        let task = tokio::task::spawn_blocking(move || inner.embed_blocking(&texts));
+        let inference = Arc::clone(&self.inference);
+        let task = async move {
+            let permit = inference
+                .acquire_owned()
+                .await
+                .map_err(|error| internal(format!("embedding admission failed: {error}")))?;
+            // A timed-out caller must not release admission while its blocking inference still runs.
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                inner.embed_blocking(&texts)
+            })
+            .await
+            .map_err(|err| internal(format!("embedding task panicked: {err}")))?
+        };
         match tokio::time::timeout(EMBED_TIMEOUT, task).await {
-            Ok(joined) => {
-                joined.map_err(|err| internal(format!("embedding task panicked: {err}")))?
-            }
+            Ok(result) => result,
             Err(_) => Err(internal(format!(
                 "embedding timed out after {}s (inference queue congested?)",
                 EMBED_TIMEOUT.as_secs()
