@@ -738,3 +738,31 @@
          () = shutdown_signal() => {}
      }
      Ok(())
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -985,6 +985,25 @@
+     Ok(())
+ }
+ 
++/// Reads the start mode using the same command definition as the CLI entry point.
++/// Returns `None` for commands that do not start the application.
++///
++/// # Errors
++/// Returns the CLI parse error for invalid arguments.
++pub fn start_mode_from_args<I, T>(args: I) -> Result<Option<StartMode>, clap::Error>
++where
++    I: IntoIterator<Item = T>,
++    T: Into<std::ffi::OsString> + Clone,
++{
++    let cli = Cli::try_parse_from(args)?;
++    Ok(match cli.command {
++        Commands::Start { all, server_and_worker, worker, scheduler, .. } => {
++            Some(start_mode_from_flags(all, server_and_worker, worker, scheduler))
++        }
++        _ => None,
++    })
++}
++
+ fn create_root_span(environment: &Environment) -> tracing::Span {
+     tracing::span!(tracing::Level::DEBUG, "app", environment = %environment)
+ }

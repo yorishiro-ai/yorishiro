@@ -38,6 +38,14 @@ These fixes do not make job effects exactly-once: application transactions and i
 They do not prove or fix the separate, unexplained PostgreSQL authentication/cleanup delays seen in previous tests.
 Do not mix patched and unpatched Redis workers during rollout: drain and replace the worker fleet because unpatched workers do not participate in attempt fencing.
 
+## CLI integration extension
+
+`cli::start_mode_from_args` exposes start-mode parsing through Loco's existing command definition.
+This is an integration extension, not an upstream bug fix.
+It removes the application's duplicate Clap command tree while leaving application-specific worker-target validation outside Loco.
+The existing `integration::process_roles` tests exercise accepted CLI spellings and rejected targets through the real binary.
+Remove this extension when upstream exposes equivalent parsed start-mode information to application configuration hooks.
+
 ## Removal condition
 
 Replace this override with a published Loco release only when it contains equivalent atomic claim/reaper/completion fencing, payload-safe error logs, atomic enqueue and awaited resource cleanup.
