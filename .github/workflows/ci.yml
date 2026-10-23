@@ -487,6 +487,7 @@ jobs:
           # They still run in the full matrix, outside this shared-request DDL window.
           result=0
           uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests:: -- \
+            --skip models::query_embedding_requests:: \
             --skip requests::setup:: \
             --skip requests::ee_setup:: \
             --skip requests::stripe:: \

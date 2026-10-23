@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, TransactionTrait};
+use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect};
 use sha2::{Digest, Sha256};
 
 use crate::db::{AppContextBackend, DbHandle};
@@ -301,7 +301,7 @@ impl Entity {
     ) -> Result<CreatedApiKey, YorishiroError> {
         use crate::models::_entities::workspace_workspaces;
 
-        let txn = db.begin().await.internal()?;
+        let txn = crate::db::begin_write(db).await.internal()?;
 
         let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
             .one(&txn)
