@@ -107,11 +107,31 @@ async fn finish_job(
                 row.claim_until
             ))),
         );
+        let directory = tempfile::tempdir().expect("queue diagnostic directory");
+        match queue.dump(directory.path(), None, None).await {
+            Ok(path) => {
+                let jobs: serde_yaml::Value = serde_yaml::from_str(
+                    &std::fs::read_to_string(path).expect("read queue diagnostics"),
+                )
+                .expect("decode queue diagnostics");
+                if let Some(jobs) = jobs.as_sequence() {
+                    for job in jobs {
+                        eprintln!(
+                            "worker timeout queue job: id={:?}, name={:?}, status={:?}",
+                            job.get("id"),
+                            job.get("name"),
+                            job.get("status")
+                        );
+                    }
+                }
+            }
+            Err(error) => eprintln!("worker timeout queue inspection failed: {error}"),
+        }
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-            let activity = ctx.db.query_all_raw(sea_orm::Statement::from_string(
+            let activity = ctx.db.query_one_raw(sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT pid, state, wait_event_type, wait_event, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()",
-            )).await;
+                "SELECT COALESCE(jsonb_agg(jsonb_build_object('pid', pid, 'state', state, 'wait_type', wait_event_type, 'wait', wait_event, 'blockers', pg_blocking_pids(pid))), '[]'::jsonb) AS activity FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()",
+            )).await.map(|row| row.map(|row| row.try_get::<serde_json::Value>("", "activity")));
             eprintln!("worker timeout database activity: {activity:?}");
         }
     }
