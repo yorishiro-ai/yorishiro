@@ -483,10 +483,49 @@ jobs:
           since=$(date --utc +%Y-%m-%dT%H:%M:%S.%NZ)
           docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
             -c 'CREATE TEMP TABLE ordinary_request_ddl_probe (id integer)'
-          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests::api_keys::scope_rejection_does_not_touch_a_key_but_a_read_does
-          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests::api_keys::api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids
-          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests::schemas::
-          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests::relations::
+          # Dedicated deployments exercise global state, worker providers or fault injection.
+          # They still run in the full matrix, outside this shared-request DDL window.
+          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests:: -- \
+            --skip requests::setup:: \
+            --skip requests::ee_setup:: \
+            --skip requests::stripe:: \
+            --skip requests::official_templates:: \
+            --skip requests::queue:: \
+            --skip requests::query_worker:: \
+            --skip requests::fill_defaults:: \
+            --skip requests::api_keys::api_key_lifecycle_is_admin_only_and_secret_is_one_time \
+            --skip requests::audit_log::set_maintenance_is_recorded_and_readable_by_an_audit_key \
+            --skip requests::audit_log::undo_migration_job_is_recorded \
+            --skip requests::audit_log::an_audit_key_cannot_read_another_tenants_audit_log \
+            --skip requests::auth::signup_then_login_round_trip \
+            --skip requests::auth::signup_without_invite_creates_its_own_tenant \
+            --skip requests::auth::signup_without_invite_respects_the_tenant_cap \
+            --skip requests::auth::signup_cannot_raise_the_community_tenant_cap_with_configuration \
+            --skip requests::auth::create_tenant_serializes_on_its_advisory_lock \
+            --skip requests::entities::undo_restores_snapshotted_entities_and_counts_a_deleted_one \
+            --skip requests::import::concurrent_import_workers_keep_each_apps_database \
+            --skip requests::import::import_resolves_a_pre_existing_schema_for_every_entity_line \
+            --skip requests::inference::an_unlicensed_deployment_answers_the_same_without_a_valid_key \
+            --skip requests::inference::proposals_require_explicit_confirmation_and_undo_reverses_it \
+            --skip requests::inference::infer_fill_dispatch_failure_rolls_back_job \
+            --skip requests::marketplace::without_a_licence_the_marketplace_is_not_served \
+            --skip requests::members::owner_can_list_and_add_members \
+            --skip requests::mcp::fill_defaults_mcp_executes_and_enforces_migration_scope \
+            --skip requests::mcp::mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid \
+            --skip requests::mcp::mcp_search_asks_a_worker_to_embed_the_query \
+            --skip requests::oauth::find_or_create_refuses_a_new_tenant_past_the_cap \
+            --skip requests::oauth::find_or_create_provisions_an_active_workspace_with_a_general_notes_schema \
+            --skip requests::oauth::oauth_provisioning_policy_controls_new_caps \
+            --skip requests::search::search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result \
+            --skip requests::search::search_without_a_worker_times_out_as_service_unavailable_without_a_fallback \
+            --skip requests::search::a_result_for_an_expired_request_is_discarded \
+            --skip requests::search::a_worker_failure_reaches_the_caller_as_service_unavailable \
+            --skip requests::search::a_width_the_workspace_does_not_hold_is_refused_by_the_worker \
+            --skip requests::search::a_disabled_embedding_provider_is_reported_by_the_worker \
+            --skip requests::system::maintenance_is_readable_and_settable_over_rest \
+            --skip requests::system::a_full_lock_entered_over_rest_can_be_left_over_rest \
+            --skip requests::workspaces::owner_can_create_list_view_and_delete_workspaces \
+            --skip requests::workspaces::cannot_delete_a_tenants_only_workspace
           docker logs --since "$since" ${{ job.services.db.id }} > "$RUNNER_TEMP/ordinary-request-ddl.log" 2>&1
           if ! grep -Fq 'CREATE TEMP TABLE ordinary_request_ddl_probe' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
             echo '::error::PostgreSQL DDL logging was not observed.'
