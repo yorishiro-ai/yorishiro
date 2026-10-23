@@ -404,7 +404,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// and cannot change the entity.
 #[tokio::test]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
             tenant_id,
             workspace_id,

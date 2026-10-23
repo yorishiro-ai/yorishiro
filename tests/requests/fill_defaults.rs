@@ -6,7 +6,7 @@ use sea_orm::EntityTrait;
 use uuid::Uuid;
 use yorishiro::workers::target::WorkerTarget;
 
-pub(crate) use super::boot_request;
+pub(crate) use super::boot_request_isolated as boot_request;
 
 #[cfg(feature = "enterprise")]
 pub(crate) async fn finish(ctx: &AppContext, id: Uuid) {
@@ -112,7 +112,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
     use serde_json::json;
     use yorishiro::models::{api_keys::ApiKeyScope, entity_entities, schema_schemas};
 
-    super::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let super::fixtures::TestTenant { tenant_id: tenant, workspace_id: workspace, api_key: key, .. } = super::fixtures::TestTenant::create(&request, &ctx, super::fixtures::TenantArgs { key_scope: ApiKeyScope::Migration, ..Default::default() },
         ).await;
         let mut entity_id = None;
