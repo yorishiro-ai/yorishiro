@@ -701,7 +701,7 @@ mod conflict {
             }
             tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 while provider.calls.load(Ordering::SeqCst) == 0 {
-                    tokio::task::yield_now().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
             })
             .await
@@ -718,7 +718,7 @@ mod conflict {
                     if count == 3 {
                         break count;
                     }
-                    tokio::task::yield_now().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
             })
             .await;
@@ -768,7 +768,7 @@ mod conflict {
                     if done == 3 {
                         break;
                     }
-                    tokio::task::yield_now().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
             })
             .await
@@ -824,7 +824,7 @@ mod conflict {
                         {
                             break;
                         }
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                 })
                 .await
@@ -843,7 +843,7 @@ mod conflict {
             let outcome = std::panic::AssertUnwindSafe(async {
                 tokio::time::timeout(std::time::Duration::from_secs(1), async {
                     while provider.active.load(Ordering::SeqCst) != 1 {
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                 })
                 .await
@@ -855,7 +855,7 @@ mod conflict {
                     .unwrap()
                     .tenant_id;
                 let query_ctx = ctx.clone();
-                let query = tokio::spawn(async move {
+                let mut query = tokio::spawn(async move {
                     yorishiro::workers::query_embedding::embed_query(
                         &query_ctx,
                         tenant_id,
@@ -866,6 +866,9 @@ mod conflict {
                 });
                 let request_id = tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     loop {
+                        if query.is_finished() {
+                            panic!("query caller finished before its delivery was observed processing: {:?}", (&mut query).await);
+                        }
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
                         let jobs: Vec<loco_rs::bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
@@ -877,18 +880,24 @@ mod conflict {
                             break serde_json::from_value::<Uuid>(job.data["request_id"].clone())
                                 .unwrap();
                         }
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                 })
-                .await
-                .expect("query delivery waits for the document's embedding permit");
+                .await;
+                let request_id = match request_id {
+                    Ok(id) => id,
+                    Err(error) => {
+                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                        panic!("query delivery was not observed processing: {error}; caller_finished={}; queue={}", query.is_finished(), std::fs::read_to_string(dump).unwrap());
+                    }
+                };
                 assert_eq!(provider.active.load(Ordering::SeqCst), 1);
                 assert_eq!(provider.order.lock().unwrap().len(), 1);
                 assert!(provider.order.lock().unwrap()[0].contains("original"));
                 provider.release.add_permits(1);
                 tokio::time::timeout(std::time::Duration::from_secs(1), async {
                     while provider.order.lock().unwrap().len() < 2 {
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                 })
                 .await
@@ -987,7 +996,7 @@ mod conflict {
                         break serde_json::from_value::<Uuid>(job.data["lifecycle_id"].clone())
                             .unwrap();
                     }
-                    tokio::task::yield_now().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
             })
             .await;
@@ -1007,7 +1016,7 @@ mod conflict {
                 async {
                     tokio::time::timeout(std::time::Duration::from_secs(1), async {
                         while provider.active.load(Ordering::SeqCst) != 1 {
-                            tokio::task::yield_now().await;
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                         }
                     })
                     .await
@@ -1035,7 +1044,7 @@ mod conflict {
                             break serde_json::from_value::<Uuid>(job.data["lifecycle_id"].clone())
                                 .unwrap();
                         }
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     };
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
@@ -1055,7 +1064,7 @@ mod conflict {
                         if processing == 2 && provider.active.load(Ordering::SeqCst) == 1 {
                             break;
                         }
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
                     provider.release.add_permits(1);
@@ -1070,7 +1079,7 @@ mod conflict {
                                 && !error.contains("private scripted provider failure")));
                             break;
                         }
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                     provider.release.add_permits(1);
                     loop {
@@ -1088,7 +1097,7 @@ mod conflict {
                         if failed && completed {
                             break;
                         }
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                     let row = Entity::find_by_id(waiting_id)
                         .one(&ctx.db)
@@ -1145,7 +1154,7 @@ mod conflict {
         }
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while provider.active.load(Ordering::SeqCst) != 1 {
-                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         })
         .await
@@ -1160,7 +1169,7 @@ mod conflict {
                 .await
                 < 2
             {
-                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         })
         .await
@@ -1204,7 +1213,7 @@ mod conflict {
                 }) {
                     break;
                 }
-                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         })
         .await;
@@ -1289,7 +1298,7 @@ mod conflict {
                         let (id_b, _) = harness_b.enqueue(workspace_b, entity_b).await;
                         tokio::time::timeout(std::time::Duration::from_secs(3), async {
                             while aggregate.load(Ordering::SeqCst) < 2 {
-                                tokio::task::yield_now().await;
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                             }
                         })
                         .await
@@ -1304,7 +1313,7 @@ mod conflict {
                                 .status
                                 != LifecycleStatus::Completed.as_db_str()
                             {
-                                tokio::task::yield_now().await;
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                             }
                         })
                         .await
@@ -1328,7 +1337,7 @@ mod conflict {
                         .status
                         != LifecycleStatus::Completed.as_db_str()
                     {
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                 })
                 .await
