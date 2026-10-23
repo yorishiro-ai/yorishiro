@@ -485,13 +485,13 @@ jobs:
             -c 'CREATE TEMP TABLE ordinary_request_ddl_probe (id integer)'
           # Dedicated deployments exercise global state, worker providers or fault injection.
           # They still run in the full matrix, outside this shared-request DDL window.
+          result=0
           uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests:: -- \
             --skip requests::setup:: \
             --skip requests::ee_setup:: \
             --skip requests::stripe:: \
             --skip requests::official_templates:: \
             --skip requests::queue:: \
-            --skip requests::query_worker:: \
             --skip requests::fill_defaults:: \
             --skip requests::api_keys::api_key_lifecycle_is_admin_only_and_secret_is_one_time \
             --skip requests::audit_log::set_maintenance_is_recorded_and_readable_by_an_audit_key \
@@ -508,6 +508,7 @@ jobs:
             --skip requests::inference::an_unlicensed_deployment_answers_the_same_without_a_valid_key \
             --skip requests::inference::proposals_require_explicit_confirmation_and_undo_reverses_it \
             --skip requests::inference::infer_fill_dispatch_failure_rolls_back_job \
+            --skip requests::inference::the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant \
             --skip requests::marketplace::without_a_licence_the_marketplace_is_not_served \
             --skip requests::members::owner_can_list_and_add_members \
             --skip requests::mcp::fill_defaults_mcp_executes_and_enforces_migration_scope \
@@ -525,7 +526,7 @@ jobs:
             --skip requests::system::maintenance_is_readable_and_settable_over_rest \
             --skip requests::system::a_full_lock_entered_over_rest_can_be_left_over_rest \
             --skip requests::workspaces::owner_can_create_list_view_and_delete_workspaces \
-            --skip requests::workspaces::cannot_delete_a_tenants_only_workspace
+            --skip requests::workspaces::cannot_delete_a_tenants_only_workspace || result=$?
           docker logs --since "$since" ${{ job.services.db.id }} > "$RUNNER_TEMP/ordinary-request-ddl.log" 2>&1
           if ! grep -Fq 'CREATE TEMP TABLE ordinary_request_ddl_probe' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
             echo '::error::PostgreSQL DDL logging was not observed.'
@@ -537,6 +538,7 @@ jobs:
           fi
           docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
             -c "ALTER SYSTEM RESET log_statement" -c 'SELECT pg_reload_conf()'
+          exit "$result"
 
       - name: Upload ordinary request DDL evidence
         if: always() && matrix.backend == 'postgres'
