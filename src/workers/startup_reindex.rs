@@ -10,8 +10,6 @@
 use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
 
-use crate::workers::embedding_sync::resolve_worker_provider;
-
 /// The advisory lock key every replica contends on.
 const SCAN_LOCK: &str = "startup-reindex-scan";
 
@@ -57,7 +55,12 @@ async fn detect_startup_reindex(ctx: &AppContext) {
     };
 
     for workspace in workspaces {
-        let provider = match resolve_worker_provider(ctx, workspace.id).await {
+        let provider = match crate::models::workspace_workspaces::embedding_provider(
+            ctx,
+            workspace.id,
+        )
+        .await
+        {
             Ok(Some(provider)) => provider,
             Ok(None) => {
                 tracing::warn!(

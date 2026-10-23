@@ -15,9 +15,8 @@ pub(crate) fn install(ctx: &AppContext) {
             "browsing the marketplace and publishing a template version are unavailable on SQLite \
              and return backend_unsupported (501). Point DATABASE_URL at PostgreSQL to use them"
         );
-    } else {
-        ctx.shared_store
-            .insert(Arc::new(auth::TenantScopedAuthenticator)
-                as Arc<dyn crate::controllers::middleware::auth::Authenticator>);
     }
+    ctx.shared_store
+        .insert(Arc::new(auth::TenantScopedAuthenticator)
+            as Arc<dyn crate::controllers::middleware::auth::Authenticator>);
 }

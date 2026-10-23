@@ -54,7 +54,7 @@ impl ReindexArgs {
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
     // Resolve in the worker so workspace-specific overrides are honored without putting
     // credentials in the queue payload.
-    let provider = crate::workers::embedding_sync::resolve_worker_provider(ctx, args.workspace_id)
+    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?
         .ok_or_else(|| loco_rs::Error::Message("embedding provider absent".into()))?;

@@ -23,7 +23,7 @@ use crate::error::YorishiroError;
 use crate::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
 use crate::models::search;
 use crate::services::embedding::EmbedKind;
-use crate::workers::embedding_sync::{WorkerClass, resolve_worker_provider};
+use crate::workers::embedding_sync::WorkerClass;
 use crate::workers::target::WorkerTarget;
 
 /// How long a client is told to wait before retrying a search no worker answered.
@@ -101,7 +101,7 @@ async fn embed(
         message: "legacy query request has no durable caller deadline".into(),
         retry_after: RETRY_AFTER,
     })?;
-    let provider = resolve_worker_provider(ctx, workspace_id)
+    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, workspace_id)
         .await?
         .ok_or_else(|| YorishiroError::BackendUnavailable {
             message: "no embedding provider is configured on the worker".into(),

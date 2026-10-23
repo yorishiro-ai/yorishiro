@@ -2,7 +2,7 @@
 
 use crate::YorishiroError;
 use crate::controllers::middleware::auth::{self as base_auth, Authenticator};
-use crate::db::DbHandle;
+use crate::db::{AppContextBackend, DbHandle};
 use crate::error::ResultExt;
 use crate::models::api_keys::{ApiKeyScope, AuthContext, hash_key};
 use loco_rs::prelude::async_trait;
@@ -40,10 +40,19 @@ fn requested_workspace(headers: &[(String, String)]) -> RequestedWorkspace {
 impl Authenticator for TenantScopedAuthenticator {
     async fn authenticate(
         &self,
-        db: &DbHandle,
+        app: &loco_rs::app::AppContext,
         presented_key: &str,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
+        if app.is_sqlite() {
+            return base_auth::DefaultAuthenticator
+                .authenticate(app, presented_key, headers)
+                .await;
+        }
+        let db = app
+            .shared_store
+            .get::<DbHandle>()
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
         let pool = db.tenant.pool();
         let requested = match requested_workspace(headers) {
             RequestedWorkspace::Absent => None,

@@ -62,7 +62,7 @@ pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
 pub trait Authenticator: Send + Sync {
     async fn authenticate(
         &self,
-        db: &DbHandle,
+        app: &AppContext,
         presented_key: &str,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError>;
@@ -75,11 +75,19 @@ pub(crate) struct DefaultAuthenticator;
 impl Authenticator for DefaultAuthenticator {
     async fn authenticate(
         &self,
-        db: &DbHandle,
+        app: &AppContext,
         presented_key: &str,
         _headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
-        Entity::authenticate(db, presented_key).await
+        if app.is_sqlite() {
+            Entity::authenticate_sqlite(&app.db, presented_key).await
+        } else {
+            let db = app
+                .shared_store
+                .get::<DbHandle>()
+                .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+            Entity::authenticate(&db, presented_key).await
+        }
     }
 }
 
@@ -124,7 +132,7 @@ pub fn require_audit(ctx: &AuthContext) -> Result<(), YorishiroError> {
     }
 }
 
-/// Request authentication shared by transport adapters, with backend details kept here.
+/// Request authentication shared by transport adapters through the installed policy.
 pub(crate) struct RequestAuth<'a> {
     app: &'a AppContext,
 }
@@ -139,35 +147,12 @@ impl<'a> RequestAuth<'a> {
         key: &str,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
-        if self.app.is_sqlite() {
-            Entity::authenticate_sqlite(&self.app.db, key).await
-        } else {
-            let db = self.db()?;
-            let authenticator = self
-                .app
-                .shared_store
-                .get::<Arc<dyn Authenticator>>()
-                .ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!("Authenticator missing"))
-                })?;
-            authenticator.authenticate(&db, key, headers).await
-        }
-    }
-
-    fn db(&self) -> Result<DbHandle, YorishiroError> {
-        self.app
+        let authenticator = self
+            .app
             .shared_store
-            .get::<DbHandle>()
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))
-    }
-
-    async fn touch(&self, ctx: &AuthContext) -> Result<(), YorishiroError> {
-        if self.app.is_sqlite() {
-            Entity::touch_last_used(&self.app.db, ctx.api_key_id).await;
-        } else {
-            touch_last_used_on(&self.db()?, ctx.tenant_id, ctx.workspace_id, ctx.api_key_id).await;
-        }
-        Ok(())
+            .get::<Arc<dyn Authenticator>>()
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("Authenticator missing")))?;
+        authenticator.authenticate(self.app, key, headers).await
     }
 
     pub(crate) async fn authenticate(
@@ -176,7 +161,7 @@ impl<'a> RequestAuth<'a> {
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
-        self.touch(&ctx).await?;
+        Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
     }
 
@@ -188,7 +173,7 @@ impl<'a> RequestAuth<'a> {
     ) -> Result<AuthContext, YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
         require_scope(&ctx, required)?;
-        self.touch(&ctx).await?;
+        Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
     }
 
@@ -219,36 +204,12 @@ impl<'a> RequestAuth<'a> {
         write: bool,
     ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
         // Touch independently: read handlers roll their workspace transaction back on drop.
-        self.touch(&ctx).await?;
+        Entity::touch_authenticated(self.app, &ctx).await?;
         let txn = if write {
             crate::db::begin_workspace_write(self.app, ctx.tenant_id, ctx.workspace_id).await?
         } else {
             crate::db::begin_workspace(self.app, ctx.tenant_id, ctx.workspace_id).await?
         };
         Ok((ctx, txn))
-    }
-}
-
-/// Touches `last_used_at` through a connection freshly acquired for this workspace, logging (never failing the caller) on either call's error.
-pub(crate) async fn touch_last_used_on(
-    db: &DbHandle,
-    tenant_id: uuid::Uuid,
-    workspace_id: uuid::Uuid,
-    api_key_id: uuid::Uuid,
-) {
-    match db
-        .tenant
-        .acquire_for_workspace(tenant_id, workspace_id)
-        .await
-    {
-        Ok(mut conn) => {
-            if let Err(err) = Entity::touch_last_used_on_connection(conn.as_mut(), api_key_id).await
-            {
-                tracing::warn!(error = %err, "failed to update api key last_used_at");
-            }
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to acquire connection to touch last_used_at");
-        }
     }
 }

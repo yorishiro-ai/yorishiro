@@ -8,6 +8,22 @@ pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Mo
 
 mod tenancy;
 
+/// Resolves the workspace override on each delivery, falling back to the process's deployment provider.
+pub(crate) async fn embedding_provider(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: Uuid,
+) -> Result<Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError>
+{
+    Ok(
+        match crate::workspace_embedding_provider(&ctx.db, workspace_id).await? {
+            Some(provider) => Some(provider),
+            None => ctx
+                .shared_store
+                .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
+        },
+    )
+}
+
 pub(crate) use tenancy::{
     delete_workspace, get_workspace, get_workspace_tenant, list_workspaces,
     workspace_count_lock_key,

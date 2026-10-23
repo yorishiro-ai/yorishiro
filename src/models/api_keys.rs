@@ -2,7 +2,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, TransactionTrait};
 use sha2::{Digest, Sha256};
 
-use crate::db::DbHandle;
+use crate::db::{AppContextBackend, DbHandle};
 use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 
@@ -148,7 +148,7 @@ impl Entity {
     /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the SeaORM entity API.
     /// Matches the SQL function's single-argument overload exactly: only a workspace-scoped key (`workspace_id` set) resolves; a tenant-scoped key matches nothing here either, same as on Postgres.
     ///
-    /// Deliberately not routed through the `Authenticator` trait: that trait is the seam for replacing the PostgreSQL authentication rule, and SQLite has no second rule to substitute, so there is nothing for the trait to select between on this backend.
+    /// The default authenticator selects this implementation for SQLite.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -168,6 +168,39 @@ impl Entity {
             user_id: key.user_id,
             audit: key.audit,
         })
+    }
+
+    /// Records authenticated usage outside the request transaction, preserving read-only requests' timestamps.
+    /// Connection failures are best-effort on both backends and never reject a valid credential.
+    pub(crate) async fn touch_authenticated(
+        app: &loco_rs::app::AppContext,
+        auth: &AuthContext,
+    ) -> Result<(), YorishiroError> {
+        if app.is_sqlite() {
+            Self::touch_last_used(&app.db, auth.api_key_id).await;
+            return Ok(());
+        }
+        let db = app
+            .shared_store
+            .get::<DbHandle>()
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+        match db
+            .tenant
+            .acquire_for_workspace(auth.tenant_id, auth.workspace_id)
+            .await
+        {
+            Ok(mut conn) => {
+                if let Err(error) =
+                    Self::touch_last_used_on_connection(conn.as_mut(), auth.api_key_id).await
+                {
+                    tracing::warn!(%error, "failed to update api key last_used_at");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to acquire connection to touch last_used_at");
+            }
+        }
+        Ok(())
     }
 
     /// Records the key's last-used timestamp on a raw `sqlx` connection.
