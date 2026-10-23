@@ -334,19 +334,23 @@ async fn build_local_provider(
     let model_path = model_path.display().to_string();
     let tokenizer_path = tokenizer_path.display().to_string();
 
-    let provider = local::LocalEmbeddingProvider::load(local::LocalEmbeddingConfig {
+    let local_config = local::LocalEmbeddingConfig {
         model_path: model_path.clone().into(),
         tokenizer_path: tokenizer_path.clone().into(),
         def,
         max_sequence_length,
-    })
-    .map_err(|err| {
-        anyhow::anyhow!(
-            "{err}\n\nthe local embedding provider needs '{model_path}' and \
+    };
+    let provider =
+        tokio::task::spawn_blocking(move || local::LocalEmbeddingProvider::load(local_config))
+            .await
+            .map_err(|err| anyhow::anyhow!("local embedding model loader task failed: {err}"))?
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "{err}\n\nthe local embedding provider needs '{model_path}' and \
              '{tokenizer_path}', or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an \
              OpenAI-compatible endpoint instead"
-        )
-    })?;
+                )
+            })?;
     tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");
     Ok(std::sync::Arc::new(provider))
 }

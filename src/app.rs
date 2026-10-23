@@ -41,7 +41,6 @@ pub(crate) fn app_version() -> String {
 /// Returns an error when the configuration is invalid, or when the command starts workers without a valid worker target.
 pub(crate) async fn load_config(env: &Environment) -> Result<Config> {
     let mut config = crate::data::config::load(env).await?;
-    crate::data::config::validate(&config)?;
     let start = crate::workers::start::worker_start_from_args(std::env::args_os())
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     serve_start(start, &mut config);
@@ -67,7 +66,6 @@ pub(crate) async fn boot<H: Hooks>(
     environment: &Environment,
     mut config: Config,
 ) -> Result<BootResult> {
-    crate::data::config::validate_queue_policy(&config)?;
     crate::data::config::validate(&config)?;
     let start = crate::workers::start::worker_start_from_mode(&mode)
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
