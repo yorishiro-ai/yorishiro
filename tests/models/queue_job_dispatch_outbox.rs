@@ -97,6 +97,16 @@ async fn durable_claim_excludes_a_second_relay_and_requires_matching_ack_token()
             .await
             .unwrap()
         );
+        assert!(matches!(
+            yorishiro::models::queue_job_lifecycles::Entity::start_at(
+                &db,
+                id,
+                chrono::Utc::now().fixed_offset()
+            )
+            .await
+            .unwrap(),
+            yorishiro::models::queue_job_lifecycles::Admission::Started { .. }
+        ));
         assert!(
             yorishiro::models::queue_job_dispatch_outbox::acknowledge_dispatch(
                 &db,

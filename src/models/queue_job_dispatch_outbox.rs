@@ -367,7 +367,20 @@ pub async fn acknowledge_dispatch(
     claim_token: Uuid,
     provider_job_id: &str,
 ) -> Result<bool, DbErr> {
-    let txn = db.begin().await?;
+    let txn = crate::db::begin_write(db).await?;
+    let lifecycle_id = outbox::Entity::find_by_id(id)
+        .one(&txn)
+        .await?
+        .and_then(|row| row.lifecycle_id);
+    // Retry writers lock lifecycle before outbox; acknowledgement must use the same order.
+    let lifecycle = if let Some(lifecycle_id) = lifecycle_id {
+        lifecycle::Entity::find_by_id(lifecycle_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+    } else {
+        None
+    };
     let result = outbox::Entity::update_many()
         .col_expr(outbox::Column::PublishedAt, Expr::current_timestamp())
         .col_expr(outbox::Column::ClaimToken, Expr::val(None::<String>))
@@ -385,14 +398,12 @@ pub async fn acknowledge_dispatch(
         txn.rollback().await?;
         return Ok(false);
     }
-    if let Some(lifecycle_id) = outbox::Entity::find_by_id(id)
-        .one(&txn)
-        .await?
-        .and_then(|row| row.lifecycle_id)
+    if let Some(lifecycle) = lifecycle
+        && lifecycle.status == LifecycleStatus::Queued.as_db_str()
     {
         crate::models::queue_job_lifecycles::Entity::mark_dispatched(
             &txn,
-            lifecycle_id,
+            lifecycle.id,
             provider_job_id,
         )
         .await?;
