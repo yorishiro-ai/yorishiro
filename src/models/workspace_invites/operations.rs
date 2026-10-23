@@ -95,32 +95,20 @@ pub async fn redeem_invite_at(
 ) -> Result<Option<RedeemedInvite>, YorishiroError> {
     let token_hash = hash_key(raw_token);
 
-    // Read first to build the response: the update itself does not return rows affected as model data, and a second SELECT after the UPDATE could observe a different row (e.g. one this same call just marked used) if invites were ever deletable, which they are not, so this is safe, not merely convenient.
-    let invite = Entity::find()
-        .filter(Column::TokenHash.eq(token_hash.clone()))
+    let invite = Entity::update_many()
+        .col_expr(Column::UsedAt, sea_orm::sea_query::Expr::value(now))
+        .filter(Column::TokenHash.eq(token_hash))
         .filter(Column::UsedAt.is_null())
         .filter(Column::ExpiresAt.gt(now))
-        .one(conn)
+        .exec_with_returning(conn)
         .await
-        .internal()?;
+        .internal()?
+        .into_iter()
+        .next();
 
     let Some(invite) = invite else {
         return Ok(None);
     };
-
-    let update_result = Entity::update_many()
-        .col_expr(Column::UsedAt, sea_orm::sea_query::Expr::value(now))
-        .filter(Column::Id.eq(invite.id))
-        .filter(Column::UsedAt.is_null())
-        .filter(Column::ExpiresAt.gt(now))
-        .exec(conn)
-        .await
-        .internal()?;
-
-    if update_result.rows_affected == 0 {
-        // Lost the race: another concurrent redemption already claimed this token between the read above and this UPDATE.
-        return Ok(None);
-    }
 
     let role = MembershipRole::from_db_str(&invite.role).ok_or_else(|| {
         YorishiroError::Internal(anyhow::anyhow!(
