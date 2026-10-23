@@ -515,7 +515,8 @@ jobs:
           RUST_BACKTRACE: "1"
           YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
           YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
-        run: uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }}
+        run: |
+          RUSTC_BOOTSTRAP=1 uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- -Z unstable-options --report-time
 
       - name: Remove the matrix Valkey service
         if: always() && matrix.queue_key == 'valkey'

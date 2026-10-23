@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use loco_rs::app::{AppContext, Hooks};
-use sea_orm::EntityTrait;
+use sea_orm::{ConnectionTrait, EntityTrait};
 use uuid::Uuid;
 use yorishiro::workers::target::WorkerTarget;
 
@@ -90,6 +90,31 @@ async fn finish_job(
         }))
         .catch_unwind()
         .await;
+    if matches!(&result, Ok(Err(_))) {
+        let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(id)
+            .one(&ctx.db)
+            .await;
+        let dispatch =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await;
+        eprintln!(
+            "worker timeout: lifecycle={:?}, dispatch={:?}",
+            lifecycle.map(|row| row.map(|row| (row.status, row.attempt, row.provider_job_id))),
+            dispatch.map(|row| row.map(|row| (
+                row.published_at,
+                row.last_attempt_at,
+                row.claim_until
+            ))),
+        );
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+            let activity = ctx.db.query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT pid, state, wait_event_type, wait_event, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()",
+            )).await;
+            eprintln!("worker timeout database activity: {activity:?}");
+        }
+    }
     yorishiro::App::on_shutdown(&worker_ctx).await;
     let shutdown = queue.shutdown();
     let joined = tokio::time::timeout(Duration::from_secs(10), worker).await;
