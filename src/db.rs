@@ -357,14 +357,8 @@ impl TenantDb {
         // SeaORM has no API for executing non-SELECT configuration statements, so raw SQL is required.
         txn.execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            "SELECT set_config('app.current_tenant', $1, true)",
-            [tenant_id.to_string().into()],
-        ))
-        .await?;
-        txn.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT set_config('app.current_workspace', $1, true)",
-            [workspace_id.to_string().into()],
+            "SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true)",
+            [tenant_id.to_string().into(), workspace_id.to_string().into()],
         ))
         .await?;
 
@@ -385,11 +379,10 @@ impl TenantDb {
     {
         let mut conn = self.pool.acquire().await?;
 
-        sea_orm::sqlx::query("SELECT set_config('app.current_tenant', $1, false)")
+        sea_orm::sqlx::query(
+            "SELECT set_config('app.current_tenant', $1, false), set_config('app.current_workspace', $2, false)",
+        )
             .bind(tenant_id.to_string())
-            .execute(conn.as_mut())
-            .await?;
-        sea_orm::sqlx::query("SELECT set_config('app.current_workspace', $1, false)")
             .bind(workspace_id.to_string())
             .execute(conn.as_mut())
             .await?;
