@@ -1,5 +1,6 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/db.rs	fn	begin_workspace	integration-test: workspace model tests use the production transaction and RLS selection instead of duplicating backend branches.
 src/app.rs	use	crate::initializers::timezone::{cli_requires_timezone_gate,cli_timezone_gate_result}	integration-test: preserve the existing CLI gate imports while moving implementation into its lifecycle owner.
 src/workers/mod.rs	mod	fill_defaults	integration-test: request tests register the production migration worker on the configured queue provider.
 src/workers/fill_defaults.rs	struct	FillDefaultsWorker	integration-test: REST and MCP tests prove migration waits for and executes on the selected Loco queue provider.

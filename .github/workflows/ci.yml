@@ -466,6 +466,44 @@ jobs:
             exit 1
           fi
 
+      - name: Verify ordinary requests do not create databases
+        if: matrix.backend == 'postgres'
+        env:
+          LOCO_ENV: ${{ matrix.loco_env }}
+          DATABASE_URL: ${{ matrix.database_url }}
+          QUEUE_URL: ${{ matrix.queue_url }}
+          YORISHIRO_VALKEY_TEST_URL: ${{ matrix.queue_url }}
+          DB_MAX_CONNECTIONS: 100
+          DB_CONNECT_TIMEOUT: 5000
+          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+          YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
+        run: |
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
+          since=$(date --utc +%Y-%m-%dT%H:%M:%S.%NZ)
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c 'CREATE TEMP TABLE ordinary_request_ddl_probe (id integer)'
+          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests::api_keys::scope_rejection_does_not_touch_a_key_but_a_read_does
+          docker logs --since "$since" ${{ job.services.db.id }} > "$RUNNER_TEMP/ordinary-request-ddl.log" 2>&1
+          if ! grep -Fq 'CREATE TEMP TABLE ordinary_request_ddl_probe' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
+            echo '::error::PostgreSQL DDL logging was not observed.'
+            exit 1
+          fi
+          if grep -Ei '(CREATE|DROP)[[:space:]]+DATABASE[[:space:]]' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
+            echo '::error::The ordinary API-key request created or dropped a database.'
+            exit 1
+          fi
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c "ALTER SYSTEM RESET log_statement" -c 'SELECT pg_reload_conf()'
+
+      - name: Upload ordinary request DDL evidence
+        if: always() && matrix.backend == 'postgres'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ordinary-request-ddl-${{ matrix.edition }}-${{ matrix.queue_key }}
+          path: ${{ runner.temp }}/ordinary-request-ddl.log
+          if-no-files-found: error
+
       - name: Run tests
         env:
           LOCO_ENV: ${{ matrix.loco_env }}

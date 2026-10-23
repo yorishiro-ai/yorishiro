@@ -26,18 +26,6 @@ impl AppContextBackend for loco_rs::app::AppContext {
     }
 }
 
-/// Registers SQLite extensions (sqlite-vec) so every connection opened on a SQLite URL
-/// auto-loads them.
-///
-/// Called from two places — `src/bin/main.rs` (covers all CLI subcommands) and
-/// `App::boot` (covers the test harness, which never runs `main.rs`) — each guarded by
-/// `std::sync::Once::call_once` so the C-level registration is atomic and idempotent.
-///
-/// The registration must happen **before** any SQLite connection opens: `loco-rs 1.2.0`'s
-/// `cli::main` calls `create_context::<H>` unconditionally at line 777, before the
-/// `match cli.command` that dispatches to `Start`/`create_app`/`H::boot`.  Every
-/// subcommand (`task`, `db`, `scheduler`) opens `ctx.db` there, before any `Hooks` method
-/// runs.
 /// Builds tenant and identity pools on PostgreSQL and stores them as the [`DbHandle`] every authenticated path resolves through.
 ///
 /// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI).
@@ -54,61 +42,11 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
     Ok(())
 }
 
-/// Replaces Loco's PostgreSQL application pool with one that initializes the
-/// configured session timezone on every physical connection.
+/// Replaces Loco's application pool with the backend's configured timezone hooks.
 ///
 /// # Errors
 /// Returns an error if the configured application pool cannot be opened.
-pub(crate) async fn replace_postgres_app_pool(
-    ctx: &mut loco_rs::app::AppContext,
-) -> loco_rs::Result<()> {
-    if !ctx.is_postgres() {
-        return Ok(());
-    }
-
-    let config = &ctx.config.database;
-    let mut options = sea_orm::ConnectOptions::new(config.uri.clone());
-    options
-        .max_connections(config.max_connections)
-        .min_connections(config.min_connections)
-        .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
-        .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
-        .sqlx_logging(config.enable_logging);
-    if let Some(acquire_timeout) = config.acquire_timeout {
-        options.acquire_timeout(std::time::Duration::from_millis(acquire_timeout));
-    }
-
-    postgres_session_options(
-        &mut options,
-        crate::time::configured(ctx).to_string(),
-        false,
-    );
-
-    let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
-        loco_rs::Error::Message(format!("failed to build application pool: {error}"))
-    })?;
-    let previous = std::mem::replace(&mut ctx.db, replacement);
-    previous.close_by_ref().await.map_err(|error| {
-        loco_rs::Error::Message(format!(
-            "failed to close Loco's default application pool: {error}"
-        ))
-    })?;
-    Ok(())
-}
-
-/// Replaces Loco's SQLite application pool with one whose timestamp default uses the configured zone.
-///
-/// SQLite's special keyword is shadowed by a per-connection scalar so each app context owns its zone.
-///
-/// # Errors
-/// Returns an error when a replacement connection or per-connection callback fails.
-pub(crate) async fn replace_sqlite_app_pool(
-    ctx: &mut loco_rs::app::AppContext,
-) -> loco_rs::Result<()> {
-    if !ctx.is_sqlite() {
-        return Ok(());
-    }
-    let zone = crate::time::configured(ctx);
+pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco_rs::Result<()> {
     let config = &ctx.config.database;
     let mut options = sea_orm::ConnectOptions::new(config.uri.clone());
     options
@@ -120,23 +58,37 @@ pub(crate) async fn replace_sqlite_app_pool(
     if let Some(timeout) = config.acquire_timeout {
         options.acquire_timeout(std::time::Duration::from_millis(timeout));
     }
-    ctx.db.close_by_ref().await.map_err(|error| {
+    let zone = crate::time::configured(ctx);
+    if ctx.is_sqlite() {
+        require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
+        // Close before reopening SQLite so connection-local functions own the configured zone.
+        ctx.db.close_by_ref().await.map_err(|error| {
+            loco_rs::Error::Message(format!(
+                "failed to close Loco's default SQLite app pool: {error}"
+            ))
+        })?;
+        options.map_sqlx_sqlite_pool_opts(move |pool| {
+            pool.after_connect(move |conn, _meta| {
+                Box::pin(async move {
+                    register_sqlite_timestamp(conn, zone).await?;
+                    Ok(())
+                })
+            })
+        });
+    } else if ctx.is_postgres() {
+        postgres_session_options(&mut options, zone.to_string(), false);
+    } else {
+        return Ok(());
+    }
+    let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
+        loco_rs::Error::Message(format!("failed to build application pool: {error}"))
+    })?;
+    let previous = std::mem::replace(&mut ctx.db, replacement);
+    previous.close_by_ref().await.map_err(|error| {
         loco_rs::Error::Message(format!(
-            "failed to close Loco's default SQLite app pool: {error}"
+            "failed to close Loco's default application pool: {error}"
         ))
     })?;
-    options.map_sqlx_sqlite_pool_opts(move |pool| {
-        pool.after_connect(move |conn, _meta| {
-            Box::pin(async move {
-                register_sqlite_timestamp(conn, zone).await?;
-                Ok(())
-            })
-        })
-    });
-    let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
-        loco_rs::Error::Message(format!("failed to build SQLite app pool: {error}"))
-    })?;
-    ctx.db = replacement;
     Ok(())
 }
 
@@ -320,7 +272,8 @@ pub fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
         .collect()
 }
 
-/// Public entry point for `main.rs` and `App::boot` to call.
+/// Registers sqlite-vec once before `main.rs` or `App::boot` opens any SQLite connections.
+/// The CLI creates its context before dispatching subcommands, so registration cannot wait for a hook.
 ///
 /// The configured-zone timestamp function is installed separately per app-pool connection.
 pub fn register_sqlite_extensions() {
@@ -468,7 +421,7 @@ pub async fn set_session_timezone(db: &DatabaseConnection, timezone: &str) -> Re
 ///
 /// # Errors
 /// Returns an error if the transaction cannot be started, or if a PostgreSQL deployment has no tenant pool.
-pub(crate) async fn begin_workspace(
+pub async fn begin_workspace(
     ctx: &loco_rs::app::AppContext,
     tenant_id: Uuid,
     workspace_id: Uuid,

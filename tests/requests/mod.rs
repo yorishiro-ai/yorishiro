@@ -380,17 +380,7 @@ pub(crate) async fn workspace_txn(
     tenant_id: uuid::Uuid,
     workspace_id: uuid::Uuid,
 ) -> sea_orm::DatabaseTransaction {
-    use sea_orm::TransactionTrait;
-    use yorishiro::db::{AppContextBackend, DbHandle};
-
-    if ctx.is_sqlite() {
-        return ctx.db.begin().await.expect("begin workspace transaction");
-    }
-    ctx.shared_store
-        .get::<DbHandle>()
-        .expect("tenant pool")
-        .tenant
-        .begin_for_workspace(tenant_id, workspace_id)
+    yorishiro::db::begin_workspace(ctx, tenant_id, workspace_id)
         .await
         .expect("begin workspace transaction")
 }
