@@ -775,3 +775,33 @@
  fn create_root_span(environment: &Environment) -> tracing::Span {
      tracing::span!(tracing::Level::DEBUG, "app", environment = %environment)
  }
+--- a/src/testing/db.rs
++++ b/src/testing/db.rs
+@@ -125,6 +125,7 @@
+                 .execute(&pool)
+                 .await
+                 .expect("create DB schema");
++            pool.close().await;
+         })
+     }
+ 
+@@ -139,7 +140,10 @@
+         // safe to call from `Drop::drop` since nothing here is `.await`ed on
+         // the caller's runtime.
+         std::thread::spawn(move || {
+-            let rt = tokio::runtime::Runtime::new().expect("create cleanup runtime");
++            let rt = tokio::runtime::Builder::new_current_thread()
++                .enable_all()
++                .build()
++                .expect("create cleanup runtime");
+ 
+             rt.block_on(async {
+                 let pool = Pool::<Postgres>::connect(&connection_string)
+@@ -150,6 +154,7 @@
+                     .execute(&pool)
+                     .await
+                     .expect("Drop database");
++                pool.close().await;
+             });
+         })
+         .join()
