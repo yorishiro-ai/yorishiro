@@ -222,10 +222,7 @@ fn postgres_session_options(options: &mut sea_orm::ConnectOptions, timezone: Str
             let timezone = release_timezone.clone();
             Box::pin(async move {
                 if tenant {
-                    sea_orm::sqlx::query("RESET app.current_tenant")
-                        .execute(&mut *conn)
-                        .await?;
-                    sea_orm::sqlx::query("RESET app.current_workspace")
+                    sea_orm::sqlx::raw_sql("RESET app.current_tenant; RESET app.current_workspace")
                         .execute(&mut *conn)
                         .await?;
                 }
