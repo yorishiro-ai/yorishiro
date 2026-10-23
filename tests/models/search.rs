@@ -681,7 +681,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 )).one(&ctx.db).await.expect("observe workspace advisory lock")
                     .expect("lock observation row").waiting;
                 if waiting { break; }
-                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         }).await.expect("second reindex waits for this workspace's advisory lock");
         release.add_permits(1);

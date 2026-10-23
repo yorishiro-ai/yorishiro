@@ -218,7 +218,7 @@ async fn concurrent_fetches_use_distinct_staging_paths_and_rename_only_verified_
                 let body = futures::stream::once(async move {
                     tokio::time::timeout(Duration::from_secs(5), async {
                         while partial_files(&partial_dir).len() != 2 {
-                            tokio::task::yield_now().await;
+                            tokio::time::sleep(Duration::from_millis(20)).await;
                         }
                         assert!(!partial_dir.join("test.bin").exists());
                         staged.wait().await;

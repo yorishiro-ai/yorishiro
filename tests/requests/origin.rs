@@ -346,7 +346,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
                         )).one(&db).await.expect("observe revision lock wait")
                             .expect("lock observation").waiting;
                         if waiting { break; }
-                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                 }).await.expect("request waits on the target advisory lock");
             }

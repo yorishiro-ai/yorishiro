@@ -247,7 +247,7 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
                     assert!(!diagnostic.contains("model is warming up"));
                     break;
                 }
-                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
         .await
