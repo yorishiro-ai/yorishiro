@@ -55,6 +55,8 @@ async fn postgres_pool_replacement_keeps_uri_settings_without_replaying_startup(
     }
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
         let mut config = ctx.config.clone();
+        config.database.min_connections = 1;
+        config.database.max_connections = 2;
         let mut uri = reqwest::Url::parse(&config.database.uri).unwrap();
         uri.query_pairs_mut()
             .append_pair("options", "-c application_name=startup-session-test");
@@ -85,6 +87,36 @@ async fn postgres_pool_replacement_keeps_uri_settings_without_replaying_startup(
                 assert_eq!(name, "startup-session-test");
             }
         }
+        // Hold the other slot so the released scoped session must be reused.
+        let tenant_id = uuid::Uuid::now_v7();
+        let workspace_id = uuid::Uuid::now_v7();
+        let mut scoped = handle
+            .tenant
+            .acquire_for_workspace(tenant_id, workspace_id)
+            .await
+            .unwrap();
+        let (pid, tenant, workspace): (i32, String, String) = sea_orm::sqlx::query_as(
+            "SELECT pg_backend_pid(), current_setting('app.current_tenant'), current_setting('app.current_workspace')",
+        )
+        .fetch_one(&mut *scoped)
+        .await
+        .unwrap();
+        assert_eq!(tenant, tenant_id.to_string());
+        assert_eq!(workspace, workspace_id.to_string());
+        let other = handle.tenant.pool().acquire().await.unwrap();
+        drop(scoped);
+        let mut reused = handle.tenant.pool().acquire().await.unwrap();
+        let (reused_pid, tenant, workspace): (i32, String, String) = sea_orm::sqlx::query_as(
+            "SELECT pg_backend_pid(), current_setting('app.current_tenant'), current_setting('app.current_workspace')",
+        )
+        .fetch_one(&mut *reused)
+        .await
+        .unwrap();
+        assert_eq!(reused_pid, pid);
+        assert!(tenant.is_empty(), "tenant scope leaked across pool release");
+        assert!(workspace.is_empty(), "workspace scope leaked across pool release");
+        drop(reused);
+        drop(other);
         let count: i64 = sea_orm::sqlx::query_scalar("SELECT count(*) FROM startup_probe")
             .fetch_one(&handle.identity)
             .await
