@@ -1,6 +1,6 @@
 # MCP Tools
 
-The inventory below is a checked-in review contract derived from the composed `rmcp 3.4.0` runtime routers.
+The inventory below is a checked-in review contract derived from the composed `rmcp` runtime routers.
 Runtime discovery and dispatch remain authoritative, so this document must not be used as a runtime registry.
 The contract test fails when names, descriptions, or input schemas drift from the generated runtime inventory.
 
@@ -151,7 +151,7 @@ Input schema:
 
 ### `fill_defaults`
 
-Fill absent required fields in entities behind a schema's active version (requires migration scope). Takes a snapshot so the operation can be undone with the migration undo endpoint.
+Enqueue a fill-defaults job (requires migration scope). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log.
 
 Input schema:
 
@@ -329,9 +329,31 @@ Input schema:
 }
 ```
 
+### `import_job_status`
+
+Poll a queued JSON Lines import (requires schema scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `import_jsonl`
 
-Bulk-import schemas/entities/relations from a JSON Lines document in the export format (requires schema scope, since importing schemas is itself a schema-scope-only operation). Runs as a single transaction: either every record in `jsonl` is applied, or the first error rolls back everything imported so far.
+Bulk-import schemas/entities/relations from a JSON Lines document in the export format (requires schema scope, since importing schemas is itself a schema-scope-only operation). Returns a job_id; poll import_job_status. The worker applies every record in one transaction or rolls everything back.
 
 Input schema:
 
