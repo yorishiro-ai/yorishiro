@@ -12,9 +12,3 @@ impl ActiveModelBehavior for ActiveModel {
         Ok(this)
     }
 }
-
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}

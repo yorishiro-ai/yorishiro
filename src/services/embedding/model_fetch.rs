@@ -34,11 +34,10 @@ pub struct Artifact {
 
 /// One selectable local model: everything `super::build_local_provider` and [`super::local`] need to fetch, load, and identify it, and nothing that lives outside this module reaches for a bare `REPO`/`REVISION` constant instead.
 ///
-/// The model and tokenizer artifacts live on the same definition rather than as two independent statics, deliberately: both output 768 dimensions on the two models defined below, so a mismatched model/tokenizer pairing would pass every shape check silently, embedding with the wrong vocabulary while looking healthy.
-/// Pairing them on one struct makes that swap a compile-time impossibility rather than a runtime risk to guard against.
+/// Model and tokenizer artifacts share one definition so their pinned revisions stay together.
 pub struct LocalModelDef {
     /// The model identifier reported by [`super::EmbeddingProvider::model_name`] and stamped onto a workspace at creation.
-    /// A HuggingFace repo id, since that is the only identifier that survives an implementation change (this codebase's own `ort` to `candle` migration already outlived one such identifier).
+    /// Uses the HuggingFace repository identifier independently of the inference engine.
     pub(super) id: &'static str,
     /// Selects this definition via `YORISHIRO_LOCAL_MODEL`, and names its own cache/default-path subdirectory.
     /// Short and filesystem-safe, unlike `Self::id`, which contains a `/`.

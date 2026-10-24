@@ -92,7 +92,11 @@ fn test_environment(environment: &Environment) -> Environment {
     match environment {
         Environment::Test => {
             if let Ok(topology) = crate::data::env::Env::TestTopology.read() {
-                return Environment::Any(format!("test_{}", topology.replace('-', "_")));
+                return Environment::Any(match topology.as_str() {
+                    "sqlite-sqlite" => "test_sqlite".into(),
+                    "postgres-postgres" => "test_postgres".into(),
+                    _ => format!("test_{}", topology.replace('-', "_")),
+                });
             }
             let sqlite = crate::data::env::Env::DatabaseUrl
                 .read()

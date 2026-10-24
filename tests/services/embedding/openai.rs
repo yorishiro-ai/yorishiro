@@ -118,15 +118,15 @@ async fn production_response_validation_rejects_invalid_json_count_and_width() {
         (
             r#"{"data":[{"index":0,"embedding":[1.0,2.0]},{"embedding":[3.0,4.0]}]}"#,
             vec!["first", "second"],
-            Some("invalid vector indices"),
+            None,
         ),
         (
-            r#"{"data":[{"embedding":[1.0,2.0]}]}"#,
+            r#"{"data":[{"index":0,"embedding":[1.0,2.0]}]}"#,
             vec!["first", "second"],
             Some("1 vectors for 2 inputs"),
         ),
         (
-            r#"{"data":[{"embedding":[1.0]}]}"#,
+            r#"{"data":[{"index":0,"embedding":[1.0]}]}"#,
             vec!["text"],
             Some("length 1 but expected 2"),
         ),

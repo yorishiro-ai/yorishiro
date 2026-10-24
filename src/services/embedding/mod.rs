@@ -173,123 +173,11 @@ pub async fn build_embedding_provider(
     }
 }
 
-/// What became of one old `YORISHIRO_ONNX_*` variable.
-/// The two outcomes carry genuinely different risk, so [`reject_renamed_onnx_vars`] must not give
-/// them the same message: a stale `Renamed` variable can silently start this provider on the
-/// wrong model, but a stale `Removed` one cannot, since nothing reads it and there is no
-/// alternative behaviour left for it to have selected.
-enum OnnxVarFate {
-    /// Reading this old name would have changed which model, tokenizer, or truncation this
-    /// provider used, so leaving it set risks starting a different model than the deployment
-    /// thinks it has.
-    Renamed(&'static str),
-    /// This variable named a mechanism removed outright.
-    /// `alternative` names where the operator should put the files instead, if one exists.
-    Removed { alternative: Option<&'static str> },
-}
-
-/// The `YORISHIRO_ONNX_*` variables this deployment might still have set from before the local
-/// provider moved from `ort`/ONNX to candle.
-const RENAMED_ONNX_VARS: [(crate::data::env::RetiredEnv, OnnxVarFate); 7] = [
-    (
-        crate::data::env::RetiredEnv::OnnxModelPath,
-        OnnxVarFate::Renamed("YORISHIRO_LOCAL_MODEL_PATH"),
-    ),
-    (
-        crate::data::env::RetiredEnv::OnnxTokenizerPath,
-        OnnxVarFate::Renamed("YORISHIRO_LOCAL_TOKENIZER_PATH"),
-    ),
-    (
-        crate::data::env::RetiredEnv::LocalModelPath,
-        OnnxVarFate::Removed {
-            alternative: Some("models/<short_id>/model.safetensors"),
-        },
-    ),
-    (
-        crate::data::env::RetiredEnv::LocalTokenizerPath,
-        OnnxVarFate::Removed {
-            alternative: Some("models/<short_id>/tokenizer.json"),
-        },
-    ),
-    (
-        crate::data::env::RetiredEnv::OnnxMaxSequenceLength,
-        OnnxVarFate::Renamed("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH"),
-    ),
-    (
-        crate::data::env::RetiredEnv::OnnxPooling,
-        OnnxVarFate::Removed { alternative: None },
-    ),
-    (
-        crate::data::env::RetiredEnv::OnnxQueryInstruction,
-        OnnxVarFate::Removed { alternative: None },
-    ),
-];
-
-/// Fails startup when a retired `YORISHIRO_ONNX_*` variable is still set.
-///
-/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model is never read: it is simply invisible to [`resolve_model_paths`], which then runs its normal resolution as if nothing had been configured (using the `models/<short_id>/` default files if both are present, fetching the selected model, `model_fetch::DEFAULT_MODEL` unless `YORISHIRO_LOCAL_MODEL` says otherwise, if neither is, or erroring on an incomplete pair).
-/// A deployment that had a different model configured under the old name would, without this check, silently start writing vectors from a different model into an index built for the one it thinks it still has, with every status staying green.
-/// Refusing to boot forces the operator to remove or rename the variable (and confirm the resulting resolution is what they actually want) before that can happen, rather than a log line they could reasonably miss during an otherwise successful upgrade.
-///
-/// `YORISHIRO_ONNX_POOLING`/`YORISHIRO_ONNX_QUERY_INSTRUCTION` also fail startup for consistency
-/// (every retired name gets the same "stop and clean this up" treatment rather than some
-/// silently tolerated), but their message does not claim the wrong-model risk above: neither
-/// variable is read by anything, so a stale value changes no behaviour at all. Claiming a risk
-/// that does not exist would undermine the accurate claim above its credibility for any reader.
-///
-/// `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH` are rejected here as well:
-/// the operator-chosen path is structurally unbound from the model identifier (which comes
-/// from `YORISHIRO_LOCAL_MODEL`), so a mismatch could never be detected at write time.
-fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
-    for (old, fate) in RENAMED_ONNX_VARS {
-        let old_name = old.name();
-        // `var_os`, not `var`: `var` returns `Err` both when the variable is unset and when it is
-        // set to a non-UTF-8 value, so checking `.is_err()` would let a non-UTF-8
-        // `YORISHIRO_ONNX_MODEL_PATH` slip past this guard as though it were absent. `var_os`
-        // only cares whether the variable is present, regardless of what it decodes to.
-        if !old.is_set() {
-            continue;
-        }
-        match fate {
-            OnnxVarFate::Renamed(new) => anyhow::bail!(
-                "{old_name} is set but no longer read; the local embedding provider now reads {new}. \
-                 Remove {old_name} (or rename it to {new} if it should still apply) before starting: \
-                 leaving it set would silently start this provider on a different model than the \
-                 one {old_name} names, which is not safe to detect and correct after the fact once \
-                 vectors from the wrong model have been written."
-            ),
-            OnnxVarFate::Removed { alternative } => {
-                let msg = if alternative.is_some() {
-                    format!(
-                        "{old_name} is set but no longer has any effect: this setting was removed rather than \
-                          renamed, and nothing reads it. Use {alternative:?} (relative to your working directory) \
-                          and place both model files under models/<short_id>/ instead. Remove {old_name} before starting."
-                    )
-                } else {
-                    format!(
-                        "{old_name} is set but no longer has any effect: this setting was removed rather than \
-                          renamed, and nothing reads it. Remove {old_name} before starting; leaving it set \
-                         changes no behaviour, but its presence claims a configuration this deployment no \
-                         longer has."
-                    )
-                };
-                anyhow::bail!("{msg}")
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value, or [`model_fetch::DEFAULT_MODEL`] when unset.
 /// An unrecognized value fails startup rather than silently falling back to the default: a typo in this variable is exactly the kind of "this deployment thinks it configured one model but got another" mistake the whole write-time model check exists to catch, and catching the typo at boot is strictly better than catching the resulting stamp mismatch on the first write.
 fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::LocalModelDef> {
     if requested == model_fetch::DEFAULT_MODEL.short_id {
         Ok(model_fetch::DEFAULT_MODEL)
-    } else if requested == "nomic-embed-text-v1.5" {
-        anyhow::bail!(
-            "nomic-embed-text-v1.5 has been removed: set YORISHIRO_LOCAL_MODEL={0} or run reindex_embeddings to migrate your workspaces",
-            model_fetch::DEFAULT_MODEL.short_id
-        )
     } else {
         anyhow::bail!(
             "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
@@ -301,8 +189,6 @@ fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
 /// `YORISHIRO_LOCAL_MODEL` selects which [`model_fetch::LocalModelDef`] to load (default: [`model_fetch::DEFAULT_MODEL`]); see [`resolve_local_model`].
 /// The model and tokenizer files live at `models/<short_id>/model.safetensors` and `models/<short_id>/tokenizer.json` for the selected model, or are fetched into `$HOME/.cache/yorishiro/models/<short_id>/` on first use when absent.
-/// Not the selected model's own upper bound: nomic's own bound is 8192, and silently truncating further out by default the moment a deployment sets `YORISHIRO_LOCAL_MODEL=nomic-embed-text-v1.5` explicitly would be a memory/latency change with no corresponding request for one.
-/// `def.max_sequence_length` still validates the setting (see [`local::LocalEmbeddingProvider::load`]): 512 already satisfies every current definition's own bound, nomic's and multilingual-e5-base's alike, so this default needs no per-model branch of its own.
 ///
 /// There is no pooling variable: every model this provider can load is mean-pooled (see `local::LocalEmbeddingProvider`'s own doc comment for why that stays a fact rather than a config surface).
 ///
@@ -310,7 +196,6 @@ fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::
 async fn build_local_provider(
     config: &crate::data::settings::Embedding,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
-    reject_renamed_onnx_vars()?;
     let dimensions = config.dimensions;
     let def = resolve_local_model(&config.local_model)?;
     if dimensions != def.dimensions {

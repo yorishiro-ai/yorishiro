@@ -10,17 +10,8 @@
 #
 #   docker run --rm yorishiro start --worker=worker-target:shared
 #
-# The embedding provider (`candle-core`/`candle-nn`/`candle-transformers`) needs no prebuilt
-# runtime binary and pulls no dynamic TLS library into the link, unlike the ONNX-based provider
-# this Dockerfile used to build.
-#
-# There is no web-asset stage. An earlier version of this file built `ee/web` with pnpm and
-# copied the result into the cargo build so the SPA could be embedded. That directory does not
-# exist on this branch: the frontend is not part of the rebuild yet. When it returns, its stage
-# comes back with it, in the same change that adds the directory.
-# Pinned in rust-toolchain.toml: the release workflows pass that channel as RUST_VERSION, and CI
-# fails when this default drifts from it, so a plain `docker build` agrees with them.
-ARG RUST_VERSION=1.97.0
+# Local embedding inference uses Candle and safetensors without a separate native runtime.
+
 FROM rust:${RUST_VERSION}-slim AS builder
 ARG EDITION=ee
 

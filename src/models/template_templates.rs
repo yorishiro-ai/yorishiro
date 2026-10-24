@@ -26,12 +26,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}
-
 /// A row from the tenant's DB-backed template library, with `definition` parsed.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

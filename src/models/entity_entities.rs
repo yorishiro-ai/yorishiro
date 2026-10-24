@@ -158,12 +158,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}
-
 /// A stored entity.
 /// `created_by`/`updated_by` are absent for entities touched by an unattributed API key.
 //

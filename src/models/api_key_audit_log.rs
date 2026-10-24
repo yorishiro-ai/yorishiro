@@ -26,12 +26,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}
-
 /// A committed completion record makes redelivery a no-op without replacing original undo snapshots.
 pub(crate) async fn job_completed(
     conn: &impl ConnectionTrait,

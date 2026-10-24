@@ -10,9 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::http::Request;
 use axum::http::request::Parts;
-use axum::middleware::{self, Next};
 use loco_rs::app::AppContext;
 use rmcp::ErrorData;
 use rmcp::RoleServer;
@@ -358,31 +356,5 @@ where
         transport_config,
     );
 
-    router.nest(
-        "/mcp",
-        Router::new()
-            .fallback_service(mcp_service)
-            .layer(middleware::from_fn(accept_compatibility)),
-    )
-}
-
-async fn accept_compatibility(
-    mut request: Request<axum::body::Body>,
-    next: Next,
-) -> axum::response::Response {
-    let accept = request.headers().get(axum::http::header::ACCEPT);
-    if accept.is_none()
-        || accept.is_some_and(|value| {
-            value == "*/*"
-                || value
-                    .to_str()
-                    .is_ok_and(|value| value.contains("application/json"))
-        })
-    {
-        request.headers_mut().insert(
-            axum::http::header::ACCEPT,
-            axum::http::HeaderValue::from_static("application/json, text/event-stream"),
-        );
-    }
-    next.run(request).await
+    router.nest("/mcp", Router::new().fallback_service(mcp_service))
 }

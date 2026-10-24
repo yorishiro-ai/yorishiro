@@ -543,9 +543,3 @@ pub struct Enqueue<'a> {
     pub concurrency_key: Option<&'a str>,
     pub concurrency_limit: Option<i32>,
 }
-
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}

@@ -26,9 +26,6 @@ use uuid::Uuid;
 /// The shortest interval a schedule may name, so a typo cannot make every workspace of a tenant reindex every few seconds.
 const MIN_INTERVAL_SECONDS: i64 = 5 * 60;
 
-/// What the ticker uses for a stored interval it cannot read, which only a row written before intervals were validated can hold.
-const DEFAULT_INTERVAL_SECONDS: i64 = 24 * 60 * 60;
-
 /// Reads an ISO 8601 duration made of weeks, days, hours, minutes and seconds, such as `P1D`, `P1W` or `PT6H`.
 ///
 /// Years and months are refused: they have no fixed length, and a schedule that drifts with the calendar is not what an interval promises.
@@ -252,6 +249,17 @@ pub(crate) async fn tick(
         if !is_due(sched_utc, tick) {
             continue;
         }
+        let next = parse_interval(&schedule.interval)
+            .filter(|every| every.num_seconds() >= MIN_INTERVAL_SECONDS)
+            .and_then(|every| tick.checked_add_signed(every));
+        let Some(next) = next else {
+            let _ = txn.rollback().await;
+            let release = release_scheduler_ownership(ownership.take().unwrap()).await;
+            return Err(Error::Message(format!(
+                "invalid stored reindex interval for tenant {}: {:?}; ownership release: {release:?}",
+                schedule.tenant_id, schedule.interval
+            )));
+        };
 
         // Fetch all workspaces under this tenant.
         let workspaces: Vec<_> = match WorkspaceEntity::Entity::find()
@@ -296,20 +304,7 @@ pub(crate) async fn tick(
         // Advance before dispatch for the deliberate at-most-once policy. A crash or queue
         // failure after this commit loses the current interval until the next one.
         let mut active = schedule.clone().into_active_model();
-        let every = parse_interval(&schedule.interval).unwrap_or_else(|| {
-            tracing::warn!(
-                tenant_id = %schedule.tenant_id,
-                interval = %schedule.interval,
-                "reindex scheduler: unreadable interval, using P1D"
-            );
-            chrono::Duration::seconds(DEFAULT_INTERVAL_SECONDS)
-        });
-        let every = every.max(chrono::Duration::seconds(MIN_INTERVAL_SECONDS));
-        let new_sched: chrono::DateTime<chrono::FixedOffset> = tick
-            .checked_add_signed(every)
-            .unwrap_or_else(|| tick + chrono::Duration::seconds(DEFAULT_INTERVAL_SECONDS))
-            .into();
-        active.scheduled_for = ActiveValue::Set(Some(new_sched));
+        active.scheduled_for = ActiveValue::Set(Some(next.into()));
         active.updated_at = ActiveValue::Set(tick.into());
         if let Err(err) = active.update(&txn).await {
             let _ = txn.rollback().await;

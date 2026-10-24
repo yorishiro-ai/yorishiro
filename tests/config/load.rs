@@ -101,7 +101,7 @@ async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
             && queue.connect_timeout == 5000
     ));
     assert_eq!(postgres.database.uri, "postgres://db/app");
-    let topology = load(&Environment::Any("test_postgres_postgres".into()))
+    let topology = load(&Environment::Any("test_postgres".into()))
         .await
         .unwrap();
     assert!(

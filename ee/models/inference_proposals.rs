@@ -2,7 +2,7 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::inference_proposals::Column;
-use crate::models::inference_proposals::{ActiveModel, Entity, Model};
+use crate::models::_entities::inference_proposals::{ActiveModel, Entity, Model};
 use crate::models::schema_schemas::SchemaStatus;
 use crate::models::{entity_entities, schema_schemas};
 use sea_orm::sea_query::Expr;

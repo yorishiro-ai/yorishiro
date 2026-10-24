@@ -42,12 +42,6 @@ depends:
 # up as the floor to test against instead of the one actually declared below. This paragraph
 # avoids writing that exact pattern for that reason.)
 #
-# Re-measured against the candle-based binary from a real CI build on the former Ubuntu 24.04
-# runner (release.yml, dry_run, binary/amd64 job): `readelf -V` on the extracted binary shows
-# GLIBC_2.39 as the highest versioned symbol required, the same figure the ort-based binary
-# needed. Removing `ort` changed the native library set but did not move this floor on that
-# runner.
-#
 # That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
 # produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
 # source, same dependencies. The C library's own headers decide which versioned symbols the

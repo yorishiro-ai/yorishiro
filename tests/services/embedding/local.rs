@@ -107,7 +107,7 @@ async fn embeds_texts_with_a_real_e5_model() {
     assert_eq!(batch[1].len(), 768);
 }
 
-/// Numeric parity against a real `sentence-transformers` run of multilingual-e5-base, and, unlike the ort-parity test above, coverage of the query/document prefix plumbing itself.
+/// Numeric parity and query/document prefixes against a real `sentence-transformers` run of multilingual-e5-base.
 ///
 /// `tests/fixtures/generate_e5_reference/generate.py` (run in the Docker image built from
 /// that directory's Dockerfile) manually prepends `query: `/`passage: ` before encoding, since
@@ -119,9 +119,7 @@ async fn embeds_texts_with_a_real_e5_model() {
 /// the similarity threshold below, so this test fails if the prefix plumbing silently regresses,
 /// not only if the model's numeric output does.
 ///
-/// Unlike the ort-parity fixture, this one is regenerable (the generator script is committed,
-/// pinned, and dockerized), so `#[ignore]` here is about needing the real model files locally,
-/// the same reason nomic's parity test above is ignored, not about the fixture being irreplaceable.
+/// The pinned Docker generator reproduces the fixture; this test requires local model files.
 #[tokio::test]
 #[ignore = "requires models/multilingual-e5-base/model.safetensors and its tokenizer"]
 async fn matches_a_real_sentence_transformers_run_of_e5() {

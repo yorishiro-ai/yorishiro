@@ -70,7 +70,7 @@ struct EmbeddingsResponse {
 
 #[derive(Deserialize)]
 struct EmbeddingDatum {
-    index: Option<usize>,
+    index: usize,
     embedding: Vec<f32>,
 }
 
@@ -131,19 +131,16 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
         })?;
         let mut parsed: EmbeddingsResponse = serde_json::from_slice(&body).internal()?;
 
-        // Older compatible providers omit indices; indexed responses must form a complete permutation.
-        if parsed.data.iter().any(|datum| datum.index.is_some()) {
-            parsed.data.sort_unstable_by_key(|datum| datum.index);
-            if parsed
-                .data
-                .iter()
-                .enumerate()
-                .any(|(index, datum)| datum.index != Some(index))
-            {
-                return Err(YorishiroError::Internal(anyhow::anyhow!(
-                    "embedding provider returned invalid vector indices"
-                )));
-            }
+        parsed.data.sort_unstable_by_key(|datum| datum.index);
+        if parsed
+            .data
+            .iter()
+            .enumerate()
+            .any(|(index, datum)| datum.index != index)
+        {
+            return Err(YorishiroError::Internal(anyhow::anyhow!(
+                "embedding provider returned invalid vector indices"
+            )));
         }
 
         let vectors: Vec<Vec<f32>> = parsed.data.into_iter().map(|d| d.embedding).collect();

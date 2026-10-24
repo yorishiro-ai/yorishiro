@@ -219,22 +219,18 @@ async fn a_schedule_advances_by_its_own_interval() {
     .await;
 }
 
-/// Legacy intervals cannot create a tight loop or leave the next run at the current tick.
+/// Invalid stored intervals fail without advancing the schedule.
 #[tokio::test]
-async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
+async fn invalid_stored_intervals_are_rejected_without_advancement() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        for (interval, seconds) in [
-            ("PT1S", 300),
-            ("P1D1D", 86_400),
-            ("PT9223372036854775S", 86_400),
-        ] {
+        for interval in ["PT1S", "P1D1D", "PT9223372036854775S"] {
             set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
-            // Legacy invalid intervals cannot be written through the validated production setter.
+            // Bypass input validation to exercise detection of corrupt stored data.
             yorishiro::models::_entities::tenant_reindex_schedules::Entity::update_many()
                 .col_expr(
                     yorishiro::models::_entities::tenant_reindex_schedules::Column::Interval,
@@ -257,7 +253,7 @@ async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
             TenantReindexScheduler
                 .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
                 .await
-                .unwrap();
+                .expect_err("invalid stored interval must fail");
             let next = get(&ctx.db, tenant_id)
                 .await
                 .unwrap()
@@ -265,11 +261,7 @@ async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
                 .scheduled_for
                 .unwrap()
                 .to_utc();
-            assert_eq!(
-                next,
-                tick + chrono::Duration::seconds(seconds),
-                "{interval}"
-            );
+            assert_eq!(next, tick, "{interval}");
         }
     })
     .await;

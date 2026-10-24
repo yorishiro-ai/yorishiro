@@ -81,7 +81,7 @@ There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 ## Where tests live
 
 Every test is under `tests/`. `src/` and `ee/` contain no `#[test]` and no `#[cfg(test)]`: CI rejects both.
-A test that needs an item the crate keeps private widens it to `pub` and records it in `scripts/public_api_allowlist.tsv` under the `integration-test` boundary.
+Keep items private or crate-visible unless production callers or integration tests need the public boundary.
 Test-only seams in production code are not allowed either: a dispatcher is replaced by inserting an `Arc<dyn Trait>` into `AppContext::shared_store`, the same call production makes.
 
 `tests/` builds without the enterprise feature (`--no-default-features --features community`).

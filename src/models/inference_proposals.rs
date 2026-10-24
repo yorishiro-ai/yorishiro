@@ -1,4 +1,4 @@
-pub(crate) use super::_entities::inference_proposals::{ActiveModel, Entity, Model};
+use super::_entities::inference_proposals::ActiveModel;
 
 use sea_orm::entity::prelude::*;
 
@@ -13,9 +13,3 @@ impl ActiveModelBehavior for ActiveModel {
         Ok(this)
     }
 }
-
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}

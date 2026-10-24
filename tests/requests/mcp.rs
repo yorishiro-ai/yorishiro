@@ -155,7 +155,7 @@ async fn mcp_transport_rejects_unconfigured_host_by_default() {
 
 #[tokio::test]
 #[serial_test::serial(process_environment)]
-async fn mcp_transport_allows_configured_host_and_common_accept_headers() {
+async fn mcp_transport_requires_protocol_accept_headers() {
     let guard = EnvGuard::capture(&["YORISHIRO_MCP_ALLOWED_HOSTS"]);
     guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "mcp.remote.test");
     boot_request::<App, _, _>(|request, _ctx| async move {
@@ -167,7 +167,7 @@ async fn mcp_transport_allows_configured_host_and_common_accept_headers() {
             }
             let response = call.json(&body).await;
             assert_ne!(response.status_code(), StatusCode::FORBIDDEN);
-            assert_ne!(response.status_code(), StatusCode::NOT_ACCEPTABLE);
+            assert_eq!(response.status_code(), StatusCode::NOT_ACCEPTABLE);
         }
     })
     .await;

@@ -36,7 +36,6 @@ impl OAuthConfig {
             client_id: Option<String>,
             client_secret: Option<String>,
             redirect_uri: Option<String>,
-            bind: Option<String>,
         }
         let settings: Settings = config
             .initializers
@@ -63,18 +62,7 @@ impl OAuthConfig {
         let redirect_uri = settings
             .redirect_uri
             .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| {
-                settings
-                    .bind
-                    .filter(|value| !value.is_empty())
-                    .map(|bind| {
-                        format!(
-                            "http://{}/auth/oauth/callback",
-                            rewrite_unspecified_host(&bind)
-                        )
-                    })
-                    .unwrap_or_else(|| default_redirect_uri(&config.server))
-            });
+            .unwrap_or_else(|| default_redirect_uri(&config.server));
 
         let state_signing_key = client_secret.as_bytes().to_vec();
 

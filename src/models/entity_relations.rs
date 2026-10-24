@@ -64,12 +64,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}
-
 pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {
     RelationStatus::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
         message: format!("'{value}' is not a relation status"),

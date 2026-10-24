@@ -25,9 +25,3 @@ impl ActiveModelBehavior for ActiveModel {
         Ok(self)
     }
 }
-
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}

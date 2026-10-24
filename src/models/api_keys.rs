@@ -77,10 +77,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-impl Model {}
-
-impl ActiveModel {}
-
 impl Entity {
     /// Verifies a presented raw API key and resolves the workspace, tenant, and scope it belongs to.
     ///

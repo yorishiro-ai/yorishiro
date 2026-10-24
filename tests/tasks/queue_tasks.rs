@@ -88,7 +88,7 @@ async fn resync_queues_a_job_for_each_entity_without_an_embedding() {
         let server = HttpStub::start(axum::Router::new().route(
             "/embeddings",
             axum::routing::post(|| async {
-                axum::Json(serde_json::json!({"data": [{"embedding": vec![1.0; 768]}]}))
+                axum::Json(serde_json::json!({"data": [{"index": 0, "embedding": vec![1.0; 768]}]}))
             }),
         ))
         .await;

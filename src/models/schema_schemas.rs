@@ -32,12 +32,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-impl Model {}
-
-impl ActiveModel {}
-
-impl Entity {}
-
 db_enum! {
     #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum SchemaStatus {

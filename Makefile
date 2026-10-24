@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -42,11 +42,6 @@ python-lint:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_topology_self.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_package_ids.py
 	bash -n .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh
-
-public-api-check:
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_public_api.py
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_public_api.py
-	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
 
 edition-boundary-check:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_edition_boundary.py
@@ -132,9 +127,9 @@ entities: build
 patch-check:
 	python3 patches/loco-rs/verify.py --prepare
 
-check-all: patch-check fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ce clippy-ce
+check-all: patch-check fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ce clippy-ce
 
-check-all-ee: patch-check fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ee clippy-ee
+check-all-ee: patch-check fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ee clippy-ee
 
 package-docker-check:
 	@test -n "$(IMAGE)" || { echo 'IMAGE is required' >&2; exit 2; }

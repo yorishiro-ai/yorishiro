@@ -11,35 +11,6 @@ pub(crate) enum Env {
     Home,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum RetiredEnv {
-    OnnxModelPath,
-    OnnxTokenizerPath,
-    LocalModelPath,
-    LocalTokenizerPath,
-    OnnxMaxSequenceLength,
-    OnnxPooling,
-    OnnxQueryInstruction,
-}
-
-impl RetiredEnv {
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::OnnxModelPath => "YORISHIRO_ONNX_MODEL_PATH",
-            Self::OnnxTokenizerPath => "YORISHIRO_ONNX_TOKENIZER_PATH",
-            Self::LocalModelPath => "YORISHIRO_LOCAL_MODEL_PATH",
-            Self::LocalTokenizerPath => "YORISHIRO_LOCAL_TOKENIZER_PATH",
-            Self::OnnxMaxSequenceLength => "YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH",
-            Self::OnnxPooling => "YORISHIRO_ONNX_POOLING",
-            Self::OnnxQueryInstruction => "YORISHIRO_ONNX_QUERY_INSTRUCTION",
-        }
-    }
-
-    pub(crate) fn is_set(self) -> bool {
-        std::env::var_os(self.name()).is_some()
-    }
-}
-
 impl Env {
     const fn name(self) -> &'static str {
         match self {
