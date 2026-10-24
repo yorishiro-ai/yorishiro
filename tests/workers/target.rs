@@ -160,6 +160,8 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
     let mut config = crate::sqlite_fixture_config("sqlite::memory:");
     config.queue = Some(QueueConfig::Redis(RedisQueueConfig {
         uri: "redis://localhost:6379/15".into(),
+        connect_timeout: 10_000,
+        response_timeout: 5_000,
         dangerously_flush: false,
         queues: None,
         num_workers: 1,

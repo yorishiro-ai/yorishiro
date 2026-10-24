@@ -418,14 +418,11 @@ async fn serve<H: Hooks>(
 ) -> (TestServer, loco_rs::app::AppContext) {
     if let Some(loco_rs::config::QueueConfig::Redis(queue)) = config.queue.as_mut() {
         static NEXT_DATABASE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let service = std::env::var("YORISHIRO_TEST_VALKEY_BASE_URL")
-            .expect("Valkey app fixtures require the matrix service URL");
+        let service = std::env::var("YORISHIRO_TEST_REDIS_BASE_URL")
+            .expect("Redis app fixtures require the matrix service URL");
         let database = NEXT_DATABASE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        assert!(
-            database < 65536,
-            "matrix Valkey logical databases exhausted"
-        );
-        let (base, _) = service.rsplit_once('/').expect("Valkey database URL");
+        assert!(database < 65536, "matrix Redis logical databases exhausted");
+        let (base, _) = service.rsplit_once('/').expect("Redis database URL");
         queue.uri = format!("{base}/{database}");
     }
     config.server.port = loco_rs::testing::prelude::get_available_port().await;

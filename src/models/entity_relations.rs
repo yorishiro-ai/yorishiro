@@ -10,7 +10,7 @@ pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model}
 use crate::models::entity_entities::{self, EntityRecord};
 
 db_enum! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum RelationStatus {
         Active = "active",
         Deprecated = "deprecated",
@@ -18,7 +18,7 @@ db_enum! {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RelationRecord {
     pub id: Uuid,
@@ -64,13 +64,10 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
 impl Model {}
 
-// implement your write-oriented logic here
 impl ActiveModel {}
 
-// implement your custom finders, selectors oriented logic here
 impl Entity {}
 
 pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {

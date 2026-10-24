@@ -74,7 +74,7 @@ pub(crate) async fn search_text(
     search_in_table(&txn, workspace_id, vector, text, query, table).await
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SearchHit {
     pub entity: EntityRecord,

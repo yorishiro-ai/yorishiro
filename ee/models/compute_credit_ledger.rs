@@ -20,7 +20,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 /// A single row in the compute credit ledger.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct LedgerEntry {
     pub workspace_id: Uuid,
     /// Positive for earn, negative for spend.
@@ -30,7 +30,7 @@ pub struct LedgerEntry {
 
 crate::db_enum::db_enum! {
     /// Which kind of ledger event this row records.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Eq, PartialEq)]
     pub enum TransactionType {
         Earn = "earn",
         Spend = "spend",

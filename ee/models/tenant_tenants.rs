@@ -9,7 +9,7 @@ use sea_orm::{
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct TenantUsage {
     pub(crate) tenant_id: Uuid,

@@ -29,7 +29,11 @@ pub async fn load(environment: &Environment) -> Result<Config> {
     {
         load_example(folder, &environment)?
     } else {
-        environment.load()?
+        Config::from_folder_with(
+            &environment,
+            folder.as_deref().unwrap_or_else(|| Path::new("config")),
+            resolve_connection_defaults,
+        )?
     };
     validate(&config)?;
     Ok(config)
@@ -48,10 +52,40 @@ fn load_example(folder: &Path, environment: &Environment) -> Result<Config> {
         if local.exists() {
             fs::copy(&local, example_folder.join("production.local.yaml"))?;
         }
-        Config::from_folder(environment, &example_folder)
+        Config::from_folder_with(environment, &example_folder, resolve_connection_defaults)
     })();
     fs::remove_dir_all(example_folder)?;
     result
+}
+
+fn resolve_connection_defaults(value: &mut serde_yaml::Value) -> Result<()> {
+    let Some(queue) = value.get("queue").filter(|queue| !queue.is_null()) else {
+        return Ok(());
+    };
+    let provider: QueueConfig = serde_yaml::from_value(queue.clone())
+        .map_err(|error| Error::Message(format!("invalid queue configuration: {error}")))?;
+    if !matches!(provider, QueueConfig::Postgres(_) | QueueConfig::Sqlite(_)) {
+        return Ok(());
+    }
+    let database = value["database"].clone();
+    let queue = value["queue"]
+        .as_mapping_mut()
+        .ok_or_else(|| Error::Message("queue configuration must be a mapping".into()))?;
+    // Resolve after local-file merging so explicit queue settings always win.
+    for field in [
+        "min_connections",
+        "max_connections",
+        "connect_timeout",
+        "idle_timeout",
+        "enable_logging",
+    ] {
+        if let Some(default) = database.get(field) {
+            queue
+                .entry(serde_yaml::Value::from(field))
+                .or_insert_with(|| default.clone());
+        }
+    }
+    Ok(())
 }
 
 fn test_environment(environment: &Environment) -> Environment {
@@ -172,23 +206,31 @@ pub fn validate_queue_policy(config: &Config) -> Result<()> {
             "BackgroundQueue requires a configured queue provider".into(),
         ));
     };
+    if let QueueConfig::Redis(redis) = queue
+        && (redis.connect_timeout == 0 || redis.response_timeout == 0)
+    {
+        return Err(Error::Message(
+            "Redis queue connect_timeout and response_timeout must be greater than zero".into(),
+        ));
+    }
     // Restrict the existing SQL providers only; future providers validate their own backend requirements.
     let sqlite_database = is_sqlite_uri(&config.database.uri);
     let mismatch = match queue {
-        QueueConfig::Postgres(_) if sqlite_database => Some(
-            "a PostgreSQL queue is not allowed with a SQLite database / SQLite DB では PostgreSQL キューを利用できません",
-        ),
-        QueueConfig::Sqlite(_) if !sqlite_database => Some(
-            "a SQLite queue is not allowed with a PostgreSQL database / PostgreSQL DB では SQLite キューを利用できません",
-        ),
+        QueueConfig::Postgres(_) if sqlite_database => {
+            Some("a PostgreSQL queue is not allowed with a SQLite database")
+        }
+        QueueConfig::Sqlite(_) if !sqlite_database => {
+            Some("a SQLite queue is not allowed with a PostgreSQL database")
+        }
         _ => None,
     };
     if let Some(message) = mismatch {
         return Err(YorishiroError::ValidationFailed {
             message: message.into(),
             details: vec![],
-            hint: "Use a SQL queue matching the database, or a Redis-compatible (Valkey) queue / DB と同じ種類の SQL キュー、または Redis 互換 (Valkey) キューを指定してください".into(),
-        }.into());
+            hint: "Use a SQL queue matching the database, or a Redis-compatible queue".into(),
+        }
+        .into());
     }
     let workers = match queue {
         QueueConfig::Postgres(queue) => queue.num_workers,

@@ -4,7 +4,7 @@ use uuid::Uuid;
 /// `status` and `visibility` stay strings on the wire so an unknown value reaches the model's
 /// `parse_publish` / `parse_input` and is refused with the API's own validation envelope and hint,
 /// which a serde rejection would replace with a plain-text body.
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct PublishVersionRequest {
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
@@ -22,18 +22,18 @@ fn default_publish_status() -> String {
     "draft".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub(crate) struct ForkParams {
     pub(crate) version: Option<i32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct ForkResponse {
     pub(crate) template_id: Uuid,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct SetVisibilityRequest {
     #[cfg_attr(feature = "openapi", schema(value_type = crate::models::template_templates::TemplateVisibility))]

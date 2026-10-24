@@ -26,7 +26,7 @@ pub enum EmbedKind {
 }
 
 /// Whether a provider is available for document and query embedding.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EmbeddingProviderAvailability {
     Enabled,
     Disabled,
@@ -112,7 +112,7 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
     }
 }
 
-/// Builds the embedding provider from environment variables.
+/// Builds the embedding provider from resolved settings.
 ///
 /// Priority order:
 ///
@@ -120,12 +120,12 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 ///    This is the documented shape for an external embedding backend (LM Studio, Ollama, vLLM, or real OpenAI).
 /// 2. `YORISHIRO_EMBEDDING_PROVIDER=none` — explicitly disabled, returns [`UnconfiguredEmbeddingProvider`].
 /// 3. `YORISHIRO_EMBEDDING_PROVIDER=local` — the local in-process provider (candle-based safetensors).
-/// 4. Unset or other — defaults to the local provider (`DEFAULT_MODEL`, the recommended e5 base).
-///    The model files (~1 GiB) are fetched into `$HOME/.cache/yorishiro/` on first use.
+///
+/// The configured default is the local provider; an explicit OpenAI provider requires both URL and model.
 ///
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 ///
-/// Only a worker process calls this: the API and MCP server holds no model.
+/// Production workers load the provider; API and MCP search requests enqueue query embedding work.
 ///
 /// # Errors
 /// Returns an error when the selected provider cannot be built, for example an unknown local model or model files that cannot be fetched.
@@ -326,7 +326,6 @@ async fn build_local_provider(
     let Some((model_path, tokenizer_path)) = resolve_model_paths(def).await? else {
         return Ok(std::sync::Arc::new(UnconfiguredEmbeddingProvider {
             dimensions,
-            // `YORISHIRO_EMBEDDING_PROVIDER=local` is already set, so pointing at the OpenAI-compatible variables here would answer a question this operator did not ask.
             remedy: "YORISHIRO_EMBEDDING_PROVIDER=local, but the model files could not be \
                      located or fetched",
         }));
@@ -355,18 +354,6 @@ async fn build_local_provider(
     Ok(std::sync::Arc::new(provider))
 }
 
-/// The model and tokenizer paths the local provider should load, fetching them on first use if absent.
-///
-/// Two cases:
-///
-/// 1. The default `models/<short_id>/` path holds *both* files: use them, fetch nothing.
-///    Exactly one of them present is an error rather than a fall-through to fetch; see below.
-/// 2. Neither file is at the default path: fetch into the cache directory under `HOME`, which is both where the download lands and where a later start looks first, so only the first start pays for it.
-///
-/// `Ok(None)` is case 2 with no resolvable `HOME`, which degrades to [`UnconfiguredEmbeddingProvider`] rather than failing.
-/// That is the one degrading path here, and it differs from a failed fetch on whether a retry could ever help: an unresolvable `HOME` is a permanent property of the deployment, so no restart fixes it and the useful answer is a log naming the two variables an operator can set.
-/// A network failure or a digest mismatch fails the start instead, so a supervisor's `Restart=on-failure` retries a transient outage and heals by itself, and so that unverified model bytes are never loaded, which is the whole reason the digests are checked.
-/// Degrading is right for the unset-provider case [`UnconfiguredEmbeddingProvider`] was built for, but `YORISHIRO_EMBEDDING_PROVIDER=local` is explicit operator intent to run embeddings, so quietly serving a deployment whose search is dead would answer a request nobody made.
 /// What the default `models/` path's contents mean for [`resolve_model_paths`].
 #[derive(PartialEq, Eq)]
 enum DefaultPathOutcome {

@@ -1,9 +1,6 @@
 //! Shared test fixtures for tenant/workspace/owner creation.
 //!
-//! A ~20-line block that creates a tenant, workspace, and owner is repeated
-//! across multiple test files. This module provides a builder that encapsulates
-//! the shared setup logic while letting each caller specify its own key scope
-//! and return shape.
+//! Uses signup for new tenants and the production membership operation for owners sharing the CE tenant.
 
 use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
@@ -36,7 +33,7 @@ impl TestTenant {
             && std::env::var("DATABASE_URL").is_ok_and(|url| url == ctx.config.database.uri)
         {
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-            use yorishiro::models::{tenant_memberships, tenant_tenants, user_users};
+            use yorishiro::models::{tenant_memberships, tenant_tenants};
 
             static TENANT: tokio::sync::OnceCell<Uuid> = tokio::sync::OnceCell::const_new();
             let tenant_id = *TENANT
@@ -69,23 +66,17 @@ impl TestTenant {
                 .await;
             let tenant_ready = std::time::Instant::now();
             let txn = ctx.db.begin().await.expect("begin CE workspace setup");
-            let owner = user_users::create_user(
+            let owner = tenancy::register_member(
                 &txn,
+                tenant_id,
                 &args.owner_email,
                 &args.owner_password,
                 Some(&args.tenant_name),
+                tenant_memberships::MembershipRole::Owner,
             )
             .await
             .expect("create CE fixture owner");
             let owner_ready = std::time::Instant::now();
-            tenant_memberships::add_member(
-                &txn,
-                tenant_id,
-                owner.id,
-                tenant_memberships::MembershipRole::Owner,
-            )
-            .await
-            .expect("add CE fixture owner");
             let workspace =
                 tenancy::create_workspace(&txn, tenant_id, &args.workspace_name, None, None)
                     .await

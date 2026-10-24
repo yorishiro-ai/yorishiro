@@ -6,9 +6,9 @@
 # Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
-YORISHIRO_VALKEY_TEST_URL ?= redis://localhost:6379/15
+YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -83,10 +83,10 @@ test-postgres: build
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' YORISHIRO_TEST_TOPOLOGY=sqlite-sqlite YORISHIRO_TEST_QUEUE=sqlite RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite
 
-# Valkey DB 15 on the Compose Redis service is reserved for tests.
-test-valkey: patch-check
-	@if [ "$(YORISHIRO_VALKEY_TEST_URL)" = "redis://localhost:6379/15" ]; then docker compose up -d --wait redis; fi
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='redis://localhost:6379/15' YORISHIRO_TEST_TOPOLOGY=sqlite-valkey YORISHIRO_TEST_QUEUE=valkey LOCO_ENV=test_sqlite_valkey uv run scripts/test_topology.py sqlite-valkey
+# Redis DB 15 on the Compose Redis service is reserved for tests.
+test-redis: patch-check
+	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379/15" ]; then docker compose up -d --wait redis; fi
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_REDIS_TEST_URL)' YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' YORISHIRO_TEST_TOPOLOGY=sqlite-redis YORISHIRO_TEST_QUEUE=redis LOCO_ENV=test_sqlite_redis uv run scripts/test_topology.py sqlite-redis
 
 build: build-ce
 

@@ -2,9 +2,8 @@
 # LOCO_ENV=test_sqlite. SQLite-specific tests use this environment; request_with_create_db
 # remains PostgreSQL-only because it issues CREATE DATABASE, which SQLite does not support.
 #
-# YORISHIRO_MAX_TENANTS must still be set (to any value) for POST /setup to answer as enabled:
-# setup.rs's wizard_enabled() checks only that the variable is set, not its value: the SQLite cap
-# of 1 is enforced separately by tenancy::create_tenant regardless of what this variable says.
+# The resolved tenant-cap policy controls setup availability.
+# SQLite independently enforces a single tenant through tenant_tenants::create_tenant.
 
 logger:
   enable: true

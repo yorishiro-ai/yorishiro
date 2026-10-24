@@ -13,7 +13,7 @@ pub enum Plan {
 }
 
 /// Internal scheduling priority derived from the tenant's subscription plan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PriorityTier {
     Low,
@@ -22,7 +22,7 @@ pub enum PriorityTier {
 }
 
 /// Bounded compute policy used by the worker-class resolver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ComputePolicy {
     pub priority: PriorityTier,
     pub queue_start_objective_seconds: Option<u32>,
@@ -33,7 +33,7 @@ pub struct ComputePolicy {
 /// Caps applied when a tenant is on a given plan.
 /// `max_workspaces` is written onto `tenant_tenants`; `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
 /// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub(crate) struct PlanCaps {
     pub(crate) max_workspaces: Option<i32>,
     pub(crate) default_max_entities: Option<i32>,
@@ -117,7 +117,7 @@ impl Plan {
 
 /// Which Stripe Price id corresponds to which plan, read from `YORISHIRO_STRIPE_PRICE_PRO`/`YORISHIRO_STRIPE_PRICE_TEAM`.
 /// Both are `None` (no mapping) until an operator configures real Stripe price ids.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct StripePriceMapping {
     pub(crate) pro_price_id: Option<String>,
     pub(crate) team_price_id: Option<String>,

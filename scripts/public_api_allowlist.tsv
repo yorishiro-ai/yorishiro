@@ -1,5 +1,6 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/models/tenancy.rs	fn	register_member	integration-test: shared CE fixtures use the same atomic account and membership operation as signup, setup and invite registration.
 src/db.rs	fn	begin_workspace	integration-test: workspace model tests use the production transaction and RLS selection instead of duplicating backend branches.
 src/app.rs	use	crate::initializers::timezone::{cli_requires_timezone_gate,cli_timezone_gate_result}	integration-test: preserve the existing CLI gate imports while moving implementation into its lifecycle owner.
 src/workers/mod.rs	mod	fill_defaults	integration-test: request tests register the production migration worker on the configured queue provider.
@@ -10,7 +11,6 @@ src/initializers/timezone.rs	fn	cli_timezone_gate_result	integration-test: exter
 src/data/config.rs	fn	validate	integration-test: external settings tests exercise application configuration validation.
 src/data/settings.rs	field	Settings::timezone	integration-test: external configuration tests assert the validated timezone setting.
 src/db.rs	fn	set_session_timezone	integration-test: PostgreSQL integration tests verify configured session-zone behavior on real connections.
-src/db.rs	fn	connect_postgres_pool	integration-test: PostgreSQL integration tests exercise the production SeaORM identity pool factory and verify timezone reset on backend reuse.
 src/initializers/mod.rs	mod	logger	integration-test: external formatter test verifies real timezone-rendered logger timestamps.
 src/initializers/logger.rs	struct	ConfiguredTimer	integration-test: formatter test invokes the production timer to check DST offsets and trailing-space behavior.
 src/initializers/logger.rs	fn	ConfiguredTimer::new	integration-test: formatter test supplies explicit IANA zones to the production timer.
@@ -525,7 +525,8 @@ ee/controllers/stripe.rs	const	SIGNATURE_TOLERANCE_SECS	integration-test: tests/
 ee/controllers/stripe.rs	enum	inbound::Error	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
 ee/controllers/stripe.rs	fn	inbound::verify_at	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
 ee/controllers/stripe.rs	mod	inbound	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
-ee/controllers/stripe.rs	struct	inbound::VerifiedStripeEvent	integration-test: tests/ee/controllers/stripe.rs exercises it now that the unit tests moved out of src/.
+ee/controllers/stripe.rs	use	inbound::crate::edition::ee::dtos::stripe::VerifiedStripeEvent	transport: preserve the verified webhook type returned by the existing signature verification API after moving its definition to DTOs.
+ee/dtos/stripe.rs	struct	VerifiedStripeEvent	transport: verified webhook payload shared by the signature verifier and billing model, with private fields preventing external construction.
 ee/data/mod.rs	fn	non_empty_env	integration-test: tests/ee/data/mod.rs exercises it now that the unit tests moved out of src/.
 ee/data/mod.rs	mod	oauth	integration-test: tests/ee/data/mod.rs exercises it now that the unit tests moved out of src/.
 ee/data/mod.rs	mod	plan	integration-test: tests/ee/data/mod.rs exercises it now that the unit tests moved out of src/.

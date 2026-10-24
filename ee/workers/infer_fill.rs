@@ -22,7 +22,7 @@ use crate::error::ResultExt;
 use crate::models::schema_schemas;
 
 /// Arguments for an infer-fill worker job.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InferFillArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,

@@ -38,15 +38,11 @@ scheduler:
 
 # Queue Configuration
 #
-# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
-# With DATABASE_URL unset (defaults to `sqlite://`) or naming PostgreSQL, the queue
-# defaults to the same backend and QUEUE_URL falls back to DATABASE_URL.
-# QUEUE_URL takes no default when an external backend is required (Redis, or explicit
-# non-SQLite queue), matching this file's own no-silent-fallback convention.
+# This environment fixes the queue provider to PostgreSQL.
+# QUEUE_URL overrides the application DATABASE_URL for queue storage.
+# Missing SQL pool settings inherit the resolved database settings.
 queue:
   kind: Postgres
-  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
 
   # Postgres connection URI. Commonly the same value as DATABASE_URL.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>

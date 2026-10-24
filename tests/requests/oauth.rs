@@ -7,6 +7,7 @@ use axum::http::header;
 use sea_orm::{EntityTrait, TransactionTrait};
 use serial_test::serial;
 use yorishiro::App;
+use yorishiro::db::AppContextBackend;
 use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
 fn require_licence(ctx: &loco_rs::app::AppContext) {
@@ -270,31 +271,36 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             .await;
 
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
-        let txn = ctx.db.begin().await.expect("begin");
-        let result = yorishiro::edition::ee::models::user_users::find_or_create(
-            &txn,
-            "oidc",
-            "a-brand-new-subject",
-            Some("newcomer@example.com"),
-            None,
-            Some(1),
-            false,
-        )
-        .await;
-        // The call is expected to be refused; make the rollback explicit so a
-        // future implementation that retains the transaction cannot leak it.
-        txn.rollback().await.expect("rollback refused provisioning");
-        match result {
-            Err(yorishiro::YorishiroError::ScopeInsufficient { message, .. }) => {
-                assert!(
-                    message.contains("tenant limit"),
-                    "wrong ScopeInsufficient message: {message}"
-                );
+        for max_tenants in [Some(1), None] {
+            if max_tenants.is_none() && !ctx.is_sqlite() {
+                continue;
             }
-            _ => panic!(
-                "a new identity past the cap must be refused with ScopeInsufficient naming the \
+            let txn = ctx.db.begin().await.expect("begin");
+            let result = yorishiro::edition::ee::models::user_users::find_or_create(
+                &txn,
+                "oidc",
+                "a-brand-new-subject",
+                Some("newcomer@example.com"),
+                None,
+                max_tenants,
+                false,
+            )
+            .await;
+            // The call is expected to be refused; make the rollback explicit so a
+            // future implementation that retains the transaction cannot leak it.
+            txn.rollback().await.expect("rollback refused provisioning");
+            match result {
+                Err(yorishiro::YorishiroError::Conflict { message }) => {
+                    assert!(
+                        message.contains("tenant limit"),
+                        "wrong Conflict message: {message}"
+                    );
+                }
+                _ => panic!(
+                    "a new identity past the cap must be refused with Conflict naming the \
                  tenant limit"
-            ),
+                ),
+            }
         }
     })
     .await;

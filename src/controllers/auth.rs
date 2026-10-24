@@ -1,4 +1,4 @@
-//! `/auth/signup` and `/auth/login`: the only two endpoints reachable without a bearer token, by design, since their entire purpose is to hand one out.
+//! Public account registration and credential-based API key issuance.
 //!
 //! Both run on `ctx.db` (Loco's own connection, migration role, no RLS scope), same as the admin CLI tasks: no tenant/workspace context exists yet for RLS to scope by.
 
@@ -8,15 +8,14 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::TransactionTrait;
 
 use crate::controllers::ApiError;
 use crate::dtos::auth::{LoginRequest, LoginResponse, SignupRequest, SignupResponse};
-use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRole;
-use crate::models::{tenancy, tenant_tenants, user_users, workspace_invites, workspace_workspaces};
+use crate::models::{tenancy, user_users, workspace_invites, workspace_workspaces};
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -96,26 +95,26 @@ async fn signup_without_invite(
             hint: "either provide invite_token, or provide email to create a new tenant".into(),
         })?;
 
-    // tenant + user + membership run in one transaction, same reasoning as signup_with_invite's create_user + add_member: a request that dies part-way must not leave rows nothing can finish or undo.
-    let tenant_name = body.display_name.as_deref().unwrap_or(email);
-    let txn = ctx.db.begin().await.internal()?;
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("tenant cap policy missing")))?
         .resolve();
-    let tenant = tenant_tenants::create_tenant(&txn, tenant_name, max_tenants).await?;
-    let user =
-        user_users::create_user(&txn, email, &body.password, body.display_name.as_deref()).await?;
-    tenant_memberships::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
-    txn.commit().await.internal()?;
+    let (user, tenant_id) = tenancy::signup_account(
+        &ctx.db,
+        max_tenants,
+        email,
+        &body.password,
+        body.display_name.as_deref(),
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,
         Json(SignupResponse {
             user_id: user.id,
             email: user.email,
-            tenant_id: tenant.id,
+            tenant_id,
             role: MembershipRole::Owner,
             workspaces: vec![],
         }),

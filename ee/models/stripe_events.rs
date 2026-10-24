@@ -48,8 +48,7 @@ pub async fn is_stale_for_customer(
 
 /// Records that `event_id` has been applied, so a later retry or reorder of the same or an older event for `customer_id` is rejected by [`is_event_processed`]/[`is_stale_for_customer`].
 ///
-/// `ON CONFLICT (event_id) DO NOTHING`: the caller's [`is_event_processed`] check and this insert are not wrapped in a shared transaction, so two truly concurrent deliveries of the same brand-new event id can both pass that check and both dispatch (harmless, the handlers are idempotent).
-/// Without the conflict clause, the loser's insert would then fail on the `event_id` primary key and surface as a spurious `500`.
+/// `ON CONFLICT (event_id) DO NOTHING` tolerates duplicate inserts; event application owns the surrounding transaction and subscription customer lock.
 ///
 /// `event_type` is written but never read back by any query here, which makes it look removable.
 /// It isn't: this table is the billing audit trail, and dropping the column would leave an investigator able to see that an event was applied but not what it did.
@@ -77,3 +76,6 @@ pub async fn record_processed_event(
         .internal()?;
     Ok(())
 }
+
+mod apply;
+pub(crate) use apply::apply_stripe_event;

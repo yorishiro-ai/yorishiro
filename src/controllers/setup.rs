@@ -1,6 +1,6 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
 //!
-//! Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the deployment's first tenant/workspace from scratch: there is no one to invite from yet.
+//! Creates the deployment's first tenant, workspace and owner account.
 //! The resolved edition tenant cap controls whether first-run setup is available.
 //! An unlimited cap disables the wizard; the source default is one tenant.
 

@@ -10,7 +10,7 @@
 ///
 /// ```ignore
 /// db_enum! {
-///     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///     #[derive(Clone, Copy, PartialEq, Eq)]
 ///     pub enum Mode {
 ///         Off = "off",
 ///         ReadOnly = "read_only" | "read-only",

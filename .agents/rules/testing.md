@@ -8,7 +8,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 |---|---|---|
 | `make test-postgres` | PostgreSQL DB and PostgreSQL queue topology | PostgreSQL/PostgreSQL |
 | `make test-sqlite` | SQLite DB and SQLite queue topology using separate files | SQLite/SQLite |
-| `make test-valkey` | SQLite DB and Valkey-compatible `redis://` queue topology | SQLite/Valkey |
+| `make test-redis` | SQLite DB and Redis-compatible `redis://` queue topology | SQLite/Redis |
 | `uv run scripts/test_topology.py <topology>` | Full topology suite with configured-app evidence | Any supported topology |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
@@ -30,7 +30,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
 | `LOCO_ENV` | `test_postgres` or `test_sqlite` | Selects the test configuration |
 
-Supported topologies are `postgres-postgres`, `sqlite-sqlite`, `postgres-valkey`, and `sqlite-valkey`.
+Supported topologies are `postgres-postgres`, `sqlite-sqlite`, `postgres-redis`, and `sqlite-redis`.
 Crossed SQLite/PostgreSQL SQL queues are forbidden by config validation and are not full-suite or CI targets.
 
 Custom PostgreSQL:
@@ -144,7 +144,8 @@ A non-superuser role is required. A superuser bypasses RLS regardless of `FORCE`
 Provider routing tests use the request harness's owned throwaway database rather than clearing the database named by `DATABASE_URL` or `QUEUE_URL`.
 Process-local serial locks do not isolate separate CE and EE test processes.
 
-Queue tests (`tests/requests/queue.rs`) bypass `request_with_create_db` because the queue pool has no public close path. They use a temporary SQLite queue file instead.
+Queue tests (`tests/requests/queue.rs`) use separate temporary SQLite application and queue files for provider-specific inspection.
+Teardown drains workers and closes queue and application pools before removing those files.
 
 ## Gate testing
 

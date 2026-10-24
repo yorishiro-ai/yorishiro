@@ -26,17 +26,14 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
 impl Model {}
 
-// implement your write-oriented logic here
 impl ActiveModel {}
 
-// implement your custom finders, selectors oriented logic here
 impl Entity {}
 
 /// A row from the tenant's DB-backed template library, with `definition` parsed.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TemplateRecord {
     pub id: uuid::Uuid,
@@ -102,7 +99,7 @@ impl TryFrom<Model> for TemplateRecord {
 }
 
 db_enum! {
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum TemplateVisibility {
         Tenant = "tenant",
         Community = "community",

@@ -7372,7 +7372,6 @@ dependencies = [
  "candle-transformers",
  "chrono",
  "chrono-tz 0.10.4",
- "clap",
  "futures",
  "hmac",
  "jsonschema",

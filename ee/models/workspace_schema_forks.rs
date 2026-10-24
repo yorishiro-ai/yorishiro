@@ -20,7 +20,7 @@ use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, Entity, Model};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ForkRecord {
     pub id: Uuid,
@@ -40,7 +40,7 @@ pub struct ForkRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = CreateForkRequest))]
 pub struct CreateInput {
@@ -48,7 +48,7 @@ pub struct CreateInput {
     pub source_schema_id: Uuid,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = UpdateForkRequest))]
 pub struct UpdateInput {
@@ -61,7 +61,7 @@ pub struct UpdateInput {
     pub expected_source_schema_id: Option<Uuid>,
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct ForkEdge {
     source_workspace_id: Uuid,
 }

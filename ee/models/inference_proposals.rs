@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 crate::db_enum::db_enum! {
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum ProposalStatus {
         Pending = "pending",
         Confirmed = "confirmed",
@@ -27,7 +27,7 @@ crate::db_enum::db_enum! {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = InferenceProposalResponse))]
 pub struct ProposalRecord {
@@ -63,7 +63,7 @@ impl TryFrom<Model> for ProposalRecord {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = ProposalConfirmResponse))]
 pub struct ConfirmReport {
@@ -73,7 +73,7 @@ pub struct ConfirmReport {
     pub invalid: i64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = ProposalActionResponse))]
 pub struct ProposalActionReport {

@@ -24,7 +24,7 @@ Changing the pinned version requires reviewing these fixes against the new upstr
 
 | ID | Upstream bug | Fix | Regression check |
 |---|---|---|---|
-| LQ-01 | Redis single-job enqueue wrote the payload and queue membership separately. | Write both in a Redis transaction, as upstream batch enqueue already does. | Existing enqueue/dispatch tests and Valkey topology suites. |
+| LQ-01 | Redis single-job enqueue wrote the payload and queue membership separately. | Write both in a Redis transaction, as upstream batch enqueue already does. | Existing enqueue/dispatch tests and Redis topology suites. |
 | LQ-02 | Claiming a long-queued job did not refresh its processing timestamp, so the reaper could immediately redeliver it. | Atomically claim the unchanged candidate, persist `processing` and the claim time, and assign a unique attempt token. | `redis_claim_refreshes_age_and_fences_reaped_completion_and_failure`. |
 | LQ-03 | A reaper could overwrite a job completed or reclaimed after its read; a stale worker could overwrite the replacement attempt. | Reaper transitions compare the exact record and set membership atomically; completion/failure compare the attempt token atomically. | The same regression test holds two real workers across redelivery and checks both stale success and failure. |
 | LQ-04 | Completion/failure persistence errors logged the entire job, including import bodies and credentials. | Log the job ID instead of `Debug`-formatting its payload. | Review `fixes.patch`; this changes diagnostic fields, not stored job arguments. |
@@ -46,6 +46,17 @@ It removes the application's duplicate Clap command tree while leaving applicati
 The existing `integration::process_roles` tests exercise accepted CLI spellings and rejected targets through the real binary.
 Remove this extension when upstream exposes equivalent parsed start-mode information to application configuration hooks.
 
+## Connection configuration integration
+
+`Config::from_folder_with` lets the application fill missing connection settings after base/local merging and before typed deserialization.
+The application owns SQL queue inheritance in `src/data/config.rs`; explicit queue settings take precedence.
+Redis queue configuration exposes millisecond `connect_timeout` and `response_timeout` values, retaining the existing worker defaults of 10000 and 5000.
+Its provider keeps these settings with the client so producers, administration and workers use the same transport policy instead of silently using different library defaults.
+`QueueConfig::preserve_jobs` lets an additional provider opt out of destructive first-boot flushing without duplicating provider variants in callers.
+These are integration extensions, not claims of upstream bug fixes.
+Remove them when upstream supplies equivalent merged-config resolution and consistent producer/worker connection configuration.
+Existing configuration/topology cases cover SQL inheritance, explicit queue overrides and Redis defaults; all queue topologies must still pass in CI.
+
 ## Removal condition
 
 Replace this override with a published Loco release only when it contains equivalent atomic claim/reaper/completion fencing, payload-safe error logs, atomic enqueue and awaited resource cleanup.
@@ -61,7 +72,7 @@ No upstream issue or accepted upstream fix is implied by these local defect IDs.
 `source/Cargo.lock` は上流配布物の記録であり、アプリのビルドと監査にはルートの `Cargo.lock` を使います。
 `verify.py` は配布アーカイブのハッシュ、パッチ適用結果、同梱ソースの一致を検証します。
 LQ-01は単一投入の途中失敗、LQ-02は取得直後の誤った再配信、LQ-03はreaperと古いworkerによる状態の上書き、LQ-04はログへのpayload露出、LQ-05は終了時のプールとworker contextの保持、LQ-06はPostgreSQLキュー初期化の同時初回起動での競合を修正します。
-回帰試験では実際のproviderとValkeyを使い、古い試行の成功・失敗が新しい試行を上書きしないことを確認します。
+回帰試験では実際のproviderとRedisを使い、古い試行の成功・失敗が新しい試行を上書きしないことを確認します。
 `shutdown()` は停止通知のままで、workerの終了後に `close().await` でリソース解放を待ちます。
 稼働中workerのプールを先に閉じてはいけません。
 旧workerは試行トークンを扱わないため、新旧workerを混在させず、処理をdrainしてから置き換えます。

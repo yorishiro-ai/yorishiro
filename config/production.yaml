@@ -105,7 +105,6 @@ queue:
 <% else %>
 queue:
   kind: Postgres
-  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
 
   # Postgres connection URI. Commonly the same value as DATABASE_URL.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
@@ -194,7 +193,7 @@ mailer:
 database:
   # Database connection URI.
   # Defaults to a local SQLite file for an unconfigured trial instance.
-  # Point at PostgreSQL when you need RLS, multi-tenancy, or vector search.
+  # Use PostgreSQL for database-enforced tenant isolation; both backends support vector search.
   uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>'
   # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
@@ -205,8 +204,6 @@ database:
   # Minimum number of connections for a pool.
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
   # Maximum number of connections for a pool. SQLite has a single writer, so it defaults to 10 rather than 100.
-  # Serving real traffic on the
-  # development default of 1 serializes every request behind one connection.
 <% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
   max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
 <% else %>
@@ -225,9 +222,7 @@ database:
 # Authentication Configuration
 #
 # Deliberately absent, not merely unset.
-# This block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`.
-# A `JWT_SECRET` here would therefore be a required secret configuring a token type nothing mints or verifies.
-# Restore this block only alongside code that actually issues a JWT.
+# Authentication uses API keys through RequestAuth, not Loco's JWT configuration.
 
 initializers:
   plan_policy_enabled: '<%= get_env(name="YORISHIRO_PLAN_POLICY_ENABLED", default="false") %>'

@@ -26,7 +26,7 @@ db_enum! {
     ///
     /// The class is recorded on the job's lifecycle row and decides its priority band and concurrency limit.
     /// It does not choose the worker: that is the job's [`crate::workers::target::WorkerTarget`], which a `TenantPrivate` job derives from the tenant that owns its workspace.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum WorkerClass {
         /// Runs only on compute a single tenant registered for its own workspaces.
         TenantPrivate = "tenant_private",
@@ -53,7 +53,6 @@ impl EmbeddingSyncArgs {
     pub(crate) const JOB_NAME: &'static str = "embedding_sync";
 }
 
-#[derive(Debug)]
 enum EmbeddingSyncOutcome {
     Persisted,
     Noop(&'static str),

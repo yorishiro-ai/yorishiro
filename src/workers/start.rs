@@ -8,13 +8,13 @@ use loco_rs::boot::StartMode;
 use super::target::{WorkerTarget, targets_for_start};
 
 /// The workers a start runs.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum WorkerStart {
     NoWorkers,
     Targets(Vec<WorkerTarget>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StartError(String);
 
 impl fmt::Display for StartError {

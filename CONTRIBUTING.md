@@ -47,7 +47,7 @@ Async waits release the task to do other work, but one physical connection still
 
 Run the full suite with Rust's default parallel test execution.
 
-Use `make test-postgres`, `make test-sqlite`, or `make test-valkey` locally.
+Use `make test-postgres`, `make test-sqlite`, or `make test-redis` locally.
 For the four supported topologies, use `uv run scripts/test_topology.py <topology>`.
 The wrapper selects CE or EE explicitly and requires configured-app evidence from a successful Loco boot.
 

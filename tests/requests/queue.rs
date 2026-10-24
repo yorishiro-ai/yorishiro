@@ -2,9 +2,8 @@
 //!
 //! The isolated SQLite-provider cases use separate temporary application and queue files, preserving the permitted SQLite/SQLite pair.
 //!
-//! `tests/workers/queue_routing.rs` covers tag filtering through the public
-//! `Queue::run(tags)` API for both SQL providers.  The Valkey provider is covered
-//! by `uv run scripts/test_topology.py sqlite-valkey` against a real Valkey service.
+//! `tests/workers/target.rs` covers worker-target names and queue selection.
+//! Redis provider behavior is also exercised by the Redis topology suites.
 
 use futures::FutureExt;
 use std::sync::Arc;

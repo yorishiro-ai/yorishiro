@@ -32,7 +32,7 @@ fn require_postgres(conn: &impl ConnectionTrait, what: &str) -> Result<(), Yoris
 }
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
-#[derive(Debug, Serialize, FromQueryResult)]
+#[derive(Serialize, FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketplaceListing {
     pub template_id: Uuid,
@@ -64,7 +64,7 @@ pub struct TemplateVersionRecord {
 }
 
 crate::db_enum::db_enum! {
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum TemplateVersionStatus {
         Draft = "draft",
         Pre = "pre",
@@ -85,7 +85,7 @@ impl TemplateVersionStatus {
     }
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct TemplateVersionDbRecord {
     id: Uuid,
     template_id: Uuid,
@@ -96,7 +96,7 @@ struct TemplateVersionDbRecord {
     created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct AuthorizedTemplateVersionDbRecord {
     // Visibility is projected only after the query's authorization predicate.
     // An inaccessible corrupt row must remain indistinguishable from a missing row.
@@ -174,7 +174,7 @@ impl TryFrom<crate::models::_entities::template_versions::Model> for TemplateVer
     }
 }
 
-#[derive(Debug, Serialize, FromQueryResult)]
+#[derive(Serialize, FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TemplateReviewRecord {
     pub id: Uuid,
@@ -200,7 +200,7 @@ impl From<crate::models::_entities::template_reviews::Model> for TemplateReviewR
     }
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct AuthorizedTemplateReviewDbRecord {
     id: Uuid,
     template_id: Uuid,
@@ -234,7 +234,7 @@ impl TryFrom<AuthorizedTemplateReviewDbRecord> for TemplateReviewRecord {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct PublishVersionRequest {
     pub definition: Value,
     pub changelog: Option<String>,
@@ -247,7 +247,7 @@ fn default_status() -> TemplateVersionStatus {
     TemplateVersionStatus::Draft
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SubmitReviewRequest {
     pub rating: i16,

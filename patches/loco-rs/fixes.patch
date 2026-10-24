@@ -1,6 +1,19 @@
 --- a/src/bgworker/mod.rs
 +++ b/src/bgworker/mod.rs
-@@ -284,6 +284,14 @@
+@@ -22,11 +22,9 @@
+ #[cfg(all(feature = "worker", feature = "db-sqlite"))]
+ pub mod sqlt;
+ 
+-#[cfg(feature = "db-sqlite")]
+-use crate::config::SqliteQueueConfig;
+ use crate::{
+     app::AppContext,
+-    config::{self, Config, PostgresQueueConfig, QueueConfig, RedisQueueConfig, WorkerMode},
++    config::{self, Config, QueueConfig, WorkerMode},
+     Error, Result,
+ };
+ 
+@@ -284,6 +282,14 @@
      /// Does not currently return an error, but implementations might, so
      /// using Result here as return type.
      fn shutdown(&self) -> Result<()>;
@@ -15,7 +28,7 @@
  }
  
  /// Process worker task handles and handle any errors.
-@@ -584,6 +592,15 @@
+@@ -584,6 +590,15 @@
      pub fn shutdown(&self) -> Result<()> {
          tracing::info!("Shutting down background job processing");
          self.0.shutdown()
@@ -31,6 +44,59 @@
      }
  
      async fn get_jobs(
+@@ -920,49 +935,9 @@
+ /// This function will return an error if it fails
+ pub async fn converge(queue: &Queue, config: &QueueConfig) -> Result<()> {
+     queue.setup().await?;
+-    match config {
+-        QueueConfig::Postgres(PostgresQueueConfig {
+-            dangerously_flush,
+-            uri: _,
+-            max_connections: _,
+-            enable_logging: _,
+-            connect_timeout: _,
+-            idle_timeout: _,
+-            poll_interval_sec: _,
+-            num_workers: _,
+-            min_connections: _,
+-            reaper: _,
+-        })
+-        | QueueConfig::Redis(RedisQueueConfig {
+-            dangerously_flush,
+-            uri: _,
+-            queues: _,
+-            num_workers: _,
+-            reaper: _,
+-        }) => {
+-            if *dangerously_flush {
+-                tracing::warn!("Flush mode enabled - clearing all jobs from queue");
+-                queue.clear().await?;
+-            }
+-        }
+-        #[cfg(feature = "db-sqlite")]
+-        QueueConfig::Sqlite(SqliteQueueConfig {
+-            dangerously_flush,
+-            uri: _,
+-            max_connections: _,
+-            enable_logging: _,
+-            connect_timeout: _,
+-            idle_timeout: _,
+-            poll_interval_sec: _,
+-            num_workers: _,
+-            min_connections: _,
+-            reaper: _,
+-        }) => {
+-            if *dangerously_flush {
+-                tracing::warn!("Flush mode enabled - clearing all jobs from queue");
+-                queue.clear().await?;
+-            }
+-        }
++    if config.dangerously_flush() {
++        tracing::warn!("Flush mode enabled - clearing all jobs from queue");
++        queue.clear().await?;
+     }
+     Ok(())
+ }
 --- a/src/bgworker/pg.rs
 +++ b/src/bgworker/pg.rs
 @@ -178,6 +178,14 @@
@@ -111,7 +177,28 @@
  
 --- a/src/bgworker/redis.rs
 +++ b/src/bgworker/redis.rs
-@@ -140,7 +140,7 @@
+@@ -22,7 +22,19 @@
+ use tracing::{debug, error, info, trace};
+ use ulid::Ulid;
+ 
+-pub type RedisPool = Client;
++#[derive(Clone)]
++pub struct RedisPool {
++    client: Client,
++    connection: AsyncConnectionConfig,
++}
++
++impl RedisPool {
++    async fn connection(&self) -> redis::RedisResult<Connection> {
++        self.client
++            .get_multiplexed_async_connection_with_config(&self.connection)
++            .await
++    }
++}
+ 
+ const QUEUE_KEY_PREFIX: &str = "queue:";
+ const JOB_KEY_PREFIX: &str = "job:";
+@@ -140,7 +152,7 @@
                          }
                      };
  
@@ -120,7 +207,7 @@
                          debug!(job_id = job.id, name = job.name, "working on job");
                          if let Some(handler) = handlers.get(&job.name) {
                              match handler(job.id.clone(), job.data.clone()).await {
-@@ -150,18 +150,32 @@
+@@ -150,18 +162,32 @@
                                          &job.id,
                                          &queue_name,
                                          job.interval,
@@ -158,7 +245,74 @@
                                      }
                                  }
                              }
-@@ -315,8 +329,14 @@
+@@ -192,27 +218,14 @@
+     }
+ }
+ 
+-fn connect(url: &str) -> Result<RedisPool> {
+-    let client = Client::open(url.to_string())?;
+-    Ok(client)
+-}
+-
+-/// How long a single worker connection attempt may take.
+-///
+-/// `redis` 1.x defaults this to one second (`DEFAULT_CONNECTION_TIMEOUT`), where
+-/// 0.x left it unset and waited as long as the connect needed. One second has to
+-/// cover TCP, AUTH and the multiplexer handshake, and on a small instance booting
+-/// an app — migrations, connection pool and seeding at once — a managed Redis can
+-/// miss it. Inheriting that default turns a slow boot into a worker that never
+-/// starts.
+-const WORKER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+-
+-/// How long a single command issued by a worker may take.
+-///
+-/// Same story: `redis` 1.x defaults this to 500ms where 0.x left it unset. That
+-/// is a tight budget for a round trip to a managed Redis, and a worker that trips
+-/// it stops draining the queue.
+-const WORKER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
++fn connect(config: &RedisQueueConfig) -> Result<RedisPool> {
++    Ok(RedisPool {
++        client: Client::open(config.uri.clone())?,
++        connection: AsyncConnectionConfig::new()
++            .set_connection_timeout(Some(Duration::from_millis(config.connect_timeout)))
++            .set_response_timeout(Some(Duration::from_millis(config.response_timeout))),
++    })
++}
+ 
+ /// The longest a worker waits between connection attempts.
+ const WORKER_MAX_BACKOFF: Duration = Duration::from_secs(5);
+@@ -226,9 +239,6 @@
+ /// while the process stays up and answers health checks. A managed Redis failover
+ /// routinely outlasts any fixed number of attempts.
+ async fn connect_worker(client: &RedisPool, token: &CancellationToken) -> Option<Connection> {
+-    let config = AsyncConnectionConfig::new()
+-        .set_connection_timeout(Some(WORKER_CONNECT_TIMEOUT))
+-        .set_response_timeout(Some(WORKER_RESPONSE_TIMEOUT));
+     let mut backoff = Duration::from_millis(250);
+     let mut attempt: u32 = 0;
+ 
+@@ -237,10 +247,7 @@
+         if token.is_cancelled() {
+             return None;
+         }
+-        match client
+-            .get_multiplexed_async_connection_with_config(&config)
+-            .await
+-        {
++        match client.connection().await {
+             Ok(conn) => {
+                 if attempt > 1 {
+                     info!(attempt, "worker connected to redis");
+@@ -266,7 +273,7 @@
+ }
+ 
+ async fn get_connection(client: &RedisPool) -> Result<Connection> {
+-    let conn = client.get_multiplexed_async_connection().await?;
++    let conn = client.connection().await?;
+     Ok(conn)
+ }
+ 
+@@ -315,8 +322,14 @@
      // Store job in Redis queue (ZSET, scored by priority) and in its job key.
      let score = calculate_score(job.priority);
      let job_key = format!("{JOB_KEY_PREFIX}{}", job.id);
@@ -175,7 +329,7 @@
  
      Ok(job_id)
  }
-@@ -384,11 +404,14 @@
+@@ -384,11 +397,14 @@
  local queue_key = KEYS[1]
  local processing_key = KEYS[2]
  local job_id = ARGV[1]
@@ -192,7 +346,7 @@
      return score
  else
      return nil
-@@ -399,7 +422,7 @@
+@@ -399,7 +415,7 @@
      conn: &mut Connection,
      queues: &[String],
      tags: &[String],
@@ -201,7 +355,7 @@
      // Paging bounds for scanning the priority-ordered queue.
      const BATCH_SIZE: isize = 50;
      const MAX_SEARCH: isize = 1000;
-@@ -417,7 +440,7 @@
+@@ -417,7 +433,7 @@
          // Page through the queue (ordered by ZSET score = priority) collecting
          // jobs whose tags match the worker's tag filter.
          let mut offset = 0;
@@ -210,7 +364,7 @@
          while offset < MAX_SEARCH {
              let job_ids: Vec<String> = conn
                  .zrange(&queue_key, offset, offset + BATCH_SIZE - 1)
-@@ -462,7 +485,7 @@
+@@ -462,7 +478,7 @@
                                      "Job not due yet, skipping"
                                  );
                              } else {
@@ -219,7 +373,7 @@
                              }
                          }
                          Err(err) => {
-@@ -488,7 +511,7 @@
+@@ -488,7 +504,7 @@
          // 1. Higher priority first.
          // 2. Earlier `run_at` first for equal priority.
          // 3. Smaller id first as a final deterministic tiebreaker.
@@ -228,7 +382,7 @@
              job_b
                  .priority
                  .cmp(&job_a.priority)
-@@ -496,18 +519,26 @@
+@@ -496,18 +512,26 @@
                  .then_with(|| id_a.cmp(id_b))
          });
  
@@ -257,7 +411,7 @@
              }
          }
      }
-@@ -519,6 +550,7 @@
+@@ -519,6 +543,7 @@
      id: &JobId,
      queue_name: &str,
      interval_ms: Option<i64>,
@@ -265,7 +419,7 @@
  ) -> Result<()> {
      let job_key = format!("{JOB_KEY_PREFIX}{id}");
      let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue_name}");
-@@ -533,18 +565,22 @@
+@@ -533,18 +558,22 @@
              let new_json = job.to_json()?;
              let queue_key = format!("{QUEUE_KEY_PREFIX}{queue_name}");
              let score = calculate_score(job.priority);
@@ -296,7 +450,7 @@
      }
      Ok(())
  }
-@@ -554,6 +590,7 @@
+@@ -554,6 +583,7 @@
      id: &JobId,
      queue_name: &str,
      error: &crate::Error,
@@ -304,7 +458,7 @@
  ) -> Result<()> {
      let job_key = format!("{JOB_KEY_PREFIX}{id}");
      let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue_name}");
-@@ -576,9 +613,41 @@
+@@ -576,9 +606,41 @@
          job.status = JobStatus::Failed;
          job.updated_at = Some(Utc::now());
          let updated_json = job.to_json()?;
@@ -349,7 +503,7 @@
      Ok(())
  }
  
-@@ -724,7 +793,7 @@
+@@ -724,7 +786,7 @@
                  && status.contains(&job.status)
              {
                  let _: () = conn.zrem(&queue_key, &job_id).await?;
@@ -358,7 +512,7 @@
              }
          }
      }
-@@ -742,7 +811,7 @@
+@@ -742,7 +804,7 @@
                  }
                  if status.contains(&job.status) {
                      let _: () = conn.srem(&processing_key, &job_id).await?;
@@ -367,7 +521,7 @@
                  }
              }
          }
-@@ -754,7 +823,7 @@
+@@ -754,7 +816,7 @@
              && let Ok(job) = Job::from_json(&json)
              && status.contains(&job.status)
          {
@@ -376,7 +530,7 @@
          }
      }
  
-@@ -816,7 +885,7 @@
+@@ -816,7 +878,7 @@
                  });
                  if should_remove {
                      let _: () = conn.zrem(&queue_key, &job_id).await?;
@@ -385,7 +539,7 @@
                  }
              }
          }
-@@ -838,7 +907,7 @@
+@@ -838,7 +900,7 @@
                  });
                  if should_remove {
                      let _: () = conn.srem(&processing_key, &job_id).await?;
@@ -394,7 +548,7 @@
                  }
              }
          }
-@@ -853,7 +922,7 @@
+@@ -853,7 +915,7 @@
                  created_at < cutoff_date && status.is_none_or(|s| s.contains(&job.status))
              });
              if should_remove {
@@ -403,7 +557,7 @@
              }
          }
      }
-@@ -914,6 +983,39 @@
+@@ -914,6 +976,39 @@
  /// # Errors
  ///
  /// This function will return an error if it fails to interact with Redis
@@ -443,7 +597,7 @@
  pub async fn requeue(client: &RedisPool, age_minutes: &i64) -> Result<()> {
      let mut conn = get_connection(client).await?;
      let cutoff_time = Utc::now() - chrono::Duration::minutes(*age_minutes);
-@@ -944,22 +1046,32 @@
+@@ -944,22 +1039,32 @@
              if let Some(json) = job_json
                  && let Ok(mut job) = Job::from_json(&json)
              {
@@ -487,7 +641,7 @@
                  }
              }
          }
-@@ -992,10 +1104,19 @@
+@@ -992,10 +1097,19 @@
                      job.updated_at = Some(Utc::now());
                      let updated_json = job.to_json()?;
                      let score = calculate_score(job.priority);
@@ -511,20 +665,63 @@
                  }
              }
          }
-@@ -1199,6 +1320,12 @@
- 
-     fn shutdown(&self) -> Result<()> {
+@@ -1201,6 +1315,12 @@
          self.token.cancel();
-+        Ok(())
-+    }
+         Ok(())
+     }
 +
 +    async fn close(&self) -> Result<()> {
 +        self.token.cancel();
 +        *self.registry.lock().await = JobRegistry::new();
-         Ok(())
-     }
++        Ok(())
++    }
  }
-@@ -1499,7 +1626,7 @@
+ 
+ /// Builds the [`RedisQueue`] provider (client, registry, run options, token)
+@@ -1208,7 +1328,7 @@
+ /// resulting `run_opts` without needing to downcast the opaque [`Queue`].
+ #[allow(clippy::unused_async)]
+ async fn build_provider(qcfg: &RedisQueueConfig) -> Result<RedisQueue> {
+-    let client = connect(&qcfg.uri)?;
++    let client = connect(qcfg)?;
+     let registry = JobRegistry::new();
+     let token = CancellationToken::new();
+     let run_opts = RunOpts {
+@@ -1252,7 +1372,7 @@
+     async fn connect_worker_honours_cancellation() {
+         // Port 1 is never a Redis. The point is that cancellation short-circuits
+         // before any attempt is made, so the address is irrelevant.
+-        let client = Client::open("redis://127.0.0.1:1/").expect("client opens");
++        let client = connect(&serde_json::from_value(serde_json::json!({"uri":"redis://127.0.0.1:1/"})).unwrap()).expect("client opens");
+         let token = CancellationToken::new();
+         token.cancel();
+ 
+@@ -1272,7 +1392,7 @@
+     /// returned, so this fails if a fixed budget comes back.
+     #[tokio::test]
+     async fn connect_worker_retries_until_cancelled() {
+-        let client = Client::open("redis://127.0.0.1:1/").expect("client opens");
++        let client = connect(&serde_json::from_value(serde_json::json!({"uri":"redis://127.0.0.1:1/"})).unwrap()).expect("client opens");
+         let token = CancellationToken::new();
+ 
+         let task = tokio::spawn({
+@@ -1299,13 +1419,13 @@
+ 
+     async fn setup_redis() -> (RedisPool, ContainerAsync<GenericImage>) {
+         let (redis_url, container) = setup_redis_container().await;
+-        let client = connect(&redis_url).expect("connect to redis");
++        let client = connect(&serde_json::from_value(serde_json::json!({"uri":redis_url})).unwrap()).expect("connect to redis");
+         (client, container)
+     }
+ 
+     async fn get_test_connection(client: &RedisPool) -> Connection {
+         client
+-            .get_multiplexed_async_connection()
++            .connection()
+             .await
+             .expect("get connection")
+     }
+@@ -1499,7 +1619,7 @@
  
          let queues = vec!["default".to_string()];
          for expected_user in [2, 1, 3] {
@@ -533,7 +730,7 @@
                  .await
                  .expect("dequeue")
                  .expect("a batched job must be dequeueable");
-@@ -1508,7 +1635,7 @@
+@@ -1508,7 +1628,7 @@
                  Some(&serde_json::json!(expected_user)),
                  "batched jobs must be dequeued by priority"
              );
@@ -542,7 +739,7 @@
                  .await
                  .expect("complete job");
          }
-@@ -1561,13 +1688,13 @@
+@@ -1561,13 +1681,13 @@
              "an untagged worker must not see tagged jobs"
          );
          for _ in 0..2 {
@@ -558,7 +755,7 @@
                  .await
                  .expect("complete job");
          }
-@@ -1591,12 +1718,14 @@
+@@ -1591,12 +1711,14 @@
          let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
              .await
              .expect("dequeue");
@@ -577,7 +774,7 @@
  
          // Verify job is not in processing set
          let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue}");
-@@ -1635,11 +1764,11 @@
+@@ -1635,11 +1757,11 @@
          let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
              .await
              .expect("dequeue");
@@ -591,7 +788,7 @@
                  .await
                  .is_ok()
          );
-@@ -1680,13 +1809,15 @@
+@@ -1680,13 +1802,15 @@
          let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
              .await
              .expect("dequeue");
@@ -611,7 +808,7 @@
  
          // Verify job is not in processing set
          let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue}");
-@@ -1729,13 +1860,19 @@
+@@ -1729,13 +1853,19 @@
          .expect("enqueue");
  
          let mut conn = get_test_connection(&client).await;
@@ -635,7 +832,7 @@
  
          let failed = get_jobs(&client, Some(&vec![JobStatus::Failed]), None)
              .await
-@@ -1761,13 +1898,19 @@
+@@ -1761,13 +1891,19 @@
          .expect("enqueue");
  
          let mut conn = get_test_connection(&client).await;
@@ -659,7 +856,7 @@
  
          assert_eq!(retry_failed(&client, None).await.expect("retry"), 1);
          assert!(get_jobs(&client, Some(&vec![JobStatus::Failed]), None)
-@@ -1777,7 +1920,7 @@
+@@ -1777,7 +1913,7 @@
  
          // Queued is not enough: the id must be back in a queue ZSET, or no
          // worker will ever see it again.
@@ -668,7 +865,7 @@
              .await
              .expect("dequeue")
              .expect("the retried job is dequeueable");
-@@ -2168,7 +2311,7 @@
+@@ -2168,7 +2304,7 @@
  
          let queues = vec!["default".to_string()];
          for expected_index in [1, 2, 3, 4, 5] {
@@ -677,7 +874,7 @@
                  .await
                  .expect("dequeue failed")
                  .expect("expected a job");
-@@ -2176,7 +2319,7 @@
+@@ -2176,7 +2312,7 @@
                  job.data.get("index"),
                  Some(&serde_json::json!(expected_index))
              );
@@ -686,7 +883,7 @@
                  .await
                  .expect("complete job");
          }
-@@ -2262,17 +2405,17 @@
+@@ -2262,17 +2398,17 @@
          let mut conn = get_test_connection(&client).await;
  
          // Zero priority is dequeued before the negative one.
@@ -707,7 +904,7 @@
              .await
              .expect("dequeue failed")
              .expect("expected a job");
-@@ -2319,7 +2462,7 @@
+@@ -2319,7 +2455,7 @@
          let _: () = conn.zadd(&queue_key, "job2", score2).await.unwrap();
  
          let queues = vec!["default".to_string()];
@@ -716,6 +913,24 @@
              .await
              .expect("dequeue")
              .expect("should have dequeued the untagged job");
+@@ -2332,6 +2468,8 @@
+     async fn create_provider_wires_reaper_config() {
+         let qcfg = RedisQueueConfig {
+             uri: "redis://127.0.0.1:6379".to_string(),
++            connect_timeout: 10_000,
++            response_timeout: 5_000,
+             dangerously_flush: false,
+             queues: None,
+             num_workers: 1,
+@@ -2354,6 +2492,8 @@
+     async fn create_provider_defaults_reaper_to_none() {
+         let qcfg = RedisQueueConfig {
+             uri: "redis://127.0.0.1:6379".to_string(),
++            connect_timeout: 10_000,
++            response_timeout: 5_000,
+             dangerously_flush: false,
+             queues: None,
+             num_workers: 1,
 --- a/src/bgworker/sqlt.rs
 +++ b/src/bgworker/sqlt.rs
 @@ -181,6 +181,13 @@
@@ -775,6 +990,110 @@
  fn create_root_span(environment: &Environment) -> tracing::Span {
      tracing::span!(tracing::Level::DEBUG, "app", environment = %environment)
  }
+--- a/src/config/mod.rs
++++ b/src/config/mod.rs
+@@ -173,6 +173,18 @@
+     /// let config = Config::from_folder(&Environment::Development, Path::new("config"))?;
+     /// ```
+     pub fn from_folder(env: &Environment, path: &Path) -> Result<Self> {
++        Self::from_folder_with(env, path, |_| Ok(()))
++    }
++
++    /// Loads and merges configuration, then resolves application defaults before deserialization.
++    ///
++    /// # Errors
++    /// Returns an error if loading, resolution or deserialization fails.
++    pub fn from_folder_with(
++        env: &Environment,
++        path: &Path,
++        resolve: impl FnOnce(&mut serde_yaml::Value) -> Result<()>,
++    ) -> Result<Self> {
+         // `{env}.yaml` is the base configuration, `{env}.local.yaml` is an
+         // optional, git-ignorable override layered on top of it. When both
+         // exist they are deep-merged (local wins), rather than one file
+@@ -183,7 +195,7 @@
+         let base_exists = base_path.exists();
+         let local_exists = local_path.exists();
+ 
+-        let (merged, selected_path_display) = match (base_exists, local_exists) {
++        let (mut merged, selected_path_display) = match (base_exists, local_exists) {
+             (false, false) => {
+                 return Err(Error::Message(format!(
+                     "no configuration file found in folder: {}",
+@@ -217,6 +229,7 @@
+             "loading environment from"
+         );
+ 
++        resolve(&mut merged)?;
+         serde_yaml::from_value(merged).map_err(|err| Error::YAMLFile(err, selected_path_display))
+     }
+ 
+--- a/src/config/queue.rs
++++ b/src/config/queue.rs
+@@ -16,6 +16,15 @@
+ }
+ 
+ impl QueueConfig {
++    /// Disables destructive startup actions for an additional provider on the same queue.
++    pub fn preserve_jobs(&mut self) {
++        match self {
++            Self::Redis(config) => config.dangerously_flush = false,
++            Self::Postgres(config) => config.dangerously_flush = false,
++            #[cfg(feature = "db-sqlite")]
++            Self::Sqlite(config) => config.dangerously_flush = false,
++        }
++    }
+     /// Whether this queue is configured to discard all jobs on startup,
+     /// whichever backend it uses.
+     #[must_use]
+@@ -32,6 +41,12 @@
+ #[derive(Debug, Clone, Deserialize, Serialize)]
+ pub struct RedisQueueConfig {
+     pub uri: String,
++    /// Connection timeout in milliseconds for producers and workers alike.
++    #[serde(default = "redis_connect_timeout")]
++    pub connect_timeout: u64,
++    /// Command response timeout in milliseconds for producers and workers alike.
++    #[serde(default = "redis_response_timeout")]
++    pub response_timeout: u64,
+     #[serde(default)]
+     pub dangerously_flush: bool,
+ 
+@@ -45,6 +60,14 @@
+     /// Opt-in visibility-timeout reaper. See [`ReaperConfig`].
+     #[serde(default)]
+     pub reaper: Option<ReaperConfig>,
++}
++
++fn redis_connect_timeout() -> u64 {
++    10_000
++}
++
++fn redis_response_timeout() -> u64 {
++    5_000
+ }
+ 
+ #[derive(Debug, Clone, Deserialize, Serialize)]
+--- a/src/controller/monitoring.rs
++++ b/src/controller/monitoring.rs
+@@ -417,6 +417,8 @@
+         ctx.config.workers.mode = config::WorkerMode::BackgroundQueue;
+         ctx.config.queue = Some(config::QueueConfig::Redis(config::RedisQueueConfig {
+             uri: failure_redis_url.to_string(),
++            connect_timeout: 10_000,
++            response_timeout: 5_000,
+             dangerously_flush: false,
+             queues: None,
+             num_workers: 1,
+@@ -427,6 +429,8 @@
+         ctx.queue_provider = Some(std::sync::Arc::new(
+             bgworker::redis::create_provider(&config::RedisQueueConfig {
+                 uri: failure_redis_url.to_string(),
++                connect_timeout: 10_000,
++                response_timeout: 5_000,
+                 dangerously_flush: false,
+                 queues: None,
+                 num_workers: 1,
 --- a/src/testing/db.rs
 +++ b/src/testing/db.rs
 @@ -125,6 +125,7 @@

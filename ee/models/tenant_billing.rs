@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 /// A tenant's billing state.
 /// Absent for any tenant that has never been through checkout.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TenantBillingRecord {
     pub(crate) tenant_id: Uuid,
     pub plan: Option<String>,

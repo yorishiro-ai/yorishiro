@@ -3,7 +3,7 @@
 #
 #   docker compose up --build
 #
-# The queue is Redis-compatible (valkey) and jobs run in a separate `worker` container from the
+# The queue uses the Redis protocol and jobs run in a separate `worker` container from the
 # same image: `start` serves HTTP only and consumes nothing, so without the worker every queued
 # job (embedding sync, reindex, infer-fill) would sit in the queue.
 #
@@ -20,7 +20,7 @@ x-yorishiro: &yorishiro
     # These override the embedded/example defaults. Mount a complete administrator-owned
     # /app/config/production.yaml or production.local.yaml when file configuration is needed.
     DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
-    # `Redis` is Loco's provider name for Redis-compatible services such as valkey. Without it the
+    # `Redis` selects Loco's Redis-compatible queue provider. Without it the
     # queue kind follows DATABASE_URL's scheme and lands on Postgres.
     YORISHIRO_QUEUE_KIND: Redis
     QUEUE_URL: redis://redis:6379

@@ -30,8 +30,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your write-oriented logic here
 impl ActiveModel {}
 
-// implement your custom finders, selectors oriented logic here
 impl Entity {}

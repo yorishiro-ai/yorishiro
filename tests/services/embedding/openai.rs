@@ -57,7 +57,7 @@ async fn production_transport_preserves_request_and_provider_order() {
                 .unwrap()
                 .send((headers, body))
                 .unwrap();
-            Json(serde_json::json!({"data":[{"embedding":[1.0,2.0]},{"embedding":[3.0,4.0]}]}))
+            Json(serde_json::json!({"data":[{"index":1,"embedding":[3.0,4.0]},{"index":0,"embedding":[1.0,2.0]}]}))
         }),
     );
     let server = HttpStub::start(app).await;
@@ -105,6 +105,21 @@ async fn production_status_mapping_preserves_retry_bound_and_redacts_body() {
 async fn production_response_validation_rejects_invalid_json_count_and_width() {
     for (body, inputs, diagnostic) in [
         ("provider-secret-body test-api-key", vec!["text"], None),
+        (
+            r#"{"data":[{"index":1,"embedding":[1.0,2.0]}]}"#,
+            vec!["text"],
+            Some("invalid vector indices"),
+        ),
+        (
+            r#"{"data":[{"index":0,"embedding":[1.0,2.0]},{"index":0,"embedding":[3.0,4.0]}]}"#,
+            vec!["first", "second"],
+            Some("invalid vector indices"),
+        ),
+        (
+            r#"{"data":[{"index":0,"embedding":[1.0,2.0]},{"embedding":[3.0,4.0]}]}"#,
+            vec!["first", "second"],
+            Some("invalid vector indices"),
+        ),
         (
             r#"{"data":[{"embedding":[1.0,2.0]}]}"#,
             vec!["first", "second"],

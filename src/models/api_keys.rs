@@ -13,7 +13,7 @@ db_enum! {
     /// Permission level held by an API key.
     /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
     /// The wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     pub enum ApiKeyScope {
         Read = "read",
         Write = "write",
@@ -77,13 +77,10 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
 impl Model {}
 
-// implement your write-oriented logic here
 impl ActiveModel {}
 
-// implement your custom finders, selectors oriented logic here
 impl Entity {
     /// Verifies a presented raw API key and resolves the workspace, tenant, and scope it belongs to.
     ///

@@ -76,10 +76,15 @@ pub(crate) async fn register_user(
             details: vec![],
             hint: "ask a tenant admin for a fresh invite".into(),
         })?;
-    let user =
-        crate::models::user_users::create_user(&txn, &invite.email, password, display_name).await?;
-    crate::models::tenant_memberships::add_member(&txn, invite.tenant_id, user.id, invite.role)
-        .await?;
+    let user = crate::models::tenancy::register_member(
+        &txn,
+        invite.tenant_id,
+        &invite.email,
+        password,
+        display_name,
+        invite.role,
+    )
+    .await?;
     txn.commit().await.internal()?;
     Ok((user, invite))
 }

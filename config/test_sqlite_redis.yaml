@@ -37,7 +37,7 @@ scheduler:
 
 
 # Queue Configuration
-# This environment keeps the application database independent from the external Valkey-compatible provider.
+# This environment keeps the application database independent from the external Redis-compatible provider.
 queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL") %>

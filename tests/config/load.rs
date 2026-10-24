@@ -64,12 +64,12 @@ async fn the_topology_picks_the_queue_provider_for_one_database() {
     assert!(matches!(sqlite_queue.queue, Some(QueueConfig::Sqlite(_))));
 
     guard.set("QUEUE_URL", "redis://localhost:6379");
-    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-redis");
     let redis_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(redis_queue.queue, Some(QueueConfig::Redis(_))));
 
     guard.set("QUEUE_URL", "rediss://localhost:6379");
-    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-valkey");
+    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-redis");
     let rediss_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(rediss_queue.queue, Some(QueueConfig::Redis(_))));
 }
@@ -117,7 +117,7 @@ async fn redis_test_config_keeps_queue_independent_from_database() {
     _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
     _guard.set("QUEUE_URL", "redis://queue.example:6379");
 
-    let config = load(&Environment::Any("test_sqlite_valkey".into()))
+    let config = load(&Environment::Any("test_sqlite_redis".into()))
         .await
         .unwrap();
 
@@ -167,14 +167,14 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
             "sqlite://queue.sqlite3?mode=rwc",
         ),
         (
-            "postgres-valkey",
+            "postgres-redis",
             "postgres://db/app",
-            "redis://valkey:6379/15",
+            "redis://redis:6379/15",
         ),
         (
-            "sqlite-valkey",
+            "sqlite-redis",
             "sqlite://db.sqlite3?mode=rwc",
-            "redis://valkey:6379/15",
+            "redis://redis:6379/15",
         ),
     ] {
         guard.set("YORISHIRO_TEST_TOPOLOGY", topology);
@@ -184,9 +184,25 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
         assert_eq!(config.database.uri, database);
         assert_eq!(config.server.port, 5151, "{topology} must honor PORT");
         match (topology.split('-').nth(1).unwrap(), config.queue.unwrap()) {
-            ("postgres", QueueConfig::Postgres(actual)) => assert_eq!(actual.uri, queue),
-            ("sqlite", QueueConfig::Sqlite(actual)) => assert_eq!(actual.uri, queue),
-            ("valkey", QueueConfig::Redis(actual)) => assert_eq!(actual.uri, queue),
+            ("postgres", QueueConfig::Postgres(actual)) => {
+                assert_eq!(actual.uri, queue);
+                assert_eq!(actual.connect_timeout, config.database.connect_timeout);
+                assert_eq!(actual.max_connections, config.database.max_connections);
+                assert_eq!(actual.min_connections, config.database.min_connections);
+                assert_eq!(actual.idle_timeout, config.database.idle_timeout);
+            }
+            ("sqlite", QueueConfig::Sqlite(actual)) => {
+                assert_eq!(actual.uri, queue);
+                assert_eq!(actual.connect_timeout, config.database.connect_timeout);
+                assert_eq!(actual.max_connections, config.database.max_connections);
+                assert_eq!(actual.min_connections, config.database.min_connections);
+                assert_eq!(actual.idle_timeout, config.database.idle_timeout);
+            }
+            ("redis", QueueConfig::Redis(actual)) => {
+                assert_eq!(actual.uri, queue);
+                assert_eq!(actual.connect_timeout, 10_000);
+                assert_eq!(actual.response_timeout, 5_000);
+            }
             (provider, actual) => panic!("{topology} resolved to {provider}: {actual:?}"),
         }
     }
@@ -248,6 +264,23 @@ async fn production_example_is_used_when_local_config_is_absent() {
         "sqlite:///tmp/packaged-fallback.sqlite3?mode=rwc"
     );
     assert!(!directory.path().join("production.yaml").exists());
+    std::fs::rename(
+        directory.path().join("production.yaml.example"),
+        directory.path().join("production.yaml"),
+    )
+    .unwrap();
+    std::fs::write(
+        directory.path().join("production.local.yaml"),
+        "queue:\n  connect_timeout: 1234\n  max_connections: 3\n",
+    )
+    .unwrap();
+    let overridden = load(&Environment::Production).await.unwrap();
+    let Some(QueueConfig::Sqlite(queue)) = overridden.queue else {
+        panic!("the local override must preserve the selected SQL provider");
+    };
+    assert_eq!(queue.connect_timeout, 1234);
+    assert_eq!(queue.max_connections, 3);
+    assert_eq!(queue.idle_timeout, overridden.database.idle_timeout);
 }
 
 #[tokio::test]
@@ -306,7 +339,7 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
         (
             "sqlite:///var/lib/y/a.sqlite3?mode=rwc",
             Some("Redis"),
-            Some("redis://valkey:6379/0"),
+            Some("redis://redis:6379/0"),
             10,
             2,
         ),
@@ -314,7 +347,7 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
         (
             "postgres://db/app",
             Some("Redis"),
-            Some("redis://valkey:6379/0"),
+            Some("redis://redis:6379/0"),
             100,
             2,
         ),

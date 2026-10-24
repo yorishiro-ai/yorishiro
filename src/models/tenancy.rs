@@ -18,6 +18,50 @@ pub(crate) struct SetupAccount {
     pub(crate) workspace_id: Uuid,
 }
 
+/// Creates an account and its membership in the caller's transaction.
+///
+/// # Errors
+/// Returns an error if account creation or membership insertion fails.
+pub async fn register_member(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    email: &str,
+    password: &str,
+    display_name: Option<&str>,
+    role: crate::models::tenant_memberships::MembershipRole,
+) -> Result<crate::models::user_users::Model, YorishiroError> {
+    let user = crate::models::user_users::create_user(txn, email, password, display_name).await?;
+    crate::models::tenant_memberships::add_member(txn, tenant_id, user.id, role).await?;
+    Ok(user)
+}
+
+pub(crate) async fn signup_account(
+    db: &sea_orm::DatabaseConnection,
+    max_tenants: Option<i32>,
+    email: &str,
+    password: &str,
+    display_name: Option<&str>,
+) -> Result<(crate::models::user_users::Model, Uuid), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let tenant = crate::models::tenant_tenants::create_tenant(
+        &txn,
+        display_name.unwrap_or(email),
+        max_tenants,
+    )
+    .await?;
+    let user = register_member(
+        &txn,
+        tenant.id,
+        email,
+        password,
+        display_name,
+        crate::models::tenant_memberships::MembershipRole::Owner,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok((user, tenant.id))
+}
+
 pub(crate) async fn setup_first_account(
     db: &sea_orm::DatabaseConnection,
     max_tenants: Option<i32>,
@@ -25,7 +69,7 @@ pub(crate) async fn setup_first_account(
     password: &str,
     display_name: Option<&str>,
 ) -> Result<SetupAccount, YorishiroError> {
-    use crate::models::{tenant_memberships, tenant_tenants, user_users};
+    use crate::models::{tenant_memberships, tenant_tenants};
 
     if max_tenants.is_none() {
         return Err(YorishiroError::not_found(
@@ -41,11 +85,12 @@ pub(crate) async fn setup_first_account(
     }
     let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
     let workspace = create_workspace(&txn, tenant.id, "default", None, None).await?;
-    let user = user_users::create_user(&txn, email, password, display_name).await?;
-    tenant_memberships::add_member(
+    let user = register_member(
         &txn,
         tenant.id,
-        user.id,
+        email,
+        password,
+        display_name,
         tenant_memberships::MembershipRole::Owner,
     )
     .await?;

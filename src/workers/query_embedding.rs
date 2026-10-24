@@ -31,7 +31,7 @@ const RETRY_AFTER: Duration = Duration::from_secs(1);
 
 /// What a query job carries: which request to answer and whose it is.
 /// The text stays in the row, so the job payload holds no user content.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct QueryEmbeddingArgs {
     pub request_id: Uuid,
     pub workspace_id: Uuid,

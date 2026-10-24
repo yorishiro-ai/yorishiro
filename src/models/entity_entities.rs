@@ -158,20 +158,17 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
 impl Model {}
 
-// implement your write-oriented logic here
 impl ActiveModel {}
 
-// implement your custom finders, selectors oriented logic here
 impl Entity {}
 
 /// A stored entity.
 /// `created_by`/`updated_by` are absent for entities touched by an unattributed API key.
 //
 // Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
-#[derive(Clone, Debug, Serialize, Deserialize, sea_orm::FromQueryResult)]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EntityRecord {
     pub id: Uuid,
@@ -229,7 +226,7 @@ pub struct ListEntitiesQuery {
 /// How one entity stands relative to the active version of its schema.
 ///
 /// Entities are migrated lazily, so a schema gaining a version does not rewrite rows written against earlier versions.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EntityDrift {
     pub entity_id: Uuid,
     pub entity_type: String,
@@ -243,7 +240,7 @@ pub struct EntityDrift {
 }
 
 /// A field an entity predates.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DriftField {
     pub name: String,
     /// The field's type in the active version, so a caller can tell what would go there.
@@ -254,7 +251,7 @@ pub struct DriftField {
 }
 
 /// What a batch migration would find without doing it.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MigrationDryRun {
     pub schema_name: String,
     /// The version everything would be brought to.
@@ -272,7 +269,7 @@ pub struct MigrationDryRun {
     pub by_entity_type: Vec<DryRunByType>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DryRunByType {
     pub entity_type: String,
     pub behind: i64,

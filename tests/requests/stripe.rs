@@ -502,6 +502,15 @@ async fn checkout_completion_links_the_stripe_customer() {
                 .tenant_id;
             let body = checkout_completed_body("evt_checkout", 1_000, tenant_id);
             let now = Utc::now().timestamp();
+            let subscription =
+                subscription_updated_body("evt_before_checkout", 1_001, "cus_checkout");
+            let signature = format!("t={now},v1={}", sign(WEBHOOK_SECRET, now, &subscription));
+            let early = request
+                .post("/api/stripe/webhook")
+                .add_header("stripe-signature", signature.clone())
+                .bytes(subscription.clone().into())
+                .await;
+            assert_eq!(early.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
             let response = request
                 .post("/api/stripe/webhook")
                 .add_header(
@@ -518,6 +527,19 @@ async fn checkout_completion_links_the_stripe_customer() {
                     .unwrap()
                     .and_then(|record| record.stripe_customer_id),
                 Some("cus_checkout".into())
+            );
+            let retried = request
+                .post("/api/stripe/webhook")
+                .add_header("stripe-signature", signature)
+                .bytes(subscription.into())
+                .await;
+            assert_eq!(retried.status_code(), StatusCode::OK);
+            assert_eq!(
+                tenant_billing::get_billing(&ctx.db, tenant_id)
+                    .await
+                    .unwrap()
+                    .and_then(|record| record.plan),
+                Some("pro".into())
             );
         })
         .await;

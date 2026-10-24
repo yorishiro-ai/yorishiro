@@ -31,21 +31,17 @@ pub(crate) async fn target_queue(
     target: WorkerTarget,
 ) -> Arc<loco_rs::bgworker::Queue> {
     let mut config = ctx.config.clone();
-    match config.queue.as_mut().expect("configured queue") {
-        loco_rs::config::QueueConfig::Redis(redis) => {
-            redis.dangerously_flush = false;
-        }
-        loco_rs::config::QueueConfig::Postgres(queue) => queue.dangerously_flush = false,
-        loco_rs::config::QueueConfig::Sqlite(queue) => queue.dangerously_flush = false,
-        _ => panic!("unsupported queue configuration"),
-    }
+    config
+        .queue
+        .as_mut()
+        .expect("configured queue")
+        .preserve_jobs();
     yorishiro::data::config::serve_worker_queues(&mut config, &[target.queue()]);
-    // A shutdown provider stays cancelled; every worker process needs a fresh one.
     let queue = loco_rs::bgworker::create_queue_provider(&config)
         .await
-        .expect("create the worker's configured queue")
+        .expect("create worker queue")
         .expect("background queue mode");
-    queue.setup().await.expect("set up the worker's queue");
+    queue.setup().await.expect("set up worker queue");
     queue
 }
 

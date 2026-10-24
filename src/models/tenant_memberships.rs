@@ -12,7 +12,7 @@ pub(crate) use operations::{get_membership_role, list_members};
 
 db_enum! {
     /// Mirrors the `tenant_memberships.role` check constraint.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum MembershipRole {
         Owner = "owner",
         Admin = "admin",
@@ -35,7 +35,7 @@ impl MembershipRole {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MembershipRecord {
     pub user_id: Uuid,
@@ -56,11 +56,8 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
 impl Model {}
 
-// implement your write-oriented logic here
 impl ActiveModel {}
 
-// implement your custom finders, selectors oriented logic here
 impl Entity {}

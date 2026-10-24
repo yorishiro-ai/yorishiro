@@ -17,7 +17,7 @@ use crate::edition::ee::services::inference::InferenceConfig;
 /// What a workspace has configured, without the key itself.
 ///
 /// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = LlmKeyResponse))]
 pub(crate) struct LlmKeyDescription {

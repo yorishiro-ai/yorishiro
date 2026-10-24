@@ -34,7 +34,7 @@ pub enum MergeVerdict {
 }
 
 /// One field's classification.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FieldMerge {
     pub entity_type: String,
@@ -45,7 +45,7 @@ pub struct FieldMerge {
 }
 
 /// The classification of every field that is not identical across the three.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergePlan {
     pub fields: Vec<FieldMerge>,

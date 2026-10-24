@@ -206,7 +206,7 @@ pub(crate) async fn stamp_embedding_if_missing(
 }
 
 /// API-facing workspace record with a typed status.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct WorkspaceRecord {
     pub id: Uuid,
@@ -245,7 +245,7 @@ impl TryFrom<Model> for WorkspaceRecord {
 }
 
 db_enum! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub(crate) enum WorkspaceStatus {
         SchemaPending = "schema_pending",
         Active = "active",

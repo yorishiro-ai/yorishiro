@@ -10,7 +10,7 @@ use sea_orm::{
 use uuid::Uuid;
 
 crate::db_enum::db_enum! {
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum InferenceJobStatus {
         Queued = "queued",
         Running = "running",
@@ -19,7 +19,7 @@ crate::db_enum::db_enum! {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InferenceJobRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,

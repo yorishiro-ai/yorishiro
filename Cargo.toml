@@ -43,7 +43,7 @@ sea-orm-migration = { version = "2.0.4", features = [
   "sqlx-sqlite",
 ] }
 
-# `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot.
+# `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is environment-switchable, and `Redis` is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot.
 # Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
 # It is not loco-rs's own default and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust).
 loco-rs = { version = "=1.2.0", default-features = false, features = ["cli", "with-db", "db-sqlite", "worker_redis"] }
@@ -72,9 +72,6 @@ redis = { version = "=1.7.1", features = ["aio", "tokio-comp"] }
 
 [dependencies]
 loco-rs = { workspace = true }
-# Reads `start --worker` from the command line with the same rules loco-rs applies (workers::start).
-# loco-rs keeps its `Cli` private, so the definition is mirrored; the version and `derive` feature are the ones loco-rs already builds.
-clap = { version = "4.4.7", features = ["derive"] }
 migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true
@@ -116,6 +113,7 @@ hmac = { version = "0.13.0", optional = true }          # Stripe webhook signatu
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 utoipa = { version = "6.0.0", features = ["axum_extras", "uuid", "chrono"], optional = true }
 utoipa-swagger-ui = { version = "10.0.1", features = ["axum"], optional = true }
+serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 
 [[bin]]
 name = "yorishiro"
@@ -126,7 +124,6 @@ required-features = []
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
 redis.workspace = true
-serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 # Used by queue and integration tests for isolated temporary databases.
 tempfile = { version = "3.27.0" }
 # Property-based testing (issue #358).

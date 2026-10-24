@@ -4,16 +4,12 @@
 //! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh OAuth-provisioned row) live in `ee::models::user_users` rather than beside the base model, since `user_users` knows nothing about the OAuth-specific lookups over `oauth_provider`/`oauth_subject_id`.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::tenant_tenants;
 use crate::models::_entities::workspace_workspaces as workspace_workspaces_entity;
 use crate::models::schema_schemas;
 use crate::models::tenant_memberships::{self, MembershipRole};
 use crate::models::workspace_workspaces::WorkspaceStatus;
-use crate::models::{tenancy, workspace_workspaces};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction, EntityTrait,
-    PaginatorTrait,
-};
+use crate::models::{tenancy, tenant_tenants, workspace_workspaces};
+use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction};
 use uuid::Uuid;
 
 use super::{CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_identity};
@@ -36,7 +32,7 @@ pub struct ProvisionedLogin {
 /// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` so that requirement is enforced by the signature: every advisory lock taken here and in the `create_workspace` it calls is transaction-scoped, and handed a pool each one would be released before the work it guards.
 ///
 /// The configured tenant limit is enforced here too, so auto-provisioning through SSO cannot bypass a deployment's tenant cap.
-/// The check is not race-free against a *different* identity's first login landing between the count and the insert, since this function's lock is keyed per-identity, not globally; closing it fully is not worth a global lock on every OAuth login for a race window this narrow.
+/// New tenants use the base model's backend constraints and tenant-count lock as well as this identity lock.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -79,34 +75,16 @@ pub async fn find_or_create(
         Err(CreateOauthUserError::Other(err)) => return Err(err),
     };
 
-    if let Some(max) = max_tenants {
-        let count = tenant_tenants::Entity::find()
-            .count(conn)
-            .await
-            .internal()?;
-        if count >= max as u64 {
-            return Err(YorishiroError::ScopeInsufficient {
-                message: "this deployment has reached its tenant limit".into(),
-                hint: "ask the operator to raise YORISHIRO_MAX_TENANTS, or sign in to an \
-                       existing tenant with password instead"
-                    .into(),
-            });
-        }
-    }
-
     let tenant_name = tenant_name_from_email(email);
-    let tenant_active = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(tenant_name),
-        max_workspaces: sea_orm::ActiveValue::Set(
-            crate::edition::ee::data::plan::Plan::Free
-                .caps(policy_enabled)
-                .max_workspaces,
-        ),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant_active, conn)
-        .await
-        .internal()?;
+    let tenant = tenant_tenants::create_tenant(conn, &tenant_name, max_tenants).await?;
+    crate::edition::ee::models::tenant_tenants::set_max_workspaces(
+        conn,
+        tenant.id,
+        crate::edition::ee::data::plan::Plan::Free
+            .caps(policy_enabled)
+            .max_workspaces,
+    )
+    .await?;
 
     let workspace = tenancy::create_workspace(
         conn,

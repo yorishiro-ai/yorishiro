@@ -1,6 +1,7 @@
 /// SQLite-specific tests for tenancy: single-tenant cap and invite ID generation.
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
+use sea_orm::TransactionTrait;
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::tenant_memberships::MembershipRole;
@@ -32,13 +33,15 @@ async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let err = create_tenant(&ctx.db, "second tenant", Some(1000))
+        let txn = ctx.db.begin().await.expect("begin tenant creation");
+        let err = create_tenant(&txn, "second tenant", Some(1000))
             .await
             .expect_err("a second tenant must be refused on sqlite");
         assert!(
             matches!(err, YorishiroError::Conflict { .. }),
             "expected Conflict, got {err:?}"
         );
+        txn.rollback().await.expect("rollback refused tenant");
     })
     .await;
 }

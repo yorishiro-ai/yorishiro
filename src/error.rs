@@ -9,8 +9,8 @@ use serde::{Serialize, Serializer};
 /// Adding a variant requires two things: a variant in this enum and a matching
 /// arm in `YorishiroErrorCode::from_variant`.  A new variant without a code
 /// fails to compile.
-#[derive(Debug)]
 #[non_exhaustive]
+#[derive(Debug)]
 pub enum YorishiroError {
     /// The request body or parameters do not conform to the expected schema.
     /// Includes per-field [`ValidationDetail`] so clients can render precise
@@ -154,7 +154,7 @@ pub(crate) fn mcp_internal(error: impl Into<anyhow::Error>) -> rmcp::ErrorData {
 ///
 /// Internal errors have no code (they are not listed here) — callers must
 /// handle `YorishiroError::Internal` separately and log the real error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum YorishiroErrorCode {
     /// 422 Unprocessable Entity — the request body does not conform to the expected schema.

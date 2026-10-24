@@ -40,7 +40,7 @@ pub(crate) fn record_configured_topology(ctx: &loco_rs::app::AppContext) {
     let queue = match config.queue.as_ref() {
         Some(loco_rs::config::QueueConfig::Postgres(_)) => "postgres",
         Some(loco_rs::config::QueueConfig::Sqlite(_)) => "sqlite",
-        Some(loco_rs::config::QueueConfig::Redis(_)) => "valkey",
+        Some(loco_rs::config::QueueConfig::Redis(_)) => "redis",
         _ => "unknown",
     };
     let Some(root) = std::env::var_os("YORISHIRO_TOPOLOGY_MARKER_DIR") else {

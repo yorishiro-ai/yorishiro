@@ -4,7 +4,7 @@
 
 use std::ffi::OsString;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Env {
     DatabaseUrl,
     TestTopology,

@@ -38,7 +38,7 @@ pub(crate) async fn resolve(
 /// What a workspace has configured, without the key itself.
 ///
 /// `api_key` is deliberately absent rather than masked, matching `workspace_llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = EmbeddingKeyResponse))]
 pub(crate) struct EmbeddingKeyDescription {
@@ -78,7 +78,7 @@ pub(crate) struct EmbeddingKeyConfig {
 /// `WidthChanged` is returned when the new provider's width differs from the
 /// workspace's existing vectors: the key is stored successfully, but the caller
 /// must trigger a reindex so the workspace's entities are re-embedded with the new width.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum SetOutcome {
     /// The key was stored and the workspace's width matches the new provider.
     Stored,

@@ -152,7 +152,7 @@ async fn redis_claim_refreshes_age_and_fences_reaped_completion_and_failure() {
                 .unwrap();
             let uri = match ctx.config.queue.as_ref().unwrap() {
                 loco_rs::config::QueueConfig::Redis(config) => &config.uri,
-                _ => panic!("Valkey lane must configure Redis"),
+                _ => panic!("Redis lane must configure Redis"),
             };
             let mut conn = redis::Client::open(uri.as_str())
                 .unwrap()

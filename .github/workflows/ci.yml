@@ -289,17 +289,17 @@ jobs:
           - edition: ce
             db: Postgres
             backend: postgres
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_postgres_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_postgres_redis
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379/15
           - edition: ce
             db: SQLite
             backend: sqlite
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_sqlite_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_sqlite_redis
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379/15
           - edition: ee
@@ -322,17 +322,17 @@ jobs:
           - edition: ee
             db: Postgres
             backend: postgres
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_postgres_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_postgres_redis
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379/15
           - edition: ee
             db: SQLite
             backend: sqlite
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_sqlite_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_sqlite_redis
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379/15
     services:
@@ -408,12 +408,12 @@ jobs:
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
-      - name: Configure the matrix Valkey service
-        if: matrix.queue_key == 'valkey'
+      - name: Configure the matrix Redis service
+        if: matrix.queue_key == 'redis'
         run: |
-          docker run --detach --name matrix-valkey --publish 127.0.0.1:6379:6379 \
+          docker run --detach --name matrix-redis --publish 127.0.0.1:6379:6379 \
             valkey/valkey:9.1 valkey-server --databases 65536 --save '' --appendonly no
-          docker exec matrix-valkey sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
+          docker exec matrix-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
 
       - name: Run migrations (postgres)
         if: matrix.backend == 'postgres'
@@ -472,7 +472,7 @@ jobs:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
           QUEUE_URL: ${{ matrix.queue_url }}
-          YORISHIRO_VALKEY_TEST_URL: ${{ matrix.queue_url }}
+          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
@@ -554,7 +554,7 @@ jobs:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
           QUEUE_URL: ${{ matrix.queue_url }}
-          YORISHIRO_VALKEY_TEST_URL: ${{ matrix.queue_url }}
+          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
@@ -573,9 +573,9 @@ jobs:
           path: ${{ runner.temp }}/request-timings
           if-no-files-found: error
 
-      - name: Remove the matrix Valkey service
-        if: always() && matrix.queue_key == 'valkey'
-        run: docker rm --force matrix-valkey
+      - name: Remove the matrix Redis service
+        if: always() && matrix.queue_key == 'redis'
+        run: docker rm --force matrix-redis
 
       - name: Verify topology gate rejects a mismatch
         env:
@@ -584,7 +584,7 @@ jobs:
         run: |
           set +e
           stderr="$RUNNER_TEMP/topology-mismatch.stderr"
-          output=$(uv run scripts/test_topology.py postgres-valkey models::maintenance:: 2>"$stderr")
+          output=$(uv run scripts/test_topology.py postgres-redis models::maintenance:: 2>"$stderr")
           status=$?
           set -e
           echo "$output"
