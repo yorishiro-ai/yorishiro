@@ -11,7 +11,7 @@ inputs:
     required: false
     default: ''
   toolchain:
-    description: Rust toolchain to install. Empty means the channel pinned in rust-toolchain.toml.
+    description: Rust toolchain to install. Empty means rust-version from Cargo.toml.
     required: false
     default: ''
 runs:
@@ -27,9 +27,9 @@ runs:
       env:
         TOOLCHAIN: ${{ inputs.toolchain }}
       run: |
-        toolchain="${TOOLCHAIN:-$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)}"
+        toolchain="${TOOLCHAIN:-$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)}"
         if [ -z "$toolchain" ]; then
-          echo "::error::no toolchain input and no channel in rust-toolchain.toml" >&2
+          echo "::error::no toolchain input and no rust-version in Cargo.toml" >&2
           exit 1
         fi
         echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"

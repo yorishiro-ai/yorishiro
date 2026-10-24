@@ -7,6 +7,7 @@
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
+export RUSTUP_TOOLCHAIN ?= $(shell sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
 
 coverage test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
 coverage test-postgres task doctor migrate entities: export LOCO_ENV = test_postgres

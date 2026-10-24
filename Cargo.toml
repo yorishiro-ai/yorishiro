@@ -2,6 +2,9 @@
 resolver = "2"
 exclude = ["patches/loco-rs/source"]
 
+[workspace.package]
+rust-version = "1.99.1"
+
 # Temporary upstream bug fixes, with rationale and removal criteria in patches/.
 [patch.crates-io]
 loco-rs = { path = "patches/loco-rs/source" }
@@ -10,7 +13,7 @@ loco-rs = { path = "patches/loco-rs/source" }
 name = "yorishiro"
 version = "0.100.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version.workspace = true
 publish = false
 default-run = "yorishiro"
 # `tests/` is one integration binary rooted at `tests/mod.rs`; without this Cargo also builds `tests/db.rs`, `tests/db_enum.rs` and `tests/licence.rs` as separate binaries that repeat tests the root already includes.
