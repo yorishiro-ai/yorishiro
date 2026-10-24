@@ -34,20 +34,16 @@ runs:
         username: ${{ github.actor }}
         password: ${{ inputs.token }}
 
-    - name: Read the pinned Rust version
-      id: rust
-      shell: bash
-      run: echo "version=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-
-    - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+    - uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # master
+      env:
+        IMAGE: ${{ inputs.image }}
+        TAG: ${{ inputs.tag }}-${{ inputs.edition }}-${{ inputs.arch }}
+        EDITION: ${{ inputs.edition }}
       with:
-        context: .
+        source: .
+        targets: app
         push: ${{ inputs.push == 'true' }}
-        provenance: false
-        annotations: manifest:org.opencontainers.image.description=An MCP-native, multi-tenant knowledge store with user-defined schemas.
-        build-args: |
-          EDITION=${{ inputs.edition }}
-          RUST_VERSION=${{ steps.rust.outputs.version }}
-        tags: ${{ inputs.image }}:${{ inputs.tag }}-${{ inputs.edition }}-${{ inputs.arch }}
-        cache-from: type=gha,scope=${{ inputs.arch }}
-        cache-to: type=gha,mode=max,scope=${{ inputs.arch }}
+        set: |
+          app.platform=linux/${{ inputs.arch }}
+          app.cache-from=type=gha,scope=${{ inputs.edition }}-${{ inputs.arch }}
+          app.cache-to=type=gha,mode=max,scope=${{ inputs.edition }}-${{ inputs.arch }}

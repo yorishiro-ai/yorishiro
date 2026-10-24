@@ -32,6 +32,7 @@ case "$(basename "$PKG_FILE")" in
   *) echo "package filename is not edition-first: $(basename "$PKG_FILE")" >&2; exit 2 ;;
 esac
 PKG_DIR="$(dirname "$PKG_FILE")"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
 
@@ -54,7 +55,7 @@ trap cleanup EXIT INT TERM
 docker network create "$NET" >/dev/null 2>&1
 docker run -d --name "$PG" --network "$NET" \
   -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=yorishiro \
-  pgvector/pgvector:pg18 >/dev/null
+  "$(docker compose -f "$REPO/docker-compose.yml" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["testdb"]["image"])')" >/dev/null
 
 # systemd has to be PID 1, which is what `exec` at the end of the command is for, and needs both
 # tmpfs mounts plus a cgroup namespace it can write.

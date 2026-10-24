@@ -33,7 +33,14 @@ def main() -> int:
     docker_build = (ROOT / ".github/actions/build-docker/action.yml").read_text()
     manifest = (ROOT / ".github/actions/docker-manifest/action.yml").read_text()
     description = "An MCP-native, multi-tenant knowledge store with user-defined schemas."
-    assert f"annotations: manifest:org.opencontainers.image.description={description}" in docker_build
+    bake = (ROOT / "docker-bake.hcl").read_text()
+    assert f"manifest:org.opencontainers.image.description={description}" in bake
+    assert "docker/bake-action@" in docker_build
+    assert "RUST_VERSION" not in docker_build
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    assert 'COPY rust-toolchain.toml .' in dockerfile
+    assert '"toolchain"]["channel"]' in dockerfile
+    assert "cargo install sccache" not in dockerfile
     assert f"DESCRIPTION: {description}" in manifest
     assert '"index:org.opencontainers.image.description=${DESCRIPTION}"' in manifest
     assert 'docker buildx imagetools create \\\n          --annotation' in manifest

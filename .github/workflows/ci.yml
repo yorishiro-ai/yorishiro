@@ -132,14 +132,9 @@ jobs:
         run: make edition-boundary-check
 
       - name: Check pinned versions agree
-        # Versions that cannot be read from their source of truth at run time are checked instead:
-        # a service image or a Docker build default cannot take a step output.
+        # Service containers start before checkout and cannot read repository configuration.
         run: |
-          toolchain="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
-          grep -qx "ARG RUST_VERSION=${toolchain}" Dockerfile \
-            || { echo "::error::Dockerfile's RUST_VERSION default is not rust-toolchain.toml's channel ${toolchain}"; exit 1; }
-          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+' 'sccache(@| --locked --version )[0-9.]+'; do
-            # Compare only the version: the install action and the Dockerfile spell the pin differently.
+          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+'; do
             found="$(grep -rhoE "$pattern" .github docker-compose.yml Dockerfile Makefile | grep -oE '[0-9][0-9.]*$' | sort -u)"
             if [ "$(wc -l <<<"$found")" -ne 1 ]; then
               echo "::error::pinned versions disagree for '$pattern':"
@@ -386,8 +381,9 @@ jobs:
       - name: Configure the matrix Redis service
         if: matrix.queue_key == 'redis'
         run: |
+          image="$(docker compose config --format json | jq -r '.services.redis.image')"
           docker run --detach --name matrix-redis --publish 127.0.0.1:6379:6379 \
-            valkey/valkey:9.1 valkey-server --databases 65536 --save '' --appendonly no
+            "$image" valkey-server --databases 65536 --save '' --appendonly no
           docker exec matrix-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
 
       - name: Run migrations (postgres)

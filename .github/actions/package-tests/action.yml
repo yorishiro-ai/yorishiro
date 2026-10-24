@@ -49,8 +49,10 @@ runs:
         ./.github/packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
         ./.github/packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
 
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
     - name: Test Docker configuration ownership and fallback
       shell: bash
       run: |
-        docker build --build-arg EDITION=ce -t yorishiro-package-test:${{ inputs.version }} .
+        IMAGE=yorishiro-package-test TAG=${{ inputs.version }} EDITION=ce docker buildx bake --load app
         make package-docker-check IMAGE=yorishiro-package-test:${{ inputs.version }}

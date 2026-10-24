@@ -41,6 +41,7 @@ def test_release_workflow_selects_all_validations() -> None:
     assert result["release"]
     assert result["package_validation"]
     assert result["docker_validation"]
+    assert classify(["docker-bake.hcl"])["docker_validation"]
 
 
 def test_manual_full_run_selects_every_group() -> None:

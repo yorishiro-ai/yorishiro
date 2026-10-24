@@ -310,7 +310,7 @@ docker rm -f "pg-$$" "app-$$" >/dev/null 2>&1
 # A private network and no published ports: this runs beside CI's own service containers.
 docker run -d --name "pg-$$" --network "$NET" \
   -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=yorishiro \
-  pgvector/pgvector:pg18 >/dev/null
+  "$(docker compose -f "$REPO/docker-compose.yml" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["testdb"]["image"])')" >/dev/null
 
 ready=
 for _ in $(seq 1 60); do
