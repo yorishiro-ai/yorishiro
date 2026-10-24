@@ -20,15 +20,18 @@ MCPを通してスキーマを作り、データを書き込み、必要な情�
 
 ## 始め方
 
-```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 5150:5150 \
-    ghcr.io/yorishiro-ai/yorishiro:latest
+サーバー、ワーカー、スケジューラーをDocker Composeで起動します。
+[Docker Composeガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)の構成を `compose.yml` に保存し、イメージの `<VERSION>` を使うリリースタグに置き換えてください。
+そのファイルのあるディレクトリで実行します。
+
+```bash
+docker compose up -d
 ```
 
 起動したサーバーには `http://localhost:5150` で接続できます。
 [初回起動の手順](https://yorishiro-ai.github.io/wiki/ja/installation/first-run/)で最初のアカウントと API キーを作成してください。
 
-データを継続して保存するための設定など、運用を始める前に[Dockerガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker/)を確認してください。
+データの保存先、埋め込みモデル、DBの選択は[Docker Composeガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)を参照してください。
 Docker以外では、[パッケージのインストール](https://yorishiro-ai.github.io/wiki/ja/installation/packages/)と[ソースからのビルド](https://yorishiro-ai.github.io/wiki/ja/installation/build/)を案内しています。
 
 ## ドキュメント

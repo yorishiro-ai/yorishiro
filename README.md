@@ -20,15 +20,18 @@ Through MCP, you can create schemas, write data, and search by meaning for the i
 
 ## Get started
 
-```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 5150:5150 \
-    ghcr.io/yorishiro-ai/yorishiro:latest
+Run the server, worker, and scheduler with Docker Compose.
+Save a configuration from the [Docker Compose guide](https://yorishiro-ai.github.io/wiki/installation/docker-compose/) as `compose.yml` and replace the image's `<VERSION>` with the release tag you want to use.
+Run this in the directory containing that file:
+
+```bash
+docker compose up -d
 ```
 
 Connect to the running server at `http://localhost:5150`.
 Follow the [first-run guide](https://yorishiro-ai.github.io/wiki/installation/first-run/) to create your first account and API key.
 
-Before using it for ongoing work, check the [Docker guide](https://yorishiro-ai.github.io/wiki/installation/docker/) for persistent storage and other settings.
+See the [Docker Compose guide](https://yorishiro-ai.github.io/wiki/installation/docker-compose/) for data storage, embedding models, and database options.
 For installation without Docker, see [packages](https://yorishiro-ai.github.io/wiki/installation/packages/) or [building from source](https://yorishiro-ai.github.io/wiki/installation/build/).
 
 ## Documentation
