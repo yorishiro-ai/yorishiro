@@ -17,16 +17,3 @@ Do not describe maintenance warnings as vulnerabilities or claim to have fixed f
 
 The maintenance-only `paste` and YAML compatibility overrides have been removed.
 Their upstream dependencies remain unchanged; maintenance warnings are not claimed resolved.
-
-## 修正の管理
-
-このフォルダでは、上流依存の具体的なバグに対する一時的な修正だけを管理します。
-保守停止だけを理由にした依存の置換、機能変更、監査警告を隠すためのパッチは追加しません。
-アプリ固有機能の追加ではありません。
-ルートの `[patch.crates-io]` から参照し、Cargoのキャッシュは変更しません。
-各修正には、対象バージョン、問題、変更内容、回帰試験、削除条件を記録します。
-上流のライセンスを保持します。
-保守停止警告を脆弱性と呼んだり、原因が分かっていない障害まで解決したと記載したりしません。
-保守停止への対応だけを目的にした `paste` と YAML の互換パッチは削除しました。
-元の上流依存を使い、保守警告は未解消として扱います。
-Locoのバグ一覧、元ソースの出所、差分の再現方法、回帰試験、削除条件は [loco-rs/README.md](loco-rs/README.md) に記録します。
