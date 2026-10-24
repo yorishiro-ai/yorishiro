@@ -193,7 +193,7 @@ impl Inner {
 
         let encodings = self
             .tokenizer
-            .encode_batch(texts.to_vec(), true)
+            .encode_batch(texts.iter().map(String::as_str).collect::<Vec<_>>(), true)
             .map_err(|err| internal(format!("tokenization failed: {err}")))?;
 
         let batch = encodings.len();

@@ -23,33 +23,19 @@ fn mean_pooling_ignores_masked_tokens_and_normalizes() {
 }
 
 #[test]
-fn load_rejects_too_small_max_sequence_length() {
-    // tokenizers subtracts the special-token count from max_length during truncation, so an extremely small value underflows; confirm load() rejects it.
-    let result = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
-        model_path: "/nonexistent/model.safetensors".into(),
-        tokenizer_path: "/nonexistent/tokenizer.json".into(),
-        def: model_fetch::DEFAULT_MODEL,
-        max_sequence_length: 1,
-    });
-    let Err(err) = result else {
-        panic!("load should fail for too small max_sequence_length");
-    };
-    assert!(err.to_string().contains("max_sequence_length"));
-}
-
-#[test]
-fn load_rejects_too_large_max_sequence_length() {
-    // A value past the selected model's own usable sequence limit would otherwise reach candle during inference and fail there, with a message about tensor shapes rather than about the setting that caused it; confirm load() rejects it up front instead.
-    let result = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
-        model_path: "/nonexistent/model.safetensors".into(),
-        tokenizer_path: "/nonexistent/tokenizer.json".into(),
-        def: model_fetch::DEFAULT_MODEL,
-        max_sequence_length: 513,
-    });
-    let Err(err) = result else {
-        panic!("load should fail for too large max_sequence_length");
-    };
-    assert!(err.to_string().contains("max_sequence_length"));
+fn load_rejects_out_of_range_max_sequence_length() {
+    for max_sequence_length in [1, 513] {
+        let result = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
+            model_path: "/nonexistent/model.safetensors".into(),
+            tokenizer_path: "/nonexistent/tokenizer.json".into(),
+            def: model_fetch::DEFAULT_MODEL,
+            max_sequence_length,
+        });
+        let Err(err) = result else {
+            panic!("load should reject max_sequence_length={max_sequence_length}");
+        };
+        assert!(err.to_string().contains("max_sequence_length"));
+    }
 }
 
 #[test]
@@ -109,11 +95,7 @@ async fn embeds_texts_with_a_real_e5_model() {
         .embed_as(EmbedKind::Query, "猫がソファで眠っている")
         .await
         .unwrap();
-    let as_document = provider
-        .embed_as(EmbedKind::Document, "猫がソファで眠っている")
-        .await
-        .unwrap();
-    assert_ne!(as_query, as_document);
+    assert_ne!(as_query, cat_ja);
 
     // A batched call pads to the batch's longest sequence; unlike the three single-text calls above, this exercises the tokenizer's own padding rather than each call producing its own unpadded sequence, which is where a wrong pad token id or masking bug would show up.
     let batch = provider
