@@ -1,6 +1,6 @@
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use sea_orm::ConnectionTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use yorishiro::App;
 use yorishiro::models::entity_entities::{self, CreateEntityInput, ListEntitiesQuery};
 use yorishiro::models::schema_schemas;
@@ -269,12 +269,16 @@ async fn token_rotation_does_not_duplicate_fts_rows_on_sqlite() {
         .expect("update");
         assert_eq!(fts_rows(&db).await, 1, "one row after a data update");
 
-        db.execute_unprepared(&format!(
-            "UPDATE entity_entities SET updated_by = NULL WHERE id = X'{}'",
-            created.id.simple()
-        ))
-        .await
-        .expect("update a column other than data");
+        // Exercise a non-data update independently of the model's data-update operation.
+        entity_entities::Entity::update_many()
+            .col_expr(
+                yorishiro::models::_entities::entity_entities::Column::UpdatedBy,
+                sea_orm::sea_query::Expr::value(Option::<uuid::Uuid>::None),
+            )
+            .filter(yorishiro::models::_entities::entity_entities::Column::Id.eq(created.id))
+            .exec(&db)
+            .await
+            .expect("update a column other than data");
         assert_eq!(fts_rows(&db).await, 1, "one row after a non-data update");
     })
     .await;

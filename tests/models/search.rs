@@ -1,7 +1,10 @@
 use crate::requests::boot_request;
 #[cfg(feature = "enterprise")]
 use sea_orm::ConnectionTrait;
-use sea_orm::{EntityTrait, FromQueryResult, Statement};
+use sea_orm::sea_query::ExprTrait;
+use sea_orm::{
+    ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect, SelectExt, Statement,
+};
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
@@ -224,10 +227,15 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let crate::requests::fixtures::TestTenant {
+            tenant_id,
+            workspace_id,
+            ..
+        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         let (stamp_provider, _stamp_server) = fixed_width_provider(768).await;
         entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[], &stamp_provider)
-            .await.expect("stamp workspace through reindex");
+            .await
+            .expect("stamp workspace through reindex");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
         schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
             .await
@@ -250,40 +258,31 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             .expect("get entity record");
 
         let (mismatched_provider, _server) = fixed_width_provider(1024).await;
-        let result =
-            entity_embeddings::sync_embedding_for_record(
-                &ctx.db,
-                workspace_id,
-                &record,
-                &mismatched_provider,
-            )
-            .await;
+        let result = entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            workspace_id,
+            &record,
+            &mismatched_provider,
+        )
+        .await;
 
         assert!(
             matches!(result, Err(YorishiroError::ValidationFailed { .. })),
             "result: {result:?}"
         );
 
-        let stored: Option<bool> = {
-            #[derive(sea_orm::FromQueryResult)]
-            struct Row {
-                has_embedding: bool,
-            }
-            Row::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = $1",
-                [entity.id.into()],
-            ))
-            .one(&ctx.db)
+        let stored = entity_embeddings::Entity768::find_by_id(entity.id)
+            .filter(
+                yorishiro::models::_entities::entity_embeddings_768::Column::Embedding
+                    .is_not_null(),
+            )
+            .exists(&ctx.db)
             .await
-            .expect("query embedding")
-            .map(|r| r.has_embedding)
-        };
+            .expect("query embedding");
         assert!(
-            stored != Some(true),
+            !stored,
             "the refused write must not have created an embedding row: {stored:?}"
         );
-
     })
     .await;
 }
@@ -337,10 +336,16 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let (stamp_provider, _stamp_server) = model_provider("nomic-ai/nomic-embed-text-v1.5").await;
+        let crate::requests::fixtures::TestTenant {
+            tenant_id,
+            workspace_id,
+            ..
+        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let (stamp_provider, _stamp_server) =
+            model_provider("nomic-ai/nomic-embed-text-v1.5").await;
         entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[], &stamp_provider)
-            .await.expect("stamp workspace through reindex");
+            .await
+            .expect("stamp workspace through reindex");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
         schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
             .await
@@ -362,41 +367,33 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             .await
             .expect("get entity record");
 
-        let (mismatched_provider, _mismatched_provider_server) = model_provider("intfloat/multilingual-e5-base").await;
-        let result =
-            entity_embeddings::sync_embedding_for_record(
-                &ctx.db,
-                workspace_id,
-                &record,
-                &mismatched_provider,
-            )
-            .await;
+        let (mismatched_provider, _mismatched_provider_server) =
+            model_provider("intfloat/multilingual-e5-base").await;
+        let result = entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            workspace_id,
+            &record,
+            &mismatched_provider,
+        )
+        .await;
 
         assert!(
             matches!(result, Err(YorishiroError::ValidationFailed { .. })),
             "result: {result:?}"
         );
 
-        let stored: Option<bool> = {
-            #[derive(sea_orm::FromQueryResult)]
-            struct Row {
-                has_embedding: bool,
-            }
-            Row::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = $1",
-                [entity.id.into()],
-            ))
-            .one(&ctx.db)
+        let stored = entity_embeddings::Entity768::find_by_id(entity.id)
+            .filter(
+                yorishiro::models::_entities::entity_embeddings_768::Column::Embedding
+                    .is_not_null(),
+            )
+            .exists(&ctx.db)
             .await
-            .expect("query embedding")
-            .map(|r| r.has_embedding)
-        };
+            .expect("query embedding");
         assert!(
-            stored != Some(true),
+            !stored,
             "the refused write must not have created an embedding row: {stored:?}"
         );
-
     })
     .await;
 }
@@ -409,20 +406,33 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         return;
     }
     crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let fixture = crate::requests::fixtures::TestTenant::create(
-            &request, &ctx, Default::default(),
-        ).await;
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         // No public operation sets tenant embedding stamps; inject the legacy fallback tier.
-        sea_orm::ActiveModelTrait::update(tenant_tenants::ActiveModel {
-            id: sea_orm::ActiveValue::Set(fixture.tenant_id),
-            embedding_model: sea_orm::ActiveValue::Set(Some("nomic-ai/nomic-embed-text-v1.5".into())),
-            embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
-            ..Default::default()
-        }, &ctx.db).await.expect("stamp tenant embedding fallback");
+        sea_orm::ActiveModelTrait::update(
+            tenant_tenants::ActiveModel {
+                id: sea_orm::ActiveValue::Set(fixture.tenant_id),
+                embedding_model: sea_orm::ActiveValue::Set(Some(
+                    "nomic-ai/nomic-embed-text-v1.5".into(),
+                )),
+                embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
+                ..Default::default()
+            },
+            &ctx.db,
+        )
+        .await
+        .expect("stamp tenant embedding fallback");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id, def, None, None)
-            .await
-            .expect("create schema");
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            def,
+            None,
+            None,
+        )
+        .await
+        .expect("create schema");
 
         let entity = entity_entities::create(
             &ctx.db,
@@ -442,34 +452,27 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 
         // The tenant is stamped with nomic-embed-text-v1.5, so the effective model must be that.
         // Using the same model provider should succeed.
-        let (matching_provider, _matching_provider_server) = model_provider("nomic-ai/nomic-embed-text-v1.5").await;
-        let result =
-            entity_embeddings::sync_embedding_for_record(
-                &ctx.db,
-                fixture.workspace_id,
-                &record,
-                &matching_provider,
-            )
-            .await;
+        let (matching_provider, _matching_provider_server) =
+            model_provider("nomic-ai/nomic-embed-text-v1.5").await;
+        let result = entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            fixture.workspace_id,
+            &record,
+            &matching_provider,
+        )
+        .await;
         assert!(result.is_ok(), "result: {result:?}");
 
         // Verify the embedding was written.
-        let stored: Option<bool> = {
-            #[derive(sea_orm::FromQueryResult)]
-            struct Row {
-                has_embedding: bool,
-            }
-            Row::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = $1",
-                [entity.id.into()],
-            ))
-            .one(&ctx.db)
+        let stored = entity_embeddings::Entity768::find_by_id(entity.id)
+            .filter(
+                yorishiro::models::_entities::entity_embeddings_768::Column::Embedding
+                    .is_not_null(),
+            )
+            .exists(&ctx.db)
             .await
-            .expect("query embedding")
-            .map(|r| r.has_embedding)
-        };
-        assert_eq!(stored, Some(true), "embedding must have been written");
+            .expect("query embedding");
+        assert!(stored, "embedding must have been written");
 
         // A different model should be refused by the inherited model check.
         let entity2 = entity_entities::create(
@@ -488,20 +491,19 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             .await
             .expect("get entity record");
 
-        let (mismatched_provider, _mismatched_provider_server) = model_provider("intfloat/multilingual-e5-base").await;
-        let result2 =
-            entity_embeddings::sync_embedding_for_record(
-                &ctx.db,
-                fixture.workspace_id,
-                &record2,
-                &mismatched_provider,
-            )
-            .await;
+        let (mismatched_provider, _mismatched_provider_server) =
+            model_provider("intfloat/multilingual-e5-base").await;
+        let result2 = entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            fixture.workspace_id,
+            &record2,
+            &mismatched_provider,
+        )
+        .await;
         assert!(
             matches!(result2, Err(YorishiroError::ValidationFailed { .. })),
             "result: {result2:?}"
         );
-
     })
     .await;
 }
@@ -739,15 +741,14 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                Row::find_by_statement(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM entity_embeddings_768 WHERE entity_id = $1",
-                    [(*entity_id).into()],
-                ))
-                .one(&ctx.db)
-                .await
-                .expect("query embedding")
-                .and_then(|r| r.embedding)
+                entity_embeddings::Entity768::find_by_id(*entity_id)
+                    .select_only()
+                    .column(yorishiro::models::_entities::entity_embeddings_768::Column::Embedding)
+                    .into_model::<Row>()
+                    .one(&ctx.db)
+                    .await
+                    .expect("query embedding")
+                    .and_then(|r| r.embedding)
             };
             let expected = model_vector(&winner.model_name());
             assert_eq!(
@@ -835,15 +836,14 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                Row::find_by_statement(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM entity_embeddings_768 WHERE entity_id = $1",
-                    [entity_id.into()],
-                ))
-                .one(&ctx.db)
-                .await
-                .expect("query embedding")
-                .and_then(|r| r.embedding)
+                entity_embeddings::Entity768::find_by_id(entity_id)
+                    .select_only()
+                    .column(yorishiro::models::_entities::entity_embeddings_768::Column::Embedding)
+                    .into_model::<Row>()
+                    .one(&ctx.db)
+                    .await
+                    .expect("query embedding")
+                    .and_then(|r| r.embedding)
             };
             assert_eq!(
                 stored.as_ref().map(|v| v.as_slice()),
@@ -902,15 +902,14 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                Row::find_by_statement(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM entity_embeddings_768 WHERE entity_id = $1",
-                    [entity_id.into()],
-                ))
-                .one(&ctx.db)
-                .await
-                .expect("query embedding")
-                .and_then(|r| r.embedding)
+                entity_embeddings::Entity768::find_by_id(entity_id)
+                    .select_only()
+                    .column(yorishiro::models::_entities::entity_embeddings_768::Column::Embedding)
+                    .into_model::<Row>()
+                    .one(&ctx.db)
+                    .await
+                    .expect("query embedding")
+                    .and_then(|r| r.embedding)
             };
             let old_vec = model_vector(&old_provider.model_name());
             assert_ne!(
@@ -1164,21 +1163,18 @@ async fn sqlite_document_embed_persist_and_search() {
             .expect("embed entity");
 
             // Verify the embedding was written to the width-specific table.
-            let has_embedding: Option<bool> = {
-                #[derive(sea_orm::FromQueryResult)]
-                struct Row {
-                    has_embedding: bool,
-                }
-                Row::find_by_statement(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = ?",
-                    [entity.id.into()],
-                ))
+            let has_embedding = entity_embeddings::Entity768::find_by_id(entity.id)
+                .select_only()
+                .expr_as(
+                    sea_orm::sea_query::Expr::col(
+                        yorishiro::models::_entities::entity_embeddings_768::Column::Embedding,
+                    ).is_not_null(),
+                    "has_embedding",
+                )
+                .into_tuple::<bool>()
                 .one(&ctx.db)
                 .await
-                .expect("query embedding")
-                .map(|r| r.has_embedding)
-            };
+                .expect("query embedding");
             assert_eq!(has_embedding, Some(true), "embedding must have been written");
 
             // Search by vector should find the entity.
