@@ -45,6 +45,21 @@ async fn finish_job(
     expected: &str,
     status_api: Option<(&loco_rs::TestServer, &str, &str)>,
 ) {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+    // Capture relay failures from spawned tasks; queue state alone cannot explain a missing publish.
+    let _ = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_test_writer()
+                .with_ansi(false),
+        )
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_target("yorishiro::workers::dispatch", tracing::Level::WARN)
+                .with_target("yorishiro::initializers::queue", tracing::Level::ERROR),
+        )
+        .try_init();
     let outbox = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
         .one(&ctx.db)
         .await
