@@ -205,6 +205,16 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
         );
 
         // Stored with WidthChanged: GET now returns the new assignment.
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, SelectExt};
+        use yorishiro::models::_entities::queue_job_lifecycles::{Column, Entity};
+        assert!(
+            Entity::find()
+                .filter(Column::WorkspaceId.eq(setup.workspace_id))
+                .filter(Column::JobName.eq("reindex"))
+                .exists(&ctx.db)
+                .await
+                .expect("read durable reindex registration")
+        );
         let get = request
             .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

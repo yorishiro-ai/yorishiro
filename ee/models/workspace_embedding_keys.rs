@@ -12,9 +12,36 @@ use crate::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
 };
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::Serialize;
 use uuid::Uuid;
+
+pub(crate) async fn configure(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: Uuid,
+    request: crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+    let workspace = crate::models::workspace_workspaces::get_workspace(&txn, workspace_id).await?;
+    let outcome = set(
+        &txn,
+        workspace_id,
+        &request.base_url,
+        &request.model,
+        &request.api_key,
+        request.dimensions,
+        request.send_dimensions_param,
+        workspace.embedding_dimensions,
+    )
+    .await?;
+    if matches!(outcome, SetOutcome::WidthChanged { .. }) {
+        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+            .await
+            .internal()?;
+    }
+    txn.commit().await.internal()?;
+    Ok(())
+}
 
 /// Builds the workspace's assigned provider without loading the deployment default.
 pub(crate) async fn resolve(
@@ -38,7 +65,7 @@ pub(crate) async fn resolve(
 /// What a workspace has configured, without the key itself.
 ///
 /// `api_key` is deliberately absent rather than masked, matching `workspace_llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, sea_orm::FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = EmbeddingKeyResponse))]
 pub(crate) struct EmbeddingKeyDescription {
@@ -48,20 +75,6 @@ pub(crate) struct EmbeddingKeyDescription {
     /// Always true when present: the row cannot exist without a key.
     /// Callers use the absence of the whole description to mean "not configured".
     pub(crate) configured: bool,
-}
-
-/// Refuses anything that is not `http://` or `https://`.
-/// Same reasoning as `workspace_llm_keys::check_scheme`: the value is interpolated into a request URL, and this rules out only what could never be an OpenAI-compatible endpoint.
-/// Not SSRF protection.
-fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
-    if base_url.starts_with("http://") || base_url.starts_with("https://") {
-        return Ok(());
-    }
-    Err(YorishiroError::ValidationFailed {
-        message: "base_url must start with http:// or https://".into(),
-        details: vec![],
-        hint: "for example https://api.openai.com/v1".into(),
-    })
 }
 
 /// A workspace's own embedding credentials and model, as the provider lookup reads them to build a provider.
@@ -115,13 +128,8 @@ pub async fn set(
     send_dimensions_param: bool,
     expected_dimensions: Option<i32>,
 ) -> Result<SetOutcome, YorishiroError> {
-    if api_key.trim().is_empty() {
-        return Err(YorishiroError::ValidationFailed {
-            message: "api_key must not be empty".into(),
-            details: vec![],
-            hint: "remove the configuration instead of storing an empty key".into(),
-        });
-    }
+    let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
+
     if dimensions <= 0 {
         return Err(YorishiroError::ValidationFailed {
             message: "dimensions must be a positive integer".into(),
@@ -141,9 +149,6 @@ pub async fn set(
     };
 
     crate::models::entity_embeddings::embedding_table(dimensions as usize)?;
-
-    let base_url = base_url.trim().trim_end_matches('/');
-    check_scheme(base_url)?;
 
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
@@ -194,18 +199,15 @@ pub(crate) async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<EmbeddingKeyDescription>, YorishiroError> {
-    let row = Entity::find()
+    Entity::find()
+        .select_only()
+        .columns([Column::BaseUrl, Column::Model, Column::Dimensions])
+        .expr_as(sea_orm::sea_query::Expr::value(true), "configured")
         .filter(Column::WorkspaceId.eq(workspace_id))
+        .into_model::<EmbeddingKeyDescription>()
         .one(conn)
         .await
-        .internal()?;
-
-    Ok(row.map(|row| EmbeddingKeyDescription {
-        base_url: row.base_url,
-        model: row.model,
-        dimensions: row.dimensions,
-        configured: true,
-    }))
+        .internal()
 }
 
 /// The credentials themselves, for building a provider.

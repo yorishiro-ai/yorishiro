@@ -27,46 +27,7 @@ async fn set_embedding_key(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
-    let workspace =
-        crate::models::workspace_workspaces::get_workspace(&ctx.db, auth_ctx.workspace_id).await?;
-
-    match workspace_embedding_keys::set(
-        &ctx.db,
-        auth_ctx.workspace_id,
-        &body.base_url,
-        &body.model,
-        &body.api_key,
-        body.dimensions,
-        body.send_dimensions_param,
-        workspace.embedding_dimensions,
-    )
-    .await?
-    {
-        workspace_embedding_keys::SetOutcome::Stored => {}
-        workspace_embedding_keys::SetOutcome::WidthChanged { .. } => {
-            // Width changed: enqueue a reindex so the workspace's entities are
-            // re-embedded with the new provider's width. Uses the same enqueue
-            // path that the reindex scheduler uses (see #307).
-            use crate::workers::reindex::{ReindexArgs, enqueue_for_class};
-            let args = ReindexArgs {
-                lifecycle_id: None,
-                workspace_id: auth_ctx.workspace_id,
-                worker_class: crate::controllers::extractors::resolve_worker_class(
-                    &ctx,
-                    auth_ctx.workspace_id,
-                )
-                .await?,
-                startup: false,
-            };
-            if let Err(err) = enqueue_for_class(&ctx, args).await {
-                tracing::warn!(
-                    workspace_id = %auth_ctx.workspace_id,
-                    error = %err,
-                    "embedding key set: width changed, failed to enqueue reindex"
-                );
-            }
-        }
-    }
+    workspace_embedding_keys::configure(&ctx, auth_ctx.workspace_id, body).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

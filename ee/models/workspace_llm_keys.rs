@@ -8,7 +8,7 @@
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_llm_keys::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ use crate::edition::ee::services::inference::InferenceConfig;
 /// What a workspace has configured, without the key itself.
 ///
 /// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, sea_orm::FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = LlmKeyResponse))]
 pub(crate) struct LlmKeyDescription {
@@ -28,24 +28,6 @@ pub(crate) struct LlmKeyDescription {
     pub(crate) configured: bool,
 }
 
-/// Refuses anything that is not `http://` or `https://`.
-///
-/// The value is interpolated into a request URL, so a `file://` or `gopher://` there points reqwest at something that is not an HTTP conversation at all, and a scheme-less string silently becomes a relative path.
-/// Checked here, at the point a person types it, so the refusal names the field rather than surfacing later as a failed inference run.
-///
-/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a policy question for the operator; see `ee/docs/api.md`.
-/// This only rules out URLs that could never be a chat-completions endpoint.
-fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
-    if base_url.starts_with("http://") || base_url.starts_with("https://") {
-        return Ok(());
-    }
-    Err(YorishiroError::ValidationFailed {
-        message: "base_url must start with http:// or https://".into(),
-        details: vec![],
-        hint: "for example https://api.openai.com/v1".into(),
-    })
-}
-
 /// Stores or replaces a workspace's credentials.
 pub(crate) async fn set(
     conn: &impl ConnectionTrait,
@@ -54,16 +36,7 @@ pub(crate) async fn set(
     model: &str,
     api_key: &str,
 ) -> Result<(), YorishiroError> {
-    if api_key.trim().is_empty() {
-        return Err(YorishiroError::ValidationFailed {
-            message: "api_key must not be empty".into(),
-            details: vec![],
-            hint: "remove the configuration instead of storing an empty key".into(),
-        });
-    }
-    // Normalise once, then validate and store the same string: checking `base_url.trim()` and storing `base_url` would let "  https://host  " pass and be persisted with its padding, which `InferenceClient` then interpolates straight into a request URL, so the check and the stored value have to be the same value.
-    let base_url = base_url.trim().trim_end_matches('/');
-    check_scheme(base_url)?;
+    let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
 
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
@@ -110,17 +83,15 @@ pub(crate) async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {
-    let row = Entity::find()
+    Entity::find()
+        .select_only()
+        .columns([Column::BaseUrl, Column::Model])
+        .expr_as(sea_orm::sea_query::Expr::value(true), "configured")
         .filter(Column::WorkspaceId.eq(workspace_id))
+        .into_model::<LlmKeyDescription>()
         .one(conn)
         .await
-        .internal()?;
-
-    Ok(row.map(|row| LlmKeyDescription {
-        base_url: row.base_url,
-        model: row.model,
-        configured: true,
-    }))
+        .internal()
 }
 
 /// The credentials themselves, for making a call.

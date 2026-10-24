@@ -9,6 +9,8 @@ mod write;
 
 pub(crate) use write::{fork_template, publish_version, set_visibility, submit_review};
 
+use sea_orm::SelectExt;
+
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
 use crate::models::template_templates::TemplateVisibility;
@@ -574,19 +576,18 @@ pub(crate) async fn is_visible(
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
     use crate::models::_entities::template_templates::{Column, Entity};
-    use sea_orm::{ColumnTrait, Condition, PaginatorTrait, QueryFilter};
+    use sea_orm::{ColumnTrait, Condition, QueryFilter};
 
-    let count = Entity::find()
+    Entity::find()
         .filter(Column::Id.eq(template_id))
         .filter(
             Condition::any()
                 .add(Column::TenantId.eq(tenant_id))
                 .add(Column::Visibility.eq(TemplateVisibility::Community.as_db_str())),
         )
-        .count(conn)
+        .exists(conn)
         .await
-        .internal()?;
-    Ok(count > 0)
+        .internal()
 }
 
 /// Records this tenant's review, replacing its previous one if it had left one.
@@ -766,15 +767,14 @@ pub(crate) async fn is_owned_by(
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
     use crate::models::_entities::template_templates::{Column, Entity};
-    use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
+    use sea_orm::{ColumnTrait, QueryFilter};
 
-    let count = Entity::find()
+    Entity::find()
         .filter(Column::Id.eq(template_id))
         .filter(Column::TenantId.eq(tenant_id))
-        .count(conn)
+        .exists(conn)
         .await
-        .internal()?;
-    Ok(count > 0)
+        .internal()
 }
 
 /// Sets a template's marketplace visibility.
