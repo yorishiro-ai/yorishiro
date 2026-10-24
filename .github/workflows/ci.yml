@@ -19,6 +19,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  PYTHONDONTWRITEBYTECODE: "1"
   EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
   EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
   EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
@@ -108,7 +109,7 @@ jobs:
         run: make patch-check
 
       - name: Check generated entity hardener
-        run: PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_harden_generated_entities.py
+        run: uv run scripts/test_harden_generated_entities.py
 
       - name: Python lint
         run: make python-lint

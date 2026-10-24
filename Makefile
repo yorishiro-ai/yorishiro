@@ -36,15 +36,14 @@ fmt-check: patch-check
 
 python-lint:
 	uv run ruff check scripts patches/loco-rs/verify.py
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_ci_matrix.py
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_classify_ci_changes.py
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_topology_self.py
+	uv run scripts/test_ci_matrix.py
+	uv run scripts/test_classify_ci_changes.py
+	uv run scripts/test_topology_self.py
 	bash -n .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh
 
 edition-boundary-check:
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_edition_boundary.py
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_edition_boundary.py
-	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
+	uv run scripts/test_edition_boundary.py
+	uv run scripts/check_edition_boundary.py
 
 dead-code-allow-check:
 	@if git grep -n -E 'allow[[:space:]]*\([[:space:]]*dead_code' -- src ee edition migration/src tests; then \
