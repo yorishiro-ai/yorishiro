@@ -1,0 +1,2 @@
+# Preserve unified-diff context byte for byte.
+patches/loco-rs/fixes.patch -whitespace

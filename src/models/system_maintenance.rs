@@ -25,15 +25,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
-
 /// The reason recorded when the database load guard, not an operator, enables read-only mode.
 /// Its absence is how the guard knows it must not lift a read-only mode someone else set.
 pub const AUTO_REASON: &str = "database load (automatic)";
@@ -42,7 +33,7 @@ db_enum! {
     /// What the deployment is currently refusing.
     ///
     /// Unknown stored values are rejected rather than treated as `Off`: reading a row this crate does not understand and concluding "serve everything" would turn a corrupt row into an outage of the protection itself.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum MaintenanceMode {
         /// Serving normally.
         Off = "off",

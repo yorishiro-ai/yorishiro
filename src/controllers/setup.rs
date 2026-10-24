@@ -1,6 +1,6 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
 //!
-//! Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the deployment's first tenant/workspace from scratch: there is no one to invite from yet.
+//! Creates the deployment's first tenant, workspace and owner account.
 //! The resolved edition tenant cap controls whether first-run setup is available.
 //! An unlimited cap disables the wizard; the source default is one tenant.
 
@@ -11,15 +11,13 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::TransactionTrait;
 
 use crate::controllers::ApiError;
 use crate::dtos::setup::{SetupRequest, SetupResponse, SetupStatusResponse};
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::YorishiroError;
 use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRole;
-use crate::models::{tenancy, tenant_tenants, user_users};
+use crate::models::{tenancy, tenant_tenants};
 
 fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     ctx.shared_store
@@ -49,54 +47,19 @@ pub async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let max_tenants = max_tenants(&ctx)?;
-    if max_tenants.is_none() {
-        return Err(YorishiroError::not_found(
-            "the setup wizard is not enabled on this deployment",
-        )
-        .into());
-    }
-
-    // A fast-path check before doing any work, not the guarantee: two concurrent POST /setup calls could both pass this and both proceed.
-    // The real check runs again after the advisory lock below, inside the transaction that also does the writes.
-    if tenant_tenants::count_tenants(&ctx.db).await? > 0 {
-        return Err(YorishiroError::Conflict {
-            message: "this deployment has already been set up".into(),
-        }
-        .into());
-    }
-
-    // tenant + workspace + user + membership run in one transaction: a request that dies part-way must not leave rows nothing can finish or undo.
-    // `db::lock_for_update` closes the TOCTOU window the fast-path check above has: a fixed key, serializing every setup attempt on this deployment against every other, so the second caller's re-check (below) sees the first caller's commit before it decides whether to proceed.
-    let txn = ctx.db.begin().await.internal()?;
-    crate::db::lock_for_update(&txn, "setup").await.internal()?;
-    if tenant_tenants::count_tenants(&txn).await? > 0 {
-        return Err(YorishiroError::Conflict {
-            message: "this deployment has already been set up".into(),
-        }
-        .into());
-    }
-
-    let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
-
-    let workspace = tenancy::create_workspace(&txn, tenant.id, "default", None, None).await?;
-
-    let user = user_users::create_user(
-        &txn,
+    let account = tenancy::setup_first_account(
+        &ctx.db,
+        max_tenants(&ctx)?,
         &body.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenant_memberships::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
-
-    txn.commit().await.internal()?;
-
     let created = IdentityApiKeys::create_api_key(
         &ctx.db,
-        workspace.id,
+        account.workspace_id,
         MembershipRole::Owner.max_scope(),
-        Some(user.id),
+        Some(account.user_id),
         false,
     )
     .await?;
@@ -104,10 +67,10 @@ pub async fn setup(
     Ok((
         StatusCode::CREATED,
         Json(SetupResponse {
-            user_id: user.id,
-            email: user.email,
-            tenant_id: tenant.id,
-            workspace_id: workspace.id,
+            user_id: account.user_id,
+            email: account.email,
+            tenant_id: account.tenant_id,
+            workspace_id: account.workspace_id,
             api_key: created.plaintext,
         }),
     ))

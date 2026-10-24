@@ -25,10 +25,11 @@ impl Task for CreateTenant {
             .get::<crate::data::tenant_policy::TenantCap>()
             .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("tenant cap policy missing")))?
             .resolve();
-        let tenant =
-            crate::models::tenant_tenants::create_tenant(&app_context.db, name, max_tenants)
-                .await
-                .internal()?;
+        let txn = crate::db::begin_write(&app_context.db).await.internal()?;
+        let tenant = crate::models::tenant_tenants::create_tenant(&txn, name, max_tenants)
+            .await
+            .internal()?;
+        txn.commit().await.internal()?;
 
         println!("tenant id: {}", tenant.id);
         Ok(())

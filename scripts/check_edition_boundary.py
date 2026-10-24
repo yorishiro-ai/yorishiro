@@ -2,14 +2,14 @@
 """Fail when `src/` refers to the enterprise overlay or to the composition root.
 
 `src/` is the community base.
-It must not name the enterprise feature, the `ee` module, or what the overlay adds, because the only place that knows which editions exist is `edition/`.
+Only the crate-root assembly in `src/lib.rs` may name the overlay.
 
 Two kinds of check run over every Rust file under `src/`:
 
 * Text rules read the raw lines, comments and strings included: a comment that classifies code by edition is the first step towards a branch that does.
 * Token rules read the code with comments and string literals blanked out, so they see through spacing, line breaks and aliases.
   `edition` and `ee` must not appear as identifiers at all, which also rules out `use crate::edition as x;` followed by `x::ee::...`, `crate::edition :: ee`, and a path broken across lines.
-  The one exception is `src/lib.rs`, which has to declare the composition root and re-export from it, so it may name `edition` but never `ee`.
+  The one exception is `src/lib.rs`, which declares and assembles both builds.
 
 Usage: check_edition_boundary.py [repository-root]
 """
@@ -32,8 +32,8 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-# `edition` is the composition root's name: only the crate root may declare and re-export it.
-EDITION_ALLOWED_IN = frozenset({"src/lib.rs"})
+# Only the crate root owns edition-specific assembly.
+ASSEMBLY_ALLOWED_IN = frozenset({"src/lib.rs"})
 
 TOKEN_RULES: tuple[tuple[str, re.Pattern[str], bool], ...] = (
     ("the ee module as an identifier", re.compile(r"\bee\b"), False),
@@ -105,6 +105,8 @@ def strip_code(source: str) -> str:
 
 
 def scan(path: str, source: str) -> list[Finding]:
+    if path in ASSEMBLY_ALLOWED_IN:
+        return []
     findings = []
     lines = source.splitlines()
     for number, line in enumerate(lines, 1):
@@ -116,8 +118,6 @@ def scan(path: str, source: str) -> list[Finding]:
         if number in flagged:
             continue
         for rule, pattern, root_name in TOKEN_RULES:
-            if root_name and path in EDITION_ALLOWED_IN:
-                continue
             if pattern.search(line):
                 findings.append(Finding(path, number, rule, lines[number - 1].strip()))
     return findings
@@ -139,7 +139,7 @@ def main(argv: list[str]) -> int:
     for finding in findings:
         print(f"  {finding.path}:{finding.line}: {finding.rule}: {finding.text}", file=sys.stderr)
     print(
-        "Edition-specific wiring belongs in edition/, and the overlay's own code in ee/. See .agents/rules/editions.md.",
+        "Edition-specific wiring belongs in src/lib.rs, and overlay behaviour in ee/. See .agents/rules/editions.md.",
         file=sys.stderr,
     )
     return 1

@@ -1,10 +1,7 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use loco_rs::prelude::async_trait;
-use reqwest::{Request, StatusCode, header::HeaderMap};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use super::EmbeddingProvider;
@@ -25,7 +22,6 @@ pub struct OpenAiCompatibleConfig {
 }
 
 pub struct OpenAiCompatibleProvider {
-    http: Arc<dyn OpenAiCompatibleHttp>,
     client: reqwest::Client,
     base_url: String,
     api_key: String,
@@ -39,21 +35,21 @@ impl OpenAiCompatibleProvider {
     /// # Panics
     /// Panics if an internal invariant required by this operation is violated.
     pub fn new(config: OpenAiCompatibleConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .expect("reqwest client configuration is static and always valid");
+        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        let client = CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .timeout(REQUEST_TIMEOUT)
+                    .build()
+                    .expect("reqwest client configuration is static and always valid")
+            })
+            .clone();
 
-        Self::with_http(config, client, Arc::new(ReqwestOpenAiHttp))
+        Self::with_client(config, client)
     }
 
-    pub fn with_http(
-        config: OpenAiCompatibleConfig,
-        client: reqwest::Client,
-        http: Arc<dyn OpenAiCompatibleHttp>,
-    ) -> Self {
+    pub fn with_client(config: OpenAiCompatibleConfig, client: reqwest::Client) -> Self {
         Self {
-            http,
             client,
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key: config.api_key,
@@ -61,79 +57,6 @@ impl OpenAiCompatibleProvider {
             dimensions: config.dimensions,
             send_dimensions_param: config.send_dimensions_param,
         }
-    }
-}
-
-#[async_trait]
-pub trait OpenAiCompatibleHttp: Send + Sync {
-    async fn send(
-        &self,
-        client: &reqwest::Client,
-        request: Request,
-    ) -> Result<OpenAiHttpResponse, OpenAiHttpError>;
-}
-
-struct ReqwestOpenAiHttp;
-
-#[async_trait]
-impl OpenAiCompatibleHttp for ReqwestOpenAiHttp {
-    async fn send(
-        &self,
-        client: &reqwest::Client,
-        request: Request,
-    ) -> Result<OpenAiHttpResponse, OpenAiHttpError> {
-        let response = client
-            .execute(request)
-            .await
-            .map_err(OpenAiHttpError::from_request)?;
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body = response.bytes();
-        Ok(OpenAiHttpResponse {
-            status,
-            headers,
-            body: Box::pin(async move {
-                body.await
-                    .map(|body| body.to_vec())
-                    .map_err(|error| OpenAiHttpError::Response(error.to_string()))
-            }),
-        })
-    }
-}
-
-pub struct OpenAiHttpResponse {
-    pub status: StatusCode,
-    pub headers: HeaderMap,
-    pub body: Pin<Box<dyn Future<Output = Result<Vec<u8>, OpenAiHttpError>> + Send>>,
-}
-
-pub enum OpenAiHttpError {
-    Timeout(String),
-    Request(String),
-    Response(String),
-}
-
-impl OpenAiHttpError {
-    fn from_request(error: reqwest::Error) -> Self {
-        if error.is_timeout() {
-            Self::Timeout(error.to_string())
-        } else {
-            Self::Request(error.to_string())
-        }
-    }
-}
-
-impl OpenAiHttpError {
-    fn message(&self, secret: &str) -> String {
-        let message = match self {
-            Self::Timeout(message) => message,
-            Self::Request(message) => message,
-            Self::Response(message) => message,
-        };
-        if secret.is_empty() {
-            return message.clone();
-        }
-        message.replace(secret, "[redacted]")
     }
 }
 
@@ -152,6 +75,7 @@ struct EmbeddingsResponse {
 
 #[derive(Deserialize)]
 struct EmbeddingDatum {
+    index: usize,
     embedding: Vec<f32>,
 }
 
@@ -182,29 +106,20 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
             .build()
             .map_err(|err| YorishiroError::ProviderUnreachable {
                 url: self.base_url.clone(),
-                message: err.to_string(),
+                message: redact(&err.to_string(), &self.api_key),
             })?;
-        let response = self
-            .http
-            .send(&self.client, request)
-            .await
-            .map_err(|err| match err {
-                OpenAiHttpError::Timeout(_) | OpenAiHttpError::Request(_) => {
-                    YorishiroError::ProviderUnreachable {
-                        url: self.base_url.clone(),
-                        message: err.message(&self.api_key),
-                    }
-                }
-                OpenAiHttpError::Response(_) => {
-                    YorishiroError::Internal(anyhow::anyhow!(err.message(&self.api_key)))
-                }
-            })?;
+        let response = self.client.execute(request).await.map_err(|err| {
+            YorishiroError::ProviderUnreachable {
+                url: self.base_url.clone(),
+                message: redact(&err.to_string(), &self.api_key),
+            }
+        })?;
 
-        let status = response.status;
+        let status = response.status();
         if !status.is_success() {
             // A provider saying "too many requests" or "temporarily unavailable" is saying to come back, different from a request it will never accept.
             // Told apart here so the caller can wait instead of dropping the work.
-            if let Some(after) = retry_after(status.as_u16(), &response.headers) {
+            if let Some(after) = retry_after(status.as_u16(), response.headers()) {
                 return Err(YorishiroError::ProviderBusy {
                     message: format!("embedding provider returned HTTP {status}"),
                     retry_after: after,
@@ -216,11 +131,22 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
         }
 
         // Keep body consumption after status handling so provider error responses remain unread.
-        let body = response
-            .body
-            .await
-            .map_err(|err| YorishiroError::Internal(anyhow::anyhow!(err.message(&self.api_key))))?;
-        let parsed: EmbeddingsResponse = serde_json::from_slice(&body).internal()?;
+        let body = response.bytes().await.map_err(|err| {
+            YorishiroError::Internal(anyhow::anyhow!(redact(&err.to_string(), &self.api_key)))
+        })?;
+        let mut parsed: EmbeddingsResponse = serde_json::from_slice(&body).internal()?;
+
+        parsed.data.sort_unstable_by_key(|datum| datum.index);
+        if parsed
+            .data
+            .iter()
+            .enumerate()
+            .any(|(index, datum)| datum.index != index)
+        {
+            return Err(YorishiroError::Internal(anyhow::anyhow!(
+                "embedding provider returned invalid vector indices"
+            )));
+        }
 
         let vectors: Vec<Vec<f32>> = parsed.data.into_iter().map(|d| d.embedding).collect();
 
@@ -246,11 +172,19 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
     }
 }
 
+pub(crate) fn redact(message: &str, secret: &str) -> String {
+    if secret.is_empty() {
+        message.to_owned()
+    } else {
+        message.replace(secret, "[redacted]")
+    }
+}
+
 /// How long to wait before retrying, or `None` when the response is not a reason to retry.
 ///
 /// 429 and 503 are the two the providers use for "later"; everything else is a request that will fail again the same way.
 /// `Retry-After` is honoured when the provider sends it; a default stands in when it does not.
-fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+pub(crate) fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     if status != StatusCode::TOO_MANY_REQUESTS.as_u16()
         && status != StatusCode::SERVICE_UNAVAILABLE.as_u16()
     {

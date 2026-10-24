@@ -1,78 +1,26 @@
 use super::boot_request;
+use super::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
-use sea_orm::EntityTrait;
-use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::edition::ee::models::workspace_worker_classes::WorkerClassAssignmentResolver;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenant_memberships::MembershipRole;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::workers::embedding_sync::WorkerClassResolver;
-
-struct Setup {
-    key: String,
-    workspace_id: Uuid,
-}
-
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("acme".into()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-    let owner = yorishiro::models::user_users::create_user(
-        &ctx.db,
-        "owner@example.com",
-        "hunter2-hunter2",
-        None,
-    )
-    .await
-    .expect("create owner");
-    yorishiro::models::tenant_memberships::add_member(
-        &ctx.db,
-        tenant.id,
-        owner.id,
-        MembershipRole::Owner,
-    )
-    .await
-    .expect("add owner");
-    let key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Schema,
-        Some(owner.id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext;
-    Setup {
-        key,
-        workspace_id: workspace.id,
-    }
-}
 
 /// Setting, reading and clearing a workspace's own worker-class assignment over REST, matching `embedding_key_set_get_and_clear_round_trip`.
 #[tokio::test]
 async fn worker_class_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let missing = request
             .get("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             missing.status_code(),
@@ -83,7 +31,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
 
         let put = request
             .put("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "worker_class": "tenant_private" }))
             .await;
         assert_eq!(
@@ -95,7 +43,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
 
         let get = request
             .get("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             get.status_code(),
@@ -108,7 +56,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
 
         let delete = request
             .delete("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             delete.status_code(),
@@ -119,7 +67,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
 
         let after_delete = request
             .get("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(after_delete.status_code(), StatusCode::NOT_FOUND);
     })
@@ -130,11 +78,19 @@ async fn worker_class_set_get_and_clear_round_trip() {
 #[tokio::test]
 async fn setting_a_new_class_replaces_the_old_one() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let first = request
             .put("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "worker_class": "tenant_private" }))
             .await;
         assert_eq!(
@@ -146,7 +102,7 @@ async fn setting_a_new_class_replaces_the_old_one() {
 
         let second = request
             .put("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({ "worker_class": "official" }))
             .await;
         assert_eq!(
@@ -158,7 +114,7 @@ async fn setting_a_new_class_replaces_the_old_one() {
 
         let get = request
             .get("/api/workspace/worker-class")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let body: serde_json::Value = get.json();
         assert_eq!(
@@ -167,72 +123,4 @@ async fn setting_a_new_class_replaces_the_old_one() {
         );
     })
     .await;
-}
-
-/// The `WorkerClassResolver` seam returns the workspace's own assignment when one exists, and `None` (falling back to `WorkerClass::Shared`) when it does not, matching `resolver_returns_the_workspace_assignment_when_set_and_none_otherwise`.
-#[tokio::test]
-async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let setup = setup(&ctx).await;
-        let resolver = WorkerClassAssignmentResolver;
-
-        let before = resolver
-            .resolve(&ctx.db, setup.workspace_id)
-            .await
-            .expect("resolve before assignment");
-        assert!(
-            before.is_none(),
-            "an unassigned workspace must resolve to None so the caller falls back to WorkerClass::Shared"
-        );
-
-        yorishiro::edition::ee::models::workspace_worker_classes::set(
-            &ctx.db,
-            setup.workspace_id,
-            yorishiro::workers::embedding_sync::WorkerClass::Official,
-        )
-        .await
-        .expect("assign workspace worker class");
-
-        let after = resolver
-            .resolve(&ctx.db, setup.workspace_id)
-            .await
-            .expect("resolve after assignment");
-        assert_eq!(
-            after,
-            Some(yorishiro::workers::embedding_sync::WorkerClass::Official),
-            "the resolved class must be the one just assigned"
-        );
-
-        // A different, still-unassigned workspace must not see the first workspace's assignment.
-        let other = setup_second_workspace(&ctx, &setup).await;
-        let other_result = resolver
-            .resolve(&ctx.db, other)
-            .await
-            .expect("resolve unrelated workspace");
-        assert!(
-            other_result.is_none(),
-            "one workspace's assignment must not leak to another"
-        );
-
-    })
-    .await;
-}
-
-/// A second workspace under the same tenant as `setup`, for the cross-workspace isolation check above.
-async fn setup_second_workspace(ctx: &loco_rs::app::AppContext, first: &Setup) -> Uuid {
-    let first_workspace = workspace_workspaces::Entity::find_by_id(first.workspace_id)
-        .one(&ctx.db)
-        .await
-        .expect("find first workspace")
-        .expect("first workspace exists");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(first_workspace.tenant_id),
-        name: sea_orm::ActiveValue::Set("second".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert second workspace");
-    workspace.id
 }

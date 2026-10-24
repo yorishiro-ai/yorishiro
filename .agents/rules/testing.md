@@ -8,15 +8,15 @@ All commands run from the repository root. `make -C . <target>` works from any d
 |---|---|---|
 | `make test-postgres` | PostgreSQL DB and PostgreSQL queue topology | PostgreSQL/PostgreSQL |
 | `make test-sqlite` | SQLite DB and SQLite queue topology using separate files | SQLite/SQLite |
-| `make test-valkey` | SQLite DB and Valkey-compatible `redis://` queue topology | SQLite/Valkey |
+| `make test-redis` | SQLite DB and Redis-compatible `redis://` queue topology | SQLite/Redis |
 | `uv run scripts/test_topology.py <topology>` | Full topology suite with configured-app evidence | Any supported topology |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Clippy for every CE target, including public error and panic docs | CE |
 | `make clippy-ee` | Clippy for every EE target, including public error and panic docs | EE |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
-| `make check-all` | Formatting, Python/public API checks, CE check, and CE Clippy | CE |
-| `make check-all-ee` | Formatting, Python/public API checks, EE check, and EE Clippy | EE |
+| `make check-all` | Formatting, Python/boundary checks, CE check, and CE Clippy | CE |
+| `make check-all-ee` | Formatting, Python/boundary checks, EE check, and EE Clippy | EE |
 | `make build-ce` | `cargo build --locked --no-default-features --workspace` | CE |
 | `make build-ee` | `cargo build --locked --features enterprise --workspace` | EE |
 | `make entities` | Spin up pgvector container, migrate, generate entities, tear down | PostgreSQL |
@@ -30,7 +30,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
 | `LOCO_ENV` | `test_postgres` or `test_sqlite` | Selects the test configuration |
 
-Supported topologies are `postgres-postgres`, `sqlite-sqlite`, `postgres-valkey`, and `sqlite-valkey`.
+Supported topologies are `postgres-postgres`, `sqlite-sqlite`, `postgres-redis`, and `sqlite-redis`.
 Crossed SQLite/PostgreSQL SQL queues are forbidden by config validation and are not full-suite or CI targets.
 
 Custom PostgreSQL:
@@ -69,7 +69,6 @@ The integration tests are one binary rooted at `tests/mod.rs`:
 - `tests/db.rs`, `tests/db_enum.rs` — connection primitives and the `db_enum!` conversions
 - `tests/initializers/` — process-lifetime initializers (`db_load_guard`)
 - `tests/metaschema/` — nesting, projection, validation, type resolution, versioning
-- `tests/migration/` — `postgres.rs`, `sqlite.rs`
 - `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle
 - `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
 - `tests/services/` — embedding, rate limiting
@@ -82,7 +81,7 @@ There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 ## Where tests live
 
 Every test is under `tests/`. `src/` and `ee/` contain no `#[test]` and no `#[cfg(test)]`: CI rejects both.
-A test that needs an item the crate keeps private widens it to `pub` and records it in `scripts/public_api_allowlist.tsv` under the `integration-test` boundary.
+Keep items private or crate-visible unless production callers or integration tests need the public boundary.
 Test-only seams in production code are not allowed either: a dispatcher is replaced by inserting an `Arc<dyn Trait>` into `AppContext::shared_store`, the same call production makes.
 
 `tests/` builds without the enterprise feature (`--no-default-features --features community`).
@@ -111,7 +110,6 @@ Dedicated SQLite files use this gate:
 - `tests/requests/auth_sqlite.rs` — authentication
 - `tests/requests/schemas_sqlite.rs` — schema CRUD
 - `tests/requests/workspaces_sqlite.rs` — workspace CRUD
-- `tests/migration/sqlite.rs` — migration verification
 
 `uv run scripts/test_topology.py` runs the suite with explicit CE or EE feature flags and verifies a configured-app marker emitted after `Hooks::load_config(Environment::Test)` resolves the expected database URI and `QueueConfig` variant.
 The runner rejects unexpected marker directories and fails when the expected topology has no configured-app evidence.
@@ -124,7 +122,8 @@ The runner rejects unexpected marker directories and fails when the expected top
 
 One definition, in `tests/requests/mod.rs`. One crate means one binary, so every suite reaches it by path.
 
-`after_context` opens the identity pool (eager) and tenant pool (lazy). `ctx.db`'s own pool is a third connection. `spawn_startup_reindex` holds a session on `ctx.db` for the process lifetime. Without signaling its `StartupReindexHandle` before closing pools, `DROP DATABASE` panics.
+`after_context` shares the application pool with identity operations and opens a separate tenant pool.
+Test teardown must explicitly close both pools before `DROP DATABASE`.
 
 ## Boot failure diagnostics
 
@@ -142,7 +141,11 @@ psql -d template1 -c '\dx'
 
 A non-superuser role is required. A superuser bypasses RLS regardless of `FORCE`.
 
-Queue tests (`tests/requests/queue.rs`) bypass `request_with_create_db` because the queue pool has no public close path. They use a temporary SQLite queue file instead.
+Provider routing tests use the request harness's owned throwaway database rather than clearing the database named by `DATABASE_URL` or `QUEUE_URL`.
+Process-local serial locks do not isolate separate CE and EE test processes.
+
+Queue tests (`tests/requests/queue.rs`) use separate temporary SQLite application and queue files for provider-specific inspection.
+Teardown drains workers and closes queue and application pools before removing those files.
 
 ## Gate testing
 

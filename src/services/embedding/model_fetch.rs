@@ -1,6 +1,6 @@
 //! First-use fetch of the local embedding provider's model and tokenizer.
 //!
-//! `YORISHIRO_EMBEDDING_PROVIDER=local` needs a safetensors checkpoint and its tokenizer, neither of which is in the repository: the smaller of the two models here is about 522 MiB, which does not belong in git.
+//! `YORISHIRO_EMBEDDING_PROVIDER=local` needs a safetensors checkpoint and its tokenizer, neither of which is in the repository: the model checkpoint is about 1.1 GB, which does not belong in git.
 //! Rather than making an operator fetch them by hand, the default path is fetched on first use and verified against a hardcoded digest.
 //!
 //! The model and tokenizer files live at `models/<short_id>/model.safetensors` and `models/<short_id>/tokenizer.json` for the selected model, or are fetched into `$HOME/.cache/yorishiro/models/<short_id>/` on first use when absent.
@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use loco_rs::prelude::async_trait;
 use sha2::{Digest, Sha256};
 
 /// One file to fetch, with everything needed to verify it.
@@ -33,16 +32,15 @@ pub struct Artifact {
     pub description: &'static str,
 }
 
-/// One selectable local model: everything [`super::build_local_provider`] and [`super::local`] need to fetch, load, and identify it, and nothing that lives outside this module reaches for a bare `REPO`/`REVISION` constant instead.
+/// One selectable local model: everything `super::build_local_provider` and [`super::local`] need to fetch, load, and identify it, and nothing that lives outside this module reaches for a bare `REPO`/`REVISION` constant instead.
 ///
-/// The model and tokenizer artifacts live on the same definition rather than as two independent statics, deliberately: both output 768 dimensions on the two models defined below, so a mismatched model/tokenizer pairing would pass every shape check silently, embedding with the wrong vocabulary while looking healthy.
-/// Pairing them on one struct makes that swap a compile-time impossibility rather than a runtime risk to guard against.
+/// Model and tokenizer artifacts share one definition so their pinned revisions stay together.
 pub struct LocalModelDef {
     /// The model identifier reported by [`super::EmbeddingProvider::model_name`] and stamped onto a workspace at creation.
-    /// A HuggingFace repo id, since that is the only identifier that survives an implementation change (this codebase's own `ort` to `candle` migration already outlived one such identifier).
+    /// Uses the HuggingFace repository identifier independently of the inference engine.
     pub(super) id: &'static str,
     /// Selects this definition via `YORISHIRO_LOCAL_MODEL`, and names its own cache/default-path subdirectory.
-    /// Short and filesystem-safe, unlike [`Self::id`], which contains a `/`.
+    /// Short and filesystem-safe, unlike `Self::id`, which contains a `/`.
     pub short_id: &'static str,
     /// The model revision this deployment pins.
     ///
@@ -50,32 +48,17 @@ pub struct LocalModelDef {
     pub revision: &'static str,
     pub model: Artifact,
     pub tokenizer: Artifact,
-    /// Output vector width. Both definitions below happen to produce 768, which is what lets a deployment mix them in one `entity_entities.embedding vector(768)` column at all; see the write-time model check in `models/entity_embeddings/write.rs` for why that coincidence still needs guarding.
+    /// Output vector width stamped on workspaces.
     pub(super) dimensions: usize,
-    /// Upper bound on tokenized sequence length before truncation.
-    ///
-    /// Not always the model's raw position limit: nomic-embed-text-v1.5's `n_positions` (8192) is the literal rotary-embedding table size, safe to use directly.
-    /// multilingual-e5-base's `max_position_embeddings` (514) is *not* directly usable this way: XLM-RoBERTa reserves two of those positions (a `bos`/start position and a `pad` position, offset into the position-id scheme by `pad_token_id`), so the model's own `sentence_bert_config.json` publishes the already-adjusted usable length (512) instead.
-    /// Each definition below carries whichever figure is actually safe to truncate to, not a uniform "the config.json value"; do not "simplify" this into one shared field name without re-deriving both numbers.
+    /// Usable token limit after reserving XLM-RoBERTa special positions.
     pub(super) max_sequence_length: usize,
     /// Prepended to a query text before embedding it (`EmbedKind::Query`), empty for a model with no such convention.
     pub(super) query_prefix: &'static str,
     /// Prepended to a document text before embedding it (`EmbedKind::Document`), empty for a model with no such convention.
     pub(super) document_prefix: &'static str,
-    /// Which `candle-transformers` architecture loads this checkpoint.
-    pub(super) architecture: Architecture,
 }
 
-/// The `candle-transformers` model family a [`LocalModelDef`] loads through.
-/// A backend branch on this stays internal to `local.rs`'s own load/forward code, per this repository's own rule that a backend distinction must not change the function signature or return type for callers.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Architecture {
-    /// `candle_transformers::models::xlm_roberta::XLMRobertaModel`.
-    XlmRoberta,
-}
-
-/// `intfloat/multilingual-e5-base`, this provider's default; see [`DEFAULT_MODEL`]'s own doc comment for why.
-/// Multilingual (250,002-token XLM-RoBERTa vocabulary, entirely different from nomic's), which is the point of making it the default: this codebase's search and recall are not English-only.
+/// Pinned multilingual-e5-base artifacts and inference conventions.
 pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
     id: "intfloat/multilingual-e5-base",
     short_id: "multilingual-e5-base",
@@ -101,16 +84,9 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
     // intfloat/multilingual-e5-base's documented convention (its own model card): a query and a stored document are embedded asymmetrically, or retrieval quality degrades silently (the vectors are still the right shape and still normalize either way).
     query_prefix: "query: ",
     document_prefix: "passage: ",
-    architecture: Architecture::XlmRoberta,
 };
 
-/// The default model when `YORISHIRO_LOCAL_MODEL` is unset.
-///
-/// `multilingual-e5-base`, not `nomic-embed-text-v1.5`: this codebase's search and recall are not English-only, and only the multilingual model serves that well.
-/// `multilingual-e5-base` is used instead of `nomic-embed-text-v1.5` because this codebase's search and recall are not English-only.
-/// The write-time model check (`models/entity_embeddings/write.rs`) refuses a write whose vector doesn't match the workspace's stamped model, and the `reindex_embeddings` task moves a workspace between models: together these prevent the "stamp says one model, data holds another" failure.
-/// A workspace with no stamp (both `embedding_model` and `embedding_dimensions` are `NULL`) inherits the deployment default, so it is also protected: writes go through the stamp that `sync_embedding` sets on the first embed, and the model check compares against that stamp.
-/// `docs/configuration.md`'s "Moving a workspace between embedding models" section documents the procedure for every other workspace: change configuration, restart, then reindex.
+/// The local model used by this deployment.
 pub const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -122,7 +98,7 @@ static NEXT_STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
 ///
 /// Returns `None` when `HOME` does not resolve.
 /// The Docker image sets `HOME` for its service user for exactly this reason, but nothing here may assume that holds for every deployment: an operator running the binary directly, under a different supervisor, or in a container image of their own can still reach a user with no home.
-/// Nothing invents a fallback directory in that case; the caller degrades and names the two path variables instead, since writing hundreds of megabytes to a guessed location is worse than not writing it.
+/// No guessed destination is used when HOME is missing.
 pub(crate) fn cache_dir(def: &LocalModelDef) -> Option<PathBuf> {
     let home = crate::data::env::Env::Home.read_os()?;
     if home.is_empty() {
@@ -138,7 +114,7 @@ pub(crate) fn cache_dir(def: &LocalModelDef) -> Option<PathBuf> {
 /// The model and tokenizer paths to load from, fetching either one first if it is absent.
 ///
 /// `Ok(None)` means the destination could not be resolved at all (no `HOME`), so the caller degrades rather than failing.
-/// `Err` means a fetch was attempted and failed, which fails the boot; see [`super::build_local_provider`] for why those two outcomes differ.
+/// `Err` means a fetch was attempted and failed, which fails the boot; see `super::build_local_provider` for why those two outcomes differ.
 pub(super) async fn ensure_model_files(
     def: &LocalModelDef,
 ) -> anyhow::Result<Option<(PathBuf, PathBuf)>> {
@@ -146,34 +122,36 @@ pub(super) async fn ensure_model_files(
         return Ok(None);
     };
 
-    let model = ensure_file(&dir, def, &def.model).await?;
-    let tokenizer = ensure_file(&dir, def, &def.tokenizer).await?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
+        .build()?;
+    let model = ensure_file(&dir, def, &def.model, &client).await?;
+    let tokenizer = ensure_file(&dir, def, &def.tokenizer, &client).await?;
     Ok(Some((model, tokenizer)))
 }
 
-/// Fetches one artifact into `dir` unless it is already there, and returns its path.
 async fn ensure_file(
     dir: &Path,
     def: &LocalModelDef,
     artifact: &Artifact,
+    client: &reqwest::Client,
 ) -> anyhow::Result<PathBuf> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(READ_TIMEOUT)
-        .build()
-        .expect("reqwest client configuration is static and always valid");
-    ensure_file_with_http(dir, def, artifact, &client, &ReqwestArtifactHttp).await
+    let url = format!(
+        "https://huggingface.co/{}/resolve/{}/{}",
+        def.id, def.revision, artifact.remote_path
+    );
+    ensure_file_with_client(dir, &url, artifact, client).await
 }
 
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn ensure_file_with_http(
+pub async fn ensure_file_with_client(
     dir: &Path,
-    def: &LocalModelDef,
+    url: &str,
     artifact: &Artifact,
     client: &reqwest::Client,
-    http: &dyn ArtifactHttp,
 ) -> anyhow::Result<PathBuf> {
     let destination = dir.join(artifact.local_name);
     if destination.exists() {
@@ -214,10 +192,6 @@ pub async fn ensure_file_with_http(
     std::fs::create_dir_all(dir)
         .map_err(|err| anyhow::anyhow!("failed to create {}: {err}", dir.display()))?;
 
-    let url = format!(
-        "https://huggingface.co/{}/resolve/{}/{}",
-        def.id, def.revision, artifact.remote_path
-    );
     let mebibytes = artifact.size / (1024 * 1024);
     tracing::info!(
         url = %url,
@@ -232,7 +206,7 @@ pub async fn ensure_file_with_http(
     // The pid and process-local nonce keep concurrent fetches from writing or cleaning up the same partial file.
     let temp = staging_path(dir, artifact);
 
-    let result = download_verified(&url, &temp, artifact, client, http).await;
+    let result = download_verified(url, &temp, artifact, client).await;
     if result.is_err() {
         // A partial or corrupt file must not survive to be mistaken for a complete one on the next startup.
         let _ = std::fs::remove_file(&temp);
@@ -256,99 +230,6 @@ fn staging_path(dir: &Path, artifact: &Artifact) -> PathBuf {
         std::process::id(),
         nonce
     ))
-}
-
-#[async_trait]
-pub trait ArtifactHttp: Send + Sync {
-    async fn get(
-        &self,
-        client: &reqwest::Client,
-        url: &str,
-    ) -> Result<ArtifactHttpResponse, ArtifactHttpError>;
-}
-
-pub struct ReqwestArtifactHttp;
-
-#[async_trait]
-impl ArtifactHttp for ReqwestArtifactHttp {
-    async fn get(
-        &self,
-        client: &reqwest::Client,
-        url: &str,
-    ) -> Result<ArtifactHttpResponse, ArtifactHttpError> {
-        let response = client
-            .get(url)
-            .send()
-            .await
-            .map_err(ArtifactHttpError::from_request)?;
-        let status = response.status();
-        Ok(ArtifactHttpResponse {
-            status,
-            body: Box::new(ReqwestArtifactBody(response)),
-        })
-    }
-}
-
-pub struct ArtifactHttpResponse {
-    pub status: reqwest::StatusCode,
-    pub body: Box<dyn ArtifactBody>,
-}
-
-#[async_trait]
-pub trait ArtifactBody: Send {
-    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ArtifactHttpError>;
-}
-
-struct ReqwestArtifactBody(reqwest::Response);
-
-#[async_trait]
-impl ArtifactBody for ReqwestArtifactBody {
-    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ArtifactHttpError> {
-        self.0
-            .chunk()
-            .await
-            .map(|chunk| chunk.map(|chunk| chunk.to_vec()))
-            .map_err(ArtifactHttpError::from_response)
-    }
-}
-
-#[derive(Debug)]
-pub enum ArtifactHttpError {
-    Timeout(String),
-    Request(String),
-    Response(String),
-}
-
-impl ArtifactHttpError {
-    fn from_request(error: reqwest::Error) -> Self {
-        if error.is_timeout() {
-            Self::Timeout(error.to_string())
-        } else {
-            Self::Request(error.to_string())
-        }
-    }
-
-    fn from_response(error: reqwest::Error) -> Self {
-        if error.is_timeout() {
-            Self::Timeout(error.to_string())
-        } else {
-            Self::Response(error.to_string())
-        }
-    }
-
-    fn message(&self) -> &str {
-        match self {
-            Self::Timeout(message) | Self::Request(message) | Self::Response(message) => message,
-        }
-    }
-
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::Timeout(_) => "request timed out",
-            Self::Request(_) => "request failed",
-            Self::Response(_) => "response stream failed",
-        }
-    }
 }
 
 /// How long a `.partial.` file must have gone untouched before a sweep will remove it.
@@ -391,21 +272,25 @@ pub fn sweep_stale_partials(dir: &Path, artifact: &Artifact) {
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn download_verified(
+async fn download_verified(
     url: &str,
     temp: &Path,
     artifact: &Artifact,
     client: &reqwest::Client,
-    http: &dyn ArtifactHttp,
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt as _;
 
-    let mut response = http.get(client, url).await.map_err(|err| {
-        anyhow::anyhow!("failed to fetch {url}: {}: {}", err.kind(), err.message())
+    let mut response = client.get(url).send().await.map_err(|err| {
+        let kind = if err.is_timeout() {
+            "request timed out"
+        } else {
+            "request failed"
+        };
+        anyhow::anyhow!("failed to fetch {url}: {kind}: {err}")
     })?;
-    if !response.status.is_success() {
+    if !response.status().is_success() {
         // Do not read or include an error body. It can contain upstream credentials or request data.
-        anyhow::bail!("failed to fetch {url}: HTTP {}", response.status);
+        anyhow::bail!("failed to fetch {url}: HTTP {}", response.status());
     }
 
     let mut file = tokio::fs::File::create(temp)
@@ -415,12 +300,13 @@ pub async fn download_verified(
     // Streamed chunk by chunk rather than collected with `bytes()`: buffering hundreds of megabytes in memory only to write it straight back out costs the whole model's size in resident memory for no benefit.
     let mut hasher = Sha256::new();
     let mut written: u64 = 0;
-    while let Some(chunk) = response.body.next_chunk().await.map_err(|err| {
-        anyhow::anyhow!(
-            "failed while downloading {url}: {}: {}",
-            err.kind(),
-            err.message()
-        )
+    while let Some(chunk) = response.chunk().await.map_err(|err| {
+        let kind = if err.is_timeout() {
+            "request timed out"
+        } else {
+            "response stream failed"
+        };
+        anyhow::anyhow!("failed while downloading {url}: {kind}: {err}")
     })? {
         hasher.update(&chunk);
         written += chunk.len() as u64;
@@ -440,7 +326,7 @@ pub async fn download_verified(
         );
     }
 
-    let digest = hex::encode(hasher.finalize());
+    let digest = crate::data::encoding::hex(hasher.finalize());
     if digest != artifact.sha256 {
         anyhow::bail!(
             "{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",

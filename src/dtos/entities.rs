@@ -22,8 +22,13 @@ pub struct FillDefaultsRequest {
 pub struct FillDefaultsResponse {
     pub schema_name: String,
     pub job_id: Uuid,
-    pub entities_updated: i64,
-    pub fields_filled: i64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UndoResponse {
+    pub job_id: Uuid,
+    pub snapshot_job_id: Uuid,
 }
 
 #[derive(Deserialize)]
@@ -61,7 +66,7 @@ impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
             entity_type: params.entity_type,
             filter: crate::dtos::common::parse_filter_param(params.filter)?,
             schema_version: params.schema_version,
-            page: params.page.into(),
+            page: params.page.try_into()?,
         })
     }
 }

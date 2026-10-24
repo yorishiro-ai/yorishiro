@@ -4,8 +4,62 @@ use serde_json::Value;
 use uuid::Uuid;
 use yorishiro::App;
 
-use super::fixtures::{self, TenantArgs};
+use super::fixtures::{self, TenantArgs, TestTenant};
 use super::{boot_request, boot_request_with_timezone};
+
+#[tokio::test]
+async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
+    use yorishiro::models::api_keys::{ApiKeyScope, Entity};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let TestTenant {
+            workspace_id,
+            owner_id,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key =
+            fixtures::issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let before = Entity::list_for_workspace(&ctx.db, workspace_id, Default::default())
+            .await
+            .expect("list workspace keys")
+            .into_iter()
+            .find(|key| key.scope == "read")
+            .expect("read key");
+        assert!(before.last_used_at.is_none());
+        let denied = request
+            .post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"entity_type":"note", "data":{}}))
+            .await;
+        assert_eq!(denied.status_code(), StatusCode::FORBIDDEN);
+        assert!(
+            Entity::list_for_workspace(&ctx.db, workspace_id, Default::default())
+                .await
+                .expect("list workspace keys")
+                .into_iter()
+                .find(|key| key.id == before.id)
+                .expect("read key remains")
+                .last_used_at
+                .is_none()
+        );
+        let read = request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(read.status_code(), StatusCode::OK);
+        assert!(
+            Entity::list_for_workspace(&ctx.db, workspace_id, Default::default())
+                .await
+                .expect("list workspace keys")
+                .into_iter()
+                .find(|key| key.id == before.id)
+                .expect("read key remains")
+                .last_used_at
+                .is_some()
+        );
+    })
+    .await;
+}
 
 #[tokio::test]
 async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
@@ -17,8 +71,9 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .timezone;
         assert_ne!(timezone, "UTC", "test must boot with a non-default zone");
         let timezone = timezone.parse::<chrono_tz::Tz>().unwrap();
-        let (tenant_id, workspace_id, owner_id, owner_key) =
-            fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
+        let TestTenant {
+            api_key: owner_key, ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         assert_eq!(
             request.get("/api/api-keys").await.status_code(),
@@ -49,6 +104,16 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         );
 
         let full_key = created_body["full_key"].as_str().unwrap().to_owned();
+        let parts: Vec<_> = full_key.split('_').collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "ysr");
+        assert_eq!(parts[1].len(), 12);
+        assert_eq!(parts[2].len(), 48);
+        assert!(
+            parts[1..]
+                .iter()
+                .all(|part| part.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        );
         let listed = request
             .get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {owner_key}"))
@@ -118,8 +183,6 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(missing.status_code(), StatusCode::BAD_REQUEST);
-
-        let _ = (tenant_id, workspace_id, owner_id);
     })
     .await;
 }
@@ -127,11 +190,15 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
 #[tokio::test]
 async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, workspace_id, _, owner_key) =
-            fixtures::create_tenant_workspace_owner(&ctx, TenantArgs::default()).await;
+        let TestTenant {
+            tenant_id,
+            workspace_id,
+            api_key: _owner_key,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let member = yorishiro::models::user_users::create_user(
             &ctx.db,
-            "member@example.com",
+            &crate::requests::fixtures::unique_email("member"),
             "member-password",
             None,
         )
@@ -161,39 +228,51 @@ async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
             .await;
         assert_eq!(forbidden.status_code(), StatusCode::FORBIDDEN);
 
-        let (_, other_workspace, _, other_key) = fixtures::create_tenant_workspace_owner(
-            &ctx,
-            TenantArgs {
-                tenant_name: "other".into(),
-                workspace_name: "other".into(),
-                owner_email: "other@example.com".into(),
-                ..TenantArgs::default()
-            },
-        )
-        .await;
-
-        let other_created = request
-            .post("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {other_key}"))
-            .json(&serde_json::json!({ "name": "other-client" }))
+        // Cross-tenant IDs require a licensed PostgreSQL deployment.
+        #[cfg(feature = "enterprise")]
+        {
+            if !crate::require_postgres_backend() {
+                return;
+            }
+            let TestTenant {
+                workspace_id: other_workspace,
+                api_key: other_key,
+                ..
+            } = TestTenant::create(
+                &request,
+                &ctx,
+                TenantArgs {
+                    tenant_name: "other".into(),
+                    workspace_name: "other".into(),
+                    owner_email: super::fixtures::unique_email("other"),
+                    ..TenantArgs::default()
+                },
+            )
             .await;
-        assert_eq!(other_created.status_code(), StatusCode::CREATED);
-        let other_id = other_created.json::<Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
 
-        let cross_tenant = request
-            .delete(&format!("/api/api-keys/{other_id}"))
-            .add_header("Authorization", format!("Bearer {owner_key}"))
-            .await;
-        assert_eq!(cross_tenant.status_code(), StatusCode::NOT_FOUND);
+            let other_created = request
+                .post("/api/api-keys")
+                .add_header("Authorization", format!("Bearer {other_key}"))
+                .json(&serde_json::json!({ "name": "other-client" }))
+                .await;
+            assert_eq!(other_created.status_code(), StatusCode::CREATED);
+            let other_id = other_created.json::<Value>()["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
 
-        let malformed_workspace = request
-            .delete(&format!("/api/api-keys/{other_workspace}"))
-            .add_header("Authorization", format!("Bearer {owner_key}"))
-            .await;
-        assert_eq!(malformed_workspace.status_code(), StatusCode::NOT_FOUND);
+            let cross_tenant = request
+                .delete(&format!("/api/api-keys/{other_id}"))
+                .add_header("Authorization", format!("Bearer {_owner_key}"))
+                .await;
+            assert_eq!(cross_tenant.status_code(), StatusCode::NOT_FOUND);
+
+            let malformed_workspace = request
+                .delete(&format!("/api/api-keys/{other_workspace}"))
+                .add_header("Authorization", format!("Bearer {_owner_key}"))
+                .await;
+            assert_eq!(malformed_workspace.status_code(), StatusCode::NOT_FOUND);
+        }
     })
     .await;
 }

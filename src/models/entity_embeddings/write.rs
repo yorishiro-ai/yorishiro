@@ -11,7 +11,7 @@ use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EmbeddingWriteOutcome {
     Persisted,
     Noop,

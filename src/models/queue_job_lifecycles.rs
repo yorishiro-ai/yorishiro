@@ -1,16 +1,60 @@
 pub use crate::models::_entities::queue_job_lifecycles::{ActiveModel, Column, Entity, Model};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::{
-    DatabaseBackend, DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
-};
+use sea_orm::{DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect};
 use tokio::task::JoinHandle;
 
 use crate::db_enum::db_enum;
 
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
 const LEASE_DURATION_MINUTES: i64 = 5;
+
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub(crate) struct BulkJobStatus {
+    job_id: Uuid,
+    job_name: String,
+    status: LifecycleStatus,
+    result: Option<serde_json::Value>,
+}
+
+pub(crate) async fn migration_job_status(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<BulkJobStatus, crate::YorishiroError> {
+    bulk_job_status(db, workspace_id, id, &["undo", "fill_defaults"]).await
+}
+
+pub(crate) async fn bulk_job_status(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+    allowed_jobs: &[&str],
+) -> Result<BulkJobStatus, crate::YorishiroError> {
+    use crate::error::ResultExt;
+    use crate::models::api_key_audit_log::{self, AuditAction};
+    let row = Entity::find_by_id(id)
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::JobName.is_in(allowed_jobs.iter().copied()))
+        .one(db)
+        .await
+        .internal()?
+        .ok_or_else(|| crate::YorishiroError::not_found("migration job not found"))?;
+    let action = if row.job_name == "undo" {
+        AuditAction::UndoMigrationJob
+    } else if row.job_name == "fill_defaults" {
+        AuditAction::FillDefaults
+    } else {
+        AuditAction::BackgroundJobCompleted
+    };
+    Ok(BulkJobStatus {
+        job_id: id,
+        job_name: row.job_name,
+        status: LifecycleStatus::from_row(&row.status).internal()?,
+        result: api_key_audit_log::job_result(db, workspace_id, id, action).await?,
+    })
+}
 
 db_enum! {
     /// Where a queued job stands.
@@ -51,26 +95,6 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Entity {
-    pub(crate) async fn count_waiting_lower_classes(
-        db: &impl ConnectionTrait,
-        lower_classes: &[crate::workers::embedding_sync::WorkerClass],
-        cutoff: DateTimeWithTimeZone,
-    ) -> Result<u64, DbErr> {
-        let lower_classes = lower_classes
-            .iter()
-            .copied()
-            .map(crate::workers::embedding_sync::WorkerClass::as_db_str);
-        Entity::find()
-            .filter(Column::Status.is_in([
-                LifecycleStatus::Queued.as_db_str(),
-                LifecycleStatus::Retrying.as_db_str(),
-            ]))
-            .filter(Column::WorkerClass.is_in(lower_classes))
-            .filter(Column::EnqueueAt.lte(cutoff))
-            .count(db)
-            .await
-    }
-
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -127,7 +151,6 @@ impl Entity {
         }
     }
 
-    /// Whether `workspace_id` already has a `job_name` job that is queued, running or waiting for a retry.
     ///
     /// # Errors
     /// Returns an error if the read fails.
@@ -184,7 +207,7 @@ impl Entity {
             })
             .exec(db)
             .await?;
-        tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
+        tracing::warn!(lifecycle_id = %id, error = error, "queue job deferred for retry");
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
         }
@@ -222,20 +245,11 @@ impl Entity {
             )
             .exec(db)
             .await?;
-        tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
+        tracing::warn!(lifecycle_id = %id, error = error, "queue job deferred for retry");
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
         }
         Ok(())
-    }
-
-    pub(crate) async fn renew(
-        db: &impl ConnectionTrait,
-        id: Uuid,
-        attempt: i32,
-        now: DateTimeWithTimeZone,
-    ) -> Result<bool, DbErr> {
-        Self::renew_at(db, id, attempt, now).await
     }
 
     ///
@@ -263,7 +277,7 @@ impl Entity {
                 tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
             ticker.tick().await;
             loop {
-                match Self::renew(
+                match Self::renew_at(
                     &db,
                     id,
                     attempt,
@@ -274,7 +288,7 @@ impl Entity {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(error) => {
-                        tracing::warn!(lifecycle_id = %id, diagnostic = %error, "queue lease renewal failed");
+                        tracing::warn!(lifecycle_id = %id, error = %error, "queue lease renewal failed");
                         break;
                     }
                 }
@@ -287,19 +301,6 @@ impl Entity {
         Self::start_at(db, id, crate::time::database_instant(crate::time::now())).await
     }
 
-    pub(crate) async fn start_ignoring_capacity(
-        db: &DatabaseConnection,
-        id: Uuid,
-    ) -> Result<Admission, DbErr> {
-        Self::start_at_with_capacity_policy(
-            db,
-            id,
-            crate::time::database_instant(crate::time::now()),
-            true,
-        )
-        .await
-    }
-
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -308,40 +309,9 @@ impl Entity {
         id: Uuid,
         now: DateTimeWithTimeZone,
     ) -> Result<Admission, DbErr> {
-        let txn = if db.get_database_backend() == DatabaseBackend::Sqlite {
-            db.begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await?
-        } else {
-            db.begin().await?
-        };
-        let admission = admit(&txn, id, now, false).await?;
+        let txn = crate::db::begin_write(db).await?;
+        let admission = admit(&txn, id, now).await?;
         // Only an admission wrote anything; every other outcome leaves the row as it found it.
-        match admission {
-            Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
-            _ => txn.rollback().await?,
-        }
-        Ok(admission)
-    }
-
-    async fn start_at_with_capacity_policy(
-        db: &DatabaseConnection,
-        id: Uuid,
-        now: DateTimeWithTimeZone,
-        ignore_capacity: bool,
-    ) -> Result<Admission, DbErr> {
-        let txn = if db.get_database_backend() == DatabaseBackend::Sqlite {
-            db.begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await?
-        } else {
-            db.begin().await?
-        };
-        let admission = admit(&txn, id, now, ignore_capacity).await?;
         match admission {
             Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
             _ => txn.rollback().await?,
@@ -403,7 +373,6 @@ async fn admit(
     txn: &DatabaseTransaction,
     id: Uuid,
     now: DateTimeWithTimeZone,
-    ignore_capacity: bool,
 ) -> Result<Admission, DbErr> {
     let row = Entity::find_by_id(id)
         .lock_exclusive()
@@ -426,14 +395,13 @@ async fn admit(
     let recovered = status == LifecycleStatus::Running;
 
     let in_flight = match (&row.concurrency_key, row.concurrency_limit) {
-        (Some(key), Some(_)) if !ignore_capacity => {
+        (Some(key), Some(_)) => {
             crate::db::lock_for_update(txn, &format!("queue-concurrency:{key}")).await?;
             Some(in_flight(txn, key, now, id).await?)
         }
         _ => None,
     };
-    if !ignore_capacity
-        && let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)
+    if let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)
         && in_flight >= u64::try_from(limit).unwrap_or(0)
     {
         tracing::warn!(
@@ -575,12 +543,3 @@ pub struct Enqueue<'a> {
     pub concurrency_key: Option<&'a str>,
     pub concurrency_limit: Option<i32>,
 }
-
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}

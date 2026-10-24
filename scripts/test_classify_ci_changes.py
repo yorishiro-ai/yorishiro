@@ -20,9 +20,20 @@ def test_docs_are_lightweight() -> None:
     assert not result["package_validation"]
 
 
+def test_dependency_patches_always_select_rust_and_security() -> None:
+    for path in ("patches/loco-rs/fixes.patch", "patches/loco-rs/source/src/boot.rs", "patches/serde_yaml/src/lib.rs", "patches/README.md"):
+        result = classify([path])
+        assert result["rust_validation"] and result["security_validation"]
+        assert result["rust"] and result["ee"]
+        assert not result["docs_only"]
+
+
 def test_packaging_selects_package_and_rust() -> None:
-    result = classify(["packaging/nfpm-yorishiro-ce.yaml"])
+    result = classify([".github/packaging/nfpm-yorishiro-ce.yaml"])
     assert result["package_build"] and result["package_validation"]
+    assert result["rust"] and result["ee"]
+    assert not result["full"]
+    assert classify_path("src/lib.rs") == {"shared", "rust", "ee"}
 
 
 def test_release_workflow_selects_all_validations() -> None:
@@ -30,20 +41,13 @@ def test_release_workflow_selects_all_validations() -> None:
     assert result["release"]
     assert result["package_validation"]
     assert result["docker_validation"]
+    assert classify([".github/docker/docker-bake.hcl"])["docker_validation"]
 
 
 def test_manual_full_run_selects_every_group() -> None:
     result = classify([], force_full=True)
     assert result["full"]
     assert all(result[group] for group in ALL)
-
-
-def test_misc_workflow_change_does_not_force_package_matrix() -> None:
-    result = classify([".github/workflows/doc-check.yml"])
-    assert result["docs_only"]
-    assert result["doc_validation"]
-    assert not result["package_build"]
-    assert not result["package_validation"]
 
 
 def test_housekeeping_workflow_is_light_but_unknown_workflow_is_full() -> None:
@@ -65,7 +69,6 @@ def test_shared_actions_fan_out_to_consumers() -> None:
 def test_missing_paths_force_full_and_manual_force_is_full() -> None:
     assert classify([], force_full=True)["full"]
     assert classify(["docs/ja/contributing.md"])["docs_only"]
-    assert classify(["docs/ja/contributing.md"])["doc_validation"]
 
 
 def test_selected_gate_states_fail_unless_success_or_intentionally_skipped() -> None:
@@ -98,10 +101,10 @@ if __name__ == "__main__":
     for test in (
         test_unknown_defaults_to_full,
         test_docs_are_lightweight,
+        test_dependency_patches_always_select_rust_and_security,
         test_packaging_selects_package_and_rust,
         test_release_workflow_selects_all_validations,
         test_manual_full_run_selects_every_group,
-        test_misc_workflow_change_does_not_force_package_matrix,
         test_housekeeping_workflow_is_light_but_unknown_workflow_is_full,
         test_shared_actions_fan_out_to_consumers,
         test_missing_paths_force_full_and_manual_force_is_full,

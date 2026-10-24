@@ -15,6 +15,21 @@ fn parse(value: serde_json::Value) -> MetaSchemaDefinition {
 }
 
 #[test]
+fn rejects_a_pattern_the_entity_validator_cannot_compile() {
+    let def = |pattern: &str| {
+        parse(json!({
+            "name": "patterns",
+            "entity_types": {
+                "item": { "fields": { "code": { "type": "string", "pattern": pattern } } }
+            },
+            "relation_types": {}
+        }))
+    };
+    assert!(validate_definition(&def("^[a-z]+$")).is_ok());
+    assert!(validate_definition(&def("(unclosed")).is_err());
+}
+
+#[test]
 fn accepts_well_formed_definition() {
     let def = parse(json!({
         "name": "task-management",

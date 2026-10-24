@@ -26,14 +26,47 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
+/// A committed completion record makes redelivery a no-op without replacing original undo snapshots.
+pub(crate) async fn job_completed(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+    action: AuditAction,
+) -> Result<bool, YorishiroError> {
+    Ok(job_result(conn, workspace_id, job_id, action)
+        .await?
+        .is_some())
+}
 
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
+pub(crate) async fn job_result(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+    action: AuditAction,
+) -> Result<Option<serde_json::Value>, YorishiroError> {
+    use crate::models::_entities::api_key_audit_log::Column;
+    use sea_orm::QuerySelect;
+    use sea_orm::{
+        ExprTrait,
+        sea_query::{Alias, Expr, Func, extension::postgres::PgExpr},
+    };
+    let job = match conn.get_database_backend() {
+        sea_orm::DatabaseBackend::Postgres => Expr::col(Column::Detail).cast_json_field("job_id"),
+        _ => Func::cust(Alias::new("json_extract"))
+            .args([Expr::col(Column::Detail), Expr::val("$.job_id")])
+            .into(),
+    };
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Action.eq(action.as_db_str()))
+        .filter(job.eq(job_id.to_string()))
+        .select_only()
+        .column(Column::Detail)
+        .into_tuple::<serde_json::Value>()
+        .one(conn)
+        .await
+        .internal()
+}
 
 db_enum! {
     /// The closed set of operations this table records.
@@ -48,6 +81,8 @@ db_enum! {
         ReindexEmbeddings = "reindex_embeddings",
         /// `entity_entities::fill_defaults`: a `Migration`-scoped batch fill of absent required fields.
         FillDefaults = "fill_defaults",
+        /// A bulk worker's durable result, committed with its effects.
+        BackgroundJobCompleted = "background_job_completed",
     }
 }
 

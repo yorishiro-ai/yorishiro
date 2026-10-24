@@ -10,9 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::http::Request;
 use axum::http::request::Parts;
-use axum::middleware::{self, Next};
 use loco_rs::app::AppContext;
 use rmcp::ErrorData;
 use rmcp::RoleServer;
@@ -27,9 +25,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ServerHandler, tool_handler};
 use sea_orm::DatabaseTransaction;
 
-use crate::controllers::extractors::{authenticator, db_handle};
 use crate::controllers::middleware::auth;
-use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 
@@ -48,7 +44,7 @@ impl McpToolPolicy for AllowAllTools {
 
 /// The tools one MCP server exposes, and the policy that decides which of them a request may see.
 ///
-/// Starts as the community tool set under [`AllowAllTools`].
+/// Starts as the community tool set under `AllowAllTools`.
 /// An edition adds its own tools with [`McpToolSet::extend`], which replaces the policy because only the edition knows which of the tools it added need gating.
 #[derive(Clone)]
 pub struct McpToolSet {
@@ -209,11 +205,8 @@ impl Authorized {
 
     /// Commits the transaction.
     /// Every write handler must call this before returning `Ok`.
-    pub(super) async fn commit(self) -> Result<(), ErrorData> {
-        self.txn
-            .commit()
-            .await
-            .map_err(|err| ErrorData::internal_error(err.to_string(), None))
+    pub(crate) async fn commit(self) -> Result<(), ErrorData> {
+        self.txn.commit().await.map_err(crate::error::mcp_internal)
     }
 
     pub(crate) fn auth_context(&self) -> &AuthContext {
@@ -248,7 +241,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
 /// The sole entry point for every tool handler.
 /// Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
 ///
-/// Shares `controllers::middleware::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
+/// Shares `RequestAuth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
 pub(crate) async fn authorize(
     ctx: &AppContext,
     parts: &Parts,
@@ -257,27 +250,10 @@ pub(crate) async fn authorize(
     let presented_key = extract_bearer_key(parts)?;
     let headers = auth::header_pairs(parts);
 
-    // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
-    // directly against ctx.db and opens a plain transaction, mirroring the REST adapter's
-    // `Authorized<R>` SQLite extractor.
-    if ctx.is_sqlite() {
-        return match auth::authorize_sqlite(&ctx.db, presented_key, required).await {
-            Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
-            Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
-                Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
-            }
-            Err(YorishiroError::Unauthenticated) => {
-                Err(ErrorData::invalid_request("authentication failed", None))
-            }
-            Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
-        };
-    }
-
-    let db = db_handle(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
-    let auth_impl =
-        authenticator(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
-
-    match auth::authorize(&db, auth_impl.as_ref(), presented_key, required, &headers).await {
+    match auth::RequestAuth::new(ctx)
+        .authorize(presented_key, required, &headers)
+        .await
+    {
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
@@ -285,12 +261,12 @@ pub(crate) async fn authorize(
         Err(YorishiroError::Unauthenticated) => {
             Err(ErrorData::invalid_request("authentication failed", None))
         }
-        Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+        Err(err) => Err(crate::error::mcp_internal(err)),
     }
 }
 
 /// Connection-less counterpart to `authorize`, used by tools that must run a slow operation (embedding generation) before touching the database.
-/// See `controllers::middleware::auth::authorize_scope`.
+/// See `RequestAuth::verify`.
 pub(super) async fn verify(
     ctx: &AppContext,
     parts: &Parts,
@@ -299,27 +275,10 @@ pub(super) async fn verify(
     let presented_key = extract_bearer_key(parts)?;
     let headers = auth::header_pairs(parts);
 
-    // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
-    // directly against ctx.db instead of going through the Authenticator trait, mirroring the REST
-    // adapter's `AuthContext` extractor (extractors.rs) and `Verified<R>` extractor.
-    if ctx.is_sqlite() {
-        return match auth::authorize_scope_sqlite(&ctx.db, presented_key, required).await {
-            Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
-            Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
-                Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))
-            }
-            Err(YorishiroError::Unauthenticated) => {
-                Err(ErrorData::invalid_request("authentication failed", None))
-            }
-            Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
-        };
-    }
-
-    let db = db_handle(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
-    let auth_impl =
-        authenticator(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
-
-    match auth::authorize_scope(&db, auth_impl.as_ref(), presented_key, required, &headers).await {
+    match auth::RequestAuth::new(ctx)
+        .verify(presented_key, required, &headers)
+        .await
+    {
         Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))
@@ -327,7 +286,7 @@ pub(super) async fn verify(
         Err(YorishiroError::Unauthenticated) => {
             Err(ErrorData::invalid_request("authentication failed", None))
         }
-        Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+        Err(err) => Err(crate::error::mcp_internal(err)),
     }
 }
 
@@ -335,10 +294,7 @@ pub(super) async fn verify(
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     let message = match err {
-        YorishiroError::Internal(err) => {
-            tracing::error!(error = %err, "internal error in mcp tool handler");
-            "internal server error".to_string()
-        }
+        YorishiroError::Internal(err) => crate::error::report_internal(&err).to_string(),
         YorishiroError::ValidationFailed {
             message,
             details,
@@ -363,8 +319,7 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
 }
 
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
-    let text = serde_json::to_string(&value)
-        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+    let text = serde_json::to_string(&value).map_err(crate::error::mcp_internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 
@@ -401,31 +356,5 @@ where
         transport_config,
     );
 
-    router.nest(
-        "/mcp",
-        Router::new()
-            .fallback_service(mcp_service)
-            .layer(middleware::from_fn(accept_compatibility)),
-    )
-}
-
-async fn accept_compatibility(
-    mut request: Request<axum::body::Body>,
-    next: Next,
-) -> axum::response::Response {
-    let accept = request.headers().get(axum::http::header::ACCEPT);
-    if accept.is_none()
-        || accept.is_some_and(|value| {
-            value == "*/*"
-                || value
-                    .to_str()
-                    .is_ok_and(|value| value.contains("application/json"))
-        })
-    {
-        request.headers_mut().insert(
-            axum::http::header::ACCEPT,
-            axum::http::HeaderValue::from_static("application/json, text/event-stream"),
-        );
-    }
-    next.run(request).await
+    router.nest("/mcp", Router::new().fallback_service(mcp_service))
 }

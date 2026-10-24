@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(column_type = "Text")]
+    #[serde(skip_serializing)]
+    pub embedding_sync_token: String,
     pub workspace_id: Uuid,
     pub schema_id: Uuid,
     pub schema_version: i32,
@@ -19,13 +22,16 @@ pub struct Model {
     pub updated_by: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
-    #[sea_orm(column_type = "Text")]
-    #[serde(skip_serializing)]
-    pub embedding_sync_token: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_one = "super::entity_embeddings_1024::Entity")]
+    EntityEmbeddings1024,
+    #[sea_orm(has_one = "super::entity_embeddings_1536::Entity")]
+    EntityEmbeddings1536,
+    #[sea_orm(has_one = "super::entity_embeddings_768::Entity")]
+    EntityEmbeddings768,
     #[sea_orm(
         belongs_to = "super::schema_schemas::Entity",
         from = "Column::SchemaId",
@@ -58,6 +64,24 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     WorkspaceWorkspaces,
+}
+
+impl Related<super::entity_embeddings_1024::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::EntityEmbeddings1024.def()
+    }
+}
+
+impl Related<super::entity_embeddings_1536::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::EntityEmbeddings1536.def()
+    }
+}
+
+impl Related<super::entity_embeddings_768::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::EntityEmbeddings768.def()
+    }
 }
 
 impl Related<super::schema_schemas::Entity> for Entity {

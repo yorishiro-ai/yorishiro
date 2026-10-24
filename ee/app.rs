@@ -4,14 +4,28 @@ use loco_rs::{Result, app::AppContext, task::Tasks};
 
 use crate::app::RouteMounts;
 use crate::controllers::mcp::McpToolSet;
-use crate::db::AppContextBackend;
 use crate::edition::ee::controllers;
 use crate::edition::ee::controllers::middleware::edition;
 use crate::edition::ee::workers::infer_fill::{InferFillArgs, InferFillWorker};
-use crate::workers::dispatch::LocoJobDispatcher;
-use crate::workers::embedding_sync::WorkerClassResolver;
-use crate::workers::queue::QueuePolicy;
 use crate::workers::registry::WorkerRegistry;
+
+pub(crate) async fn workspace_worker_class(
+    conn: &sea_orm::DatabaseConnection,
+    workspace_id: uuid::Uuid,
+) -> std::result::Result<Option<crate::workers::embedding_sync::WorkerClass>, crate::YorishiroError>
+{
+    crate::edition::ee::models::workspace_worker_classes::get(conn, workspace_id).await
+}
+
+pub(crate) async fn workspace_embedding_provider(
+    conn: &sea_orm::DatabaseConnection,
+    workspace_id: uuid::Uuid,
+) -> std::result::Result<
+    Option<Arc<dyn crate::services::embedding::EmbeddingProvider>>,
+    crate::YorishiroError,
+> {
+    crate::edition::ee::models::workspace_embedding_keys::resolve(conn, workspace_id).await
+}
 
 pub(crate) fn tenant_creation_cap(
     configured: i32,
@@ -43,49 +57,15 @@ pub(crate) fn tenant_cap_for_licence(configured: i32, licensed: bool) -> Option<
 
 /// Installs the enterprise services that override base shared-store seams.
 pub(crate) fn compose_context(ctx: &AppContext) -> Result<()> {
-    let policy_enabled = crate::edition::ee::data::plan::plan_policy_enabled()?;
-    ctx.shared_store.insert(Arc::new(policy_enabled));
-    ctx.shared_store.insert(Arc::new(
-        crate::edition::ee::data::worker_policy::WorkerClassLimits::from_env()?,
-    ));
-    // An absent or invalid licence key warns and continues rather than failing boot.
-    let licence =
-        Arc::new(crate::edition::ee::controllers::middleware::edition::LicenceState::from_env());
-    ctx.shared_store.insert(licence);
-
-    if ctx.is_sqlite() {
-        // These marketplace operations return backend_unsupported (501) on SQLite.
-        tracing::warn!(
-            "browsing the marketplace and publishing a template version are unavailable on SQLite \
-             and return backend_unsupported (501). Point DATABASE_URL at PostgreSQL to use them"
-        );
-    } else {
-        // Replaces the default authenticator installed by the base context builder.
-        ctx.shared_store.insert(Arc::new(
-            crate::edition::ee::controllers::middleware::auth::TenantScopedAuthenticator,
-        )
-            as Arc<dyn crate::controllers::middleware::auth::Authenticator>);
-    }
-
-    ctx.shared_store.insert(Arc::new(
-        crate::edition::ee::models::workspace_embedding_keys::EmbeddingKeyResolver,
-    )
-        as Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>);
-    ctx.shared_store.insert(Arc::new(
-        crate::edition::ee::models::workspace_worker_classes::WorkerClassAssignmentResolver,
-    ) as Arc<dyn WorkerClassResolver>);
-    // Replaces the community queue policy installed by the base context builder.
-    ctx.shared_store.insert(
-        Arc::new(crate::edition::ee::workers::queue::PlanQueuePolicy) as Arc<dyn QueuePolicy>,
-    );
-    ctx.shared_store.insert(Arc::new(LocoJobDispatcher)
-        as Arc<dyn crate::edition::ee::workers::infer_fill::InferFillDispatcher>);
+    crate::edition::ee::initializers::queue::install(ctx)?;
+    crate::edition::ee::initializers::auth::install(ctx);
     Ok(())
 }
 
 /// Adds the enterprise workers after the base's, so their tags and queue come from the worker type like every other worker's.
 pub(crate) fn workers(registry: WorkerRegistry) -> WorkerRegistry {
     registry.register::<InferFillArgs, InferFillWorker>()
+        .register::<crate::edition::ee::workers::confirm_proposals::ConfirmProposalsArgs, crate::edition::ee::workers::confirm_proposals::ConfirmProposalsWorker>()
 }
 
 /// Mounts the enterprise edition's route groups after the community ones: `ee/` adds paths rather than replacing any.

@@ -1,39 +1,31 @@
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait, sea_query::Expr};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::query_embedding_requests::{
     Column, Entity, QueryEmbeddingStatus, QueryOutcome,
 };
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
-use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
+use crate::requests::{boot_request, boot_request_isolated};
 
-async fn workspace(ctx: &AppContext, name: &str) -> (Uuid, Uuid) {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(name.into()),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .expect("insert workspace");
-    (tenant.id, workspace.id)
+async fn workspace(request: &loco_rs::TestServer, ctx: &AppContext, name: &str) -> (Uuid, Uuid) {
+    let fixture = TestTenant::create(
+        request,
+        ctx,
+        TenantArgs {
+            tenant_name: format!("{name}-{}", Uuid::new_v4().simple()),
+            ..Default::default()
+        },
+    )
+    .await;
+    (fixture.tenant_id, fixture.workspace_id)
 }
 
 #[tokio::test]
 async fn a_request_moves_from_pending_to_ready_and_is_consumed_once() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, ws) = workspace(&ctx, "qe-ready").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, ws) = workspace(&request, &ctx, "qe-ready").await;
         let id = Entity::open(
             &ctx.db,
             ws,
@@ -85,8 +77,8 @@ async fn a_request_moves_from_pending_to_ready_and_is_consumed_once() {
 
 #[tokio::test]
 async fn a_failed_request_reports_its_diagnostic_once() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, ws) = workspace(&ctx, "qe-failed").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, ws) = workspace(&request, &ctx, "qe-failed").await;
         let id = Entity::open(
             &ctx.db,
             ws,
@@ -116,8 +108,8 @@ async fn a_failed_request_reports_its_diagnostic_once() {
 
 #[tokio::test]
 async fn a_late_result_cannot_revive_an_expired_or_consumed_request() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, ws) = workspace(&ctx, "qe-late").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, ws) = workspace(&request, &ctx, "qe-late").await;
 
         let expired = Entity::open(
             &ctx.db,
@@ -173,8 +165,8 @@ async fn a_late_result_cannot_revive_an_expired_or_consumed_request() {
 
 #[tokio::test]
 async fn concurrent_consumers_share_one_result() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, ws) = workspace(&ctx, "qe-race").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, ws) = workspace(&request, &ctx, "qe-race").await;
         let id = Entity::open(
             &ctx.db,
             ws,
@@ -209,8 +201,8 @@ async fn concurrent_consumers_share_one_result() {
 
 #[tokio::test]
 async fn a_malformed_stored_result_is_an_internal_error_and_is_consumed() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, ws) = workspace(&ctx, "qe-malformed").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, ws) = workspace(&request, &ctx, "qe-malformed").await;
         for stored in [
             serde_json::json!({"not": "a vector"}),
             serde_json::json!([1.0, 2.0, 3.0]),
@@ -224,14 +216,14 @@ async fn a_malformed_stored_result_is_an_internal_error_and_is_consumed() {
             )
             .await
             .unwrap();
-            // The second case is well formed JSON whose length disagrees with `dimensions`.
+            assert!(
+                Entity::complete(&ctx.db, ws, id, &[1.0, 2.0], "m")
+                    .await
+                    .unwrap()
+            );
+            // Corrupt only the stored vector; the second case disagrees with the persisted width.
             Entity::update_many()
-                .col_expr(
-                    Column::Status,
-                    Expr::value(QueryEmbeddingStatus::Succeeded.as_db_str()),
-                )
                 .col_expr(Column::ResultVector, Expr::value(stored))
-                .col_expr(Column::Dimensions, Expr::value(2))
                 .filter(Column::Id.eq(id))
                 .exec(&ctx.db)
                 .await
@@ -248,8 +240,8 @@ async fn a_malformed_stored_result_is_an_internal_error_and_is_consumed() {
 
 #[tokio::test]
 async fn expired_rows_are_purged_and_live_rows_are_kept() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, ws) = workspace(&ctx, "qe-purge").await;
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let (_, ws) = workspace(&request, &ctx, "qe-purge").await;
         let stale = Entity::open(
             &ctx.db,
             ws,
@@ -268,6 +260,7 @@ async fn expired_rows_are_purged_and_live_rows_are_kept() {
         )
         .await
         .unwrap();
+        // Advance only this row's expiry clock to exercise purge without a wall-clock wait.
         Entity::update_many()
             .col_expr(
                 Column::ExpiresAt,
@@ -279,19 +272,10 @@ async fn expired_rows_are_purged_and_live_rows_are_kept() {
             .unwrap();
 
         assert_eq!(Entity::purge_expired(&ctx.db).await.unwrap(), 1);
-        assert!(
-            Entity::find_by_id(stale)
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            Entity::find_by_id(live)
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .is_some()
+        assert_eq!(Entity::take(&ctx.db, ws, stale).await.unwrap(), None);
+        assert_eq!(
+            Entity::take(&ctx.db, ws, live).await.unwrap(),
+            Some(QueryOutcome::Pending)
         );
         assert!(
             Entity::find_pending(&ctx.db, ws, stale)
@@ -306,9 +290,20 @@ async fn expired_rows_are_purged_and_live_rows_are_kept() {
 
 #[tokio::test]
 async fn a_request_is_invisible_to_another_workspace() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, mine) = workspace(&ctx, "qe-mine").await;
-        let (_, theirs) = workspace(&ctx, "qe-theirs").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (tenant, mine) = workspace(&request, &ctx, "qe-mine").await;
+        let txn = ctx.db.begin().await.expect("begin workspace creation");
+        let theirs = yorishiro::models::tenancy::create_workspace(
+            &txn,
+            tenant,
+            &format!("other-workspace-{}", Uuid::new_v4()),
+            None,
+            None,
+        )
+        .await
+        .expect("create separate workspace")
+        .id;
+        txn.commit().await.expect("commit workspace creation");
         let id = Entity::open(
             &ctx.db,
             mine,
@@ -342,8 +337,8 @@ async fn a_request_is_invisible_to_another_workspace() {
 
 #[tokio::test]
 async fn the_database_accepts_every_status_the_enum_defines_and_rejects_others() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let (_, ws) = workspace(&ctx, "qe-check").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, ws) = workspace(&request, &ctx, "qe-check").await;
         let id = Entity::open(
             &ctx.db,
             ws,
@@ -375,18 +370,19 @@ async fn the_database_accepts_every_status_the_enum_defines_and_rejects_others()
 
 /// PostgreSQL scopes the table by `app.current_workspace`, so the tenant-scoped role sees and changes only its own workspace's rows.
 #[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn postgres_row_level_security_scopes_requests_to_the_current_workspace() {
     // Row-level security exists only on PostgreSQL.
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let db = ctx
             .shared_store
             .get::<yorishiro::db::DbHandle>()
             .expect("tenant pool on PostgreSQL");
-        let (tenant_a, ws_a) = workspace(&ctx, "qe-rls-a").await;
-        let (tenant_b, ws_b) = workspace(&ctx, "qe-rls-b").await;
+        let (tenant_a, ws_a) = workspace(&request, &ctx, "qe-rls-a").await;
+        let (tenant_b, ws_b) = workspace(&request, &ctx, "qe-rls-b").await;
         let b_id = Entity::open(
             &ctx.db,
             ws_b,

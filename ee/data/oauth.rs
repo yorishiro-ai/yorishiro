@@ -1,13 +1,13 @@
-//! Configuration for OAuth2/OIDC login, read fresh from the environment on every request (see `controllers::oauth`'s module doc comment for why).
+//! Configuration for OAuth2/OIDC login from resolved Loco initializer settings.
 //! A bad config reports `YorishiroError::Internal` rather than panicking, since a panic here would crash the task handling whichever request triggered it.
 //!
-//! `Ok(None)` (via [`OAuthConfig::from_env`]) means OAuth is disabled.
+//! `Ok(None)` (via `OAuthConfig::from_config`) means OAuth is disabled.
 //! Every `/auth/oauth/authorize` and `/auth/oauth/callback` request then answers `404`, and the community server's own `/auth/login` (email/password) is unaffected.
 
-use loco_rs::config::Server;
+use loco_rs::config::{Config, Server};
+use serde::Deserialize;
 
 use crate::YorishiroError;
-use crate::edition::ee::data::env::Env;
 
 #[derive(Clone)]
 pub struct OAuthConfig {
@@ -25,20 +25,44 @@ pub struct OAuthConfig {
 }
 
 impl OAuthConfig {
-    /// Reads the `YORISHIRO_OAUTH_*` variables and the resolved listener for a local callback fallback.
+    /// Reads `initializers.oauth` and the resolved listener for a local callback fallback.
     /// Returns `Ok(None)` when `YORISHIRO_OAUTH_ISSUER_URL` is unset or empty: OAuth login is opt-in, and every other variable is meaningless without an issuer to talk to.
     /// `YORISHIRO_OAUTH_CLIENT_ID`/`YORISHIRO_OAUTH_CLIENT_SECRET` are required once the issuer is set; a deployment that sets the issuer but leaves one of these unset or empty gets `Err` naming which, rather than silently leaving OAuth half-configured or being treated the same as simply unconfigured.
-    pub(crate) fn from_env(server: &Server) -> Result<Option<Self>, YorishiroError> {
-        let Some(issuer_url) = Env::OAuthIssuerUrl.non_empty() else {
+    pub(crate) fn from_config(config: &Config) -> Result<Option<Self>, YorishiroError> {
+        #[derive(Default, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct Settings {
+            issuer_url: Option<String>,
+            client_id: Option<String>,
+            client_secret: Option<String>,
+            redirect_uri: Option<String>,
+        }
+        let settings: Settings = config
+            .initializers
+            .as_ref()
+            .and_then(|values| values.get("oauth"))
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|_| {
+                YorishiroError::Internal(anyhow::anyhow!(
+                    "invalid initializers.oauth configuration"
+                ))
+            })?
+            .unwrap_or_default();
+        let Some(issuer_url) = settings.issuer_url.filter(|value| !value.is_empty()) else {
             return Ok(None);
         };
-
-        let client_id = require_non_empty_env(Env::OAuthClientId)?;
-        let client_secret = require_non_empty_env(Env::OAuthClientSecret)?;
-
-        let redirect_uri = Env::OAuthRedirectUri
-            .non_empty()
-            .unwrap_or_else(|| default_redirect_uri(server));
+        let client_id =
+            require_non_empty("YORISHIRO_OAUTH_CLIENT_ID", settings.client_id.as_deref())?;
+        let client_secret = require_non_empty(
+            "YORISHIRO_OAUTH_CLIENT_SECRET",
+            settings.client_secret.as_deref(),
+        )?;
+        let redirect_uri = settings
+            .redirect_uri
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| default_redirect_uri(&config.server));
 
         let state_signing_key = client_secret.as_bytes().to_vec();
 
@@ -58,12 +82,7 @@ impl OAuthConfig {
     }
 }
 
-/// Reads `key` via [`non_empty_env`] or errors naming exactly which variable is missing and why it matters.
-fn require_non_empty_env(key: Env) -> Result<String, YorishiroError> {
-    require_non_empty(key.name(), key.non_empty().as_deref())
-}
-
-/// The pure fold `require_non_empty_env` wraps, split out so tests can exercise every case (unset, set-but-empty, set) without mutating the process environment.
+/// Validates a required OAuth credential without exposing its value.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -76,18 +95,16 @@ pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, Yorishi
     }
 }
 
-/// `http://{host}/auth/oauth/callback`, using the server's actual binding and port unless the legacy `YORISHIRO_BIND` override is set.
+/// `http://{host}/auth/oauth/callback`, using the server's actual binding and port using the resolved listener.
 /// This default only covers local testing; a real deployment sets `YORISHIRO_OAUTH_REDIRECT_URI` explicitly.
 pub fn default_redirect_uri(server: &Server) -> String {
-    let bind = Env::Bind.non_empty().unwrap_or_else(|| {
-        let binding = &server.binding;
-        let binding = if binding.parse::<std::net::Ipv6Addr>().is_ok() {
-            format!("[{binding}]")
-        } else {
-            binding.clone()
-        };
-        format!("{binding}:{}", server.port)
-    });
+    let binding = &server.binding;
+    let binding = if binding.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{binding}]")
+    } else {
+        binding.clone()
+    };
+    let bind = format!("{binding}:{}", server.port);
     format!(
         "http://{}/auth/oauth/callback",
         rewrite_unspecified_host(&bind)

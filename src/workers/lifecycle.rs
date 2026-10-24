@@ -15,84 +15,6 @@ use crate::workers::target::WorkerTarget;
 
 const SATURATED: &str = "worker capacity saturated";
 
-/// Runs `work` under the lifecycle `lifecycle_id` names, re-enqueueing the job as a `W` job when it has to wait or fails.
-///
-/// A failure is recorded and re-enqueued instead of returned: Loco has no retry of its own, so returning `Err` would drop the job from the queue while the lifecycle row still said it was waiting.
-/// The re-enqueue resolves the target again from `class` and `workspace_id`, so the retry stays with the workers the job was first sent to.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn perform_with_lifecycle<W, A, F, Fut>(
-    ctx: &AppContext,
-    lifecycle_id: Option<Uuid>,
-    class: WorkerClass,
-    workspace_id: Uuid,
-    args: &A,
-    work: F,
-) -> loco_rs::Result<()>
-where
-    W: BackgroundWorker<A>,
-    A: Clone + Send + Sync + Serialize + 'static,
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = loco_rs::Result<()>>,
-{
-    let Some(id) = lifecycle_id else {
-        return work().await;
-    };
-
-    let attempt = match Entity::start(&ctx.db, id).await.map_err(message)? {
-        Admission::Started { attempt } | Admission::Recovered { attempt } => attempt,
-        Admission::Duplicate { .. } | Admission::Terminal => return Ok(()),
-        Admission::Saturated { attempt } => {
-            let scheduling = crate::workers::queue::decide(class);
-            tracing::warn!(
-                lifecycle_id = %id,
-                worker_class = class.as_db_str(),
-                scheduling_priority = scheduling.priority,
-                fallback = scheduling.fallback,
-                "worker capacity saturated; preserving class reservation"
-            );
-            // An attempt means an expired lease was reclaimed, so the deferral is fenced by that attempt and by the lease having lapsed.
-            match attempt {
-                Some(attempt) => {
-                    Entity::defer_at(
-                        &ctx.db,
-                        id,
-                        attempt,
-                        SATURATED,
-                        crate::time::now().fixed_offset(),
-                    )
-                    .await
-                }
-                None => Entity::defer(&ctx.db, id, None, SATURATED).await,
-            }
-            .map_err(message)?;
-            return requeue::<W, A>(ctx, id, class, workspace_id, args).await;
-        }
-    };
-
-    let heartbeat = Entity::heartbeat(ctx.db.clone(), id, attempt);
-    let result = work().await;
-    heartbeat.abort();
-
-    match result {
-        Ok(()) => {
-            if let Err(error) =
-                Entity::finish(&ctx.db, id, Some(attempt), LifecycleStatus::Completed, None).await
-            {
-                tracing::warn!(lifecycle_id = %id, diagnostic = %error, "job finished but its lifecycle could not be completed");
-            }
-            Ok(())
-        }
-        Err(error) => {
-            Entity::defer(&ctx.db, id, Some(attempt), &error.to_string())
-                .await
-                .map_err(message)?;
-            requeue::<W, A>(ctx, id, class, workspace_id, args).await
-        }
-    }
-}
-
 /// Runs a job whose failures are deterministic and must not be immediately requeued.
 ///
 /// Reindex provider and validation failures are terminal for this queued attempt;
@@ -183,10 +105,6 @@ where
     if let serde_json::Value::Object(fields) = &mut payload {
         fields.insert(
             "lifecycle_id".into(),
-            serde_json::Value::String(lifecycle_id.to_string()),
-        );
-        fields.insert(
-            "dispatch_id".into(),
             serde_json::Value::String(lifecycle_id.to_string()),
         );
         fields.insert(

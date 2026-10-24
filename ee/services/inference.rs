@@ -7,17 +7,13 @@
 //! The credentials belong to a workspace, not to the deployment: this product does not pay for inference, so a workspace that wants inferred values brings its own key.
 //! A workspace with no key configured gets a `ValidationFailed` rather than a silent fall back to `default` values: a caller who asked for inference and received defaults would have no way to tell that nothing was inferred.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
-use loco_rs::prelude::async_trait;
-use reqwest::{Request, StatusCode, header::HeaderMap};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::YorishiroError;
+use crate::services::embedding::openai::{redact, retry_after};
 
 /// Longer than the embedding provider's 30s: a chat completion over several fields is a slower call than embedding one string, and the work is already asynchronous behind a job id, so a caller is not sitting on this.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -34,7 +30,6 @@ pub struct InferenceConfig {
 }
 
 pub struct InferenceClient {
-    http: Arc<dyn InferenceHttp>,
     client: reqwest::Client,
     base_url: String,
     model: String,
@@ -46,24 +41,24 @@ impl InferenceClient {
     /// # Panics
     /// Panics if an internal invariant required by this operation is violated.
     pub fn new(config: InferenceConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
-            // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at (see `ee/docs/api.md`).
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("reqwest client configuration is static and always valid");
+        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        let client = CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .timeout(REQUEST_TIMEOUT)
+                    // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
+                    // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at (see `ee/docs/api.md`).
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .expect("reqwest client configuration is static and always valid")
+            })
+            .clone();
 
-        Self::with_http(config, client, Arc::new(ReqwestInferenceHttp))
+        Self::with_client(config, client)
     }
 
-    pub fn with_http(
-        config: InferenceConfig,
-        client: reqwest::Client,
-        http: Arc<dyn InferenceHttp>,
-    ) -> Self {
+    pub fn with_client(config: InferenceConfig, client: reqwest::Client) -> Self {
         Self {
-            http,
             client,
             base_url: config.base_url.trim_end_matches('/').to_string(),
             model: config.model,
@@ -118,27 +113,18 @@ impl InferenceClient {
             .build()
             .map_err(|err| YorishiroError::ProviderUnreachable {
                 url: self.base_url.clone(),
-                message: err.to_string(),
+                message: redact(&err.to_string(), &self.api_key),
             })?;
-        let response = self
-            .http
-            .send(&self.client, request)
-            .await
-            .map_err(|err| match err {
-                InferenceHttpError::Timeout(_) | InferenceHttpError::Request(_) => {
-                    YorishiroError::ProviderUnreachable {
-                        url: self.base_url.clone(),
-                        message: err.message(&self.api_key),
-                    }
-                }
-                InferenceHttpError::Response(_) => {
-                    YorishiroError::Internal(anyhow::anyhow!(err.message(&self.api_key)))
-                }
-            })?;
+        let response = self.client.execute(request).await.map_err(|err| {
+            YorishiroError::ProviderUnreachable {
+                url: self.base_url.clone(),
+                message: redact(&err.to_string(), &self.api_key),
+            }
+        })?;
 
-        let status = response.status;
+        let status = response.status();
         if !status.is_success() {
-            if let Some(after) = retry_after(status.as_u16(), &response.headers) {
+            if let Some(after) = retry_after(status.as_u16(), response.headers()) {
                 return Err(YorishiroError::ProviderBusy {
                     message: format!("the configured inference provider returned {status}"),
                     retry_after: after,
@@ -153,10 +139,9 @@ impl InferenceClient {
             });
         }
 
-        let body = response
-            .body
-            .await
-            .map_err(|err| YorishiroError::Internal(anyhow::anyhow!(err.message(&self.api_key))))?;
+        let body = response.bytes().await.map_err(|err| {
+            YorishiroError::Internal(anyhow::anyhow!(redact(&err.to_string(), &self.api_key)))
+        })?;
         let body: ChatResponse = serde_json::from_slice(&body).map_err(|_| {
             YorishiroError::Internal(anyhow::anyhow!("error decoding response body"))
         })?;
@@ -181,93 +166,6 @@ impl InferenceClient {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect())
     }
-}
-
-#[async_trait]
-pub trait InferenceHttp: Send + Sync {
-    async fn send(
-        &self,
-        client: &reqwest::Client,
-        request: Request,
-    ) -> Result<InferenceHttpResponse, InferenceHttpError>;
-}
-
-struct ReqwestInferenceHttp;
-
-#[async_trait]
-impl InferenceHttp for ReqwestInferenceHttp {
-    async fn send(
-        &self,
-        client: &reqwest::Client,
-        request: Request,
-    ) -> Result<InferenceHttpResponse, InferenceHttpError> {
-        let response = client
-            .execute(request)
-            .await
-            .map_err(InferenceHttpError::from_request)?;
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body = response.bytes();
-        Ok(InferenceHttpResponse {
-            status,
-            headers,
-            body: Box::pin(async move {
-                body.await
-                    .map(|body| body.to_vec())
-                    .map_err(|error| InferenceHttpError::Response(error.to_string()))
-            }),
-        })
-    }
-}
-
-pub struct InferenceHttpResponse {
-    pub status: StatusCode,
-    pub headers: HeaderMap,
-    pub body: Pin<Box<dyn Future<Output = Result<Vec<u8>, InferenceHttpError>> + Send>>,
-}
-
-pub enum InferenceHttpError {
-    Timeout(String),
-    Request(String),
-    Response(String),
-}
-
-impl InferenceHttpError {
-    fn from_request(error: reqwest::Error) -> Self {
-        if error.is_timeout() {
-            Self::Timeout(error.to_string())
-        } else {
-            Self::Request(error.to_string())
-        }
-    }
-
-    fn message(&self, secret: &str) -> String {
-        let message = match self {
-            Self::Timeout(message) => message,
-            Self::Request(message) => message,
-            Self::Response(message) => message,
-        };
-        if secret.is_empty() {
-            return message.clone();
-        }
-        message.replace(secret, "[redacted]")
-    }
-}
-
-/// How long to wait before retrying, or `None` when the response is not a reason to retry.
-///
-/// 429 and 503 are the two a provider uses for "later"; everything else is a request that will fail again the same way.
-/// `Retry-After` is honoured when the provider sends it; a default stands in when it does not.
-fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    if status != 429 && status != 503 {
-        return None;
-    }
-    let from_header = headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|secs| Duration::from_secs(secs.min(60)));
-    Some(from_header.unwrap_or(Duration::from_secs(5)))
 }
 
 #[derive(Serialize)]

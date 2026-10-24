@@ -25,7 +25,7 @@ use crate::workers::embedding_sync::WorkerClass;
 const TAG_PREFIX: &str = "worker-target:";
 
 /// The one place a job can run, as a worker process names it at start.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WorkerTarget {
     /// Compute any deployment shares.
     /// This is what the packaged service and the compose file serve.
@@ -37,7 +37,7 @@ pub enum WorkerTarget {
 }
 
 /// A worker tag that names no target.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvalidWorkerTarget {
     tag: String,
     reason: &'static str,

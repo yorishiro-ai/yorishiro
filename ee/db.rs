@@ -58,7 +58,7 @@ impl SchedulerOwnership {
                 let Some(file) = file.take() else {
                     return Ok(());
                 };
-                unlock_sqlite_scheduler_file(&file)
+                file.unlock()
                     .map_err(|err| format!("failed to unlock {}: {err}", path.display()))
             }
         }
@@ -231,62 +231,12 @@ fn try_lock_sqlite_scheduler_file(path: &Path) -> Result<Option<File>, String> {
         .write(true)
         .open(path)
         .map_err(|err| format!("failed to open scheduler lock {}: {err}", path.display()))?;
-    match lock_sqlite_scheduler_file(&file) {
+    match file.try_lock() {
         Ok(()) => Ok(Some(file)),
-        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
         Err(err) => Err(format!(
             "failed to lock scheduler file {}: {err}",
             path.display()
         )),
     }
-}
-
-#[cfg(unix)]
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub fn lock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
-    use std::os::fd::AsRawFd;
-    unsafe extern "C" {
-        fn flock(fd: i32, operation: i32) -> i32;
-    }
-    const LOCK_EX: i32 = 2;
-    const LOCK_NB: i32 = 4;
-    let result = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
-#[cfg(unix)]
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub fn unlock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
-    use std::os::fd::AsRawFd;
-    unsafe extern "C" {
-        fn flock(fd: i32, operation: i32) -> i32;
-    }
-    const LOCK_UN: i32 = 8;
-    let result = unsafe { flock(file.as_raw_fd(), LOCK_UN) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(unix))]
-fn lock_sqlite_scheduler_file(_file: &File) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "SQLite scheduler file locking is unsupported on this platform",
-    ))
-}
-
-#[cfg(not(unix))]
-fn unlock_sqlite_scheduler_file(_file: &File) -> std::io::Result<()> {
-    Ok(())
 }

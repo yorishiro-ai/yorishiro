@@ -26,16 +26,16 @@
 //! ```
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::_entities::entity_entities::Column as EntityColumn;
 use crate::models::entity_entities;
 use crate::models::search::SearchHit;
 use crate::models::search::SearchRow;
 use crate::models::search::resolve_search_table;
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
-use sea_orm::EntityTrait;
 use sea_orm::FromQueryResult;
-use sea_orm::PaginatorTrait;
 use sea_orm::Statement;
+use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, JoinType, Query};
 use uuid::Uuid;
 
 /// `cargo loco task sqlite_ann_benchmark workspace_id:<uuid> [min_entities:<int>] [max_latency_ms:<int>]`
@@ -87,13 +87,27 @@ impl Task for SqliteAnnBenchmark {
             .map_err(|e| Error::Message(e.to_string()))?;
 
         // Count entities with embeddings in this workspace.
-        let entity_count = entity_entities::Entity::find()
-            .count(&ctx.db)
-            .await
-            .internal()
-            .map_err(|e| Error::Message(e.to_string()))?;
-
-        let entity_count = entity_count as usize;
+        let count = Query::select()
+            .expr(sea_orm::sea_query::Func::count(Expr::col(Asterisk)))
+            .from_as(Alias::new(&table_name), Alias::new("ee"))
+            .join_as(
+                JoinType::InnerJoin,
+                entity_entities::Entity,
+                Alias::new("e"),
+                Expr::col((Alias::new("e"), EntityColumn::Id))
+                    .equals((Alias::new("ee"), Alias::new("entity_id"))),
+            )
+            .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
+            .and_where(Expr::col((Alias::new("ee"), Alias::new("embedding"))).is_not_null())
+            .to_owned();
+        let entity_count: i64 = ctx
+            .db
+            .query_one_raw(ctx.db.get_database_backend().build(&count))
+            .await?
+            .ok_or_else(|| Error::Message("embedding count returned no row".into()))?
+            .try_get_by_index(0)?;
+        let entity_count = usize::try_from(entity_count)
+            .map_err(|_| Error::Message("embedding count exceeds platform limits".into()))?;
 
         // Need at least one embedding to run the benchmark.
         if entity_count == 0 {
@@ -140,21 +154,27 @@ async fn fetch_sample_embedding(
     workspace_id: Uuid,
     table_name: &str,
 ) -> std::result::Result<Option<(Uuid, Vec<u8>)>, YorishiroError> {
-    let sql = format!(
-        "SELECT ee.entity_id, ee.embedding FROM {table_name} ee \
-         JOIN entity_entities e ON e.id = ee.entity_id \
-         WHERE e.workspace_id = ? \
-         LIMIT 1"
-    );
-
-    let row = EmbeddingRow::find_by_statement(Statement::from_sql_and_values(
-        conn.get_database_backend(),
-        &sql,
-        vec![workspace_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
+    let query = Query::select()
+        .columns([
+            (Alias::new("ee"), Alias::new("entity_id")),
+            (Alias::new("ee"), Alias::new("embedding")),
+        ])
+        .from_as(Alias::new(table_name), Alias::new("ee"))
+        .join_as(
+            JoinType::InnerJoin,
+            entity_entities::Entity,
+            Alias::new("e"),
+            Expr::col((Alias::new("e"), EntityColumn::Id))
+                .equals((Alias::new("ee"), Alias::new("entity_id"))),
+        )
+        .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
+        .and_where(Expr::col((Alias::new("ee"), Alias::new("embedding"))).is_not_null())
+        .limit(1)
+        .to_owned();
+    let row = EmbeddingRow::find_by_statement(conn.get_database_backend().build(&query))
+        .one(conn)
+        .await
+        .internal()?;
 
     Ok(row.map(|er| (er.entity_id, er.embedding)))
 }
@@ -166,12 +186,11 @@ fn vector_blob_to_f32(blob: Vec<u8>) -> Vec<f32> {
         0,
         "embedding BLOB not a multiple of 4 bytes"
     );
-    let len = blob.len() / 4;
-    let mut vec = vec![0.0_f32; len];
-    unsafe {
-        std::ptr::copy_nonoverlapping(blob.as_ptr(), vec.as_mut_ptr() as *mut u8, blob.len());
-    }
-    vec
+    blob.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
+        .collect()
 }
 
 /// Results from one measurement phase.
@@ -309,17 +328,18 @@ async fn benchmark_phase(
     let mut latencies = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = std::time::Instant::now();
-        let _hits: Vec<SearchHit> = SearchRow::find_by_statement(Statement::from_sql_and_values(
-            conn.get_database_backend(),
-            &knn.sql,
-            knn.values.clone(),
-        ))
-        .all(conn)
-        .await
-        .internal()?
-        .into_iter()
-        .map(SearchRow::into_hit)
-        .collect();
+        let hits: Vec<SearchHit> = SearchRow::find_by_statement(knn.clone())
+            .all(conn)
+            .await
+            .internal()?
+            .into_iter()
+            .map(SearchRow::into_hit)
+            .collect();
+        if hits.is_empty() {
+            return Err(YorishiroError::Internal(anyhow::anyhow!(
+                "benchmark query returned no entities for a workspace with a sample embedding"
+            )));
+        }
         latencies.push(start.elapsed().as_secs_f64() * 1000.0);
     }
 
@@ -339,60 +359,101 @@ async fn benchmark_phase(
     })
 }
 
-/// SQL query for full-scan vector search (uses `vec_distance_cosine`).
-struct KnnQuery {
-    sql: String,
-    values: Vec<sea_orm::Value>,
-}
-
-fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> KnnQuery {
-    // Convert the vector to raw LE f32 bytes for `vec_distance_cosine`.
-    let blob_bytes =
-        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-
-    let sql = format!(
-        "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
-         e.entity_type, e.data, e.created_at, e.updated_at, \
-         e.created_by, e.updated_by, \
-         vec_distance_cosine(?, ee.embedding) AS distance \
-         FROM entity_entities e \
-         JOIN {table_name} ee ON e.id = ee.entity_id \
-         WHERE ee.embedding IS NOT NULL AND e.workspace_id = ? \
-         ORDER BY distance LIMIT 10"
-    );
-    let values = vec![
-        sea_orm::Value::from(blob_bytes.to_vec()),
-        workspace_id.into(),
-    ];
-    KnnQuery { sql, values }
+fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Statement {
+    use sea_orm::sea_query::{Func, Order};
+    let query = Query::select()
+        .columns(
+            [
+                EntityColumn::Id,
+                EntityColumn::WorkspaceId,
+                EntityColumn::SchemaId,
+                EntityColumn::SchemaVersion,
+                EntityColumn::EntityType,
+                EntityColumn::Data,
+                EntityColumn::CreatedAt,
+                EntityColumn::UpdatedAt,
+                EntityColumn::CreatedBy,
+                EntityColumn::UpdatedBy,
+            ]
+            .map(|column| (Alias::new("e"), column)),
+        )
+        .expr_as(
+            Func::cust(Alias::new("vec_distance_cosine")).args([
+                Expr::val(crate::db::sqlite_vec_blob(vector)),
+                Expr::col((Alias::new("ee"), Alias::new("embedding"))),
+            ]),
+            "distance",
+        )
+        .from_as(entity_entities::Entity, Alias::new("e"))
+        .join_as(
+            JoinType::InnerJoin,
+            Alias::new(table_name),
+            Alias::new("ee"),
+            Expr::col((Alias::new("e"), EntityColumn::Id))
+                .equals((Alias::new("ee"), Alias::new("entity_id"))),
+        )
+        .and_where(Expr::col((Alias::new("ee"), Alias::new("embedding"))).is_not_null())
+        .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
+        .order_by(Alias::new("distance"), Order::Asc)
+        .limit(10)
+        .to_owned();
+    sea_orm::DatabaseBackend::Sqlite.build(&query)
 }
 
 /// SQL query for vec0 KNN search (uses the vec0 virtual table).
 ///
-/// The vec0 virtual table is created by sqlite-vec as `{table_name}_vec0`
-/// and exposes a `MATCH k=` operator for KNN search.
-fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> KnnQuery {
-    // Convert the vector to raw LE f32 bytes for vec0.
-    let blob_bytes =
-        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-
-    let sql = format!(
-        "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
-         e.entity_type, e.data, e.created_at, e.updated_at, \
-         e.created_by, e.updated_by, \
-         ee.distance AS distance \
-         FROM entity_entities e \
-         JOIN {table_name}_vec0 ee \
-             ON ee.rowid = e.id \
-             AND ee MATCH (k=10) \
-         WHERE e.workspace_id = ? \
-         ORDER BY ee.distance LIMIT 10"
-    );
-    let values = vec![
-        sea_orm::Value::from(blob_bytes.to_vec()),
-        workspace_id.into(),
-    ];
-    KnnQuery { sql, values }
+/// The optional `{table_name}_vec0` table uses canonical UUID TEXT `entity_id`
+/// as its primary key, a TEXT `workspace_id` partition key, and cosine `embedding` vectors.
+fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Statement {
+    use sea_orm::sea_query::{Func, Order, extension::sqlite::SqliteBinOper};
+    let knn = Query::select()
+        .columns(["entity_id", "distance"].map(Alias::new))
+        .from(Alias::new(format!("{table_name}_vec0")))
+        .and_where(Expr::col(Alias::new("embedding")).binary(
+            SqliteBinOper::Match,
+            Expr::val(crate::db::sqlite_vec_blob(vector)),
+        ))
+        .and_where(Expr::col(Alias::new("k")).eq(10))
+        .and_where(Expr::col(Alias::new("workspace_id")).eq(workspace_id.to_string()))
+        .to_owned();
+    let query = Query::select()
+        .columns(
+            [
+                EntityColumn::Id,
+                EntityColumn::WorkspaceId,
+                EntityColumn::SchemaId,
+                EntityColumn::SchemaVersion,
+                EntityColumn::EntityType,
+                EntityColumn::Data,
+                EntityColumn::CreatedAt,
+                EntityColumn::UpdatedAt,
+                EntityColumn::CreatedBy,
+                EntityColumn::UpdatedBy,
+            ]
+            .map(|column| (Alias::new("e"), column)),
+        )
+        .column((Alias::new("ee"), Alias::new("distance")))
+        .from_subquery(knn, Alias::new("ee"))
+        .join_as(
+            JoinType::InnerJoin,
+            entity_entities::Entity,
+            Alias::new("e"),
+            Func::cust(Alias::new("replace"))
+                .args([
+                    Expr::col((Alias::new("ee"), Alias::new("entity_id"))),
+                    Expr::val("-"),
+                    Expr::val(""),
+                ])
+                .eq(Func::lower(
+                    Func::cust(Alias::new("hex"))
+                        .arg(Expr::col((Alias::new("e"), EntityColumn::Id))),
+                )),
+        )
+        .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
+        .order_by((Alias::new("ee"), Alias::new("distance")), Order::Asc)
+        .limit(10)
+        .to_owned();
+    sea_orm::DatabaseBackend::Sqlite.build(&query)
 }
 
 /// Check whether the vec0 virtual table exists for the given embedding table.
@@ -405,23 +466,16 @@ async fn check_vec0_availability(
 ) -> std::result::Result<PhaseResult, YorishiroError> {
     let vec0_table = format!("{table_name}_vec0");
 
-    // SQLite stores virtual tables in sqlite_master like regular tables.
-    let sql = "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1";
-
-    #[derive(sea_orm::FromQueryResult)]
-    struct MasterRow {
-        #[sea_orm(alias = "type")]
-        _typ: String,
-    }
-
-    let row = MasterRow::find_by_statement(Statement::from_sql_and_values(
-        conn.get_database_backend(),
-        sql,
-        vec![vec0_table.clone().into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
+    let query = Query::select()
+        .column(Asterisk)
+        .from(Alias::new("sqlite_master"))
+        .and_where(Expr::col(Alias::new("name")).eq(vec0_table))
+        .limit(1)
+        .to_owned();
+    let row = conn
+        .query_one_raw(conn.get_database_backend().build(&query))
+        .await
+        .internal()?;
 
     Ok(PhaseResult {
         median_ms: 0.0,

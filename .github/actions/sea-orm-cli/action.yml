@@ -4,7 +4,8 @@ description: Installs the sea-orm-cli version Cargo.lock resolves, which `db ent
 runs:
   using: composite
   steps:
-    - name: Install sea-orm-cli with postgres-vector feature
+    - name: Resolve sea-orm-cli version
+      id: version
       shell: bash
       run: |
         version="$(awk '/^name = "sea-orm-cli"$/ { getline; gsub(/[^0-9.]/, ""); print; exit }' Cargo.lock)"
@@ -12,4 +13,17 @@ runs:
           echo "::error::Cargo.lock has no sea-orm-cli package" >&2
           exit 1
         fi
-        cargo install sea-orm-cli --locked --version "$version" --features postgres-vector,sqlx-postgres,sqlx-sqlite
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    # Prebuilt release binaries lack postgres-vector, so cache the source build instead.
+    - name: Restore sea-orm-cli
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.cargo/bin/sea-orm-cli
+        key: sea-orm-cli-${{ runner.os }}-${{ steps.version.outputs.version }}-postgres-vector-sqlx-postgres-sqlx-sqlite
+
+    - name: Install sea-orm-cli with postgres-vector feature
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: cargo install sea-orm-cli --locked --version "${{ steps.version.outputs.version }}" --features postgres-vector,sqlx-postgres,sqlx-sqlite

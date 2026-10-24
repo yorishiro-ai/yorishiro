@@ -1,17 +1,12 @@
 use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
-use loco_rs::bgworker::BackgroundWorker;
-use loco_rs::prelude::async_trait;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use std::sync::{Arc, Mutex};
+use sea_orm::EntityTrait;
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::workers::dispatch::ReindexDispatcher;
-use yorishiro::workers::reindex::ReindexArgs;
 
-use super::fixtures::{self, TenantArgs, issue_api_key};
+use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 
 struct Setup {
     tenant_id: Uuid,
@@ -22,16 +17,13 @@ struct Setup {
     audit_key: String,
 }
 
-async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
-    let args = TenantArgs {
-        tenant_name: tenant_name.into(),
-        owner_email: format!("owner-{tenant_name}@example.com"),
-        key_scope: ApiKeyScope::Migration,
-        key_audit: false,
-        ..Default::default()
-    };
-    let (tenant_id, workspace_id, owner_id, migration_key) =
-        fixtures::create_tenant_workspace_owner(ctx, args).await;
+async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) -> Setup {
+    let TestTenant {
+        tenant_id,
+        workspace_id,
+        owner_id,
+        api_key: migration_key,
+    } = TestTenant::create(request, ctx, TenantArgs::default()).await;
     let audit_key = issue_api_key(ctx, workspace_id, owner_id, ApiKeyScope::Read, true).await;
 
     Setup {
@@ -59,7 +51,7 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
             chrono_tz::UTC,
             "test must boot with a non-default zone"
         );
-        let setup = setup(&ctx, "acme").await;
+        let setup = setup(&request, &ctx).await;
 
         let set = request
             .put("/api/system/maintenance")
@@ -118,8 +110,8 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
 /// `undo_migration_job` is recorded on the same transaction as the undo itself.
 #[tokio::test]
 async fn undo_migration_job_is_recorded() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx, "acme").await;
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = setup(&request, &ctx).await;
 
         let definition = serde_json::from_value(serde_json::json!({
             "name": "note",
@@ -177,10 +169,23 @@ async fn undo_migration_job_is_recorded() {
             .await;
         assert_eq!(
             undo.status_code(),
-            StatusCode::OK,
+            StatusCode::ACCEPTED,
             "response: {:?}",
             undo.text()
         );
+        let queued_id: Uuid = undo.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        super::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            queued_id,
+            &setup.migration_key,
+            &format!("/api/migration-jobs/{queued_id}"),
+        )
+        .await;
 
         let log = request
             .get("/api/audit-log")
@@ -189,75 +194,20 @@ async fn undo_migration_job_is_recorded() {
         let body: Vec<serde_json::Value> = log.json();
         assert_eq!(body.len(), 1, "body: {body:?}");
         assert_eq!(body[0]["action"], "undo_migration_job");
-        assert_eq!(body[0]["detail"]["job_id"], job_id.to_string());
+        assert_eq!(body[0]["detail"]["job_id"], queued_id.to_string());
+        assert_eq!(body[0]["detail"]["snapshot_job_id"], job_id.to_string());
         assert_eq!(body[0]["detail"]["restored"], 1);
     })
     .await;
 }
 
-struct AuditBeforeDispatch {
-    detail: Mutex<Option<serde_json::Value>>,
-    dispatch_id: Mutex<Option<Uuid>>,
-}
-
-#[async_trait]
-impl ReindexDispatcher for AuditBeforeDispatch {
-    async fn dispatch(
-        &self,
-        _ctx: &loco_rs::app::AppContext,
-        args: ReindexArgs,
-        txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String> {
-        let txn = txn.expect("reindex audit and outbox share the caller transaction");
-        let row = yorishiro::models::api_key_audit_log::Entity::find()
-            .filter(
-                yorishiro::models::_entities::api_key_audit_log::Column::WorkspaceId
-                    .eq(args.workspace_id),
-            )
-            .one(txn)
-            .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-            .expect("reindex audit row must be in the outbox transaction");
-        *self.detail.lock().unwrap() = Some(row.detail);
-        let dispatch_id = Uuid::now_v7();
-        yorishiro::models::queue_job_dispatch_outbox::record_in_transaction(
-            txn,
-            yorishiro::models::queue_job_lifecycles::Enqueue {
-                id: dispatch_id,
-                job_name: "reindex_embeddings",
-                worker_class: args.worker_class,
-                workspace_id: Some(args.workspace_id),
-                plan: None,
-                concurrency_key: None,
-                concurrency_limit: None,
-            },
-            serde_json::to_value(&args)
-                .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
-            yorishiro::workers::reindex::ReindexWorker::class_name(),
-            Some(yorishiro::workers::target::WorkerTarget::Shared.queue()),
-            Some(vec![yorishiro::workers::target::WorkerTarget::Shared.tag()]),
-        )
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-        *self.dispatch_id.lock().unwrap() = Some(dispatch_id);
-        Ok(dispatch_id.to_string())
-    }
-}
-
 /// Reindex intentionally records workspace identity rather than the queue job ID.
 /// The audit row and dispatch outbox are written in the caller transaction, which commits before the relay publishes.
-/// The response still exposes the queue job ID returned by the dispatcher.
+/// The response exposes the durable job ID, not a provider publication ID.
 #[tokio::test]
 async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publication() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx, "reindex-audit").await;
-        let dispatcher = Arc::new(AuditBeforeDispatch {
-            detail: Mutex::new(None),
-            dispatch_id: Mutex::new(None),
-        });
-        ctx.shared_store
-            .insert(dispatcher.clone() as Arc<dyn yorishiro::workers::dispatch::ReindexDispatcher>);
-
+        let setup = setup(&request, &ctx).await;
         let response = request
             .post("/api/migration-jobs/reindex")
             .add_header("Authorization", format!("Bearer {}", setup.migration_key))
@@ -268,23 +218,13 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
             "response: {:?}",
             response.text()
         );
-        assert_eq!(
-            response.json::<serde_json::Value>()["job_id"],
-            dispatcher
-                .dispatch_id
-                .lock()
-                .unwrap()
-                .expect("dispatcher wrote the outbox ID")
-                .to_string()
-        );
-
+        let dispatch_id: Uuid = response.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .expect("durable job ID")
+            .parse()
+            .unwrap();
         let expected = serde_json::json!({ "workspace_id": setup.workspace_id });
-        assert_eq!(dispatcher.detail.lock().unwrap().as_ref(), Some(&expected));
-        let dispatch_id = dispatcher
-            .dispatch_id
-            .lock()
-            .unwrap()
-            .expect("dispatcher recorded an outbox row");
+        // Atomic enqueue observation: the relay must see both committed records.
         let committed_outbox =
             yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(
                 dispatch_id,
@@ -295,28 +235,15 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
             .expect("outbox committed with audit row");
         assert_eq!(committed_outbox.lifecycle_id, Some(dispatch_id));
         assert!(committed_outbox.published_at.is_none());
-        let committed_audit = yorishiro::models::api_key_audit_log::Entity::find()
-            .filter(
-                yorishiro::models::_entities::api_key_audit_log::Column::WorkspaceId
-                    .eq(setup.workspace_id),
-            )
-            .one(&ctx.db)
-            .await
-            .expect("relay reads committed audit row")
-            .expect("audit row committed with outbox");
-        assert_eq!(committed_audit.detail, expected);
-        assert!(
-            !dispatcher
-                .detail
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .contains_key("job_id")
-        );
-
+        let committed_audit = yorishiro::models::api_key_audit_log::list_for_workspace(
+            &ctx.db,
+            setup.workspace_id,
+            Default::default(),
+        )
+        .await
+        .expect("relay reads committed audit rows");
+        assert_eq!(committed_audit.len(), 1, "audit row committed with outbox");
+        assert_eq!(committed_audit[0].detail, expected);
         let log = request
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {}", setup.audit_key))
@@ -343,7 +270,7 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
 #[tokio::test]
 async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx, "acme").await;
+        let setup = setup(&request, &ctx).await;
 
         let response = request
             .get("/api/audit-log")
@@ -364,10 +291,14 @@ async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
 /// tenant B's audit key must not see tenant A's audit trail, even though both rows live in the
 /// same table.
 #[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn an_audit_key_cannot_read_another_tenants_audit_log() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant_a = setup(&ctx, "acme").await;
-        let tenant_b = setup(&ctx, "beta").await;
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let tenant_a = setup(&request, &ctx).await;
+        let tenant_b = setup(&request, &ctx).await;
 
         let set = request
             .put("/api/system/maintenance")

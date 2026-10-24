@@ -10,8 +10,6 @@
 //! **Routing**: like `embedding_sync`, a reindex job carries one `worker-target:<name>` tag chosen when it is enqueued,
 //! so `--worker=worker-target:tenant:<id>` picks up only that tenant's reindex jobs.
 
-use std::sync::Arc;
-
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
 use loco_rs::prelude::async_trait;
@@ -19,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::services::embedding::EmbeddingProviderAvailability;
-use crate::workers::dispatch::ReindexDispatcher;
 use crate::workers::embedding_sync::WorkerClass;
 
 /// Arguments for a reindex worker job: workspace id and the resolved worker class tag.
@@ -30,10 +27,6 @@ use crate::workers::embedding_sync::WorkerClass;
 pub struct ReindexArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
-    #[serde(default)]
-    pub dispatch_id: Option<Uuid>,
-    #[serde(default)]
-    pub publishing_epoch: Option<i64>,
     pub workspace_id: Uuid,
     pub worker_class: WorkerClass,
     #[serde(default)]
@@ -61,7 +54,7 @@ impl ReindexArgs {
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
     // Resolve in the worker so workspace-specific overrides are honored without putting
     // credentials in the queue payload.
-    let provider = crate::workers::embedding_sync::resolve_worker_provider(ctx, args.workspace_id)
+    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?
         .ok_or_else(|| loco_rs::Error::Message("embedding provider absent".into()))?;
@@ -70,43 +63,19 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
             "embedding provider disabled".into(),
         ));
     }
-    provider
-        .embed_batch(&[])
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("provider must be configured: {e}")))?;
-
     // Fetch all entity IDs for this workspace.
     let candidate_ids =
         crate::models::entity_entities::ids_for_workspace(&ctx.db, args.workspace_id)
             .await
             .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
-    let outcome = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        crate::models::entity_embeddings::reindex_workspace(
-            &ctx.db,
-            args.workspace_id,
-            &candidate_ids,
-            provider.as_ref(),
-        )
-        .await
-    } else {
-        let db_handle = ctx
-            .shared_store
-            .get::<crate::db::DbHandle>()
-            .ok_or_else(|| {
-                loco_rs::Error::Message(
-                    "reindex requires the tenant pool, which this deployment did not build".into(),
-                )
-            })?;
-        crate::db::reindex_workspace_with_lock(
-            db_handle.tenant.pool().clone(),
-            args.workspace_id,
-            &ctx.db,
-            &candidate_ids,
-            provider.as_ref(),
-        )
-        .await
-    }
+    let outcome = crate::db::reindex_workspace_with_lock(
+        ctx,
+        args.workspace_id,
+        &candidate_ids,
+        provider.as_ref(),
+    )
+    .await
     .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
     if !outcome.failures.is_empty() {
@@ -135,17 +104,6 @@ impl BackgroundWorker<ReindexArgs> for ReindexWorker {
     }
 
     async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &self.ctx.db,
-            args.lifecycle_id,
-            args.dispatch_id,
-            args.publishing_epoch,
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-        {
-            return Ok(());
-        }
         crate::workers::lifecycle::perform_with_terminal_lifecycle::<Self, _, _, _>(
             &self.ctx,
             args.lifecycle_id,
@@ -158,39 +116,24 @@ impl BackgroundWorker<ReindexArgs> for ReindexWorker {
     }
 }
 
-/// Enqueues `args` through the installed dispatcher, which picks the target from `args.worker_class` and the workspace.
+/// Enqueues a reindex job through the durable outbox.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the durable enqueue fails.
 pub async fn enqueue_for_class(ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<()> {
-    let dispatcher = ctx
-        .shared_store
-        .get::<Arc<dyn ReindexDispatcher>>()
-        .ok_or_else(|| loco_rs::Error::Message("ReindexDispatcher missing".into()))?;
-    enqueue_for_class_with_dispatcher(ctx, args, None, dispatcher.as_ref()).await
+    crate::workers::dispatch::dispatch_reindex(ctx, args, None)
+        .await
+        .map(|_| ())
 }
 
+/// Enqueues reindex in the caller transaction when supplied.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn enqueue_for_class_with_dispatcher(
-    ctx: &AppContext,
-    args: ReindexArgs,
-    txn: Option<&sea_orm::DatabaseTransaction>,
-    dispatcher: &dyn ReindexDispatcher,
-) -> loco_rs::Result<()> {
-    dispatcher.dispatch(ctx, args, txn).await.map(|_job_id| ())
-}
-
-/// Enqueue a reindex job with a substituted dispatcher.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn enqueue_reindex_with_dispatcher(
+pub async fn enqueue_reindex(
     ctx: &AppContext,
     workspace_id: Uuid,
     txn: Option<&sea_orm::DatabaseTransaction>,
-    dispatcher: &dyn ReindexDispatcher,
 ) -> loco_rs::Result<String> {
     if ctx.queue_provider.is_none() {
         return Err(loco_rs::Error::Message(
@@ -198,27 +141,18 @@ pub async fn enqueue_reindex_with_dispatcher(
         ));
     }
 
-    let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
         .await
-    {
-        Ok(worker_class) => worker_class,
-        Err(err) => {
-            tracing::warn!(workspace_id = %workspace_id, error = %err.0, "failed to resolve worker class, defaulting to shared");
-            WorkerClass::Shared
-        }
-    };
-    dispatcher
-        .dispatch(
-            ctx,
-            ReindexArgs {
-                dispatch_id: None,
-                publishing_epoch: None,
-                lifecycle_id: None,
-                workspace_id,
-                worker_class,
-                startup: false,
-            },
-            txn,
-        )
-        .await
+        .map_err(|error| loco_rs::Error::from(error.0))?;
+    crate::workers::dispatch::dispatch_reindex(
+        ctx,
+        ReindexArgs {
+            lifecycle_id: None,
+            workspace_id,
+            worker_class,
+            startup: false,
+        },
+        txn,
+    )
+    .await
 }

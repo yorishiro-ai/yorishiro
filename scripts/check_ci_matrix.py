@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parent.parent
-TOPOLOGIES = {("postgres", "postgres"), ("sqlite", "sqlite"), ("postgres", "valkey"), ("sqlite", "valkey")}
+TOPOLOGIES = {("postgres", "postgres"), ("sqlite", "sqlite"), ("postgres", "redis"), ("sqlite", "redis")}
 
 
 def validate(workflow: str) -> None:
@@ -32,10 +32,10 @@ def validate(workflow: str) -> None:
         db, queue = entry["backend"], entry["queue_key"]
         assert (db, queue) in TOPOLOGIES, f"forbidden topology: {db}-{queue}"
         assert entry["db"] == {"postgres": "Postgres", "sqlite": "SQLite"}[db]
-        assert entry["queue"] == {"postgres": "Postgres", "sqlite": "SQLite", "valkey": "Valkey"}[queue]
+        assert entry["queue"] == {"postgres": "Postgres", "sqlite": "SQLite", "redis": "Redis"}[queue]
         assert entry["loco_env"] == f"test_{db}" + (f"_{queue}" if db != queue else "")
         assert entry["database_url"].startswith(f"{db}:")
-        assert entry["queue_url"].startswith(f"{'redis' if queue == 'valkey' else queue}:")
+        assert entry["queue_url"].startswith(f"{queue}:")
     actual = Counter((entry["edition"], entry["backend"], entry["queue_key"]) for entry in entries)
     expected = Counter((edition, db, queue) for edition in ("ce", "ee") for db, queue in TOPOLOGIES)
     assert actual == expected, f"expected exactly one entry per edition/topology: {actual}"

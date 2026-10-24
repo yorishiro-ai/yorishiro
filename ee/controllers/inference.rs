@@ -15,7 +15,7 @@ use loco_rs::controller::Routes;
 
 use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::inference::{
-    InferFillResponse, InferJobStatusResponse, SetLlmKeyRequest,
+    InferFillResponse, InferFillStatus, InferJobStatusResponse, SetLlmKeyRequest,
 };
 use crate::edition::ee::models::inference_jobs;
 use crate::edition::ee::models::inference_jobs::InferenceJobStatus;
@@ -62,7 +62,7 @@ async fn infer_fill(
 
     Ok(Json(InferFillResponse {
         job_id,
-        status: InferenceJobStatus::Queued,
+        status: InferFillStatus::Queued,
     }))
 }
 
@@ -148,6 +148,30 @@ pub fn inference_job_status_routes() -> Routes {
         .add("/{job_id}/confirm", axum::routing::post(confirm_proposals))
         .add("/{job_id}/reject", axum::routing::post(reject_proposals))
         .add("/{job_id}/discard", axum::routing::post(discard_proposals))
+        .add(
+            "/confirmations/{job_id}",
+            axum::routing::get(confirmation_status),
+        )
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/confirmations/{job_id}", params(("job_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+async fn confirmation_status(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(job_id): Path<uuid::Uuid>,
+) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
+    let auth = authz::authenticate_workspace(&ctx, &headers).await?;
+    require_scope(&auth, ApiKeyScope::Schema)?;
+    let txn = proposal_transaction(&ctx, &auth).await?;
+    Ok(Json(
+        crate::models::queue_job_lifecycles::bulk_job_status(
+            &txn,
+            auth.workspace_id,
+            job_id,
+            &["confirm_proposals"],
+        )
+        .await?,
+    ))
 }
 
 async fn authorized_job(
@@ -220,18 +244,22 @@ async fn proposal_transaction(
     Ok(crate::db::begin_workspace(ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::ProposalConfirmResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 202, body = crate::dtos::jobs::QueuedJobResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn confirm_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(job_id): Path<String>,
-) -> Result<Json<inference_proposals::ConfirmReport>, ApiError> {
+) -> Result<(StatusCode, Json<crate::dtos::jobs::QueuedJobResponse>), ApiError> {
     let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Schema).await?;
     let txn = proposal_transaction(&ctx, &auth_ctx).await?;
-    let report =
-        inference_proposals::confirm(&txn, auth_ctx.workspace_id, job_id, auth_ctx.user_id).await?;
+    let job_id =
+        crate::edition::ee::workers::confirm_proposals::enqueue(&ctx, &txn, &auth_ctx, job_id)
+            .await?;
     txn.commit().await.internal()?;
-    Ok(Json(report))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(crate::dtos::jobs::QueuedJobResponse { job_id }),
+    ))
 }
 
 /// `PUT /api/workspace/llm-key`
@@ -302,6 +330,7 @@ pub(crate) fn job_status_openapi_docs() -> Vec<crate::controllers::route_invento
         crate::controllers::route_inventory::path_doc(__path_infer_job_status),
         crate::controllers::route_inventory::path_doc(__path_list_proposals),
         crate::controllers::route_inventory::path_doc(__path_confirm_proposals),
+        crate::controllers::route_inventory::path_doc(__path_confirmation_status),
         crate::controllers::route_inventory::path_doc(__path_reject_proposals),
         crate::controllers::route_inventory::path_doc(__path_discard_proposals),
     ]

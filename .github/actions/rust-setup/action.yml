@@ -11,27 +11,31 @@ inputs:
     required: false
     default: ''
   toolchain:
-    description: Rust toolchain to install. Empty means the channel pinned in rust-toolchain.toml.
+    description: Rust toolchain to install. Empty means rust-version from Cargo.toml.
     required: false
     default: ''
 runs:
   using: composite
   steps:
+    - name: Restore patched Loco source
+      shell: bash
+      run: python3 patches/loco-rs/verify.py --prepare
+
     - name: Resolve the toolchain
       id: resolve
       shell: bash
       env:
         TOOLCHAIN: ${{ inputs.toolchain }}
       run: |
-        toolchain="${TOOLCHAIN:-$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)}"
+        toolchain="${TOOLCHAIN:-$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)}"
         if [ -z "$toolchain" ]; then
-          echo "::error::no toolchain input and no channel in rust-toolchain.toml" >&2
+          echo "::error::no toolchain input and no rust-version in Cargo.toml" >&2
           exit 1
         fi
         echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
 
     - name: Set up Rust toolchain
-      uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
       with:
         toolchain: ${{ steps.resolve.outputs.toolchain }}
         components: ${{ inputs.components }}
@@ -49,10 +53,8 @@ runs:
         sudo apt-get install --yes mold
         mold --version
 
+    # Prebuilt binary: building it from source took about four minutes in every job.
     - name: Install sccache
-      shell: bash
-      run: |
-        if ! command -v sccache >/dev/null 2>&1; then
-          RUSTC_WRAPPER= RUSTFLAGS= cargo install sccache --locked --version 0.10.0
-        fi
-        sccache --version
+      uses: Mozilla-Actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      with:
+        version: v0.19.0

@@ -1,20 +1,19 @@
-use rand::Rng;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect, TransactionTrait};
+use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect};
 use sha2::{Digest, Sha256};
 
-use crate::db::DbHandle;
+use crate::db::{AppContextBackend, DbHandle};
 use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 
-const KEY_PREFIX_BYTES: usize = 6;
-const KEY_SECRET_BYTES: usize = 24;
+const KEY_PREFIX_LENGTH: usize = 12;
+const KEY_SECRET_LENGTH: usize = 48;
 
 db_enum! {
     /// Permission level held by an API key.
     /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
     /// The wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     pub enum ApiKeyScope {
         Read = "read",
         Write = "write",
@@ -58,13 +57,6 @@ pub struct CreatedApiKey {
     pub plaintext: String,
 }
 
-/// Lowercase-hex-encodes `byte_len` random bytes.
-pub(crate) fn random_hex(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    rand::rng().fill_bytes(&mut bytes);
-    hex::encode(bytes)
-}
-
 /// Hashes a presented key into the form stored in `api_keys.key_hash`.
 pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
@@ -85,19 +77,12 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
 impl Entity {
     /// Verifies a presented raw API key and resolves the workspace, tenant, and scope it belongs to.
     ///
     /// At this point neither the workspace nor the tenant is known yet, so RLS's `app.current_workspace`/`app.current_tenant` can't be set, which is why this takes the whole [`DbHandle`] rather than a scoped connection.
     ///
-    /// Raw SQL: `authenticate_api_key` is a SECURITY DEFINER function, so this bypasses RLS on api_keys/workspace_workspaces, and limits the columns it returns to id/workspace_id/tenant_id/scope/user_id/audit (never key_hash itself).
+    /// SeaQuery calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only id/workspace_id/tenant_id/scope/user_id/audit, never key_hash itself.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -105,24 +90,49 @@ impl Entity {
         db: &DbHandle,
         presented_key: &str,
     ) -> Result<AuthContext, YorishiroError> {
-        let row: Option<(uuid::Uuid, uuid::Uuid, uuid::Uuid, String, Option<uuid::Uuid>, bool)> =
-            sea_orm::sqlx::query_as(
-                "SELECT id, workspace_id, tenant_id, scope, user_id, audit FROM authenticate_api_key($1)",
+        use sea_orm::sea_query::{Alias, Expr, Func, Query};
+        #[derive(sea_orm::FromQueryResult)]
+        struct Credential {
+            id: uuid::Uuid,
+            workspace_id: uuid::Uuid,
+            tenant_id: uuid::Uuid,
+            scope: String,
+            user_id: Option<uuid::Uuid>,
+            audit: bool,
+        }
+        let query = Query::select()
+            .columns(
+                [
+                    "id",
+                    "workspace_id",
+                    "tenant_id",
+                    "scope",
+                    "user_id",
+                    "audit",
+                ]
+                .map(Alias::new),
             )
-            .bind(hash_key(presented_key))
-            .fetch_optional(db.tenant.pool())
+            .from_function(
+                Func::cust(Alias::new("authenticate_api_key"))
+                    .arg(Expr::val(hash_key(presented_key))),
+                Alias::new("credential"),
+            )
+            .to_owned();
+        let conn =
+            sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.tenant.pool().clone());
+        let row = Credential::find_by_statement(conn.get_database_backend().build(&query))
+            .one(&conn)
             .await
             .internal()?;
 
-        let (api_key_id, workspace_id, tenant_id, scope, user_id, audit) =
-            row.ok_or(YorishiroError::Unauthenticated)?;
+        let row = row.ok_or(YorishiroError::Unauthenticated)?;
         Ok(AuthContext {
-            api_key_id,
-            workspace_id,
-            tenant_id,
-            scope: stored_scope(&scope)?,
-            user_id,
-            audit,
+            api_key_id: row.id,
+            workspace_id: row.workspace_id,
+            tenant_id: row.tenant_id,
+            scope: stored_scope(&row.scope)?,
+            user_id: row.user_id,
+            audit: row.audit,
         })
     }
 
@@ -131,7 +141,7 @@ impl Entity {
     /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the SeaORM entity API.
     /// Matches the SQL function's single-argument overload exactly: only a workspace-scoped key (`workspace_id` set) resolves; a tenant-scoped key matches nothing here either, same as on Postgres.
     ///
-    /// Deliberately not routed through the `Authenticator` trait: that trait is the seam for replacing the PostgreSQL authentication rule, and SQLite has no second rule to substitute, so there is nothing for the trait to select between on this backend.
+    /// The default authenticator selects this implementation for SQLite.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -153,6 +163,39 @@ impl Entity {
         })
     }
 
+    /// Records authenticated usage outside the request transaction, preserving read-only requests' timestamps.
+    /// Connection failures are best-effort on both backends and never reject a valid credential.
+    pub(crate) async fn touch_authenticated(
+        app: &loco_rs::app::AppContext,
+        auth: &AuthContext,
+    ) -> Result<(), YorishiroError> {
+        if app.is_sqlite() {
+            Self::touch_last_used(&app.db, auth.api_key_id).await;
+            return Ok(());
+        }
+        let db = app
+            .shared_store
+            .get::<DbHandle>()
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+        match db
+            .tenant
+            .acquire_for_workspace(auth.tenant_id, auth.workspace_id)
+            .await
+        {
+            Ok(mut conn) => {
+                if let Err(error) =
+                    Self::touch_last_used_on_connection(conn.as_mut(), auth.api_key_id).await
+                {
+                    tracing::warn!(%error, "failed to update api key last_used_at");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to acquire connection to touch last_used_at");
+            }
+        }
+        Ok(())
+    }
+
     /// Records the key's last-used timestamp on a raw `sqlx` connection.
     /// Best-effort: doesn't affect authentication outcomes, so callers don't need to fail the whole request if it errors.
     ///
@@ -164,7 +207,17 @@ impl Entity {
         conn: &mut sea_orm::sqlx::PgConnection,
         api_key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
-        sea_orm::sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
+        use crate::models::_entities::api_keys::Column;
+        use sea_orm::sea_query::{Expr, ExprTrait, Func, PostgresQueryBuilder, Query};
+        let (sql, _) = Query::update()
+            .table(Entity)
+            .value(
+                Column::LastUsedAt,
+                Func::cust(sea_orm::sea_query::Alias::new("now")),
+            )
+            .and_where(Expr::col(Column::Id).eq(api_key_id))
+            .build(PostgresQueryBuilder);
+        sea_orm::sqlx::query(sea_orm::sqlx::AssertSqlSafe(sql))
             .bind(api_key_id)
             .execute(conn)
             .await
@@ -213,7 +266,7 @@ impl Entity {
         }
     }
 
-    /// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part (192 bits) is the actual credential.
+    /// Issues a new API key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
     /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or any other flow provisioning a key for an ordinary user.
@@ -241,7 +294,7 @@ impl Entity {
     ) -> Result<CreatedApiKey, YorishiroError> {
         use crate::models::_entities::workspace_workspaces;
 
-        let txn = db.begin().await.internal()?;
+        let txn = crate::db::begin_write(db).await.internal()?;
 
         let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
             .one(&txn)
@@ -249,8 +302,8 @@ impl Entity {
             .internal()?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-        let prefix = format!("ysr_{}", random_hex(KEY_PREFIX_BYTES));
-        let secret = random_hex(KEY_SECRET_BYTES);
+        let prefix = format!("ysr_{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
+        let secret = loco_rs::hash::random_string(KEY_SECRET_LENGTH);
         let plaintext = format!("{prefix}_{secret}");
         let key_hash = hash_key(&plaintext);
 

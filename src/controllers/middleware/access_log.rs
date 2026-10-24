@@ -14,7 +14,7 @@ pub fn path_only(uri: &axum::http::Uri) -> &str {
     uri.path()
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Middleware {
     enable: bool,
     environment: Environment,

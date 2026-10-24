@@ -1,7 +1,5 @@
 //! `GET /api/tenant/overview`: the sole read the admin dashboard's landing page needs, plan, cap, usage counters and the member list, in one round trip.
 
-use crate::error::ResultExt;
-use crate::models::_entities::tenant_tenants as tenant_tenants_entity;
 use crate::models::tenant_memberships;
 use axum::Json;
 use axum::extract::State;
@@ -9,7 +7,6 @@ use axum::http::HeaderMap;
 use axum::routing::get;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::EntityTrait;
 
 use crate::controllers::ApiError;
 use crate::edition::ee::controllers::middleware::auth::authenticate_tenant_admin;
@@ -29,11 +26,7 @@ async fn tenant_overview(
             tracing::warn!(error = %err, "hosted dashboard request rejected during authentication")
         })?;
 
-    let tenant = tenant_tenants_entity::Entity::find_by_id(tenant_id)
-        .one(&ctx.db)
-        .await
-        .internal()?
-        .ok_or_else(|| crate::YorishiroError::not_found("tenant not found"))?;
+    let tenant = crate::models::tenant_tenants::Model::find_by_id(&ctx.db, tenant_id).await?;
     let billing = tenant_billing::get_billing(&ctx.db, tenant_id).await?;
     let usage = tenant_tenants::compute_tenant_usage(&ctx.db, tenant_id).await?;
     // The dashboard overview shows every member, not a page: it's a fixed-shape summary, not a browsable list with its own query params.

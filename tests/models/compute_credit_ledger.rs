@@ -1,31 +1,16 @@
 use crate::requests::boot_request;
-use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
+use crate::requests::fixtures::{TenantArgs, TestTenant};
+use sea_orm::TransactionTrait;
 use yorishiro::App;
 use yorishiro::edition::ee::models::compute_credit_ledger as ledger;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 #[tokio::test]
 async fn actual_debit_never_overdraws_the_append_only_balance() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = tenant_tenants::ActiveModel {
-            name: ActiveValue::Set("ledger-tenant".into()),
-            ..Default::default()
-        }
-        .insert(&ctx.db)
-        .await
-        .expect("insert tenant");
-        let workspace = workspace_workspaces::ActiveModel {
-            tenant_id: ActiveValue::Set(tenant.id),
-            name: ActiveValue::Set("ledger-workspace".into()),
-            status: ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-            ..Default::default()
-        }
-        .insert(&ctx.db)
-        .await
-        .expect("insert workspace");
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let workspace_id = fixture.workspace_id;
 
-        ledger::earn(&ctx.db, workspace.id, 10)
+        ledger::earn(&ctx.db, workspace_id, 10)
             .await
             .expect("earn credits");
 
@@ -39,7 +24,7 @@ async fn actual_debit_never_overdraws_the_append_only_balance() {
         let first = tokio::spawn(async move {
             let txn = first_db.begin().await.expect("begin first debit");
             first_barrier.wait().await;
-            let result = ledger::debit_actual(&txn, workspace.id, 7).await;
+            let result = ledger::debit_actual(&txn, workspace_id, 7).await;
             if result.is_ok() {
                 txn.commit().await.expect("commit first debit");
                 true
@@ -51,7 +36,7 @@ async fn actual_debit_never_overdraws_the_append_only_balance() {
         let second = tokio::spawn(async move {
             let txn = second_db.begin().await.expect("begin second debit");
             second_barrier.wait().await;
-            let result = ledger::debit_actual(&txn, workspace.id, 7).await;
+            let result = ledger::debit_actual(&txn, workspace_id, 7).await;
             if result.is_ok() {
                 txn.commit().await.expect("commit second debit");
                 true
@@ -69,7 +54,7 @@ async fn actual_debit_never_overdraws_the_append_only_balance() {
         .await
         .expect("concurrent debit barrier must release");
         assert_eq!(u8::from(first) + u8::from(second), 1);
-        assert_eq!(ledger::balance(&ctx.db, workspace.id).await.unwrap(), 3);
+        assert_eq!(ledger::balance(&ctx.db, workspace_id).await.unwrap(), 3);
     })
     .await;
 }

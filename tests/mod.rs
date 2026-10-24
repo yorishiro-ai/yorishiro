@@ -4,13 +4,14 @@ mod db;
 mod db_enum;
 #[cfg(feature = "enterprise")]
 mod ee;
+mod error;
+mod http_stub;
 mod initializers;
 mod integration;
 
 mod config;
 mod licence;
 mod metaschema;
-pub(crate) mod migration;
 mod models;
 mod requests;
 mod services;
@@ -39,7 +40,7 @@ pub(crate) fn record_configured_topology(ctx: &loco_rs::app::AppContext) {
     let queue = match config.queue.as_ref() {
         Some(loco_rs::config::QueueConfig::Postgres(_)) => "postgres",
         Some(loco_rs::config::QueueConfig::Sqlite(_)) => "sqlite",
-        Some(loco_rs::config::QueueConfig::Redis(_)) => "valkey",
+        Some(loco_rs::config::QueueConfig::Redis(_)) => "redis",
         _ => "unknown",
     };
     let Some(root) = std::env::var_os("YORISHIRO_TOPOLOGY_MARKER_DIR") else {
@@ -87,7 +88,7 @@ static BACKEND_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// `serial_test` keys only exclude tests that carry the same key, so a test with no key still reads `DATABASE_URL`, `QUEUE_URL` and the rest while it boots.
 /// A writer therefore waits for the booting tests in flight and holds the others off until its [`EnvGuard`] is dropped.
 ///
-/// A read skips lock acquisition only inside a write scope on the same thread.
+/// A nested read shares the environment lock already held on the same thread.
 /// Nested environment guards share that write lock until the outer guard exits.
 /// A write inside a read is a bug in the test: it would wait on itself, so it is refused loudly.
 /// Capture the [`EnvGuard`] before the call that boots the application.
@@ -104,7 +105,7 @@ pub(crate) struct EnvironmentRead {
 
 impl EnvironmentRead {
     pub(crate) fn enter() -> Self {
-        let held = SCOPES.with(|scopes| scopes.get().1 > 0);
+        let held = SCOPES.with(|scopes| scopes.get() != (0, 0));
         let lock = (!held).then(|| ENVIRONMENT.read().unwrap_or_else(|e| e.into_inner()));
         SCOPES.with(|scopes| {
             let (readers, writers) = scopes.get();
@@ -297,59 +298,4 @@ pub(crate) fn require_sqlite_backend() -> bool {
 /// Returns `true` and records execution only when the active backend is PostgreSQL.
 pub(crate) fn require_postgres_backend() -> bool {
     require_backend("postgres")
-}
-
-/// The reserved Valkey test database (`/15`) this lane's queue points at, or `None` when the lane has no Valkey queue.
-///
-/// `YORISHIRO_VALKEY_TEST_URL` names it explicitly; otherwise a Redis `QUEUE_URL` is the lane's own.
-pub(crate) fn valkey_test_url() -> Option<String> {
-    let uri = std::env::var("YORISHIRO_VALKEY_TEST_URL")
-        .or_else(|_| std::env::var("QUEUE_URL"))
-        .ok()?;
-    let is_database_15 = |value: &str| {
-        (value.starts_with("redis://") || value.starts_with("rediss://"))
-            && reqwest::Url::parse(value).is_ok_and(|url| url.path() == "/15")
-    };
-    let active = std::env::var("QUEUE_URL").ok();
-    if let Some(active) = active.as_deref() {
-        if !is_database_15(active) {
-            return None;
-        }
-        if std::env::var("YORISHIRO_VALKEY_TEST_URL").is_ok() && active != uri {
-            return None;
-        }
-    }
-    is_database_15(&uri).then_some(uri)
-}
-
-#[cfg(test)]
-mod valkey_safety_tests {
-    use serial_test::serial;
-
-    #[test]
-    #[serial(process_environment)]
-    fn valkey_lane_accepts_only_database_fifteen() {
-        let original = std::env::var_os("YORISHIRO_VALKEY_TEST_URL");
-        let original_queue = std::env::var_os("QUEUE_URL");
-        unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", "redis://localhost:6379/14") };
-        assert!(super::valkey_test_url().is_none());
-        unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", "redis://localhost:6379/15") };
-        unsafe { std::env::set_var("QUEUE_URL", "redis://localhost:6379/14") };
-        assert!(super::valkey_test_url().is_none());
-        unsafe { std::env::set_var("QUEUE_URL", "redis://localhost:6379/15") };
-        assert_eq!(
-            super::valkey_test_url().as_deref(),
-            Some("redis://localhost:6379/15")
-        );
-        unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", "redis://localhost:6379/14") };
-        assert!(super::valkey_test_url().is_none());
-        match original {
-            Some(value) => unsafe { std::env::set_var("YORISHIRO_VALKEY_TEST_URL", value) },
-            None => unsafe { std::env::remove_var("YORISHIRO_VALKEY_TEST_URL") },
-        }
-        match original_queue {
-            Some(value) => unsafe { std::env::set_var("QUEUE_URL", value) },
-            None => unsafe { std::env::remove_var("QUEUE_URL") },
-        }
-    }
 }

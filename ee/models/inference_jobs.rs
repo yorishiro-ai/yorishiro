@@ -5,12 +5,12 @@ use crate::models::inference_jobs::{ActiveModel, Column, Entity, Model};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
-    QueryFilter, QuerySelect, Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    QueryFilter, QuerySelect, Set,
 };
 use uuid::Uuid;
 
 crate::db_enum::db_enum! {
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum InferenceJobStatus {
         Queued = "queued",
         Running = "running",
@@ -19,7 +19,7 @@ crate::db_enum::db_enum! {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InferenceJobRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -172,16 +172,7 @@ pub async fn reconcile_attempt(
     id: Uuid,
     target_attempt: i32,
 ) -> Result<bool, YorishiroError> {
-    let txn = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        conn.begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .internal()?
-    } else {
-        conn.begin().await.internal()?
-    };
+    let txn = crate::db::begin_write(conn).await.internal()?;
     let Some(row) = Entity::find_by_id(id)
         .lock_exclusive()
         .one(&txn)

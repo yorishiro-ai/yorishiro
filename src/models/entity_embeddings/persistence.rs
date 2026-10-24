@@ -1,5 +1,5 @@
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QuerySelect, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, ExprTrait, QueryFilter, SelectExt,
 };
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ pub(super) struct VectorWriteInput {
 
 /// Writes a vector to the width-specific table and guards it with the entity snapshot.
 ///
-/// SeaORM cannot express `INSERT ... SELECT WHERE EXISTS ... ON CONFLICT ... DO UPDATE WHERE EXISTS ... RETURNING` (conditional upsert with a subquery in both INSERT and UPDATE branches, returning a count).
+/// Both insert and conflict-update branches check the current entity token in one SeaQuery statement.
 ///
 /// Returns `Ok(true)` when the write landed, `Ok(false)` when the entity was deleted,
 /// and `Err(ConcurrentModification)` when the entity's token has changed since the
@@ -30,52 +30,48 @@ pub(super) async fn embed_and_write(
 ) -> Result<bool, YorishiroError> {
     let backend = conn.get_database_backend();
 
-    let blob_bytes = if backend == DatabaseBackend::Sqlite {
-        crate::db::sqlite_vec_blob(&input.vector)
-    } else {
-        Vec::new()
-    };
+    use crate::models::_entities::entity_entities::{Column, Entity};
+    use sea_orm::sea_query::{Alias, Expr, OnConflict, Query};
 
-    let table_name = super::embedding_table(input.dimension)?;
+    let vector: sea_orm::Value = match backend {
+        DatabaseBackend::Sqlite => crate::db::sqlite_vec_blob(&input.vector).into(),
+        DatabaseBackend::Postgres => sea_orm::entity::prelude::PgVector::from(input.vector).into(),
+        _ => {
+            return Err(YorishiroError::BackendUnsupported {
+                message: "embedding storage backend is unsupported".into(),
+            });
+        }
+    };
+    let table = Alias::new(super::embedding_table(input.dimension)?);
+    let id = Alias::new("entity_id");
+    let embedding = Alias::new("embedding");
+    let current = Query::select()
+        .expr(Expr::val(1))
+        .from(Entity)
+        .and_where(Expr::col(Column::Id).eq(input.entity_id))
+        .and_where(Expr::col(Column::WorkspaceId).eq(input.workspace_id))
+        .and_where(Expr::col(Column::EmbeddingSyncToken).eq(input.embedding_sync_token))
+        .to_owned();
+    let source = Query::select()
+        .expr(Expr::val(input.entity_id))
+        .expr(Expr::val(vector.clone()))
+        .and_where(Expr::exists(current.clone()))
+        .to_owned();
+    let statement = Query::insert()
+        .into_table(table.clone())
+        .columns([id.clone(), embedding.clone()])
+        .select_from(source)
+        .map_err(|error| YorishiroError::Internal(error.into()))?
+        .on_conflict(
+            OnConflict::column(id.clone())
+                .value(embedding, Expr::val(vector))
+                .action_and_where(Expr::col((table, id)).eq(input.entity_id))
+                .action_and_where(Expr::exists(current))
+                .to_owned(),
+        )
+        .to_owned();
     let rows_affected = conn
-        .execute_raw(Statement::from_sql_and_values(
-            backend,
-            format!(
-                "INSERT INTO {table_name} (entity_id, embedding) \
-                 SELECT $1, $2 \
-                 WHERE EXISTS ( \
-                   SELECT 1 FROM entity_entities \
-                   WHERE entity_entities.id = $1 \
-                     AND entity_entities.workspace_id = $3 \
-                     AND entity_entities.embedding_sync_token = $4 \
-                 ) \
-                 ON CONFLICT(entity_id) \
-                 DO UPDATE SET embedding = $2 \
-                   WHERE {table_name}.entity_id = $1 \
-                     AND EXISTS ( \
-                       SELECT 1 FROM entity_entities \
-                       WHERE entity_entities.id = {table_name}.entity_id \
-                         AND entity_entities.workspace_id = $3 \
-                         AND entity_entities.embedding_sync_token = $4 \
-                     ) \
-                 RETURNING 1"
-            ),
-            if backend == DatabaseBackend::Postgres {
-                vec![
-                    input.entity_id.into(),
-                    sea_orm::entity::prelude::PgVector::from(input.vector).into(),
-                    input.workspace_id.into(),
-                    input.embedding_sync_token.into(),
-                ]
-            } else {
-                vec![
-                    input.entity_id.into(),
-                    sea_orm::Value::from(blob_bytes),
-                    input.workspace_id.into(),
-                    input.embedding_sync_token.into(),
-                ]
-            },
-        ))
+        .execute_raw(backend.build(&statement))
         .await
         .internal()?;
 
@@ -83,17 +79,11 @@ pub(super) async fn embed_and_write(
         // The upsert found no matching entity row with the expected token.
         // Distinguish: was the entity deleted, or just token-mismatched?
 
-        use crate::models::_entities::entity_entities::{Column, Entity};
-
         let entity_exists = Entity::find_by_id(input.entity_id)
-            .select_only()
-            .column(Column::Id)
             .filter(Column::WorkspaceId.eq(input.workspace_id))
-            .into_tuple::<Uuid>()
-            .one(conn)
+            .exists(conn)
             .await
-            .internal()?
-            .is_some();
+            .internal()?;
 
         if entity_exists {
             return Err(YorishiroError::Conflict {

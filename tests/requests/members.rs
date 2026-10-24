@@ -1,78 +1,23 @@
 use super::boot_request;
+use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use axum::http::StatusCode;
 use yorishiro::App;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-
-/// Creates a tenant and one active workspace, for tests that need somewhere to attach members.
-async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(name.to_string()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set(format!("{name}-ws")),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-
-    (tenant.id, workspace.id)
-}
-
-async fn issue_key_for(
-    ctx: &loco_rs::app::AppContext,
-    workspace_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-) -> String {
-    api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace_id,
-        ApiKeyScope::Migration,
-        Some(user_id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext
-}
 
 #[tokio::test]
 async fn owner_can_list_and_add_members() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
-
-        let owner = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            "owner@example.com",
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .expect("create owner");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_id,
-            owner.id,
-            MembershipRole::Owner,
-        )
-        .await
-        .expect("add owner");
-        let owner_key = issue_key_for(&ctx, workspace_id, owner.id).await;
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let args = TenantArgs::default();
+        let owner_email = args.owner_email.clone();
+        let TestTenant {
+            api_key: owner_key, ..
+        } = TestTenant::create(&request, &ctx, args).await;
 
         // The invitee must already have an account before they can be added by email.
         let invitee = yorishiro::models::user_users::create_user(
             &ctx.db,
-            "invitee@example.com",
+            &crate::requests::fixtures::unique_email("invitee"),
             "hunter2-hunter2",
             None,
         )
@@ -83,7 +28,7 @@ async fn owner_can_list_and_add_members() {
             .post("/api/members")
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .json(&serde_json::json!({
-                "email": "invitee@example.com",
+                "email": invitee.email,
                 "role": "member",
             }))
             .await;
@@ -104,8 +49,8 @@ async fn owner_can_list_and_add_members() {
             .iter()
             .map(|m| m["email"].as_str().unwrap())
             .collect();
-        assert!(emails.contains(&"owner@example.com"));
-        assert!(emails.contains(&"invitee@example.com"));
+        assert!(emails.contains(&owner_email.as_str()));
+        assert!(emails.contains(&invitee.email.as_str()));
     })
     .await;
 }
@@ -113,31 +58,15 @@ async fn owner_can_list_and_add_members() {
 #[tokio::test]
 async fn add_member_rejects_an_email_with_no_account() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
-
-        let owner = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            "owner@example.com",
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .expect("create owner");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_id,
-            owner.id,
-            MembershipRole::Owner,
-        )
-        .await
-        .expect("add owner");
-        let owner_key = issue_key_for(&ctx, workspace_id, owner.id).await;
+        let TestTenant {
+            api_key: owner_key, ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
             .post("/api/members")
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .json(&serde_json::json!({
-                "email": "nobody@example.com",
+                "email": super::fixtures::unique_email("nobody"),
                 "role": "member",
             }))
             .await;
@@ -149,11 +78,15 @@ async fn add_member_rejects_an_email_with_no_account() {
 #[tokio::test]
 async fn member_role_cannot_manage_members() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
+        let TestTenant {
+            tenant_id,
+            workspace_id,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let member = yorishiro::models::user_users::create_user(
             &ctx.db,
-            "member@example.com",
+            &crate::requests::fixtures::unique_email("member"),
             "hunter2-hunter2",
             None,
         )
@@ -167,7 +100,8 @@ async fn member_role_cannot_manage_members() {
         )
         .await
         .expect("add member");
-        let member_key = issue_key_for(&ctx, workspace_id, member.id).await;
+        let member_key =
+            issue_api_key(&ctx, workspace_id, member.id, ApiKeyScope::Migration, false).await;
 
         let response = request
             .get("/api/members")

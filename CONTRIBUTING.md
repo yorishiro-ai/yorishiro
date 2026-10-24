@@ -13,10 +13,11 @@
 | `migration/src/` | Schema migrations |
 | `src/tasks/` | Admin and one-off commands |
 | `ee/` | Enterprise edition (mirrors `models/`, `controllers/`, `services/`) |
-| `edition/` | Composition root: the only `Hooks` implementation, and the only place that knows which editions exist |
-| `data/templates/` | Built-in JSON template assets embedded by `src/data/templates.rs` |
+| `src/lib.rs` | Crate-root composition: the only `Hooks` implementation and overlay assembly |
+| `src/templates/` | Built-in JSON template assets embedded by `src/data/templates.rs` |
+| `.github/packaging/` | Package definitions, hooks, service units and verification scripts |
 
-- `src/` never refers to `ee/`: no `cfg(feature = "enterprise")` and no `crate::ee`. Edition wiring goes in `edition/`, and `make edition-boundary-check` enforces it.
+- Only `src/lib.rs` assembles `ee/`; other base modules have no enterprise branches or references, enforced by `make edition-boundary-check`.
 - `src/models/_entities/` is auto-generated. Never edit by hand.
 - Table extensions live in `src/models/<table>.rs`; large ones may contain private submodules.
 - Business logic goes in `src/models/<table>.rs` next to the generated entity.
@@ -46,7 +47,7 @@ Async waits release the task to do other work, but one physical connection still
 
 Run the full suite with Rust's default parallel test execution.
 
-Use `make test-postgres`, `make test-sqlite`, or `make test-valkey` locally.
+Use `make test-postgres`, `make test-sqlite`, or `make test-redis` locally.
 For the four supported topologies, use `uv run scripts/test_topology.py <topology>`.
 The wrapper selects CE or EE explicitly and requires configured-app evidence from a successful Loco boot.
 
@@ -71,7 +72,9 @@ Tests need PostgreSQL with `vector` and `pg_trgm` in `template1`, and a non-supe
 
 ## Git workflow
 
-Branch from `develop`. Merge commits preferred. Every PR updates English + Japanese docs.
+Branch from `develop`.
+Merge commits preferred.
+`docs/` and `ee/docs/` are managed separately; code changes do not require documentation updates.
 
 ## Rules
 

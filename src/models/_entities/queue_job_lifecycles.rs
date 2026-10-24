@@ -17,6 +17,8 @@ pub struct Model {
     pub status: String,
     pub enqueue_at: DateTimeWithTimeZone,
     pub claim_at: Option<DateTimeWithTimeZone>,
+    pub admitted_at: Option<DateTimeWithTimeZone>,
+    pub lease_until: Option<DateTimeWithTimeZone>,
     pub start_at: Option<DateTimeWithTimeZone>,
     pub retry_at: Option<DateTimeWithTimeZone>,
     pub completed_at: Option<DateTimeWithTimeZone>,
@@ -29,8 +31,6 @@ pub struct Model {
     pub error: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
-    pub admitted_at: Option<DateTimeWithTimeZone>,
-    pub lease_until: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

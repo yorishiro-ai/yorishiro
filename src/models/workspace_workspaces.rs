@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ExprTrait, QuerySelect, Statement};
+use sea_orm::{ExprTrait, QuerySelect};
 use serde::Serialize;
 
 use crate::db_enum::db_enum;
@@ -8,13 +8,29 @@ pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Mo
 
 mod tenancy;
 
+/// Resolves the workspace override on each delivery, falling back to the process's deployment provider.
+pub(crate) async fn embedding_provider(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: Uuid,
+) -> Result<Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError>
+{
+    Ok(
+        match crate::workspace_embedding_provider(&ctx.db, workspace_id).await? {
+            Some(provider) => Some(provider),
+            None => ctx
+                .shared_store
+                .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
+        },
+    )
+}
+
 pub(crate) use tenancy::{
     delete_workspace, get_workspace, get_workspace_tenant, list_workspaces,
     workspace_count_lock_key,
 };
 
 /// A workspace summary returned by tenancy lookups and signup.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, sea_orm::FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceSummary {
     pub id: Uuid,
@@ -190,7 +206,7 @@ pub(crate) async fn stamp_embedding_if_missing(
 }
 
 /// API-facing workspace record with a typed status.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct WorkspaceRecord {
     pub id: Uuid,
@@ -229,7 +245,7 @@ impl TryFrom<Model> for WorkspaceRecord {
 }
 
 db_enum! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub(crate) enum WorkspaceStatus {
         SchemaPending = "schema_pending",
         Active = "active",
@@ -264,18 +280,20 @@ pub(crate) async fn mark_active(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        conn.get_database_backend(),
-        "UPDATE workspace_workspaces \
-         SET status = $1, schema_id = COALESCE(schema_id, $2) \
-         WHERE id = $3",
-        [
-            WorkspaceStatus::Active.as_db_str().into(),
-            schema_id.into(),
-            workspace_id.into(),
-        ],
-    ))
-    .await
-    .internal()?;
+    use crate::models::_entities::workspace_workspaces::Column;
+    Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(WorkspaceStatus::Active.as_db_str()),
+        )
+        .col_expr(
+            Column::SchemaId,
+            sea_orm::sea_query::Func::coalesce([Expr::col(Column::SchemaId), Expr::val(schema_id)])
+                .into(),
+        )
+        .filter(Column::Id.eq(workspace_id))
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }

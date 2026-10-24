@@ -1,93 +1,22 @@
 use super::boot_request;
+use super::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
-use chrono::Utc;
-use loco_rs::prelude::async_trait;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::db::DbHandle;
-use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 use yorishiro::edition::ee::models::inference_jobs::{self, InferenceJobStatus};
-use yorishiro::edition::ee::workers::infer_fill::{InferFillArgs, InferFillDispatcher};
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
-use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenant_memberships::MembershipRole;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
-/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the enterprise-edition state the test process booted with.
-/// See `marketplace.rs`'s own copy of this helper.
-pub(crate) fn licence(ctx: &loco_rs::app::AppContext) {
-    ctx.shared_store
-        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
-            sub: "acme-corp".into(),
-            plan: "enterprise".into(),
-            exp: Utc::now().timestamp() + 60 * 60,
-        })) as std::sync::Arc<LicenceState>);
-}
-
-pub(crate) struct Setup {
-    pub(crate) key: String,
-    pub(crate) tenant_id: Uuid,
-    pub(crate) workspace_id: Uuid,
-}
-
-pub(crate) async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    setup_named(ctx, "acme", "main", "owner@example.com").await
-}
-
-async fn setup_named(
-    ctx: &loco_rs::app::AppContext,
-    tenant_name: &str,
-    workspace_name: &str,
-    email: &str,
-) -> Setup {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(tenant_name.into()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set(workspace_name.into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-    let owner = yorishiro::models::user_users::create_user(&ctx.db, email, "hunter2-hunter2", None)
-        .await
-        .expect("create owner");
-    yorishiro::models::tenant_memberships::add_member(
-        &ctx.db,
-        tenant.id,
-        owner.id,
-        MembershipRole::Owner,
-    )
-    .await
-    .expect("add owner");
-    // Migration, not Schema: ApiKeyScope::Schema (infer_fill's own requirement) is a lower rung
-    // than Migration (POST /api/migration-jobs/{job_id}/undo's requirement, see
-    // controllers::entities::undo_migration_job), and Migration subsumes it, so one key issued at
-    // the higher scope satisfies both this file's infer_fill calls and its undo call.
-    let key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Migration,
-        Some(owner.id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext;
-    Setup {
-        key,
-        tenant_id: tenant.id,
-        workspace_id: workspace.id,
-    }
+fn require_licence(ctx: &loco_rs::app::AppContext) {
+    assert!(
+        ctx.shared_store
+            .get::<Arc<LicenceState>>()
+            .expect("production boot installs licence state")
+            .is_active(),
+        "licensed inference tests require a valid YORISHIRO_LICENSE_KEY at boot"
+    );
 }
 
 /// Setting, reading and clearing a workspace's LLM credentials over REST.
@@ -95,12 +24,11 @@ async fn setup_named(
 #[tokio::test]
 async fn llm_key_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let missing = request
             .get("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             missing.status_code(),
@@ -111,7 +39,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
 
         let put = request
             .put("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://api.example.com/v1/",
                 "model": "gpt-4o-mini",
@@ -127,7 +55,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
 
         let get = request
             .get("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             get.status_code(),
@@ -148,7 +76,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
 
         let delete = request
             .delete("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             delete.status_code(),
@@ -159,7 +87,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
 
         let after_delete = request
             .get("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(after_delete.status_code(), StatusCode::NOT_FOUND);
     })
@@ -170,8 +98,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
 #[tokio::test]
 async fn a_non_http_base_url_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         for bad_url in [
             "file:///etc/passwd",
@@ -180,7 +107,7 @@ async fn a_non_http_base_url_is_refused() {
         ] {
             let put = request
                 .put("/api/workspace/llm-key")
-                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .json(&serde_json::json!({
                     "base_url": bad_url,
                     "model": "m",
@@ -202,12 +129,12 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 async fn infer_fill_without_a_configured_key_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let create_schema = request
             .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "name": "note",
                 "entity_types": {
@@ -224,7 +151,7 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 
         let infer = request
             .post("/api/schemas/active/note/infer-fill")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             infer.status_code(),
@@ -239,13 +166,16 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 /// An unlicensed deployment answers the same 404 whether or not a valid key is presented, so an anonymous prober cannot tell "does not exist" from "exists but locked".
 /// Matches `marketplace`'s and `dashboard`'s own tests for the same gate.
 #[tokio::test]
+#[serial_test::serial(process_environment)]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let with_key = request
             .post("/api/schemas/active/note/infer-fill")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let without_key = request.post("/api/schemas/active/note/infer-fill").await;
 
@@ -256,10 +186,10 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 }
 
 /// Creates one schema and one entity for the infer-fill request tests.
-pub(crate) async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
+pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &TestTenant) -> Uuid {
     let create_schema = request
         .post("/api/schemas")
-        .add_header("Authorization", format!("Bearer {}", setup.key))
+        .add_header("Authorization", format!("Bearer {}", setup.api_key))
         .json(&serde_json::json!({
             "name": "note",
             "entity_types": {
@@ -281,7 +211,7 @@ pub(crate) async fn create_entity(request: &axum_test::TestServer, setup: &Setup
 
     let create_entity = request
         .post("/api/entities")
-        .add_header("Authorization", format!("Bearer {}", setup.key))
+        .add_header("Authorization", format!("Bearer {}", setup.api_key))
         .json(&serde_json::json!({
             "schema_name": "note",
             "entity_type": "note",
@@ -306,9 +236,9 @@ pub(crate) async fn create_entity(request: &axum_test::TestServer, setup: &Setup
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
 
         let job_id = Uuid::new_v4();
@@ -349,7 +279,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 
         let get_entity = request
             .get(&format!("/api/entities/{}", entity))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             get_entity.status_code(),
@@ -365,32 +295,58 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 
         let confirm = request
             .post(&format!("/api/inference-jobs/{job_id}/confirm"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             confirm.status_code(),
-            StatusCode::OK,
+            StatusCode::ACCEPTED,
             "response: {:?}",
             confirm.text()
         );
+        let accepted: serde_json::Value = confirm.json();
+        let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        super::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            confirmation_id,
+            &setup.api_key,
+            &format!("/api/inference-jobs/confirmations/{confirmation_id}"),
+        )
+        .await;
+        let status = request
+            .get(&format!(
+                "/api/inference-jobs/confirmations/{confirmation_id}"
+            ))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(status.status_code(), StatusCode::OK, "{}", status.text());
+        assert_eq!(status.json::<serde_json::Value>()["result"]["confirmed"], 1);
 
         // The accepted write is snapshot-backed and remains undoable through the base endpoint.
         let undo = request
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             undo.status_code(),
-            StatusCode::OK,
+            StatusCode::ACCEPTED,
             "response: {:?}",
             undo.text()
         );
         let undo_report: serde_json::Value = undo.json();
-        assert_eq!(undo_report["restored"], 1, "undo report: {undo_report:?}");
+        let undo_id = undo_report["job_id"].as_str().unwrap().parse().unwrap();
+        super::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            undo_id,
+            &setup.api_key,
+            &format!("/api/migration-jobs/{undo_id}"),
+        )
+        .await;
 
         let get_after_undo = request
             .get(&format!("/api/entities/{}", entity))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let fetched_after_undo: serde_json::Value = get_after_undo.json();
         assert!(
@@ -405,8 +361,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 #[tokio::test]
 async fn invalid_proposals_do_not_leave_a_snapshot() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
 
         let job_id = Uuid::new_v4();
@@ -463,7 +418,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
 
 async fn create_completed_proposal(
     ctx: &loco_rs::app::AppContext,
-    setup: &Setup,
+    setup: &TestTenant,
     entity: Uuid,
     job_id: Uuid,
     value: serde_json::Value,
@@ -498,8 +453,8 @@ async fn create_completed_proposal(
 #[tokio::test]
 async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
         let discarded_job = Uuid::new_v4();
@@ -522,7 +477,7 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
 
         let listed = request
             .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             listed.status_code(),
@@ -537,7 +492,7 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
 
         let rejected = request
             .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             rejected.status_code(),
@@ -549,7 +504,7 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
 
         let discarded = request
             .post(&format!("/api/inference-jobs/{discarded_job}/discard"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             discarded.status_code(),
@@ -559,10 +514,14 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
         );
         assert_eq!(discarded.json::<serde_json::Value>()["changed"], 1);
 
-        let other = setup_named(&ctx, "other-tenant", "other", "other@example.com").await;
+        // SQLite permits one tenant; cross-tenant authorization belongs to PostgreSQL.
+        if !crate::require_postgres_backend() {
+            return;
+        }
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let denied = request
             .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
-            .add_header("Authorization", format!("Bearer {}", other.key))
+            .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await;
         assert_eq!(
             denied.status_code(),
@@ -583,8 +542,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let db = ctx.shared_store.get::<DbHandle>().unwrap().clone();
 
@@ -691,14 +649,14 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
 #[tokio::test]
 async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let queued_job = Uuid::new_v4();
         create_pending_proposal(&ctx, &setup, entity, queued_job).await;
         let queued = request
             .post(&format!("/api/inference-jobs/{queued_job}/confirm"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             queued.status_code(),
@@ -718,7 +676,7 @@ async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
             .expect("fail proposal job");
         let failed = request
             .post(&format!("/api/inference-jobs/{failed_job}/confirm"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             failed.status_code(),
@@ -729,7 +687,7 @@ async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
 
         let listed = request
             .get(&format!("/api/inference-jobs/{failed_job}/proposals"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let proposals: serde_json::Value = listed.json();
         assert_eq!(proposals[0]["status"], "discarded");
@@ -739,7 +697,7 @@ async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
 
 async fn create_pending_proposal(
     ctx: &loco_rs::app::AppContext,
-    setup: &Setup,
+    setup: &TestTenant,
     entity: Uuid,
     job_id: Uuid,
 ) {
@@ -778,13 +736,13 @@ async fn create_pending_proposal(
 #[tokio::test]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // Set up a workspace LLM key so infer-fill passes its validation gate.
         let put_key = request
             .put("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://api.example.com/v1",
                 "model": "gpt-4o-mini",
@@ -801,7 +759,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         // Create a schema with at least one entity so infer-fill has work to do.
         let create_schema = request
             .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "name": "article",
                 "entity_types": {
@@ -823,7 +781,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
 
         let create_entity = request
             .post("/api/entities")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "schema_name": "article",
                 "entity_type": "article",
@@ -842,7 +800,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         // need a real job_id to prove the status route is on a different path.
         let infer = request
             .post("/api/schemas/active/article/infer-fill")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             infer.status_code(),
@@ -861,7 +819,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         // `/active/{name}/infer-fill` (the POST path), not `/inference-jobs/{job_id}`.
         let status = request
             .get(&format!("/api/inference-jobs/{job_id}"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             status.status_code(),
@@ -878,7 +836,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         // status handler).
         let get_on_infer_fill = request
             .get("/api/schemas/active/test/infer-fill")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert!(
             get_on_infer_fill.status_code() != 200
@@ -890,34 +848,15 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
     .await;
 }
 
-struct FailingInferFillDispatcher {
-    args: Mutex<Option<InferFillArgs>>,
-}
-
-#[async_trait]
-impl InferFillDispatcher for FailingInferFillDispatcher {
-    async fn dispatch(
-        &self,
-        _ctx: &loco_rs::app::AppContext,
-        args: InferFillArgs,
-        _txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String> {
-        *self.args.lock().unwrap() = Some(args);
-        Err(loco_rs::Error::Message(
-            "fake infer-fill dispatch failure".into(),
-        ))
-    }
-}
-
-/// A dispatch failure leaves the durable infer-fill row failed rather than queued forever.
+/// A dispatch failure rolls back the job together with its durable dispatch records.
 #[tokio::test]
-async fn infer_fill_dispatch_failure_persists_failed_job() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+async fn infer_fill_dispatch_failure_rolls_back_job() {
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let put_key = request
             .put("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://api.example.com/v1",
                 "model": "gpt-4o-mini",
@@ -926,35 +865,29 @@ async fn infer_fill_dispatch_failure_persists_failed_job() {
             .await;
         assert_eq!(put_key.status_code(), StatusCode::NO_CONTENT);
 
-        let dispatcher = Arc::new(FailingInferFillDispatcher {
-            args: Mutex::new(None),
-        });
-        ctx.shared_store
-            .insert(dispatcher.clone() as Arc<dyn InferFillDispatcher>);
+        use sea_orm::{ConnectionTrait, DbBackend};
+        // Database fault injection is isolated from other tests and uses real enqueue.
+        let fault = match ctx.db.get_database_backend() {
+            DbBackend::Postgres => "ALTER TABLE queue_job_dispatch_outbox ADD CONSTRAINT refuse_test_dispatch CHECK (false)",
+            DbBackend::Sqlite => "CREATE TRIGGER refuse_test_dispatch BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'refuse_test_dispatch'); END",
+            backend => panic!("unsupported test backend: {backend:?}"),
+        };
+        ctx.db.execute_unprepared(fault).await.unwrap();
 
         let response = request
             .post("/api/schemas/active/article/infer-fill")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(response.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
 
-        let args = dispatcher
-            .args
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("dispatcher must receive infer-fill args");
-        let job = inference_jobs::get(&ctx.db, args.job_id)
+        // The failed POST cannot return a job ID; inspect this workspace for orphan rows.
+        use yorishiro::models::_entities::inference_jobs as rows;
+        let jobs = rows::Entity::find()
+            .filter(rows::Column::WorkspaceId.eq(setup.workspace_id))
+            .all(&ctx.db)
             .await
-            .expect("read failed infer-fill job")
-            .expect("durable infer-fill job must exist");
-        assert_eq!(job.workspace_id, setup.workspace_id);
-        assert_eq!(job.schema_name, "article");
-        assert_eq!(job.status, InferenceJobStatus::Failed);
-        assert_eq!(
-            job.error.as_deref(),
-            Some("failed to enqueue infer-fill job: fake infer-fill dispatch failure")
-        );
+            .unwrap();
+        assert!(jobs.is_empty(), "failed enqueue must not leave an orphan job");
     })
     .await;
 }
@@ -962,8 +895,8 @@ async fn infer_fill_dispatch_failure_persists_failed_job() {
 #[tokio::test]
 async fn inference_status_polling_preserves_all_wire_values() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let mut jobs = Vec::new();
 
         let queued = Uuid::new_v4();
@@ -1002,7 +935,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
         for (job_id, expected) in jobs {
             let response = request
                 .get(&format!("/api/inference-jobs/{job_id}"))
-                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .await;
             assert_eq!(
                 response.status_code(),
@@ -1031,18 +964,15 @@ async fn inference_status_polling_preserves_all_wire_values() {
 /// The worker runs outside any request and the queued job names only the workspace, so it finds the tenant itself; the two ids differ here.
 #[tokio::test]
 async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
-    use loco_rs::bgworker::BackgroundWorker;
-    use sea_orm::{ConnectionTrait, TransactionTrait};
-    use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
-
-    boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
+    let (provider, _server, _) = crate::http_stub::keyword_provider(768).await;
+    super::query_worker::boot_with_query_worker(provider, |request, ctx| async move {
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
         create_entity(&request, &setup).await;
         let key = request
             .put("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://api.example.com/v1/",
                 "model": "gpt-4o-mini",
@@ -1052,93 +982,37 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
         assert_eq!(key.status_code(), StatusCode::NO_CONTENT);
 
         // Every entity is already on the active schema, so the run reaches the schema read and needs no LLM call.
-        let job_id = Uuid::new_v4();
-        inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
-            .await
-            .expect("create job");
-
-        let lifecycle_id = Uuid::now_v7();
-        let txn = ctx.db.begin().await.expect("begin lifecycle transaction");
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-            txn.execute_unprepared(&format!(
-                "SELECT set_config('app.current_tenant', '{}', true); SELECT set_config('app.current_workspace', '{}', true)",
-                setup.tenant_id, setup.workspace_id
-            ))
-            .await
-            .expect("set lifecycle RLS scope");
-        }
-        yorishiro::models::queue_job_dispatch_outbox::record_in_transaction(
-            &txn,
-            yorishiro::models::queue_job_lifecycles::Enqueue {
-                id: lifecycle_id,
-                job_name: "infer_fill",
-                worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
-                workspace_id: Some(setup.workspace_id),
-                plan: None,
-                concurrency_key: None,
-                concurrency_limit: None,
-            },
-            serde_json::json!({"job_id": job_id, "workspace_id": setup.workspace_id}),
-            InferFillWorker::class_name(),
-            Some(yorishiro::workers::target::WorkerTarget::Shared.queue()),
-            Some(vec![yorishiro::workers::target::WorkerTarget::Shared.tag()]),
-        )
+        let response = request
+            .post("/api/schemas/active/note/infer-fill")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        response.assert_status(StatusCode::OK);
+        let job_id = response.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let completed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let response = request
+                    .get(&format!("/api/inference-jobs/{job_id}"))
+                    .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                    .await;
+                response.assert_status(StatusCode::OK);
+                let job = response.json::<serde_json::Value>();
+                if job["status"] == "completed" {
+                    break job;
+                }
+                assert_ne!(job["status"], "failed", "{job}");
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
         .await
-        .expect("durable lifecycle dispatch");
-        txn.commit().await.expect("commit lifecycle dispatch");
-        let epoch = yorishiro::models::queue_job_dispatch_outbox::publishing_state(&ctx.db)
-            .await
-            .expect("publisher state")
-            .epoch;
-        InferFillWorker::build(&ctx)
-            .perform(InferFillArgs {
-                lifecycle_id: Some(lifecycle_id),
-                dispatch_id: Some(lifecycle_id),
-                publishing_epoch: Some(epoch),
-                job_id,
-                workspace_id: setup.workspace_id,
-                schema_name: "note".into(),
-            })
-            .await
-            .expect("the worker reads the schema under the workspace's own tenant");
-
-        let job = inference_jobs::get(&ctx.db, job_id)
-            .await
-            .expect("read job")
-            .expect("job exists");
-        assert_eq!(job.status, InferenceJobStatus::Completed, "{job:?}");
-        assert_eq!(job.error, None);
+        .expect("real worker resolves the workspace's tenant and completes");
+        assert!(completed["error"].is_null(), "{completed}");
     })
     .await;
 }
 
-#[tokio::test]
-async fn infer_fill_worker_rejects_unversioned_provider_delivery() {
-    use loco_rs::bgworker::BackgroundWorker;
-    use yorishiro::edition::ee::workers::infer_fill::InferFillWorker;
-
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let worker = InferFillWorker::build(&ctx);
-        for (dispatch_id, publishing_epoch) in
-            [(None, None), (Some(Uuid::new_v4()), None), (None, Some(1))]
-        {
-            let result = worker
-                .perform(InferFillArgs {
-                    lifecycle_id: None,
-                    dispatch_id,
-                    publishing_epoch,
-                    job_id: Uuid::new_v4(),
-                    workspace_id: Uuid::new_v4(),
-                    schema_name: "note".into(),
-                })
-                .await;
-            assert!(result.is_ok(), "rejected stale delivery is a no-op");
-        }
-    })
-    .await;
-}
-
-/// The queued job names only the workspace, so the scope the worker opens has to carry the workspace's real tenant, not the workspace id in both places.
 #[tokio::test]
 async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
     use sea_orm::{ConnectionTrait, Statement};
@@ -1148,8 +1022,8 @@ async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let setup = setup(&ctx).await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
 
         let txn = open_workspace_scope(&ctx, setup.workspace_id)

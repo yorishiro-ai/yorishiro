@@ -46,8 +46,6 @@ impl Task for ReindexEmbeddings {
         reindex::enqueue_for_class(
             app_context,
             ReindexArgs {
-                dispatch_id: None,
-                publishing_epoch: None,
                 lifecycle_id: None,
                 workspace_id,
                 worker_class,

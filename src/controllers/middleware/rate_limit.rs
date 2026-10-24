@@ -1,5 +1,5 @@
 //! A per-key fixed-window rate limiter, applied to the credential routes reachable without a bearer token.
-//! Which paths those are is not decided here: [`crate::app::RouteMounts`] collects them as route groups are mounted, so a route group added by another edition is guarded by naming its path when it is mounted, and the limiter never learns who added it.
+//! Which paths those are is not decided here: `crate::app::RouteMounts` collects them as route groups are mounted, so a route group added by another edition is guarded by naming its path when it is mounted, and the limiter never learns who added it.
 //!
 //! Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo` is present on the request (Loco's boot path always populates it, so this only matters for a request driven directly through the router, e.g. some test harnesses).
 

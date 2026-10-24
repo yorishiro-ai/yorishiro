@@ -1,30 +1,27 @@
 use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::ActiveModelTrait;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
+use sea_orm::TransactionTrait;
 use std::sync::Arc;
 use tokio::sync::Barrier;
 use yorishiro::App;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::_entities::tenant_tenants;
 use yorishiro::models::{tenancy, tenant_memberships, workspace_invites};
 
-pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnection) {
+pub(crate) async fn assert_invitation_boundaries(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
+) {
     let txn = db.begin().await.expect("begin invite boundary transaction");
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(format!("invite-boundary-{}", uuid::Uuid::new_v4())),
-        ..Default::default()
-    }
-    .insert(&txn)
-    .await
-    .expect("insert tenant");
     let now = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
         .expect("parse fixed timestamp")
         .with_timezone(&Utc);
 
     let (at_expiry, token) = workspace_invites::create_invite_at(
         &txn,
-        tenant.id,
-        "at-expiry@example.com",
+        tenant_id,
+        &crate::requests::fixtures::unique_email("at-expiry"),
         tenant_memberships::MembershipRole::Member,
         Duration::seconds(1),
         now - Duration::seconds(1),
@@ -41,8 +38,8 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
 
     let (before_expiry, token) = workspace_invites::create_invite_at(
         &txn,
-        tenant.id,
-        "before-expiry@example.com",
+        tenant_id,
+        &crate::requests::fixtures::unique_email("before-expiry"),
         tenant_memberships::MembershipRole::Member,
         Duration::seconds(1),
         now,
@@ -62,8 +59,8 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
 
     let (after_expiry, token) = workspace_invites::create_invite_at(
         &txn,
-        tenant.id,
-        "after-expiry@example.com",
+        tenant_id,
+        &crate::requests::fixtures::unique_email("after-expiry"),
         tenant_memberships::MembershipRole::Member,
         Duration::seconds(1),
         now,
@@ -84,8 +81,8 @@ pub(crate) async fn assert_invitation_boundaries(db: &sea_orm::DatabaseConnectio
     let ttl = Duration::hours(72);
     let (issued, _) = workspace_invites::create_invite_at(
         &txn,
-        tenant.id,
-        "ttl@example.com",
+        tenant_id,
+        &crate::requests::fixtures::unique_email("ttl"),
         tenant_memberships::MembershipRole::Member,
         ttl,
         now,
@@ -103,8 +100,9 @@ async fn invite_expiry_boundaries_match_postgres_gt() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        assert_invitation_boundaries(&ctx.db).await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        assert_invitation_boundaries(&ctx.db, tenant.tenant_id).await;
     })
     .await;
 }
@@ -120,31 +118,27 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         const RACERS: usize = 8;
 
         // A cap of 2 with one workspace already present leaves exactly one slot for eight racers to fight over.
-        let tenant = tenant_tenants::ActiveModel {
-            name: sea_orm::ActiveValue::Set("race".into()),
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        // No public operation changes workspace caps; inject the finite cap this race must enforce.
+        tenant_tenants::ActiveModel {
+            id: sea_orm::ActiveValue::Set(tenant.tenant_id),
             max_workspaces: sea_orm::ActiveValue::Set(Some(2)),
             ..Default::default()
-        };
-        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-            .await
-            .expect("insert tenant");
-
-        let txn = ctx.db.begin().await.expect("begin seed txn");
-        tenancy::create_workspace(&txn, tenant.id, "first", None, None)
-            .await
-            .expect("seed the tenant's first workspace");
-        txn.commit().await.expect("commit seed");
+        }
+        .update(&ctx.db)
+        .await
+        .expect("set workspace cap");
 
         let barrier = Arc::new(Barrier::new(RACERS));
         let mut handles = Vec::with_capacity(RACERS);
         for i in 0..RACERS {
             let db = ctx.db.clone();
             let barrier = Arc::clone(&barrier);
-            let tenant_id = tenant.id;
+            let tenant_id = tenant.tenant_id;
             handles.push(tokio::spawn(async move {
                 barrier.wait().await;
                 let txn = db.begin().await.expect("begin racer txn");
@@ -173,14 +167,13 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
             "exactly one racer should win the tenant's last workspace slot"
         );
 
-        // The count is the assertion that actually matters: a racer could in principle return `Ok` without its row surviving, and the cap exists to bound rows, not return values.
-        let total = workspace_workspaces::Entity::find()
-            .filter(workspace_workspaces::Column::TenantId.eq(tenant.id))
-            .count(&ctx.db)
+        // This fixture's owner belongs only to the tenant whose final workspace set we check.
+        let workspaces = tenancy::list_workspaces_for_user(&ctx.db, tenant.owner_id)
             .await
-            .expect("count workspaces");
+            .expect("list persisted workspaces");
         assert_eq!(
-            total, 2,
+            workspaces.len(),
+            2,
             "the tenant must never hold more than max_workspaces"
         );
     })

@@ -11,10 +11,10 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
 use crate::dtos::entities::{
     CreateEntityRequest, FillDefaultsRequest, FillDefaultsResponse, ListEntitiesParams,
-    ReindexResponse, UpdateEntityRequest,
+    ReindexResponse, UndoResponse, UpdateEntityRequest,
 };
 use crate::models::api_key_audit_log;
-use crate::models::entity_entities::{self, EntityRecord, UndoReport};
+use crate::models::entity_entities::{self, EntityRecord};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
@@ -28,27 +28,7 @@ pub(crate) async fn create_entity(
     let input = body.into();
     let created_by = authorized.ctx.user_id;
     let record = entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                "dispatcher missing"
-            )))
-        })?;
-    embedding_sync::enqueue_after_write_with_dispatcher(
-        &ctx,
-        workspace_id,
-        record.id,
-        Some(authorized.txn()),
-        dispatcher.as_ref(),
-    )
-    .await
-    .map_err(|e| {
-        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-            e.to_string()
-        )))
-    })?;
+    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id, authorized.txn()).await?;
     authorized.commit().await?;
     Ok((StatusCode::CREATED, Json(record)))
 }
@@ -85,27 +65,7 @@ pub(crate) async fn update_entity(
         },
     )
     .await?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                "dispatcher missing"
-            )))
-        })?;
-    embedding_sync::enqueue_after_write_with_dispatcher(
-        &ctx,
-        workspace_id,
-        record.id,
-        Some(authorized.txn()),
-        dispatcher.as_ref(),
-    )
-    .await
-    .map_err(|e| {
-        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-            e.to_string()
-        )))
-    })?;
+    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id, authorized.txn()).await?;
     authorized.commit().await?;
     Ok(Json(record))
 }
@@ -139,30 +99,37 @@ pub async fn list_entities(
 /// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
 ///
 /// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope that would gate the job that produced the snapshots, e.g. confirming a proposal that writes entities), not an ordinary entity write.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 200, body = crate::models::entity_entities::UndoReport), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 202, body = crate::dtos::entities::UndoResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub(crate) async fn undo_migration_job(
+    State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
     Path(job_id): Path<Uuid>,
-) -> Result<Json<UndoReport>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let report = entity_entities::undo_job(authorized.txn(), workspace_id, job_id).await?;
-    // Recorded on the same transaction as the undo itself, before commit: a rollback of the undo
-    // must also roll back the record that it happened, or a failed request could still leave an
-    // audit trail claiming it succeeded.
-    api_key_audit_log::record(
-        authorized.txn(),
-        api_key_audit_log::AuditActor {
-            workspace_id,
-            tenant_id: authorized.ctx.tenant_id,
-            api_key_id: authorized.ctx.api_key_id,
-            user_id: authorized.ctx.user_id,
-        },
-        api_key_audit_log::AuditAction::UndoMigrationJob,
-        serde_json::json!({ "job_id": job_id, "restored": report.restored, "missing": report.missing }),
-    )
-    .await?;
+) -> Result<(StatusCode, Json<UndoResponse>), ApiError> {
+    let queued_id =
+        crate::workers::undo::enqueue(&ctx, authorized.txn(), &authorized.ctx, job_id).await?;
     authorized.commit().await?;
-    Ok(Json(report))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(UndoResponse {
+            job_id: queued_id,
+            snapshot_job_id: job_id,
+        }),
+    ))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/migration-jobs/{job_id}", params(("job_id" = Uuid, Path)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+pub(crate) async fn migration_job_status(
+    authorized: Authorized<MigrationScope>,
+    Path(job_id): Path<Uuid>,
+) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
+    Ok(Json(
+        crate::models::queue_job_lifecycles::migration_job_status(
+            authorized.txn(),
+            authorized.ctx.workspace_id,
+            job_id,
+        )
+        .await?,
+    ))
 }
 
 /// Enqueues a reindex job for this workspace.
@@ -210,26 +177,13 @@ pub(crate) async fn reindex_workspace(
         serde_json::json!({ "workspace_id": workspace_id }),
     )
     .await?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn crate::workers::dispatch::ReindexDispatcher>>()
-        .ok_or_else(|| {
+    let job_id = reindex::enqueue_reindex(&ctx, workspace_id, Some(authorized.txn()))
+        .await
+        .map_err(|e| {
             ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                "dispatcher missing"
+                e.to_string()
             )))
         })?;
-    let job_id = reindex::enqueue_reindex_with_dispatcher(
-        &ctx,
-        workspace_id,
-        Some(authorized.txn()),
-        dispatcher.as_ref(),
-    )
-    .await
-    .map_err(|e| {
-        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-            e.to_string()
-        )))
-    })?;
     authorized.commit().await?;
 
     Ok(Json(ReindexResponse { job_id }))
@@ -237,52 +191,29 @@ pub(crate) async fn reindex_workspace(
 
 /// Fills absent required fields in entities that fall behind the active schema version.
 ///
-/// `POST /api/migration-jobs/fill-defaults` runs the same logic `migration_dry_run` describes:
-/// for every entity on an older schema version that is missing a required field the active version
-/// defines, it fills that field with the schema's `default` value or a type-appropriate empty
-/// value, takes a snapshot (so the batch can be undone via `undo_migration_job`), and writes the
-/// updated data.
-///
-/// Returns 409 when the workspace has no entities behind the active version.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = crate::dtos::entities::FillDefaultsRequest, responses((status = 200, body = crate::dtos::entities::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+/// Accepts a durable fill-defaults job and returns its ID before migration starts.
+/// The worker records completed counts in the audit log and uses this ID for undo snapshots.
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = crate::dtos::entities::FillDefaultsRequest, responses((status = 202, body = crate::dtos::entities::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub(crate) async fn fill_defaults(
+    State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
     Json(body): Json<FillDefaultsRequest>,
-) -> Result<Json<FillDefaultsResponse>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let job_id = Uuid::now_v7();
-    let updated_by = authorized.ctx.user_id;
-
-    let report = entity_entities::fill_defaults(
+) -> Result<(StatusCode, Json<FillDefaultsResponse>), ApiError> {
+    let job_id = crate::workers::fill_defaults::enqueue(
+        &ctx,
         authorized.txn(),
-        workspace_id,
-        &body.schema_name,
-        job_id,
-        updated_by,
-    )
-    .await?;
-
-    // Audit log the batch operation.
-    api_key_audit_log::record(
-        authorized.txn(),
-        api_key_audit_log::AuditActor {
-            workspace_id,
-            tenant_id: authorized.ctx.tenant_id,
-            api_key_id: authorized.ctx.api_key_id,
-            user_id: authorized.ctx.user_id,
-        },
-        api_key_audit_log::AuditAction::FillDefaults,
-        serde_json::json!({ "schema_name": body.schema_name, "job_id": job_id, "entities_updated": report.entities_updated, "fields_filled": report.fields_filled }),
+        &authorized.ctx,
+        body.schema_name.clone(),
     )
     .await?;
     authorized.commit().await?;
-
-    Ok(Json(FillDefaultsResponse {
-        schema_name: body.schema_name,
-        job_id,
-        entities_updated: report.entities_updated,
-        fields_filled: report.fields_filled,
-    }))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(FillDefaultsResponse {
+            schema_name: body.schema_name,
+            job_id,
+        }),
+    ))
 }
 
 pub fn routes() -> Routes {
@@ -298,6 +229,7 @@ pub fn routes() -> Routes {
 pub fn migration_routes() -> Routes {
     Routes::new()
         .prefix("api/migration-jobs")
+        .add("/{job_id}", get(migration_job_status))
         .add("/{job_id}/undo", post(undo_migration_job))
         .add("/reindex", post(reindex_workspace))
         .add("/fill-defaults", post(fill_defaults))
@@ -312,6 +244,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_delete_entity),
         super::route_inventory::path_doc(__path_list_entities),
         super::route_inventory::path_doc(__path_undo_migration_job),
+        super::route_inventory::path_doc(__path_migration_job_status),
         super::route_inventory::path_doc(__path_reindex_workspace),
         super::route_inventory::path_doc(__path_fill_defaults),
     ]

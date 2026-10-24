@@ -4,7 +4,8 @@ use uuid::Uuid;
 use crate::edition::ee::models::tenant_tenants::TenantUsage;
 use crate::models::tenant_memberships::MembershipRecord;
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct TenantOverview {
     pub(crate) tenant_id: Uuid,
     /// `null` until a Stripe subscription event has set one.

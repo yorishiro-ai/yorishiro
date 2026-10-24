@@ -6,12 +6,18 @@ use yorishiro::data::templates::{TEMPLATES, parse};
 use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::boot_request;
-use super::fixtures::{self, TenantArgs, issue_api_key};
+use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 
 #[tokio::test]
 async fn relations_are_created_listed_statused_exported_and_deleted_over_rest() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (_, workspace_id, owner_id, schema_key) = fixtures::create_tenant_workspace_owner(
+        let TestTenant {
+            workspace_id,
+            owner_id,
+            api_key: schema_key,
+            ..
+        } = TestTenant::create(
+            &request,
             &ctx,
             TenantArgs {
                 key_scope: ApiKeyScope::Schema,
@@ -161,7 +167,13 @@ async fn relations_are_created_listed_statused_exported_and_deleted_over_rest() 
 #[tokio::test]
 async fn relation_write_requires_write_scope_and_read_authentication() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (_, workspace_id, owner_id, schema_key) = fixtures::create_tenant_workspace_owner(
+        let TestTenant {
+            workspace_id,
+            owner_id,
+            api_key: schema_key,
+            ..
+        } = TestTenant::create(
+            &request,
             &ctx,
             TenantArgs {
                 key_scope: ApiKeyScope::Schema,
@@ -206,7 +218,13 @@ async fn relation_write_requires_write_scope_and_read_authentication() {
 #[tokio::test]
 async fn every_builtin_relation_type_can_be_created() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (_, workspace_id, owner_id, schema_key) = fixtures::create_tenant_workspace_owner(
+        let TestTenant {
+            workspace_id,
+            owner_id,
+            api_key: schema_key,
+            ..
+        } = TestTenant::create(
+            &request,
             &ctx,
             TenantArgs {
                 key_scope: ApiKeyScope::Schema,

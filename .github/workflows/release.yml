@@ -91,6 +91,7 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
 
           cp Cargo.lock Cargo.lock.before
+          python3 patches/loco-rs/verify.py --prepare
           cargo check
           python3 - "$VERSION" <<'PY'
           import copy
@@ -211,16 +212,8 @@ jobs:
         include:
           - os: ubuntu-26.04
             arch: amd64
-            edition: ce
           - os: ubuntu-26.04-arm
             arch: arm64
-            edition: ce
-          - os: ubuntu-26.04
-            arch: amd64
-            edition: ee
-          - os: ubuntu-26.04-arm
-            arch: arm64
-            edition: ee
     runs-on: ${{ matrix.os }}
     permissions:
       packages: write
@@ -241,7 +234,6 @@ jobs:
         with:
           image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
-          edition: ${{ matrix.edition }}
           arch: ${{ matrix.arch }}
           push: ${{ !inputs.dry_run }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -320,7 +312,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           pattern: binary-*

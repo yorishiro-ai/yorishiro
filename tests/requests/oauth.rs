@@ -4,27 +4,20 @@
 use super::boot_request;
 use axum::http::StatusCode;
 use axum::http::header;
-use hmac::{Hmac, KeyInit, Mac};
-use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
+use sea_orm::{EntityTrait, TransactionTrait};
 use serial_test::serial;
-use sha2::Sha256;
 use yorishiro::App;
-use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-use yorishiro::models::_entities::tenant_tenants;
+use yorishiro::db::AppContextBackend;
+use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
-/// The OAuth routes carry the licence gate, so an unlicensed process answers 404 to all three before
-/// any handler runs.
-/// Every test here installs a licence for the same reason `marketplace.rs` and `stripe.rs` do, and by
-/// the same means: `shared_store.insert` is keyed by `TypeId`, so this overwrites the
-/// enterprise-edition state the test process booted with.
-/// What the gate itself does is asserted in `licence_gate.rs`, not here.
-fn licence(ctx: &loco_rs::app::AppContext) {
-    ctx.shared_store
-        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
-            sub: "acme-corp".into(),
-            plan: "enterprise".into(),
-            exp: chrono::Utc::now().timestamp() + 60 * 60,
-        })) as std::sync::Arc<LicenceState>);
+fn require_licence(ctx: &loco_rs::app::AppContext) {
+    assert!(
+        ctx.shared_store
+            .get::<std::sync::Arc<LicenceState>>()
+            .expect("production boot installs licence state")
+            .is_active(),
+        "licensed OAuth tests require a valid YORISHIRO_LICENSE_KEY at boot"
+    );
 }
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
@@ -33,28 +26,14 @@ const ISSUER_URL: &str = "http://127.0.0.1:1";
 const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
 
-/// A signed `state` value in the exact shape `controllers::oauth::state_token::issue` produces: this crate keeps that module private, so a test that needs a validly-signed fixture (rather than exercising the rejection paths, which need no valid signature at all) builds one the same way, HMAC-SHA256 under the client secret.
-fn sign_state(payload: &str) -> String {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(CLIENT_SECRET.as_bytes()).expect("any key length is valid");
-    mac.update(payload.as_bytes());
-    let signature = mac
-        .finalize()
-        .into_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    format!("{payload}.{signature}")
-}
-
 const OAUTH_VARS: [&str; 3] = [
     "YORISHIRO_OAUTH_ISSUER_URL",
     "YORISHIRO_OAUTH_CLIENT_ID",
     "YORISHIRO_OAUTH_CLIENT_SECRET",
 ];
 
-/// `OAuthConfig::from_env` reads process env vars directly on every request, with no DI seam for it (see `controllers::oauth`'s module doc comment), so tests configure OAuth the same way production does: by setting the vars for the duration of the request.
-/// `#[serial(process_environment)]` on every test in this suite makes that safe.
+/// The shipped Loco configuration interpolates these values before each app boots.
+/// Callers that change these variables take `serial(process_environment)`.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
     guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
@@ -72,7 +51,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
         ambient.remove(variable);
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
+        require_licence(&ctx);
         let disabled = request.get("/auth/oauth/status").await;
         assert_eq!(disabled.status_code(), StatusCode::OK);
         assert_eq!(
@@ -81,19 +60,28 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
         );
 
         with_oauth_env(async {
-            let enabled = request.get("/auth/oauth/status").await;
-            assert_eq!(enabled.status_code(), StatusCode::OK);
+            let unchanged = request.get("/auth/oauth/status").await;
             assert_eq!(
-                enabled.json::<serde_json::Value>(),
-                serde_json::json!({ "enabled": true })
+                unchanged.json::<serde_json::Value>(),
+                serde_json::json!({"enabled": false})
             );
+            boot_request::<App, _, _>(|request, ctx| async move {
+                require_licence(&ctx);
+                let enabled = request.get("/auth/oauth/status").await;
+                assert_eq!(enabled.status_code(), StatusCode::OK);
+                assert_eq!(
+                    enabled.json::<serde_json::Value>(),
+                    serde_json::json!({ "enabled": true })
+                );
+            })
+            .await;
         })
         .await;
     })
     .await;
 }
 
-/// An issuer set with no `client_id`/`client_secret` is a misconfiguration, not "unconfigured": since `OAuthConfig::from_env` is read per request rather than once at boot, it must report `500` rather than panic and crash the task handling the request, and must not be silently treated as `enabled: false`.
+/// Partial resolved OAuth configuration must report 500 rather than panic or silently disable login.
 #[tokio::test]
 #[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {
@@ -102,7 +90,7 @@ async fn status_errors_loudly_when_partially_configured() {
     guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
     guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
+        require_licence(&ctx);
         let response = request.get("/auth/oauth/status").await;
 
         assert_eq!(
@@ -121,7 +109,7 @@ async fn status_errors_loudly_when_partially_configured() {
 #[serial(process_environment)]
 async fn authorize_and_callback_404_when_unconfigured() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
+        require_licence(&ctx);
         let authorize = request.get("/auth/oauth/authorize").await;
         assert_eq!(
             authorize.status_code(),
@@ -148,7 +136,7 @@ async fn authorize_and_callback_404_when_unconfigured() {
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            licence(&ctx);
+            require_licence(&ctx);
             let response = request.get("/auth/oauth/authorize").await;
             assert_eq!(
                 response.status_code(),
@@ -168,7 +156,7 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            licence(&ctx);
+            require_licence(&ctx);
             let response = request
                 .get("/auth/oauth/callback?error=access_denied&error_description=user+declined")
                 .await;
@@ -203,7 +191,7 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            licence(&ctx);
+            require_licence(&ctx);
             let missing_state = request.get("/auth/oauth/callback?code=abc").await;
             assert_eq!(missing_state.status_code(), StatusCode::FOUND);
             assert_eq!(
@@ -229,7 +217,7 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 async fn callback_rejects_a_state_with_a_bad_signature() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
+        require_licence(&ctx);
             let response = request
                 .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
                 .await;
@@ -248,9 +236,13 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 async fn callback_rejects_an_expired_state() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            licence(&ctx);
+            require_licence(&ctx);
             let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
-            let state = sign_state(&format!("{issued_at}.deadbeef.verifier"));
+            let state = yorishiro::edition::ee::controllers::oauth::state_token::issue_at(
+                CLIENT_SECRET.as_bytes(),
+                issued_at,
+            )
+            .state;
 
             let response = request
                 .get(&format!("/auth/oauth/callback?code=abc&state={state}"))
@@ -273,44 +265,42 @@ async fn callback_rejects_an_expired_state() {
 /// Fresh generation with the lockfile-pinned CLI omits this partial index entirely; no application/test path uses Schema::create_table_from_entity or other entity-based schema creation, so the migration is its only owner.
 /// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
 #[tokio::test]
-#[serial(process_environment)]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        licence(&ctx);
-        let existing_tenant = tenant_tenants::ActiveModel {
-            name: ActiveValue::Set("existing".into()),
-            ..Default::default()
-        };
-        sea_orm::ActiveModelTrait::insert(existing_tenant, &ctx.db)
-            .await
-            .unwrap();
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        super::fixtures::TestTenant::create(&request, &ctx, super::fixtures::TenantArgs::default())
+            .await;
 
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
-        let txn = ctx.db.begin().await.expect("begin");
-        let result = yorishiro::edition::ee::models::user_users::find_or_create(
-            &txn,
-            "oidc",
-            "a-brand-new-subject",
-            Some("newcomer@example.com"),
-            None,
-            Some(1),
-            false,
-        )
-        .await;
-        // The call is expected to be refused; make the rollback explicit so a
-        // future implementation that retains the transaction cannot leak it.
-        txn.rollback().await.expect("rollback refused provisioning");
-        match result {
-            Err(yorishiro::YorishiroError::ScopeInsufficient { message, .. }) => {
-                assert!(
-                    message.contains("tenant limit"),
-                    "wrong ScopeInsufficient message: {message}"
-                );
+        for max_tenants in [Some(1), None] {
+            if max_tenants.is_none() && !ctx.is_sqlite() {
+                continue;
             }
-            _ => panic!(
-                "a new identity past the cap must be refused with ScopeInsufficient naming the \
+            let txn = ctx.db.begin().await.expect("begin");
+            let result = yorishiro::edition::ee::models::user_users::find_or_create(
+                &txn,
+                "oidc",
+                "a-brand-new-subject",
+                Some("newcomer@example.com"),
+                None,
+                max_tenants,
+                false,
+            )
+            .await;
+            // The call is expected to be refused; make the rollback explicit so a
+            // future implementation that retains the transaction cannot leak it.
+            txn.rollback().await.expect("rollback refused provisioning");
+            match result {
+                Err(yorishiro::YorishiroError::Conflict { message }) => {
+                    assert!(
+                        message.contains("tenant limit"),
+                        "wrong Conflict message: {message}"
+                    );
+                }
+                _ => panic!(
+                    "a new identity past the cap must be refused with Conflict naming the \
                  tenant limit"
-            ),
+                ),
+            }
         }
     })
     .await;
@@ -319,10 +309,8 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 /// A first login must not leave the auto-provisioned workspace `schema_pending`: there is no admin present afterward to choose a starting schema for it, unlike `controllers::setup::setup`'s own bootstrap workspace.
 /// The workspace is provisioned with a schema from the built-in `general-notes` template and left `active`.
 #[tokio::test]
-#[serial(process_environment)]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        licence(&ctx);
+    super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
@@ -331,7 +319,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             "a-first-login-subject",
             Some("firstlogin@example.com"),
             None,
-            None,
+            Some(1),
             false,
         )
         .await
@@ -356,11 +344,14 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             .schema_id
             .expect("the workspace must have a schema linked");
 
-        let schema = yorishiro::models::_entities::schema_schemas::Entity::find_by_id(schema_id)
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .expect("the linked schema must exist");
+        let schema = yorishiro::models::schema_schemas::get_active_schema(
+            &ctx.db,
+            provisioned.workspace_id,
+            "general-notes",
+        )
+        .await
+        .expect("the linked schema must be active");
+        assert_eq!(schema.id, schema_id);
         assert_eq!(schema.name, "general-notes");
     })
     .await;
@@ -377,8 +368,10 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
             None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
         }
-        boot_request::<App, _, _>(|_request, ctx| async move {
-            licence(&ctx);
+        super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
+            let policy_enabled =
+                yorishiro::edition::ee::data::plan::plan_policy_enabled(&ctx.config)
+                    .expect("resolve provisioning policy");
             let txn = ctx.db.begin().await.expect("begin");
             let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
                 &txn,
@@ -386,26 +379,12 @@ async fn oauth_provisioning_policy_controls_new_caps() {
                 &format!("policy-subject-{index}"),
                 Some(&format!("policy-{index}@example.com")),
                 None,
-                None,
-                expected_tenant.is_some(),
+                Some(1),
+                policy_enabled,
             )
             .await
             .expect("provisioning");
             txn.commit().await.expect("commit");
-            let tenant = tenant_tenants::Entity::find_by_id(
-                yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
-                    provisioned.workspace_id,
-                )
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .unwrap()
-                .tenant_id,
-            )
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
             let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
                 provisioned.workspace_id,
             )
@@ -413,6 +392,10 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             .await
             .unwrap()
             .unwrap();
+            let tenant =
+                yorishiro::models::tenant_tenants::Model::find_by_id(&ctx.db, workspace.tenant_id)
+                    .await
+                    .expect("provisioned tenant");
             assert_eq!(tenant.max_workspaces, expected_tenant);
             assert_eq!(workspace.max_entities, expected_entities);
         })
@@ -425,7 +408,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
 #[tokio::test]
 async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        licence(&ctx);
+        require_licence(&ctx);
         for path in ["/auth/oauth/authorize", "/auth/oauth/callback"] {
             let mut last_status = 0;
             for _ in 0..15 {

@@ -3,7 +3,7 @@
 #
 #   docker compose up --build
 #
-# The queue is Redis-compatible (valkey) and jobs run in a separate `worker` container from the
+# The queue uses the Redis protocol and jobs run in a separate `worker` container from the
 # same image: `start` serves HTTP only and consumes nothing, so without the worker every queued
 # job (embedding sync, reindex, infer-fill) would sit in the queue.
 #
@@ -13,14 +13,17 @@
 # One image and one configuration for the server and the worker, so they cannot disagree about
 # the database, the queue, or the embedding provider.
 x-yorishiro: &yorishiro
+  image: ${IMAGE:-yorishiro}:${TAG:-local}
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      EDITION: ${EDITION:-ee}
   environment: &yorishiro-environment
     # These override the embedded/example defaults. Mount a complete administrator-owned
     # /app/config/production.yaml or production.local.yaml when file configuration is needed.
     DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
-    # `Redis` is Loco's provider name for Redis-compatible services such as valkey. Without it the
+    # `Redis` selects Loco's Redis-compatible queue provider. Without it the
     # queue kind follows DATABASE_URL's scheme and lands on Postgres.
     YORISHIRO_QUEUE_KIND: Redis
     QUEUE_URL: redis://redis:6379
@@ -32,10 +35,6 @@ x-yorishiro: &yorishiro
     # model into the container cache when no read-only model mount is supplied.
     # `YORISHIRO_EMBEDDING_PROVIDER=none docker compose up` skips the model download.
     YORISHIRO_EMBEDDING_PROVIDER: ${YORISHIRO_EMBEDDING_PROVIDER:-local}
-    # YORISHIRO_LOCAL_MODEL_PATH and YORISHIRO_LOCAL_TOKENIZER_PATH were removed: the
-    # operator-chosen path was structurally unbound from the model identifier, so the
-    # separation was eliminated entirely. The files live at models/<short_id>/ or are
-    # fetched automatically on first use when absent.
     # Also the binary's own default: `src/bin/main.rs` sets YORISHIRO_MAX_TENANTS to "1" when
     # it is unset, which is what keeps the first-run setup wizard reachable. Set it to "0" for
     # multiple tenants, which turns that wizard off.
@@ -43,7 +42,9 @@ x-yorishiro: &yorishiro
 
 services:
   db:
-    image: pgvector/pgvector:pg18
+    image: &postgres-image pgvector/pgvector:pg18
+    # Reap orphan children outside PostgreSQL so their exit cannot trigger cluster recovery.
+    init: true
     container_name: db
     environment:
       POSTGRES_USER: yorishiro
@@ -55,13 +56,14 @@ services:
       # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
       - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yorishiro"]
+      test: ["CMD", "pg_isready", "-U", "yorishiro"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   testdb:
-    image: pgvector/pgvector:pg18
+    image: *postgres-image
+    init: true
     container_name: testdb
     environment:
       POSTGRES_USER: yorishiro
@@ -73,7 +75,7 @@ services:
       # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
       - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yorishiro"]
+      test: ["CMD", "pg_isready", "-U", "yorishiro"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -81,7 +83,7 @@ services:
       - "127.0.0.1:15432:5432"
 
   redis:
-    image: valkey/valkey:9.1
+    image: valkey/valkey:9.1.2
     container_name: redis
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
@@ -94,14 +96,11 @@ services:
   app:
     <<: *yorishiro
     container_name: app
-    # The healthcheck start period accommodates the local embedding model download
-    # (about 522 MiB on first use).  Set `YORISHIRO_EMBEDDING_PROVIDER=none` to skip
-    # the download when embedding is not needed — the server then starts instantly
-    # because the local model is not loaded in that case.
+    # Allow first-start model download; set YORISHIRO_EMBEDDING_PROVIDER=none to skip local inference.
     healthcheck:
       start_period: 15m
     # To use a model this machine already has, put `model.safetensors` and `tokenizer.json` in
-    # `models/` and add:
+    # `models/<short_id>/` and add:
     #
     #   volumes:
     #     - ./models:/app/models:ro
@@ -109,7 +108,7 @@ services:
     # Not mounted by default because `models/` is gitignored, so docker would create it as an
     # empty root-owned directory. That is not an error: with no files there the provider fetches
     # the model on first use into $HOME/.cache/yorishiro/models instead, which blocks that first
-    # start for about 522 MiB. Both files or neither, though: exactly one present is a startup
+    # start while the model downloads. Both files or neither, though: exactly one present is a startup
     # error rather than a partial fetch.
     ports:
       - "5150:5150"

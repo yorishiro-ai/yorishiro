@@ -2,7 +2,7 @@
 //!
 //! This crate has exactly one `Hooks` implementation, and it lives in `crate::edition`.
 //! That implementation calls the functions below for the base behaviour and adds whatever its edition contributes.
-//! Nothing here knows which editions exist: the types this module hands out ([`RouteMounts`], [`WorkerRegistry`], [`McpToolSet`]) are how an edition adds to the base.
+//! Nothing here knows which editions exist: the types this module hands out (`RouteMounts`, [`WorkerRegistry`], [`McpToolSet`]) are how an edition adds to the base.
 
 use loco_rs::{
     Result,
@@ -15,15 +15,12 @@ use loco_rs::{
 };
 use migration::Migrator;
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::controllers;
 use crate::controllers::mcp::McpToolSet;
 use crate::controllers::route_inventory::{RouteClass, RouteInventory};
-use crate::db::AppContextBackend;
 use crate::initializers;
 use crate::tasks;
-use crate::workers::dispatch::{EmbeddingSyncDispatcher, LocoJobDispatcher, ReindexDispatcher};
 use crate::workers::registry::WorkerRegistry;
 
 pub(crate) fn app_version() -> String {
@@ -44,7 +41,6 @@ pub(crate) fn app_version() -> String {
 /// Returns an error when the configuration is invalid, or when the command starts workers without a valid worker target.
 pub(crate) async fn load_config(env: &Environment) -> Result<Config> {
     let mut config = crate::data::config::load(env).await?;
-    crate::data::config::validate(&config)?;
     let start = crate::workers::start::worker_start_from_args(std::env::args_os())
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     serve_start(start, &mut config);
@@ -70,7 +66,6 @@ pub(crate) async fn boot<H: Hooks>(
     environment: &Environment,
     mut config: Config,
 ) -> Result<BootResult> {
-    crate::data::config::validate_queue_policy(&config)?;
     crate::data::config::validate(&config)?;
     let start = crate::workers::start::worker_start_from_mode(&mode)
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
@@ -87,52 +82,13 @@ pub(crate) fn before_run(ctx: &AppContext) {
     }
 }
 
-/// Identifies CLI commands that execute application work before Loco's `before_run` hook.
-///
-/// `shortcut: Does not parse arbitrary subcommand option grammars; expand this if Loco changes its global CLI flags.`
-pub fn cli_requires_timezone_gate<I, T>(args: I) -> bool
-where
-    I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString>,
-{
-    let mut args = args.into_iter().map(Into::into).skip(1);
-    while let Some(raw) = args.next() {
-        let arg = raw.to_string_lossy();
-        if arg == "-e" || arg == "--environment" {
-            args.next();
-            continue;
-        }
-        if arg.starts_with("--environment=") || (arg.starts_with("-e") && arg.len() > 2) {
-            continue;
-        }
-        if arg.starts_with('-') {
-            continue;
-        }
-        return matches!(arg.as_ref(), "task" | "t" | "scheduler" | "jobs");
-    }
-    false
-}
-
-/// Checks whether a work command may proceed with the persisted active timezone.
-///
-/// # Errors
-/// Returns an error when a gated command has no persisted timezone state.
-pub fn cli_timezone_gate_result<I, T>(args: I, active_timezone: Option<&str>) -> Result<()>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString>,
-{
-    if cli_requires_timezone_gate(args) && active_timezone.is_none() {
-        return Err(loco_rs::Error::Message(
-            "timezone_state singleton missing; run `db migrate` before executing tasks or workers"
-                .into(),
-        ));
-    }
-    Ok(())
-}
+pub use crate::initializers::timezone::{cli_requires_timezone_gate, cli_timezone_gate_result};
 
 pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
-    vec![Box::new(initializers::db_load_guard::LoadGuard)]
+    vec![
+        Box::new(initializers::timezone::Timezone),
+        Box::new(initializers::db_load_guard::LoadGuard),
+    ]
 }
 
 /// Builds the base pools and shared-store seams.
@@ -140,24 +96,10 @@ pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
 /// An edition that brings its own rule for a seam inserts its own `Arc<dyn Trait>` afterwards: the store is keyed by `TypeId`, so the later insert wins without changing any call site.
 pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
     let mut ctx = ctx;
-    crate::db::replace_postgres_app_pool(&mut ctx).await?;
-    crate::db::replace_sqlite_app_pool(&mut ctx).await?;
+    initializers::database::install(&mut ctx).await?;
     let ctx = install_services(ctx).await?;
-    ctx.shared_store
-        .insert(Arc::new(LocoJobDispatcher) as Arc<dyn EmbeddingSyncDispatcher>);
-    ctx.shared_store
-        .insert(Arc::new(LocoJobDispatcher) as Arc<dyn ReindexDispatcher>);
+    initializers::queue::install(&ctx);
     Ok(ctx)
-}
-
-pub(crate) async fn synchronize_timezone(ctx: &AppContext) -> Result<()> {
-    crate::models::timezone_state::activate(
-        &ctx.db,
-        &ctx.config
-            .settings::<crate::data::settings::Settings>()?
-            .timezone,
-    )
-    .await
 }
 
 /// The route tree under construction, together with the inventory that `validate` checks and swagger serves.
@@ -333,22 +275,11 @@ pub(crate) fn after_routes(
         .ok_or_else(|| loco_rs::Error::Message("route inventory missing".into()))?;
     let router = controllers::swagger::mount(router, &inventory);
     let router = controllers::mcp::mount(router, ctx, move |ctx| tools.server(ctx));
-    let settings = ctx
-        .shared_store
-        .get::<crate::data::settings::Settings>()
-        .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
     let credential_paths = ctx
         .shared_store
         .get::<CredentialPaths>()
         .ok_or_else(|| loco_rs::Error::Message("credential paths missing".into()))?;
-    let rate_limiter = std::sync::Arc::new(
-        crate::controllers::middleware::rate_limit::RateLimiter::auth(&settings)
-            .guarding(&credential_paths.0),
-    );
-    let router = router.layer(axum::middleware::from_fn_with_state(
-        rate_limiter,
-        crate::controllers::middleware::rate_limit::enforce,
-    ));
+    let router = initializers::rate_limit::after_routes(router, ctx, &credential_paths.0)?;
     Ok(router.layer(axum::middleware::from_fn_with_state(
         ctx.clone(),
         crate::controllers::middleware::maintenance::maintenance_guard,
@@ -395,46 +326,10 @@ pub(crate) async fn connect_workers(
     queue: &loco_rs::bgworker::Queue,
     workers: &WorkerRegistry,
 ) -> Result<()> {
-    install_embedding_provider(ctx).await?;
-    refuse_retired_routes(ctx).await?;
+    initializers::embedding::install_provider(ctx).await?;
     workers.connect(ctx, queue).await?;
-    crate::workers::dispatch::start_relay(ctx);
+    initializers::queue::start_relay(ctx)?;
     crate::workers::startup_reindex::run(ctx).await;
-    Ok(())
-}
-
-/// Refuses to start a worker while jobs enqueued by a release that routed by worker class are still unfinished.
-///
-/// Those jobs carry tags no worker asks for any more, so they would wait forever, and their running rows would not count against the limit the new concurrency keys enforce.
-/// The queue has to be drained by the previous release first.
-async fn refuse_retired_routes(ctx: &AppContext) -> Result<()> {
-    let retired = crate::models::queue_job_dispatch_outbox::count_retired_routes(&ctx.db)
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    if retired > 0 {
-        return Err(loco_rs::Error::Message(format!(
-            "{retired} queued, running, or retrying jobs were enqueued by a release that routed jobs by worker class; drain the queue with that release before starting workers (see the upgrade notes in the configuration documentation)"
-        )));
-    }
-    Ok(())
-}
-
-async fn install_embedding_provider(ctx: &AppContext) -> Result<()> {
-    if ctx
-        .shared_store
-        .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
-        .is_some()
-    {
-        return Ok(());
-    }
-    let settings = ctx
-        .shared_store
-        .get::<crate::data::settings::Settings>()
-        .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
-    let provider = crate::services::embedding::build_embedding_provider(&settings)
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("failed to build embedding provider: {e}")))?;
-    ctx.shared_store.insert(provider);
     Ok(())
 }
 
@@ -455,20 +350,13 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::maintenance::Maintenance);
     tasks.register(tasks::maintenance_status::MaintenanceStatus);
     tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
-    tasks.register(tasks::set_queue_publishing_epoch::SetQueuePublishingEpoch);
-    tasks.register(tasks::replay_queue_dispatch_snapshot::ReplayQueueDispatchSnapshot);
     tasks.register(tasks::db_load_guard::DbLoadGuard);
 }
 
 pub(crate) async fn on_shutdown(ctx: &AppContext) {
-    if let Some(relay) = ctx.shared_store.get::<tokio::task::AbortHandle>() {
-        relay.abort();
-    }
+    initializers::queue::shutdown(ctx).await;
     initializers::db_load_guard::shutdown(ctx).await;
-    if let Some(db) = ctx.shared_store.get::<crate::db::DbHandle>() {
-        db.identity.close().await;
-        db.tenant.pool().close().await;
-    }
+    // Loco drains queue workers after this hook; their contexts keep the pools alive.
 }
 
 /// Seeds the demo tenant and workspace from `fixtures/`.
@@ -499,39 +387,11 @@ pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
 /// Only a process that consumes the queue installs it, in [`connect_workers`].
 /// Loco builds a context twice for `yorishiro start`, so anything built here would be built twice.
 async fn install_services(ctx: AppContext) -> Result<AppContext> {
-    if ctx.is_sqlite() {
-        crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
-            .map_err(loco_rs::Error::Message)?;
-    }
-
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
 
-    if ctx.is_postgres() {
-        crate::db::install_pools(&ctx).await?;
-        // Replaced by a later `shared_store.insert` when an edition brings its own rule:
-        // `Arc<dyn Trait>` is keyed by `TypeId`, so the later insert wins without changing any call site.
-        ctx.shared_store
-            .insert(crate::controllers::middleware::auth::default_authenticator());
-    }
-
-    ctx.shared_store
-        .insert(crate::workers::queue::default_queue_policy());
-    // Both resolvers are installed on every backend, unlike the authenticator above: they read
-    // `ctx.db` directly, and a per-workspace assignment is not an RLS concept.
-    ctx.shared_store
-        .insert(crate::services::embedding::default_embedding_resolver());
-    ctx.shared_store.insert(
-        crate::services::embedding::concurrency::EmbeddingConcurrency::new(
-            settings.embedding.provider_concurrency,
-        ),
-    );
-    ctx.shared_store
-        .insert(crate::workers::embedding_sync::default_worker_class_resolver());
-    // The per-workspace search token budget is request-scoped state, so it lives in `shared_store`
-    // rather than being built fresh in `after_routes` like the per-IP auth limiter.
-    ctx.shared_store.insert(Arc::new(
-        crate::controllers::middleware::rate_limit::RateLimiter::search(&settings),
-    ));
+    initializers::auth::install(&ctx);
+    initializers::embedding::install(&ctx, &settings);
+    initializers::rate_limit::install(&ctx, &settings);
     ctx.shared_store.insert(settings);
     Ok(ctx)
 }

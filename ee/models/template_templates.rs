@@ -26,7 +26,7 @@ const OFFICIAL_TENANT_NAME: &str = "Yorishiro Official";
 
 /// What one seeding run did.
 /// Callers report it; nothing branches on it.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct SeedOutcome {
     pub published: Vec<String>,
     pub updated: Vec<String>,

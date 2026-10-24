@@ -6,9 +6,13 @@ One repository, two licences. Everything outside `ee/` is BUSL-1.1; `ee/` is the
 
 ## Boundary
 
-**Nothing in `src/` may refer to the enterprise overlay.** That means no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, no path into `ee/`, and no overlay names, queues, branches, or registrations, comments included. The dependency runs from `ee/` into `src/`, never back.
+**Only `src/lib.rs` may assemble the enterprise overlay.** Other base modules contain no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, no path into `ee/`, and no overlay names, queues, branches, or registrations, comments included.
+Domain dependencies run from `ee/` into the base, not back.
 
-The composition root is `edition/`, outside `src/` on purpose. It is the only place that knows which editions exist, and it is assembly only. One crate makes both directions compile, so the boundary is a rule rather than a compiler error: `scripts/check_edition_boundary.py` is the mechanical guard, run by `make edition-boundary-check`, `make check-all`, `make check-all-ee`, and CI. It reads comments and strings as text, and reads code with comments and strings blanked so that spacing, line breaks and aliases cannot hide a path: `edition` and `ee` must not appear as identifiers anywhere under `src/`, except that `src/lib.rs` may name `edition` to declare the composition root and re-export from it. It has tests that include deliberate violations.
+Crate-root assembly lives inline in `src/lib.rs`; there is no separate `edition/` directory.
+The inline `edition` module preserves existing public paths.
+`scripts/check_edition_boundary.py` checks all other source modules for overlay names and branches, including comments, aliases and paths split over lines.
+Both check-all targets and CI run it, with deliberate-violation tests.
 
 ## Classification
 
@@ -22,13 +26,25 @@ Unclear cases are a question for the user, asked as the classification itself ra
 
 ## Composition
 
-**`ee/` is a module of the application crate, not a package of its own.** `edition/mod.rs` declares it with `#[path = "../ee/mod.rs"]` behind the `enterprise` feature, and `src/lib.rs` declares `edition/` itself with `#[path = "../edition/mod.rs"]` and no feature gate. The files stay at the repository root where `ee/LICENSE` scopes them ("everything under the `ee/` directory") while compiling into the same crate as everything in `src/`. The overlay is therefore `crate::edition::ee`. The root `Cargo.toml`'s `[workspace] members` lists `"."` only; there is one binary, `yorishiro`.
+CE follows Loco's generated directory and file names.
+When an overlay changes or extends the same functionality, its path under `ee/` mirrors the path under `src/`.
+An enterprise-only feature does not require an empty counterpart in CE.
+Fix the base API first, then adapt its overlay; temporary build failures during that change are not a reason to put edition branches into CE.
+
+**`ee/` is a module of the application crate, not a package of its own.**
+`src/lib.rs` declares it with `#[path = "../ee/mod.rs"]` behind the `enterprise` feature, and re-exports it through the inline `edition` module for existing callers.
+The files stay at the repository root where `ee/LICENSE` scopes them while compiling into the same crate.
+The root workspace lists `"."` only; there is one binary, `yorishiro`.
 
 One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module whitelist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
 
-**There is one `Hooks` impl, `edition::App` in `edition/app.rs`, re-exported as `yorishiro::App`.** Each hook calls the matching function in `src/app.rs` and then the active edition's function: `after_context` installs the licence state, the tenant-scoped authenticator (PostgreSQL only) and the resolver and policy seams after building base's own pools; `routes()` adds the enterprise edition's route groups after the community ones through `RouteMounts`; `register_tasks` registers `ee/`'s tasks alongside base's; the MCP tools and their licence policy are added through `McpToolSet`.
+**There is one `Hooks` impl, inline in `src/lib.rs`, re-exported as `yorishiro::App`.**
+It delegates base behaviour to `src/app.rs` and overlay contributions to `ee/app.rs`, using `RouteMounts`, `McpToolSet` and the worker registry.
 
-The active edition is `ee/app.rs` when the `enterprise` feature is on and `edition/community.rs` otherwise. They expose identical functions, so the build of whichever edition fell behind fails on a signature mismatch. There is no trait between them: one overlay and no runtime choice is not a reason for a trait. A trait is for behaviour that varies at runtime, such as `QueuePolicy`, `Authenticator`, and `WorkerClassResolver`, which `ee/` replaces by inserting its own `Arc<dyn Trait>` into `shared_store`.
+The active contribution is `ee/app.rs` with the `enterprise` feature and the inline community module otherwise.
+They expose identical functions, checked by both builds.
+No wiring trait is needed for compile-time selection.
+Runtime differences use `QueuePolicy`, `Authenticator` and `WorkerClassResolver` in `shared_store`.
 
 **Workers have one registration per edition.** `src/workers/registry.rs` owns `WorkerRegistry`, a plain value whose `community()` is the baseline and whose `register::<Args, Worker>()` is how `ee/app.rs` adds `infer-fill`. A worker's tags and queue are whatever its `BackgroundWorker::tags()` and `queue()` return. `edition::workers()` composes the final registry, and Loco registration, the Redis queue configuration, and `yorishiro worker-tags` all derive from it. Do not keep a second list of tags or queues anywhere.
 
@@ -74,5 +90,6 @@ Tests live in `tests/requests/licence_gate.rs`, covering verification, expiry-bo
 
 ## Config file
 
-This application resolves `config/{environment}.yaml` and defines no `license_key:` field there.
-The only live configuration is the `YORISHIRO_LICENSE_KEY` environment variable.
+This application resolves `config/{environment}.yaml` and reads the licence from `initializers.licence_key`.
+Shipped configurations interpolate `YORISHIRO_LICENSE_KEY` into that field.
+Runtime verification consumes the resolved configuration, not the environment.

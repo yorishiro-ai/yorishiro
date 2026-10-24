@@ -3,29 +3,13 @@ use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::{entity_entities, schema_schemas};
 
-use super::fixtures::{self, TenantArgs};
-
-struct Setup {
-    tenant_id: Uuid,
-    workspace_id: Uuid,
-    key: String,
-}
-
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let (tenant_id, workspace_id, _, key) =
-        fixtures::create_tenant_workspace_owner(ctx, TenantArgs::default()).await;
-    Setup {
-        tenant_id,
-        workspace_id,
-        key,
-    }
-}
+use super::fixtures::{TenantArgs, TestTenant};
 
 /// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let definition = serde_json::from_value(serde_json::json!({
             "name": "note",
@@ -96,17 +80,45 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
 
         let response = request
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             response.status_code(),
-            200,
+            202,
             "response: {:?}",
             response.text()
         );
         let body: serde_json::Value = response.json();
-        assert_eq!(body["restored"], 1, "body: {body}");
-        assert_eq!(body["missing"], 1, "body: {body}");
+        assert_eq!(body["snapshot_job_id"], job_id.to_string());
+        let status_path = format!("/api/migration-jobs/{}", body["job_id"].as_str().unwrap());
+        let pending = request
+            .get(&status_path)
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(pending.status_code(), 200);
+        assert_eq!(pending.json::<serde_json::Value>()["status"], "queued");
+        assert!(pending.json::<serde_json::Value>()["result"].is_null());
+        let before = entity_entities::get(&ctx.db, setup.workspace_id, survivor.id)
+            .await
+            .unwrap();
+        assert_eq!(before.data["title"], "overwritten");
+        super::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            body["job_id"].as_str().unwrap().parse().unwrap(),
+            &setup.api_key,
+            &status_path,
+        )
+        .await;
+        let completed = request
+            .get(&status_path)
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(completed.status_code(), 200);
+        let completed = completed.json::<serde_json::Value>();
+        assert_eq!(completed["status"], "completed");
+        assert_eq!(completed["result"]["restored"], 1);
+        assert_eq!(completed["result"]["missing"], 1);
 
         let restored = entity_entities::get(&ctx.db, setup.workspace_id, survivor.id)
             .await
@@ -121,11 +133,11 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
 #[tokio::test]
 async fn undo_an_unknown_job_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
             .post(&format!("/api/migration-jobs/{}/undo", Uuid::new_v4()))
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             response.status_code(),
@@ -149,7 +161,7 @@ async fn list_entities_with_filter_returns_501_on_sqlite() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&ctx).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let definition = serde_json::from_value(serde_json::json!({
             "name": "note",
@@ -187,7 +199,7 @@ async fn list_entities_with_filter_returns_501_on_sqlite() {
         // directly, so we pass it URL-encoded to avoid query-string parsing issues.
         let response = request
             .get("/api/entities?filter=%7B%22status%22:%22active%22%7D")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
             response.status_code(),

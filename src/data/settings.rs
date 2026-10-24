@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     #[serde(default = "default_timezone")]
@@ -14,6 +14,26 @@ pub struct Settings {
     pub(crate) db_load_guard: DbLoadGuard,
     #[serde(default)]
     pub query_embedding: QueryEmbedding,
+    #[serde(default)]
+    pub(crate) dispatch: Dispatch,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Dispatch {
+    pub(crate) poll_interval_ms: u64,
+    pub(crate) claim_lease_seconds: u32,
+    pub(crate) enqueue_timeout_ms: u64,
+}
+
+impl Default for Dispatch {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: 500,
+            claim_lease_seconds: 30,
+            enqueue_timeout_ms: 5_000,
+        }
+    }
 }
 
 fn default_timezone() -> String {
@@ -24,7 +44,7 @@ fn default_max_tenants() -> i32 {
     1
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Mcp {
     /// Comma-separated exact Host values accepted in addition to loopback.
@@ -35,7 +55,7 @@ pub(crate) struct Mcp {
 ///
 /// The server holds no embedding model: it enqueues a request and polls for the result, so these three values bound that wait.
 /// The section is optional so a configuration file written before it existed keeps loading with the defaults.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct QueryEmbedding {
     /// The longest a search waits for its vector, in milliseconds.
@@ -56,7 +76,7 @@ impl Default for QueryEmbedding {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Embedding {
     pub provider: EmbeddingProvider,
@@ -76,7 +96,7 @@ fn default_provider_concurrency() -> usize {
     1
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EmbeddingProvider {
     None,
@@ -84,7 +104,7 @@ pub enum EmbeddingProvider {
     Openai,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RateLimit {
     pub(crate) auth_max_requests: u32,
@@ -92,7 +112,7 @@ pub(crate) struct RateLimit {
     pub(crate) search_tokens_per_minute: u32,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DbLoadGuard {
     pub(crate) threshold: i64,

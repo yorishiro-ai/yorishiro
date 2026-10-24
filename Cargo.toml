@@ -1,11 +1,19 @@
 [workspace]
 resolver = "2"
+exclude = ["patches/loco-rs/source"]
+
+[workspace.package]
+rust-version = "1.99.1"
+
+# Temporary upstream bug fixes, with rationale and removal criteria in patches/.
+[patch.crates-io]
+loco-rs = { path = "patches/loco-rs/source" }
 
 [package]
 name = "yorishiro"
 version = "0.100.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version.workspace = true
 publish = false
 default-run = "yorishiro"
 # `tests/` is one integration binary rooted at `tests/mod.rs`; without this Cargo also builds `tests/db.rs`, `tests/db_enum.rs` and `tests/licence.rs` as separate binaries that repeat tests the root already includes.
@@ -38,23 +46,21 @@ sea-orm-migration = { version = "2.0.4", features = [
   "sqlx-sqlite",
 ] }
 
-# `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot.
+# `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is environment-switchable, and `Redis` is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot.
 # Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
 # It is not loco-rs's own default and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust).
-loco-rs = { version = "=1.2.0", features = ["worker_redis"] }
+loco-rs = { version = "=1.2.0", default-features = false, features = ["cli", "with-db", "db-sqlite", "worker_redis"] }
 anyhow = { version = "1.0.104" }
 axum = { version = "0.8.9" }
-chrono = { version = "0.4.45" }
+chrono = { version = "0.4.45", features = ["serde"] }
 chrono-tz = "0.10.4"
-rand = { version = "0.10.2" }
 reqwest = { version = "0.13.5", features = ["json", "rustls", "form"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.151" }
+serde_json = { version = "1.0.154" }
 serial_test = { version = "4.0.1" }
-sha2 = { version = "0.11.0" }
-hex = "0.4.3"
+sha2 = { version = "0.11.1" }
 tracing = { version = "0.1.44" }
-tracing-subscriber = { version = "0.3.23", features = ["time"] }
+tracing-subscriber = { version = "0.3.23", features = ["json"] }
 tracing-appender = "0.2.5"
 # sea-orm and uuid take different feature sets on each side (root needs sqlx-sqlite/postgres-vector and uuid's v7 that ee/ does not use directly), so the table carries the union of what either side needs.
 sea-orm = { version = "2.0.4", features = [
@@ -64,39 +70,29 @@ sea-orm = { version = "2.0.4", features = [
   "macros",
   "postgres-vector",
 ] }
-uuid = { version = "1.26.1", features = ["v4", "v7"] }
-ulid = "=1.2.1"
-redis = { version = "=1.7.0", features = ["aio", "tokio-comp"] }
+uuid = { version = "1.29.0", features = ["v4", "v7", "serde"] }
+redis = { version = "=1.8.0", features = ["aio", "tokio-comp"] }
 
 [dependencies]
 loco-rs = { workspace = true }
-# Reads `start --worker` from the command line with the same rules loco-rs applies (workers::start).
-# loco-rs keeps its `Cli` private, so the definition is mirrored; the version and `derive` feature are the ones loco-rs already builds.
-clap = { version = "4.4.7", features = ["derive"] }
 migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.53.1", features = ["rt", "time", "macros", "sync"] }
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util"] }
+futures = "0.3.34"
 axum.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
-regex = { version = "1.13.1" }
 sea-orm.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
-ulid.workspace = true
-redis.workspace = true
-thiserror = { version = "2.0.20" }
 anyhow.workspace = true
-rand.workspace = true
 sha2.workspace = true
-hex.workspace = true
-jsonschema = { version = "=0.58.5" }
-rmcp = { version = "3.3.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
-serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
-schemars = { version = "1.2.2", features = ["uuid1"] }
+jsonschema = { version = "=0.60.1" }
+rmcp = { version = "3.7.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+schemars = { version = "1.2.3", features = ["uuid1"] }
 # OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
 # vLLM/real OpenAI over HTTP.
 reqwest.workspace = true
@@ -106,7 +102,6 @@ reqwest.workspace = true
 candle-core = { version = "0.11.0" }
 candle-nn = { version = "0.11.0" }
 candle-transformers = { version = "0.11.0" }
-# Current upstream Candle and Swagger UI releases constrain ZIP to 8.x; see the security follow-up before upgrading this group.
 tokenizers = { version = "0.23.2", features = ["onig"] }
 sqlite-vec = "=0.1.9"
 # Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
@@ -115,11 +110,12 @@ sqlite-vec = "=0.1.9"
 libsqlite3-sys = "=0.37.0"
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
-jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"], optional = true }  # licence key verification (ee/services/licence.rs)
+jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"], optional = true }  # licence and OIDC verification without the vulnerable RustCrypto RSA backend
 hmac = { version = "0.13.0", optional = true }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 utoipa = { version = "6.0.0", features = ["axum_extras", "uuid", "chrono"], optional = true }
-utoipa-swagger-ui = { version = "10.0.1", features = ["axum"], optional = true }
+utoipa-swagger-ui = { version = "10.0.2", features = ["axum"], optional = true }
+serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 
 [[bin]]
 name = "yorishiro"
@@ -129,11 +125,8 @@ required-features = []
 [dev-dependencies]
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
+redis.workspace = true
 # Used by queue and integration tests for isolated temporary databases.
 tempfile = { version = "3.27.0" }
-# Used by the ee/ request tests folded into tests/requests/.
-axum-test = { version = "17.3.0" }
-# Required for catch_unwind on non-Send futures in boot_request wrapper.
-futures = "0.3.34"
 # Property-based testing (issue #358).
-proptest = "=1.11.0"
+proptest = "=1.12.0"

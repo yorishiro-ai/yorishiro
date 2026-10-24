@@ -51,6 +51,9 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = auth_ctx.workspace_id;
+        if let Err(err) = search::ensure_available(&self.app_context().db, workspace_id).await {
+            return Ok(err_to_tool_result(err));
+        }
         let limiter = match search_token_limiter(self.app_context()).map_err(|err| err.0) {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -60,50 +63,19 @@ impl YorishiroMcpServer {
             return Ok(err_to_tool_result(err));
         }
 
-        // The server holds no model: a worker embeds the query, and no DB connection is held while waiting for it.
-        let vector = match crate::workers::query_embedding::embed_query(
+        let hits = match search::search_text(
             self.app_context(),
             auth_ctx.tenant_id,
             workspace_id,
             &args.query_text,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
-
-        // Resolved on the identity pool: the tenant-scoped role cannot read `tenant_tenants`, which the embedding chain joins.
-        let embed_table =
-            match search::resolve_query_table(&self.app_context().db, workspace_id, vector.len())
-                .await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
-
-        // A read-only transaction, same as `Authorized`'s: dropped without committing when this returns, which is a no-op since nothing was written.
-        let txn =
-            match crate::db::begin_workspace(self.app_context(), auth_ctx.tenant_id, workspace_id)
-                .await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
-
-        let hits = match search::search_in_table(
-            &txn,
-            workspace_id,
-            vector,
-            &args.query_text,
             query,
-            embed_table,
         )
         .await
         {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
+
         ok_json(hits)
     }
 }

@@ -9,11 +9,7 @@ use std::time::Duration;
 use tempfile::tempdir;
 
 use sea_orm::sqlx::postgres::PgPoolOptions;
-use serial_test::serial;
-use yorishiro::edition::ee::db::{
-    acquire_sqlite_scheduler_lock, lock_sqlite_scheduler_file, sqlite_scheduler_lock_path,
-    unlock_sqlite_scheduler_file,
-};
+use yorishiro::edition::ee::db::{acquire_sqlite_scheduler_lock, sqlite_scheduler_lock_path};
 
 fn postgres_test_url() -> Option<String> {
     let url = std::env::var("DATABASE_URL").ok();
@@ -117,7 +113,7 @@ fn sqlite_scheduler_lock_is_non_blocking_and_releases() {
         file: Some(file), ..
     } = &first
     {
-        unlock_sqlite_scheduler_file(file).unwrap();
+        file.unlock().unwrap();
     } else {
         panic!("expected SQLite ownership");
     }
@@ -140,15 +136,18 @@ fn sqlite_scheduler_lock_works_with_separate_file_handles() {
         .write(true)
         .open(&path)
         .unwrap();
-    lock_sqlite_scheduler_file(&first).unwrap();
+    first.try_lock().unwrap();
     let second = OpenOptions::new()
         .read(true)
         .write(true)
         .open(&path)
         .unwrap();
-    assert!(lock_sqlite_scheduler_file(&second).is_err());
-    unlock_sqlite_scheduler_file(&first).unwrap();
-    lock_sqlite_scheduler_file(&second).unwrap();
+    assert!(matches!(
+        second.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    first.unlock().unwrap();
+    second.try_lock().unwrap();
 }
 
 #[cfg(unix)]
@@ -189,6 +188,7 @@ fn sqlite_scheduler_lock_subprocess_aliases_contend_and_release() {
                 "YORISHIRO_SQLITE_LOCK_CHILD_URI",
                 "sqlite://app.sqlite?mode=rwc",
             )
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
@@ -202,13 +202,11 @@ fn sqlite_scheduler_lock_subprocess_aliases_contend_and_release() {
             }
         }
         assert!(ready, "the lock subprocess did not report readiness");
-        assert!(
-            acquire_sqlite_scheduler_lock(&contender_uri, "unused")
-                .unwrap()
-                .is_none()
-        );
+        let contender = acquire_sqlite_scheduler_lock(&contender_uri, "unused");
+        child.stdin.take().unwrap().write_all(b"release\n").unwrap();
         for _line in &mut lines {}
         assert!(child.wait().unwrap().success());
+        assert!(contender.unwrap().is_none());
         let released = acquire_sqlite_scheduler_lock(&contender_uri, "unused")
             .unwrap()
             .unwrap();
@@ -226,7 +224,9 @@ fn sqlite_scheduler_lock_child() {
         .unwrap();
     println!("ready");
     std::io::stdout().flush().unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    let mut command = String::new();
+    std::io::stdin().read_line(&mut command).unwrap();
+    assert_eq!(command, "release\n");
     release_sqlite_for_test(&ownership);
 }
 
@@ -235,15 +235,15 @@ fn release_sqlite_for_test(ownership: &yorishiro::edition::ee::db::SchedulerOwne
         file: Some(file), ..
     } = ownership
     {
-        unlock_sqlite_scheduler_file(file).unwrap();
+        file.unlock().unwrap();
     } else {
         panic!("expected SQLite ownership");
     }
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn postgres_scheduler_lock_contends_and_connection_close_releases() {
+    let _environment = crate::EnvironmentRead::enter();
     let Some(url) = postgres_test_url() else {
         return;
     };
@@ -274,8 +274,8 @@ async fn postgres_scheduler_lock_contends_and_connection_close_releases() {
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn postgres_scheduler_detached_connection_close_releases_without_unlock() {
+    let _environment = crate::EnvironmentRead::enter();
     let Some(url) = postgres_test_url() else {
         return;
     };
@@ -313,8 +313,8 @@ async fn postgres_scheduler_detached_connection_close_releases_without_unlock() 
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn postgres_scheduler_lock_drop_releases_after_task_cancellation() {
+    let _environment = crate::EnvironmentRead::enter();
     let Some(url) = postgres_test_url() else {
         return;
     };

@@ -32,17 +32,8 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
-
 db_enum! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum SchemaStatus {
         Active = "active",
         Archived = "archived",
@@ -50,7 +41,7 @@ db_enum! {
 }
 
 db_enum! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum SchemaOriginStatus {
         Linked = "linked",
         Detached = "detached",
@@ -76,7 +67,7 @@ pub async fn lock_version(
 /// One version of a workspace's schema.
 //
 // `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SchemaRecord {
     pub id: Uuid,
@@ -234,6 +225,7 @@ pub(crate) async fn get_by_id(
 ///
 /// Lives here because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpstreamChange {
     pub schema_id: Uuid,
     pub schema_name: String,
@@ -249,7 +241,8 @@ pub struct UpstreamChange {
 }
 
 /// Counts the decisions in a computed origin merge plan.
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeDiffSummary {
     pub total_fields: usize,
     pub auto_add: usize,

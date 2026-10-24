@@ -41,7 +41,7 @@ async fn the_server_boots_without_building_a_provider() {
     assert!(provider_of(&boot.app_context).is_none());
 
     let router = boot.router.expect("a server builds a router");
-    let server = axum_test::TestServer::new(
+    let server = loco_rs::TestServer::new(
         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .unwrap();

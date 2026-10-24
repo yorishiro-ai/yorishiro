@@ -9,7 +9,6 @@
 
 use loco_rs::prelude::async_trait;
 use loco_rs::prelude::*;
-use sea_orm::{DatabaseBackend, SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,14 +22,10 @@ use crate::error::ResultExt;
 use crate::models::schema_schemas;
 
 /// Arguments for an infer-fill worker job.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InferFillArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
-    #[serde(default)]
-    pub dispatch_id: Option<Uuid>,
-    #[serde(default)]
-    pub publishing_epoch: Option<i64>,
     pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub schema_name: String,
@@ -39,20 +34,6 @@ pub struct InferFillArgs {
 impl InferFillArgs {
     /// The name this job is recorded under in the queue lifecycle.
     pub(crate) const JOB_NAME: &'static str = "infer_fill";
-}
-
-/// The dispatch seam for infer-fill jobs.
-///
-/// `compose_context` stores the production adapter as `Arc<dyn InferFillDispatcher>` in `AppContext::shared_store`.
-/// A caller that needs a different dispatcher inserts its own `Arc<dyn InferFillDispatcher>` there afterwards.
-#[async_trait]
-pub trait InferFillDispatcher: Send + Sync {
-    async fn dispatch(
-        &self,
-        ctx: &AppContext,
-        args: InferFillArgs,
-        txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String>;
 }
 
 /// Opens the transaction an infer-fill run reads and writes in, scoped the way a request for this workspace would be.
@@ -83,23 +64,13 @@ async fn open_workspace_write_scope(
     ctx: &AppContext,
     workspace_id: Uuid,
 ) -> loco_rs::Result<sea_orm::DatabaseTransaction> {
-    if ctx.db.get_database_backend() != DatabaseBackend::Sqlite {
-        let tenant_id =
-            crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
-                .await
-                .internal()?;
-        return db::begin_workspace(ctx, tenant_id, workspace_id)
+    let tenant_id =
+        crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()));
-    }
-    Ok(ctx
-        .db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
+            .internal()?;
+    db::begin_workspace_write(ctx, tenant_id, workspace_id)
         .await
-        .internal()?)
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))
 }
 
 /// Shared implementation of the infer-fill worker's perform body.
@@ -228,17 +199,6 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
-        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &self.ctx.db,
-            args.lifecycle_id,
-            args.dispatch_id,
-            args.publishing_epoch,
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-        {
-            return Ok(());
-        }
         self.perform_job(args).await
     }
 }
@@ -246,7 +206,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
 impl InferFillWorker {
     /// Hands a job back to the queue because another job of its workspace is running.
     ///
-    /// Without a lifecycle row the job is left queued and the run fails, so the queue's own retry redelivers it.
+    /// Without a lifecycle row the run fails and requires explicit retry on the native SQL queue.
     /// With one, the admitted attempt is released and the job is enqueued again at once, so a busy workspace costs one poll interval per redelivery until the running job ends.
     async fn defer_for_busy_workspace(
         &self,
@@ -444,10 +404,6 @@ async fn defer_and_enqueue(
             "lifecycle_id".into(),
             serde_json::Value::String(lifecycle_id.to_string()),
         );
-        fields.insert(
-            "dispatch_id".into(),
-            serde_json::Value::String(lifecycle_id.to_string()),
-        );
     }
     crate::models::queue_job_dispatch_outbox::record_lifecycle_payload(
         &txn,
@@ -492,47 +448,18 @@ pub async fn enqueue_infer_fill(
     inference_jobs::create(&txn, job_id, workspace_id, &schema_name)
         .await
         .internal()?;
-    let dispatcher = ctx
-        .shared_store
-        .get::<std::sync::Arc<dyn InferFillDispatcher>>()
-        .ok_or_else(|| loco_rs::Error::Message("InferFillDispatcher missing".into()))?;
+    crate::edition::ee::workers::dispatch::dispatch_infer_fill(
+        ctx,
+        InferFillArgs {
+            lifecycle_id: None,
+            job_id,
+            workspace_id,
+            schema_name,
+        },
+        Some(&txn),
+    )
+    .await?;
     txn.commit().await.internal()?;
-    if let Err(error) = dispatcher
-        .dispatch(
-            ctx,
-            InferFillArgs {
-                lifecycle_id: None,
-                dispatch_id: None,
-                publishing_epoch: None,
-                job_id,
-                workspace_id,
-                schema_name,
-            },
-            None,
-        )
-        .await
-    {
-        let diagnostic = format!("failed to enqueue infer-fill job: {error}");
-        let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id)
-            .await
-            .internal()?;
-        inference_jobs::fail(&txn, job_id, &diagnostic)
-            .await
-            .internal()?;
-        txn.commit().await.internal()?;
-        return Err(error);
-    }
 
     Ok(job_id.to_string())
-}
-
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn enqueue_infer_fill_with_dispatcher(
-    ctx: &AppContext,
-    args: InferFillArgs,
-    dispatcher: &dyn InferFillDispatcher,
-) -> loco_rs::Result<String> {
-    dispatcher.dispatch(ctx, args, None).await
 }
