@@ -438,7 +438,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify ordinary requests do not create databases
+      - name: Verify shared requests models and workers do not create databases
         if: matrix.backend == 'postgres'
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
@@ -456,10 +456,32 @@ jobs:
           docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
             -c 'CREATE TEMP TABLE ordinary_request_ddl_probe (id integer)'
           # Dedicated deployments exercise global state, worker providers or fault injection.
-          # They still run in the full matrix, outside this shared-request DDL window.
+          # They still run in the full matrix, outside this shared-suite DDL window.
           result=0
-          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} requests:: -- \
-            --skip models::query_embedding_requests:: \
+          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- requests:: models:: workers:: \
+            --skip models::maintenance:: \
+            --skip models::inference_jobs::persisted_row_with_unknown_status_returns_internal_error \
+            --skip models::inference_jobs::claim_rejects_stale_and_invalid_rows \
+            --skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept \
+            --skip models::queue_job_dispatch_outbox::record_is_recoverable_until_attempted \
+            --skip models::queue_job_dispatch_outbox::recovery_eligibility_uses_lifecycle_status_and_retry_at \
+            --skip models::queue_job_dispatch_outbox::ordinary_retry_eligibility_uses_retry_at_not_provider_job_id \
+            --skip models::queue_job_lifecycles::timezone_state_changes_without_rewriting_lifecycle_instants \
+            --skip models::queue_job_lifecycles::timezone_state_rejects_invalid_and_missing_singleton_without_inserting \
+            --skip models::search::sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain \
+            --skip models::search::sync_embedding_resolves_the_tenant_dimension_tier \
+            --skip models::tenancy::concurrent_create_workspace_cannot_exceed_the_cap \
+            --skip workers::dispatch:: \
+            --skip workers::startup_reindex:: \
+            --skip workers::embedding_sync::conflict:: \
+            --skip workers::query_embedding:: \
+            --skip workers::target_routing:: \
+            --skip workers::queue::upstream_fixes::redis_claim_refreshes_age_and_fences_reaped_completion_and_failure \
+            --skip ee::workers::infer_fill::relay_dispatches_infer_fill_using_the_registered_worker_class \
+            --skip ee::workers::infer_fill::stalled_provider_enqueue_does_not_block_new_dispatch_records \
+            --skip ee::workers::infer_fill::two_jobs_for_one_workspace_never_run_together \
+            --skip ee::workers::infer_fill::schema_change_during_llm_call_rejects_the_old_schema_proposal \
+            --skip ee::workers::reindex:: \
             --skip requests::setup:: \
             --skip requests::ee_setup:: \
             --skip requests::stripe:: \
@@ -506,7 +528,7 @@ jobs:
             exit 1
           fi
           if grep -Ei '(CREATE|DROP)[[:space:]]+DATABASE[[:space:]]' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
-            echo '::error::The ordinary request group created or dropped a database.'
+            echo '::error::The shared request/model/worker group created or dropped a database.'
             exit 1
           fi
           docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
