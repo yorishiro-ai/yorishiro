@@ -1,7 +1,7 @@
 # Multi-stage build producing a self-contained runtime image, used both for distribution and as
 # the `app` service in compose.yml.
 #
-#   docker buildx bake --load
+#   docker compose up --build
 #   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
 #
 # The default command serves HTTP only. Queued jobs run in a second container from this same

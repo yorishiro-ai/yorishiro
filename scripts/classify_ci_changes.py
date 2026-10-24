@@ -52,7 +52,7 @@ def classify_path(path: str) -> set[str]:
         groups |= {"packaging"}
     if s.startswith(".github/packaging/"):
         groups |= {"rust", "ee"}
-    if s.startswith(("Dockerfile", "docker-compose", "docker-bake", "docker/")):
+    if s.startswith(("Dockerfile", "docker-compose", "docker/", ".github/docker/")):
         groups |= {"docker"}
     if s.startswith((".github/actions/build-and-package/", ".github/actions/build-docker/", ".github/actions/docker-manifest/", ".github/actions/smoke/")):
         groups |= {"release"}

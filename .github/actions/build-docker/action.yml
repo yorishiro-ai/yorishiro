@@ -41,6 +41,7 @@ runs:
         EDITION: ${{ inputs.edition }}
       with:
         source: .
+        files: .github/docker/docker-bake.hcl
         targets: app
         push: ${{ inputs.push == 'true' }}
         set: |

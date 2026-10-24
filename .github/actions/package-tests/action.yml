@@ -54,5 +54,5 @@ runs:
     - name: Test Docker configuration ownership and fallback
       shell: bash
       run: |
-        IMAGE=yorishiro-package-test TAG=${{ inputs.version }} EDITION=ce docker buildx bake --load app
+        IMAGE=yorishiro-package-test TAG=${{ inputs.version }} EDITION=ce docker buildx bake -f .github/docker/docker-bake.hcl --load app
         make package-docker-check IMAGE=yorishiro-package-test:${{ inputs.version }}

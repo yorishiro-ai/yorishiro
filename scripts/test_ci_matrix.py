@@ -33,9 +33,10 @@ def main() -> int:
     docker_build = (ROOT / ".github/actions/build-docker/action.yml").read_text()
     manifest = (ROOT / ".github/actions/docker-manifest/action.yml").read_text()
     description = "An MCP-native, multi-tenant knowledge store with user-defined schemas."
-    bake = (ROOT / "docker-bake.hcl").read_text()
+    bake = (ROOT / ".github/docker/docker-bake.hcl").read_text()
     assert f"manifest:org.opencontainers.image.description={description}" in bake
     assert "docker/bake-action@" in docker_build
+    assert "files: .github/docker/docker-bake.hcl" in docker_build
     assert "RUST_VERSION" not in docker_build
     dockerfile = (ROOT / "Dockerfile").read_text()
     assert 'COPY rust-toolchain.toml .' in dockerfile

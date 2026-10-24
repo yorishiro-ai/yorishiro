@@ -19,6 +19,8 @@ group "default" {
 }
 
 target "app" {
+  context = "."
+  dockerfile = "Dockerfile"
   args = {
     EDITION = EDITION
   }
