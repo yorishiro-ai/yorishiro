@@ -8,6 +8,13 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
 
+coverage test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
+coverage test-postgres task doctor migrate entities: export LOCO_ENV = test_postgres
+coverage test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
+coverage test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
+test-postgres test-sqlite test-redis: export RUST_BACKTRACE ?= 1
+test-redis: export YORISHIRO_REDIS_TEST_URL := $(YORISHIRO_REDIS_TEST_URL)
+
 .PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
@@ -63,22 +70,22 @@ debug-macro-check:
 # Nightly is required because LLVM branch coverage is not available on stable.
 # Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
 coverage: patch-check
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/coverage_report.py
+	uv run scripts/coverage_report.py
 
 # Run the full suite against the selected backend (postgres by default).
-test-postgres: build
+test-postgres: patch-check
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		docker compose up -d --wait testdb; \
 	fi
-	DATABASE_URL='$(DATABASE_URL)' QUEUE_URL='$(DATABASE_URL)' YORISHIRO_TEST_TOPOLOGY=postgres-postgres YORISHIRO_TEST_QUEUE=postgres RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/test_topology.py postgres-postgres
+	QUEUE_URL='$(DATABASE_URL)' uv run scripts/test_topology.py postgres-postgres
 
-test-sqlite: build
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' YORISHIRO_TEST_TOPOLOGY=sqlite-sqlite YORISHIRO_TEST_QUEUE=sqlite RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite
+test-sqlite: patch-check
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite
 
 # Redis DB 15 on the Compose Redis service is reserved for tests.
 test-redis: patch-check
 	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379/15" ]; then docker compose up -d --wait redis; fi
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_REDIS_TEST_URL)' YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' YORISHIRO_TEST_TOPOLOGY=sqlite-redis YORISHIRO_TEST_QUEUE=redis LOCO_ENV=test_sqlite_redis uv run scripts/test_topology.py sqlite-redis
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_REDIS_TEST_URL)' LOCO_ENV=test_sqlite_redis uv run scripts/test_topology.py sqlite-redis
 
 build: build-ce
 
@@ -90,18 +97,18 @@ build-ee: patch-check
 
 # make task NAME=seed_official_templates [ARGS="key:value"]
 task: build
-	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=test_postgres ./target/debug/yorishiro task $(NAME) $(ARGS)
+	./target/debug/yorishiro task $(NAME) $(ARGS)
 
 # make doctor DATABASE_URL=postgres://...
 doctor: build
 ifndef DATABASE_URL
 	$(error DATABASE_URL is required for doctor: set it explicitly)
 endif
-	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=test_postgres ./target/debug/yorishiro doctor
+	./target/debug/yorishiro doctor
 
 migrate: build
 	docker compose up -d --wait testdb
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
+	./target/debug/yorishiro db migrate
 
 # Generate SeaORM entity structs from the current schema.
 # Starts a disposable pgvector/pgvector:pg18 container on port 15432,
@@ -113,10 +120,10 @@ entities: build
 		echo "ERROR: make entities requires sea-orm-cli $$expected from Cargo.lock, found $$actual; install the pinned CLI before regenerating" >&2; exit 1; \
 	fi
 	docker compose up -d --wait testdb
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
+	./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
 	@if echo '$(DATABASE_URL)' | grep -q '^sqlite://'; then echo "ERROR: entities requires PostgreSQL (DATABASE_URL must start with postgres://)" >&2; exit 1; fi
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db entities
+	./target/debug/yorishiro db entities
 	uv run scripts/harden_generated_entities.py
 	docker compose down -v testdb
 
