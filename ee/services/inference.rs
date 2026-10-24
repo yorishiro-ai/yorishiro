@@ -41,13 +41,18 @@ impl InferenceClient {
     /// # Panics
     /// Panics if an internal invariant required by this operation is violated.
     pub fn new(config: InferenceConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
-            // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at (see `ee/docs/api.md`).
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("reqwest client configuration is static and always valid");
+        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        let client = CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .timeout(REQUEST_TIMEOUT)
+                    // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
+                    // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at (see `ee/docs/api.md`).
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .expect("reqwest client configuration is static and always valid")
+            })
+            .clone();
 
         Self::with_client(config, client)
     }

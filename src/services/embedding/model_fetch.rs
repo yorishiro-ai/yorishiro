@@ -1,6 +1,6 @@
 //! First-use fetch of the local embedding provider's model and tokenizer.
 //!
-//! `YORISHIRO_EMBEDDING_PROVIDER=local` needs a safetensors checkpoint and its tokenizer, neither of which is in the repository: the smaller of the two models here is about 522 MiB, which does not belong in git.
+//! `YORISHIRO_EMBEDDING_PROVIDER=local` needs a safetensors checkpoint and its tokenizer, neither of which is in the repository: the model checkpoint is about 1.1 GB, which does not belong in git.
 //! Rather than making an operator fetch them by hand, the default path is fetched on first use and verified against a hardcoded digest.
 //!
 //! The model and tokenizer files live at `models/<short_id>/model.safetensors` and `models/<short_id>/tokenizer.json` for the selected model, or are fetched into `$HOME/.cache/yorishiro/models/<short_id>/` on first use when absent.
@@ -48,32 +48,17 @@ pub struct LocalModelDef {
     pub revision: &'static str,
     pub model: Artifact,
     pub tokenizer: Artifact,
-    /// Output vector width. Both definitions below happen to produce 768, which is what lets a deployment mix them in one `entity_entities.embedding vector(768)` column at all; see the write-time model check in `models/entity_embeddings/write.rs` for why that coincidence still needs guarding.
+    /// Output vector width stamped on workspaces.
     pub(super) dimensions: usize,
-    /// Upper bound on tokenized sequence length before truncation.
-    ///
-    /// Not always the model's raw position limit: nomic-embed-text-v1.5's `n_positions` (8192) is the literal rotary-embedding table size, safe to use directly.
-    /// multilingual-e5-base's `max_position_embeddings` (514) is *not* directly usable this way: XLM-RoBERTa reserves two of those positions (a `bos`/start position and a `pad` position, offset into the position-id scheme by `pad_token_id`), so the model's own `sentence_bert_config.json` publishes the already-adjusted usable length (512) instead.
-    /// Each definition below carries whichever figure is actually safe to truncate to, not a uniform "the config.json value"; do not "simplify" this into one shared field name without re-deriving both numbers.
+    /// Usable token limit after reserving XLM-RoBERTa special positions.
     pub(super) max_sequence_length: usize,
     /// Prepended to a query text before embedding it (`EmbedKind::Query`), empty for a model with no such convention.
     pub(super) query_prefix: &'static str,
     /// Prepended to a document text before embedding it (`EmbedKind::Document`), empty for a model with no such convention.
     pub(super) document_prefix: &'static str,
-    /// Which `candle-transformers` architecture loads this checkpoint.
-    pub(super) architecture: Architecture,
 }
 
-/// The `candle-transformers` model family a [`LocalModelDef`] loads through.
-/// A backend branch on this stays internal to `local.rs`'s own load/forward code, per this repository's own rule that a backend distinction must not change the function signature or return type for callers.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Architecture {
-    /// `candle_transformers::models::xlm_roberta::XLMRobertaModel`.
-    XlmRoberta,
-}
-
-/// `intfloat/multilingual-e5-base`, this provider's default; see [`DEFAULT_MODEL`]'s own doc comment for why.
-/// Multilingual (250,002-token XLM-RoBERTa vocabulary, entirely different from nomic's), which is the point of making it the default: this codebase's search and recall are not English-only.
+/// Pinned multilingual-e5-base artifacts and inference conventions.
 pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
     id: "intfloat/multilingual-e5-base",
     short_id: "multilingual-e5-base",
@@ -99,16 +84,9 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
     // intfloat/multilingual-e5-base's documented convention (its own model card): a query and a stored document are embedded asymmetrically, or retrieval quality degrades silently (the vectors are still the right shape and still normalize either way).
     query_prefix: "query: ",
     document_prefix: "passage: ",
-    architecture: Architecture::XlmRoberta,
 };
 
-/// The default model when `YORISHIRO_LOCAL_MODEL` is unset.
-///
-/// `multilingual-e5-base`, not `nomic-embed-text-v1.5`: this codebase's search and recall are not English-only, and only the multilingual model serves that well.
-/// `multilingual-e5-base` is used instead of `nomic-embed-text-v1.5` because this codebase's search and recall are not English-only.
-/// The write-time model check (`models/entity_embeddings/write.rs`) refuses a write whose vector doesn't match the workspace's stamped model, and the `reindex_embeddings` task moves a workspace between models: together these prevent the "stamp says one model, data holds another" failure.
-/// A workspace with no stamp (both `embedding_model` and `embedding_dimensions` are `NULL`) inherits the deployment default, so it is also protected: writes go through the stamp that `sync_embedding` sets on the first embed, and the model check compares against that stamp.
-/// `docs/configuration.md`'s "Moving a workspace between embedding models" section documents the procedure for every other workspace: change configuration, restart, then reindex.
+/// The local model used by this deployment.
 pub const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -120,7 +98,7 @@ static NEXT_STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
 ///
 /// Returns `None` when `HOME` does not resolve.
 /// The Docker image sets `HOME` for its service user for exactly this reason, but nothing here may assume that holds for every deployment: an operator running the binary directly, under a different supervisor, or in a container image of their own can still reach a user with no home.
-/// Nothing invents a fallback directory in that case; the caller degrades and names the two path variables instead, since writing hundreds of megabytes to a guessed location is worse than not writing it.
+/// No guessed destination is used when HOME is missing.
 pub(crate) fn cache_dir(def: &LocalModelDef) -> Option<PathBuf> {
     let home = crate::data::env::Env::Home.read_os()?;
     if home.is_empty() {
@@ -144,27 +122,26 @@ pub(super) async fn ensure_model_files(
         return Ok(None);
     };
 
-    let model = ensure_file(&dir, def, &def.model).await?;
-    let tokenizer = ensure_file(&dir, def, &def.tokenizer).await?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
+        .build()?;
+    let model = ensure_file(&dir, def, &def.model, &client).await?;
+    let tokenizer = ensure_file(&dir, def, &def.tokenizer, &client).await?;
     Ok(Some((model, tokenizer)))
 }
 
-/// Fetches one artifact into `dir` unless it is already there, and returns its path.
 async fn ensure_file(
     dir: &Path,
     def: &LocalModelDef,
     artifact: &Artifact,
+    client: &reqwest::Client,
 ) -> anyhow::Result<PathBuf> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(READ_TIMEOUT)
-        .build()
-        .expect("reqwest client configuration is static and always valid");
     let url = format!(
         "https://huggingface.co/{}/resolve/{}/{}",
         def.id, def.revision, artifact.remote_path
     );
-    ensure_file_with_client(dir, &url, artifact, &client).await
+    ensure_file_with_client(dir, &url, artifact, client).await
 }
 
 ///

@@ -35,10 +35,15 @@ impl OpenAiCompatibleProvider {
     /// # Panics
     /// Panics if an internal invariant required by this operation is violated.
     pub fn new(config: OpenAiCompatibleConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .expect("reqwest client configuration is static and always valid");
+        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        let client = CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .timeout(REQUEST_TIMEOUT)
+                    .build()
+                    .expect("reqwest client configuration is static and always valid")
+            })
+            .clone();
 
         Self::with_client(config, client)
     }
