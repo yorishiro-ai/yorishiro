@@ -27,11 +27,22 @@ impl HttpStub {
         let url = format!("http://{}", listener.local_addr().expect("stub address"));
         let task = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.expect("accept stalled request");
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(
+                    socket
+                        .read_u8()
+                        .await
+                        .expect("read stalled request headers"),
+                );
+            }
             socket
                 .write_all(response.as_bytes())
                 .await
                 .expect("write partial HTTP response");
+            // Keep the connection open until the stub is dropped, not just until the write finishes.
             std::future::pending::<()>().await;
+            drop(socket);
         });
         Self { url, task }
     }
