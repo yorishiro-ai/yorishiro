@@ -212,16 +212,8 @@ jobs:
         include:
           - os: ubuntu-26.04
             arch: amd64
-            edition: ce
           - os: ubuntu-26.04-arm
             arch: arm64
-            edition: ce
-          - os: ubuntu-26.04
-            arch: amd64
-            edition: ee
-          - os: ubuntu-26.04-arm
-            arch: arm64
-            edition: ee
     runs-on: ${{ matrix.os }}
     permissions:
       packages: write
@@ -242,7 +234,6 @@ jobs:
         with:
           image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
-          edition: ${{ matrix.edition }}
           arch: ${{ matrix.arch }}
           push: ${{ !inputs.dry_run }}
           token: ${{ secrets.GITHUB_TOKEN }}

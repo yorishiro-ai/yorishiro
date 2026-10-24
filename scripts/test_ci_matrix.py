@@ -37,6 +37,14 @@ def main() -> int:
     assert f"manifest:org.opencontainers.image.description={description}" in bake
     assert "docker/bake-action@" in docker_build
     assert "files: .github/docker/docker-bake.hcl" in docker_build
+    assert "targets: release" in docker_build
+    assert 'edition = ["ce", "ee"]' in bake
+    for release_path in ("release.yml", "release_pre.yml"):
+        release = (ROOT / ".github/workflows" / release_path).read_text()
+        docker_job = release.split("\n  docker:\n", 1)[1].split("\n  docker-manifest:\n", 1)[0]
+        assert docker_job.count("arch: amd64") == 1
+        assert docker_job.count("arch: arm64") == 1
+        assert "matrix.edition" not in docker_job
     assert "RUST_VERSION" not in docker_build
     dockerfile = (ROOT / "Dockerfile").read_text()
     assert 'COPY rust-toolchain.toml .' in dockerfile

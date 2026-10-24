@@ -1,5 +1,5 @@
 name: Build Docker image
-description: Builds, and optionally pushes, one edition and architecture of the image (checkout stays in each caller)
+description: Builds, and optionally pushes, both editions for one native architecture
 
 inputs:
   image:
@@ -7,9 +7,6 @@ inputs:
     required: true
   tag:
     description: Release tag
-    required: true
-  edition:
-    description: Edition, ce or ee
     required: true
   arch:
     description: Image architecture, amd64 or arm64
@@ -37,14 +34,10 @@ runs:
     - uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # master
       env:
         IMAGE: ${{ inputs.image }}
-        TAG: ${{ inputs.tag }}-${{ inputs.edition }}-${{ inputs.arch }}
-        EDITION: ${{ inputs.edition }}
+        TAG: ${{ inputs.tag }}
+        ARCH: ${{ inputs.arch }}
       with:
         source: .
         files: .github/docker/docker-bake.hcl
-        targets: app
+        targets: release
         push: ${{ inputs.push == 'true' }}
-        set: |
-          app.platform=linux/${{ inputs.arch }}
-          app.cache-from=type=gha,scope=${{ inputs.edition }}-${{ inputs.arch }}
-          app.cache-to=type=gha,mode=max,scope=${{ inputs.edition }}-${{ inputs.arch }}

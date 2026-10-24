@@ -14,7 +14,6 @@
 
 ARG DEBIAN_IMAGE=debian:trixie-slim
 FROM ${DEBIAN_IMAGE} AS builder
-ARG EDITION=ee
 
 RUN apt-get update && apt-get install -y \
     g++ \
@@ -40,6 +39,7 @@ COPY . .
 RUN python3 patches/loco-rs/verify.py --prepare
 # The edition is selected at build time with EDITION=ce or EDITION=ee. CE does not compile the
 # enterprise module; EE includes it and retains its runtime licence gate.
+ARG EDITION=ee
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target,sharing=locked \
     export RUSTC_WRAPPER= \
