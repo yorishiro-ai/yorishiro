@@ -151,11 +151,12 @@ pub async fn record_query_in_transaction(
 }
 
 /// Puts a retryable lifecycle back in the queue with a fresh payload.
+/// Both rows must change in the caller's transaction so the relay cannot observe a partial requeue.
 ///
 /// # Errors
 /// Returns an error if the lifecycle is not queued or retrying, or the database operation fails.
 pub async fn record_lifecycle_payload(
-    txn: &impl ConnectionTrait,
+    txn: &sea_orm::DatabaseTransaction,
     lifecycle_id: Uuid,
     mut payload: Value,
     worker_name: String,

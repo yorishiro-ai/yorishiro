@@ -1,6 +1,6 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel, TransactionTrait};
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
@@ -237,23 +237,31 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
         assert_eq!(result["schemas"], 0, "result: {result:?}");
 
         // Simulate a crash after effects commit but before lifecycle completion is persisted.
+        let replay = ctx
+            .db
+            .begin_with_options(sea_orm::TransactionOptions {
+                sqlite_transaction_mode: Some(sea_orm::SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         let mut lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(id)
-            .one(&ctx.db)
+            .one(&replay)
             .await
             .unwrap()
             .unwrap()
             .into_active_model();
         lifecycle.status = Set("queued".to_owned());
         lifecycle.completed_at = Set(None);
-        lifecycle.update(&ctx.db).await.unwrap();
+        lifecycle.update(&replay).await.unwrap();
         let dispatch =
             yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
-                .one(&ctx.db)
+                .one(&replay)
                 .await
                 .unwrap()
                 .unwrap();
         yorishiro::models::queue_job_dispatch_outbox::record_lifecycle_payload(
-            &ctx.db,
+            &replay,
             id,
             dispatch.payload,
             dispatch.worker_name,
@@ -266,6 +274,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
         )
         .await
         .unwrap();
+        replay.commit().await.unwrap();
         super::fill_defaults::finish_via_api(
             &request,
             &ctx,
