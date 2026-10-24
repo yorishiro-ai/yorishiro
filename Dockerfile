@@ -31,7 +31,8 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH=/usr/local/cargo/bin:$PATH
 COPY rust-toolchain.toml .
-RUN channel=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])') \
+RUN channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml) \
+    && test -n "$channel" \
     && curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh \
     && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain "$channel" \
     && rm /tmp/rustup-init.sh

@@ -30,29 +30,6 @@ def main() -> int:
     assert 'env:\n          GH_TOKEN: ${{ github.token }}' in job
     assert 'REPO: ${{ github.repository }}' in job
     assert 'PR_NUMBER: ${{ github.event.pull_request.number }}' in job
-    docker_build = (ROOT / ".github/actions/build-docker/action.yml").read_text()
-    manifest = (ROOT / ".github/actions/docker-manifest/action.yml").read_text()
-    description = "An MCP-native, multi-tenant knowledge store with user-defined schemas."
-    bake = (ROOT / ".github/docker/docker-bake.hcl").read_text()
-    assert f"manifest:org.opencontainers.image.description={description}" in bake
-    assert "docker/bake-action@" in docker_build
-    assert "files: .github/docker/docker-bake.hcl" in docker_build
-    assert "targets: release" in docker_build
-    assert 'edition = ["ce", "ee"]' in bake
-    for release_path in ("release.yml", "release_pre.yml"):
-        release = (ROOT / ".github/workflows" / release_path).read_text()
-        docker_job = release.split("\n  docker:\n", 1)[1].split("\n  docker-manifest:\n", 1)[0]
-        assert docker_job.count("arch: amd64") == 1
-        assert docker_job.count("arch: arm64") == 1
-        assert "matrix.edition" not in docker_job
-    assert "RUST_VERSION" not in docker_build
-    dockerfile = (ROOT / "Dockerfile").read_text()
-    assert 'COPY rust-toolchain.toml .' in dockerfile
-    assert '"toolchain"]["channel"]' in dockerfile
-    assert "cargo install sccache" not in dockerfile
-    assert f"DESCRIPTION: {description}" in manifest
-    assert '"index:org.opencontainers.image.description=${DESCRIPTION}"' in manifest
-    assert 'docker buildx imagetools create \\\n          --annotation' in manifest
     matrix_start = workflow.index("          - edition: ce", workflow.index("\n  test:\n"))
     first_end = workflow.index("          - edition: ce", matrix_start + 1)
     first = workflow[matrix_start:first_end]

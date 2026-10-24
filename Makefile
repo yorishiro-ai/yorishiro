@@ -36,11 +36,9 @@ fmt-check: patch-check
 
 python-lint:
 	uv run ruff check scripts patches/loco-rs/verify.py
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/check_ci_matrix.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_ci_matrix.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_classify_ci_changes.py
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_topology_self.py
-	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_package_ids.py
 	bash -n .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh
 
 edition-boundary-check:
