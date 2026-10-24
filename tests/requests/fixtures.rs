@@ -26,6 +26,11 @@ impl TestTenant {
     }
 
     pub async fn create(request: &loco_rs::TestServer, ctx: &AppContext, args: TenantArgs) -> Self {
+        let started = std::time::Instant::now();
+        let name = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_owned();
         #[cfg(not(feature = "enterprise"))]
         if ctx.config.database.uri.starts_with("postgres:")
             && std::env::var("DATABASE_URL").is_ok_and(|url| url == ctx.config.database.uri)
@@ -62,6 +67,7 @@ impl TestTenant {
                     .expect("shared CE tenant ID")
                 })
                 .await;
+            let tenant_ready = std::time::Instant::now();
             let txn = ctx.db.begin().await.expect("begin CE workspace setup");
             let owner = user_users::create_user(
                 &txn,
@@ -71,6 +77,7 @@ impl TestTenant {
             )
             .await
             .expect("create CE fixture owner");
+            let owner_ready = std::time::Instant::now();
             tenant_memberships::add_member(
                 &txn,
                 tenant_id,
@@ -84,12 +91,24 @@ impl TestTenant {
                     .await
                     .expect("create CE fixture workspace");
             txn.commit().await.expect("commit CE workspace setup");
+            let workspace_ready = std::time::Instant::now();
+            let api_key =
+                issue_api_key(ctx, workspace.id, owner.id, args.key_scope, args.key_audit).await;
+            super::record_request_timing(
+                &name,
+                "fixture-ce-shared",
+                &[
+                    ("tenant", tenant_ready - started),
+                    ("owner", owner_ready - tenant_ready),
+                    ("workspace", workspace_ready - owner_ready),
+                    ("api_key", workspace_ready.elapsed()),
+                ],
+            );
             return Self {
                 tenant_id,
                 workspace_id: workspace.id,
                 owner_id: owner.id,
-                api_key: issue_api_key(ctx, workspace.id, owner.id, args.key_scope, args.key_audit)
-                    .await,
+                api_key,
             };
         }
         let response = request
@@ -102,6 +121,7 @@ impl TestTenant {
             .await;
         response.assert_status(axum::http::StatusCode::CREATED);
         let account = response.json::<serde_json::Value>();
+        let signed_up = std::time::Instant::now();
         let tenant_id =
             serde_json::from_value(account["tenant_id"].clone()).expect("signup tenant ID");
         let owner_id = serde_json::from_value(account["user_id"].clone()).expect("signup owner ID");
@@ -111,8 +131,18 @@ impl TestTenant {
                 .await
                 .expect("create workspace");
         txn.commit().await.expect("commit workspace setup");
+        let workspace_ready = std::time::Instant::now();
         let api_key =
             issue_api_key(ctx, workspace.id, owner_id, args.key_scope, args.key_audit).await;
+        super::record_request_timing(
+            &name,
+            "fixture",
+            &[
+                ("signup", signed_up - started),
+                ("workspace", workspace_ready - signed_up),
+                ("api_key", workspace_ready.elapsed()),
+            ],
+        );
         Self {
             tenant_id,
             workspace_id: workspace.id,
