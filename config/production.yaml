@@ -105,6 +105,7 @@ queue:
 <% else %>
 queue:
   kind: Postgres
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
 
   # Postgres connection URI. Commonly the same value as DATABASE_URL.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>

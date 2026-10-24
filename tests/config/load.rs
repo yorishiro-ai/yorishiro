@@ -78,7 +78,12 @@ async fn the_topology_picks_the_queue_provider_for_one_database() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_TEST_TOPOLOGY",
+        "DB_CONNECT_TIMEOUT",
+    ]);
     guard.remove("YORISHIRO_TEST_TOPOLOGY");
     guard.remove("QUEUE_URL");
 
@@ -87,12 +92,21 @@ async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
     assert!(matches!(sqlite.queue, Some(QueueConfig::Sqlite(_))));
 
     guard.set("DATABASE_URL", "postgres://db/app");
+    guard.set("DB_CONNECT_TIMEOUT", "5000");
     let postgres = load(&Environment::Test).await.unwrap();
     assert!(matches!(
         postgres.queue,
-        Some(QueueConfig::Postgres(queue)) if queue.uri == "postgres://db/app"
+        Some(QueueConfig::Postgres(ref queue)) if queue.uri == "postgres://db/app"
+            && queue.connect_timeout == postgres.database.connect_timeout
+            && queue.connect_timeout == 5000
     ));
     assert_eq!(postgres.database.uri, "postgres://db/app");
+    let topology = load(&Environment::Any("test_postgres_postgres".into()))
+        .await
+        .unwrap();
+    assert!(
+        matches!(topology.queue, Some(QueueConfig::Postgres(queue)) if queue.connect_timeout == 5000)
+    );
 }
 
 #[tokio::test]

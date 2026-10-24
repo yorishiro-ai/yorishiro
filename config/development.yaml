@@ -99,6 +99,7 @@ queue:
 <% else %>
 queue:
   kind: Postgres
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
 
   # QUEUE_URL overrides where this reads; unset, it falls back to the same DATABASE_URL the
   # application itself connects to (database.uri below), so a deployment that sets DATABASE_URL
