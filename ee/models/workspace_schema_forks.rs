@@ -2,9 +2,10 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{Alias, Asterisk, Expr, Func, Query};
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait,
-    QueryFilter, QueryOrder, Statement,
+    QueryFilter, QueryOrder,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,7 +20,8 @@ use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, Entity, Model};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ForkRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -32,19 +34,25 @@ pub struct ForkRecord {
     pub fork_schema_version: i32,
     pub customized: bool,
     pub upstream_version: Option<i32>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub definition: MetaSchemaDefinition,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = CreateForkRequest))]
 pub struct CreateInput {
     pub source_workspace_id: Uuid,
     pub source_schema_id: Uuid,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = UpdateForkRequest))]
 pub struct UpdateInput {
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
     pub definition: Option<MetaSchemaDefinition>,
     pub action: Option<String>,
     #[serde(default)]
@@ -53,7 +61,7 @@ pub struct UpdateInput {
     pub expected_source_schema_id: Option<Uuid>,
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct ForkEdge {
     source_workspace_id: Uuid,
 }
@@ -70,18 +78,21 @@ async fn source_by_id<C: ConnectionTrait>(
 ) -> Result<Option<schema_schemas::Model>, YorishiroError> {
     // PostgreSQL uses the scoped SECURITY DEFINER function so fork source reads can cross workspace RLS; SQLite is single-tenant.
     if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        return schema_schemas::Model::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT * FROM workspace_schema_fork_source_by_id($1, $2, $3)",
-            [
-                tenant_id.into(),
-                source_workspace_id.into(),
-                source_schema_id.into(),
-            ],
-        ))
-        .one(conn)
-        .await
-        .internal();
+        let query = Query::select()
+            .column(Asterisk)
+            .from_function(
+                Func::cust(Alias::new("workspace_schema_fork_source_by_id")).args([
+                    Expr::val(tenant_id),
+                    Expr::val(source_workspace_id),
+                    Expr::val(source_schema_id),
+                ]),
+                Alias::new("source"),
+            )
+            .to_owned();
+        return schema_schemas::Model::find_by_statement(conn.get_database_backend().build(&query))
+            .one(conn)
+            .await
+            .internal();
     }
 
     schema_schemas::Entity::find()
@@ -101,25 +112,31 @@ async fn latest_source_by_name<C: ConnectionTrait>(
 ) -> Result<Option<schema_schemas::Model>, YorishiroError> {
     // Keep the PostgreSQL RLS crossing in its scoped database function; the SQLite query has no RLS boundary.
     if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        return schema_schemas::Model::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT * FROM workspace_schema_fork_latest_source($1, $2, $3)",
-            [
-                tenant_id.into(),
-                source_workspace_id.into(),
-                source_schema_name.into(),
-            ],
-        ))
-        .one(conn)
-        .await
-        .internal();
+        let query = Query::select()
+            .column(Asterisk)
+            .from_function(
+                Func::cust(Alias::new("workspace_schema_fork_latest_source")).args([
+                    Expr::val(tenant_id),
+                    Expr::val(source_workspace_id),
+                    Expr::val(source_schema_name),
+                ]),
+                Alias::new("source"),
+            )
+            .to_owned();
+        return schema_schemas::Model::find_by_statement(conn.get_database_backend().build(&query))
+            .one(conn)
+            .await
+            .internal();
     }
 
     schema_schemas::Entity::find()
         .filter(SchemaColumn::TenantId.eq(tenant_id))
         .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
         .filter(SchemaColumn::Name.eq(source_schema_name))
-        .filter(SchemaColumn::Status.eq("active"))
+        .filter(
+            SchemaColumn::Status
+                .eq(crate::models::schema_schemas::SchemaStatus::Active.as_db_str()),
+        )
         .order_by_desc(SchemaColumn::Version)
         .one(conn)
         .await
@@ -133,20 +150,24 @@ async fn fork_edges<C: ConnectionTrait>(
 ) -> Result<Vec<Uuid>, YorishiroError> {
     // The PostgreSQL function traverses fork edges across workspace RLS; SQLite can read the table directly.
     if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        return ForkEdge::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT source_workspace_id FROM workspace_schema_fork_edges($1, $2)",
-            [tenant_id.into(), workspace_id.into()],
-        ))
-        .all(conn)
-        .await
-        .internal()
-        .map(|edges| {
-            edges
-                .into_iter()
-                .map(|edge| edge.source_workspace_id)
-                .collect()
-        });
+        let query = Query::select()
+            .column(Alias::new("source_workspace_id"))
+            .from_function(
+                Func::cust(Alias::new("workspace_schema_fork_edges"))
+                    .args([Expr::val(tenant_id), Expr::val(workspace_id)]),
+                Alias::new("edge"),
+            )
+            .to_owned();
+        return ForkEdge::find_by_statement(conn.get_database_backend().build(&query))
+            .all(conn)
+            .await
+            .internal()
+            .map(|edges| {
+                edges
+                    .into_iter()
+                    .map(|edge| edge.source_workspace_id)
+                    .collect()
+            });
     }
 
     Entity::find()
@@ -171,7 +192,7 @@ async fn current_source<C: ConnectionTrait>(
     let source = source_by_id(conn, tenant_id, source_workspace_id, source_schema_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("source schema was not found"))?;
-    if source.status != "active" {
+    if source.status != crate::models::schema_schemas::SchemaStatus::Active.as_db_str() {
         return Err(YorishiroError::ValidationFailed {
             message: "source_schema_id must name the active source schema".into(),
             details: vec![],

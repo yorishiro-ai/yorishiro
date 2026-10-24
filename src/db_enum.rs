@@ -1,7 +1,7 @@
 //! One table of stored strings for each closed set of values.
 //!
 //! A value like `"read_only"` used to be written out separately for `as_db_str`, `FromStr`, serde's `rename_all`, and the database `CHECK` constraint, and nothing but a round-trip test noticed when one copy drifted.
-//! [`db_enum!`] takes the table once and derives every conversion from it, so the wire form and the stored form cannot disagree.
+//! `db_enum!` takes the table once and derives every conversion from it, so the wire form and the stored form cannot disagree.
 //!
 //! The generated `Deserialize` accepts only the canonical string.
 //! `from_db_str` and `FromStr` also accept the `| "alias"` spellings, which exist for command-line input and are not part of the stored or wire contract.
@@ -10,7 +10,7 @@
 ///
 /// ```ignore
 /// db_enum! {
-///     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///     #[derive(Clone, Copy, PartialEq, Eq)]
 ///     pub enum Mode {
 ///         Off = "off",
 ///         ReadOnly = "read_only" | "read-only",

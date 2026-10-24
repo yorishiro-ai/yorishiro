@@ -20,7 +20,6 @@
 # The enterprise edition variables below are not rendered by this file (they are read
 # through the typed keys in `ee/data/env.rs`), but listed here for completeness so this
 # document is the single reference for every configuration option:
-#   YORISHIRO_BIND          - Legacy OAuth callback host:port override. Prefer YORISHIRO_OAUTH_REDIRECT_URI for public URLs; server binding uses BINDING and PORT.
 #   YORISHIRO_LICENSE_KEY   - RSA256-signed licence key for enterprise features (see `ee/services/licence.rs`)
 
 # Application logging configuration
@@ -68,7 +67,6 @@ scheduler:
       run_on_start: true
 # SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
 # PostgreSQL scheduler replicas use a detached session advisory lock and may run concurrently.
-# YORISHIRO_SCHEDULER_REPLICAS is diagnostic compatibility metadata only and is not enforced.
 
 # Run HTTP and worker processes separately. Start a worker with an explicit target, such as
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.
@@ -148,6 +146,10 @@ settings:
     threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
     sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
     poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
+  dispatch:
+    poll_interval_ms: <%= get_env(name="YORISHIRO_DISPATCH_POLL_INTERVAL_MS", default="500") %>
+    claim_lease_seconds: <%= get_env(name="YORISHIRO_DISPATCH_CLAIM_LEASE_SECS", default="30") %>
+    enqueue_timeout_ms: <%= get_env(name="YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS", default="5000") %>
   query_embedding:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
@@ -189,7 +191,7 @@ mailer:
 database:
   # Database connection URI.
   # Defaults to a local SQLite file for an unconfigured trial instance.
-  # Point at PostgreSQL when you need RLS, multi-tenancy, or vector search.
+  # Use PostgreSQL for database-enforced tenant isolation; both backends support vector search.
   uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>'
   # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
@@ -200,8 +202,6 @@ database:
   # Minimum number of connections for a pool.
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
   # Maximum number of connections for a pool. SQLite has a single writer, so it defaults to 10 rather than 100.
-  # Serving real traffic on the
-  # development default of 1 serializes every request behind one connection.
 <% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
   max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
 <% else %>
@@ -220,6 +220,21 @@ database:
 # Authentication Configuration
 #
 # Deliberately absent, not merely unset.
-# This block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`.
-# A `JWT_SECRET` here would therefore be a required secret configuring a token type nothing mints or verifies.
-# Restore this block only alongside code that actually issues a JWT.
+# Authentication uses API keys through RequestAuth, not Loco's JWT configuration.
+
+initializers:
+  plan_policy_enabled: '<%= get_env(name="YORISHIRO_PLAN_POLICY_ENABLED", default="false") %>'
+  worker_admission:
+    shared: '<%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="") %>'
+    tenant_private: '<%= get_env(name="YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", default="") %>'
+    official: '<%= get_env(name="YORISHIRO_WORKER_OFFICIAL_LIMIT", default="") %>'
+  stripe:
+    webhook_secret: '<%= get_env(name="YORISHIRO_STRIPE_WEBHOOK_SECRET", default="") %>'
+    price_pro: '<%= get_env(name="YORISHIRO_STRIPE_PRICE_PRO", default="") %>'
+    price_team: '<%= get_env(name="YORISHIRO_STRIPE_PRICE_TEAM", default="") %>'
+  oauth:
+    issuer_url: '<%= get_env(name="YORISHIRO_OAUTH_ISSUER_URL", default="") %>'
+    client_id: '<%= get_env(name="YORISHIRO_OAUTH_CLIENT_ID", default="") %>'
+    client_secret: '<%= get_env(name="YORISHIRO_OAUTH_CLIENT_SECRET", default="") %>'
+    redirect_uri: '<%= get_env(name="YORISHIRO_OAUTH_REDIRECT_URI", default="") %>'
+  licence_key: '<%= get_env(name="YORISHIRO_LICENSE_KEY", default="") %>'

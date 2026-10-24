@@ -14,8 +14,8 @@ MISMATCH_TOKEN = "YORISHIRO_TOPOLOGY_REJECTED"
 TOPOLOGIES = {
     "postgres-postgres",
     "sqlite-sqlite",
-    "postgres-valkey",
-    "sqlite-valkey",
+    "postgres-redis",
+    "sqlite-redis",
 }
 
 
@@ -59,18 +59,21 @@ def main() -> int:
             YORISHIRO_TEST_TOPOLOGY=topology,
             YORISHIRO_TEST_QUEUE=queue,
         )
-        valkey_url = env.get("YORISHIRO_VALKEY_TEST_URL", "")
+        redis_url = env.get("YORISHIRO_REDIS_TEST_URL", "")
         queue_url = env.get("QUEUE_URL", "")
-        if queue == "valkey":
-            if not valkey_url.startswith(("redis://", "rediss://")) and queue_url.startswith(("redis://", "rediss://")):
-                valkey_url = queue_url
-            if not valkey_url.startswith(("redis://", "rediss://")):
-                print("YORISHIRO_VALKEY_TEST_URL must be an explicit Redis URL for Valkey topology", file=sys.stderr)
+        if queue == "redis":
+            if not redis_url.startswith(("redis://", "rediss://")) and queue_url.startswith(("redis://", "rediss://")):
+                redis_url = queue_url
+            if not redis_url.startswith(("redis://", "rediss://")):
+                print("YORISHIRO_REDIS_TEST_URL must be an explicit Redis URL for Redis topology", file=sys.stderr)
                 return 2
-            env["YORISHIRO_VALKEY_TEST_URL"] = valkey_url
+            env["YORISHIRO_REDIS_TEST_URL"] = redis_url
+            env["QUEUE_URL"] = redis_url
+            env["YORISHIRO_TEST_REDIS_BASE_URL"] = redis_url
         else:
-            # The CI matrix also sets this variable in SQLite/PostgreSQL cells; do not feed those URLs to Valkey tests.
-            env.pop("YORISHIRO_VALKEY_TEST_URL", None)
+            # The CI matrix also sets this variable in SQLite/PostgreSQL cells; do not feed those URLs to Redis tests.
+            env.pop("YORISHIRO_REDIS_TEST_URL", None)
+            env.pop("YORISHIRO_TEST_REDIS_BASE_URL", None)
         result = subprocess.run(
             ["cargo", "test", "--locked", "--workspace", *feature_args, *cargo_args],
             cwd=ROOT,

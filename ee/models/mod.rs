@@ -14,6 +14,7 @@ pub mod schema_schemas;
 pub mod stripe_events;
 pub mod template_templates;
 pub mod tenant_billing;
+pub mod tenant_reindex_schedules;
 pub(crate) mod tenant_tenants;
 pub mod user_users;
 pub mod workspace_embedding_keys;

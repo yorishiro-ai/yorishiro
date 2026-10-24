@@ -51,13 +51,22 @@ impl ListParams {
     /// to the internal 0-based offset/limit representation.
     ///
     /// `page` is clamped to `>= 1` (no page 0), and `page_size` to `[1, MAX_LIST_LIMIT]`.
-    pub(crate) fn from_pagination_query(page: u64, page_size: u64) -> Self {
-        let page = page.max(1) as i64;
+    pub(crate) fn from_pagination_query(
+        page: u64,
+        page_size: u64,
+    ) -> Result<Self, crate::YorishiroError> {
         let page_size = page_size.clamp(1, MAX_LIST_LIMIT as u64) as i64;
-        let offset = (page - 1) * page_size;
-        Self {
+        let offset = i64::try_from(page.max(1) - 1)
+            .ok()
+            .and_then(|page| page.checked_mul(page_size))
+            .ok_or_else(|| crate::YorishiroError::ValidationFailed {
+                message: "pagination offset is too large".into(),
+                details: vec![],
+                hint: "use a smaller page number".into(),
+            })?;
+        Ok(Self {
             limit: page_size,
             offset,
-        }
+        })
     }
 }

@@ -14,23 +14,6 @@ pub(crate) fn now() -> DateTime<Utc> {
     Utc::now()
 }
 
-/// Returns the current instant rendered in the configured application zone.
-#[must_use]
-pub(crate) fn queue_now(timezone: Timezone) -> DateTime<Timezone> {
-    now().with_timezone(&timezone)
-}
-
-/// Formats an absolute queue instant with the configured zone's offset.
-#[must_use]
-pub(crate) fn queue_storage<T: chrono::TimeZone>(
-    instant: DateTime<T>,
-    timezone: Timezone,
-) -> String {
-    instant
-        .with_timezone(&timezone)
-        .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)
-}
-
 /// Adapts an instant to SeaORM's fixed-offset timestamp type without changing its epoch.
 #[must_use]
 pub(crate) fn database_instant(instant: DateTime<Utc>) -> DateTime<chrono::FixedOffset> {

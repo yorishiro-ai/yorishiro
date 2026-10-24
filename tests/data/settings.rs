@@ -110,3 +110,32 @@ fn query_embedding_section_is_optional_and_has_bounded_defaults() {
     unknown["query_embedding"] = serde_json::json!({"obsolete": 1});
     assert!(serde_json::from_value::<Settings>(unknown).is_err());
 }
+
+#[test]
+fn dispatch_timing_is_validated_before_workers_start() {
+    let _environment = crate::EnvironmentRead::enter();
+    for timing in [
+        serde_json::json!({}),
+        serde_json::json!({"poll_interval_ms": 25, "enqueue_timeout_ms": 100, "claim_lease_seconds": 1}),
+    ] {
+        let mut config = config_for_timezone("UTC");
+        config.settings.as_mut().unwrap()["dispatch"] = timing;
+        assert!(yorishiro::data::config::validate(&config).is_ok());
+    }
+    for timing in [
+        serde_json::json!({"poll_interval_ms": 0}),
+        serde_json::json!({"enqueue_timeout_ms": 0}),
+        serde_json::json!({"claim_lease_seconds": 0}),
+        serde_json::json!({"claim_lease_seconds": 5}),
+        serde_json::json!({"claim_lease_seconds": 1, "enqueue_timeout_ms": 1001}),
+        serde_json::json!({"poll_interval_ms": -1}),
+        serde_json::json!({"obsolete": 1}),
+    ] {
+        let mut config = config_for_timezone("UTC");
+        config.settings.as_mut().unwrap()["dispatch"] = timing.clone();
+        assert!(
+            yorishiro::data::config::validate(&config).is_err(),
+            "{timing}"
+        );
+    }
+}

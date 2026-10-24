@@ -2,7 +2,7 @@
 
 use crate::YorishiroError;
 use crate::controllers::middleware::auth::{self as base_auth, Authenticator};
-use crate::db::DbHandle;
+use crate::db::{AppContextBackend, DbHandle};
 use crate::error::ResultExt;
 use crate::models::api_keys::{ApiKeyScope, AuthContext, hash_key};
 use loco_rs::prelude::async_trait;
@@ -40,10 +40,19 @@ fn requested_workspace(headers: &[(String, String)]) -> RequestedWorkspace {
 impl Authenticator for TenantScopedAuthenticator {
     async fn authenticate(
         &self,
-        db: &DbHandle,
+        app: &loco_rs::app::AppContext,
         presented_key: &str,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
+        if app.is_sqlite() {
+            return base_auth::DefaultAuthenticator
+                .authenticate(app, presented_key, headers)
+                .await;
+        }
+        let db = app
+            .shared_store
+            .get::<DbHandle>()
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
         let pool = db.tenant.pool();
         let requested = match requested_workspace(headers) {
             RequestedWorkspace::Absent => None,
@@ -63,18 +72,52 @@ impl Authenticator for TenantScopedAuthenticator {
 
         // The two-argument overload of the `authenticate_api_key` SECURITY DEFINER function the schema migration creates.
         // `p_requested_workspace` is only consulted for a key with no workspace of its own, and resolves only when the named workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
-        let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>, bool)> = sea_orm::sqlx::query_as(
-            "SELECT id, workspace_id, tenant_id, scope, user_id, audit \
-             FROM authenticate_api_key($1, $2)",
-        )
-        .bind(key_hash)
-        .bind(requested)
-        .fetch_optional(pool)
-        .await
-        .internal()?;
+        use sea_orm::{
+            FromQueryResult,
+            sea_query::{Alias, Expr, Func, Query},
+        };
+        #[derive(FromQueryResult)]
+        struct Credential {
+            id: Uuid,
+            workspace_id: Uuid,
+            tenant_id: Uuid,
+            scope: String,
+            user_id: Option<Uuid>,
+            audit: bool,
+        }
+        let query = Query::select()
+            .columns(
+                [
+                    "id",
+                    "workspace_id",
+                    "tenant_id",
+                    "scope",
+                    "user_id",
+                    "audit",
+                ]
+                .map(Alias::new),
+            )
+            .from_function(
+                Func::cust(Alias::new("authenticate_api_key"))
+                    .args([Expr::val(key_hash), Expr::val(requested)]),
+                Alias::new("credential"),
+            )
+            .to_owned();
+        let conn = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
+        let row = Credential::find_by_statement(conn.get_database_backend().build(&query))
+            .one(&conn)
+            .await
+            .internal()?;
 
-        let (api_key_id, workspace_id, tenant_id, scope_str, user_id, audit) =
-            row.ok_or(YorishiroError::Unauthenticated)?;
+        let row = row.ok_or(YorishiroError::Unauthenticated)?;
+        let Credential {
+            id: api_key_id,
+            workspace_id,
+            tenant_id,
+            scope: scope_str,
+            user_id,
+            audit,
+        } = row;
 
         // A workspace-scoped key ignores the header, so a client that sends one naming a different workspace is asking for something it will not get.
         // Rejecting says so; proceeding would act on the key's own workspace instead: a write landing where the client never named, answered with a 2xx.
@@ -117,21 +160,11 @@ fn bearer_token(headers: &HeaderMap) -> Result<&str, YorishiroError> {
         .ok_or(YorishiroError::Unauthenticated)
 }
 
-fn db_handle(ctx: &AppContext) -> Result<DbHandle, YorishiroError> {
-    ctx.shared_store
-        .get::<DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))
-}
-
 async fn authenticate(
     ctx: &AppContext,
     headers: &HeaderMap,
 ) -> Result<AuthContext, YorishiroError> {
     let token = bearer_token(headers)?;
-    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return crate::models::api_keys::Entity::authenticate_sqlite(&ctx.db, token).await;
-    }
-    let db = db_handle(ctx)?;
     let forwarded = headers
         .iter()
         .filter_map(|(name, value)| {
@@ -141,9 +174,8 @@ async fn authenticate(
                 .map(|value| (name.as_str().to_owned(), value.to_owned()))
         })
         .collect::<Vec<_>>();
-    crate::controllers::extractors::authenticator(ctx)
-        .map_err(|error| error.0)?
-        .authenticate(&db, token, &forwarded)
+    base_auth::RequestAuth::new(ctx)
+        .resolve(token, &forwarded)
         .await
 }
 

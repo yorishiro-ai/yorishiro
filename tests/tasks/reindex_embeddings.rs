@@ -1,15 +1,14 @@
+use crate::requests::fixtures::{TenantArgs, TestTenant};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::requests::boot_request;
-use loco_rs::prelude::async_trait;
-use sea_orm::FromQueryResult;
+use sea_orm::{ColumnTrait, EntityTrait, QuerySelect};
 use yorishiro::App;
-use yorishiro::error::YorishiroError;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::_entities::workspace_workspaces;
 use yorishiro::models::entity_embeddings;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{entity_entities, schema_schemas};
-use yorishiro::services::embedding::EmbeddingProvider;
+use yorishiro::services::embedding::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
 fn note_definition() -> serde_json::Value {
     serde_json::json!({
@@ -21,32 +20,24 @@ fn note_definition() -> serde_json::Value {
 }
 
 async fn insert_workspace(
+    request: &loco_rs::TestServer,
     ctx: &loco_rs::app::AppContext,
     stamped_model: &str,
-) -> workspace_workspaces::Model {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("reindex-embeddings-test".into()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+) -> uuid::Uuid {
+    let TestTenant {
+        tenant_id,
+        workspace_id,
+        ..
+    } = TestTenant::create(request, ctx, TenantArgs::default()).await;
+    let (previous, _server) = http_provider(stamped_model, usize::MAX).await;
+    entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[], &previous)
         .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
-        embedding_model: sea_orm::ActiveValue::Set(Some(stamped_model.into())),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
+        .expect("stamp the previous deployed model");
     let def = serde_json::from_value(note_definition()).expect("parse definition");
-    schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+    schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
         .await
         .expect("create schema");
-    workspace
+    workspace_id
 }
 
 async fn insert_entity(
@@ -69,143 +60,77 @@ async fn insert_entity(
 }
 
 async fn stamped_model(ctx: &loco_rs::app::AppContext, workspace_id: uuid::Uuid) -> Option<String> {
-    #[derive(FromQueryResult)]
-    struct Row {
-        embedding_model: Option<String>,
-    }
-    Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT embedding_model FROM workspace_workspaces WHERE id = $1",
-        [workspace_id.into()],
-    ))
-    .one(&ctx.db)
-    .await
-    .expect("query stamp")
-    .and_then(|r| r.embedding_model)
+    workspace_workspaces::Entity::find_by_id(workspace_id)
+        .select_only()
+        .column(workspace_workspaces::Column::EmbeddingModel)
+        .into_tuple::<Option<String>>()
+        .one(&ctx.db)
+        .await
+        .expect("query stamp")
+        .flatten()
 }
 
 async fn embedding_is_set(ctx: &loco_rs::app::AppContext, entity_id: uuid::Uuid) -> bool {
-    #[derive(FromQueryResult)]
-    struct Row {
-        has_embedding: bool,
-    }
-    Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = $1",
-        [entity_id.into()],
-    ))
-    .one(&ctx.db)
-    .await
-    .expect("query embedding")
-    .map(|r| r.has_embedding)
-    .unwrap_or(false)
+    entity_embeddings::Entity768::find_by_id(entity_id)
+        .select_only()
+        .column_as(
+            yorishiro::models::_entities::entity_embeddings_768::Column::Embedding.is_not_null(),
+            "has_embedding",
+        )
+        .into_tuple::<bool>()
+        .one(&ctx.db)
+        .await
+        .expect("query embedding")
+        .unwrap_or(false)
 }
 
-/// A provider that succeeds its first `succeeds_before_failing` calls, then errors on every call after: enough to make a real reindex run produce a genuine partial result (some rows re-embedded, some not) rather than an all-or-nothing outcome that never exercises the restamp-ordering logic.
-struct FlakyProvider {
-    model_name: &'static str,
-    calls: AtomicUsize,
+async fn http_provider(
+    model: &str,
     succeeds_before_failing: usize,
-}
-
-#[async_trait]
-impl EmbeddingProvider for FlakyProvider {
-    fn dimensions(&self) -> usize {
-        768
-    }
-
-    fn model_name(&self) -> String {
-        self.model_name.into()
-    }
-
-    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-        if texts.is_empty() {
-            return Ok(vec![]);
-        }
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        if call >= self.succeeds_before_failing {
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "simulated provider outage"
-            )));
-        }
-        Ok(texts.iter().map(|_| vec![0.0_f32; 768]).collect())
-    }
-}
-
-/// A provider that always succeeds, for the happy-path restamp test.
-struct WorkingProvider(&'static str);
-
-#[async_trait]
-impl EmbeddingProvider for WorkingProvider {
-    fn dimensions(&self) -> usize {
-        768
-    }
-
-    fn model_name(&self) -> String {
-        self.0.into()
-    }
-
-    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-        Ok(texts.iter().map(|_| vec![0.0_f32; 768]).collect())
-    }
-}
-
-/// A provider that, on its first call, updates `target_entity_id`'s own data (bumping `updated_at`) before returning a vector, deterministically recreating the race `embed_and_write`'s `updated_at` guard exists for: `reindex_embedding_for_record` reads `record.updated_at` before this call runs, so the write that follows targets a now-stale snapshot and matches zero rows.
-struct ConcurrentModificationProvider {
-    model_name: &'static str,
-    conn: sea_orm::DatabaseConnection,
-    workspace_id: uuid::Uuid,
-    target_entity_id: uuid::Uuid,
-    triggered: std::sync::atomic::AtomicBool,
-}
-
-#[async_trait]
-impl EmbeddingProvider for ConcurrentModificationProvider {
-    fn dimensions(&self) -> usize {
-        768
-    }
-
-    fn model_name(&self) -> String {
-        self.model_name.into()
-    }
-
-    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-        if !self.triggered.swap(true, Ordering::SeqCst) {
-            entity_entities::update(
-                &self.conn,
-                self.workspace_id,
-                entity_entities::UpdateEntityInput {
-                    id: self.target_entity_id,
-                    data: serde_json::json!({ "title": "modified concurrently with the reindex" }),
-                    updated_by: None,
-                },
-            )
-            .await
-            .expect("concurrent update");
-        }
-        Ok(texts.iter().map(|_| vec![0.0_f32; 768]).collect())
-    }
+) -> (OpenAiCompatibleProvider, crate::http_stub::HttpStub) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
+        "/embeddings",
+        axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+            let calls = calls.clone();
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) >= succeeds_before_failing {
+                    return Err(axum::http::StatusCode::SERVICE_UNAVAILABLE);
+                }
+                let data = body["input"]
+                    .as_array()
+                    .expect("embedding inputs")
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; 768]}))
+                    .collect::<Vec<_>>();
+                Ok(axum::Json(serde_json::json!({"data": data})))
+            }
+        }),
+    ))
+    .await;
+    let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+        base_url: server.url.clone(),
+        api_key: "test-key".into(),
+        model: model.into(),
+        dimensions: 768,
+        send_dimensions_param: false,
+    });
+    (provider, server)
 }
 
 /// A partial failure must leave the workspace's stamp completely unchanged, which is the load-bearing property `reindex_embeddings` exists to guarantee: restamping on a partial result would claim a model for rows that were never actually re-embedded with it, recreating the exact stamp/data mismatch the write-time model check in `sync.rs` exists to catch.
 #[tokio::test]
 async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
-        let first = insert_entity(&ctx, workspace.id, "first entity").await;
-        let second = insert_entity(&ctx, workspace.id, "second entity").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let workspace_id = insert_workspace(&request, &ctx, "nomic-ai/nomic-embed-text-v1.5").await;
+        let first = insert_entity(&ctx, workspace_id, "first entity").await;
+        let second = insert_entity(&ctx, workspace_id, "second entity").await;
 
-        let provider = FlakyProvider {
-            model_name: "intfloat/multilingual-e5-base",
-            calls: AtomicUsize::new(0),
-            succeeds_before_failing: 1,
-        };
-        let outcome = entity_embeddings::reindex_workspace(
-            &ctx.db,
-            workspace.id,
+        let (provider, _server) = http_provider("intfloat/multilingual-e5-base", 1).await;
+        let outcome = yorishiro::db::reindex_workspace_with_lock(
+            &ctx,
+            workspace_id,
             &[first.id, second.id],
             &provider,
         )
@@ -220,7 +145,7 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
         assert_eq!(outcome.failures.len(), 1);
 
         assert_eq!(
-            stamped_model(&ctx, workspace.id).await,
+            stamped_model(&ctx, workspace_id).await,
             Some("nomic-ai/nomic-embed-text-v1.5".into()),
             "a partial failure must not touch the workspace's stamp"
         );
@@ -231,18 +156,15 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
 /// Full success must both write every row's vector and restamp the workspace to the new provider's identity, which is what lets a subsequent ordinary write pass the write-time model check instead of being refused forever.
 #[tokio::test]
 async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
-        let first = insert_entity(&ctx, workspace.id, "first entity").await;
-        let second = insert_entity(&ctx, workspace.id, "second entity").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let workspace_id = insert_workspace(&request, &ctx, "nomic-ai/nomic-embed-text-v1.5").await;
+        let first = insert_entity(&ctx, workspace_id, "first entity").await;
+        let second = insert_entity(&ctx, workspace_id, "second entity").await;
 
-        let provider = WorkingProvider("intfloat/multilingual-e5-base");
-        let outcome = entity_embeddings::reindex_workspace(
-            &ctx.db,
-            workspace.id,
+        let (provider, _server) = http_provider("intfloat/multilingual-e5-base", usize::MAX).await;
+        let outcome = yorishiro::db::reindex_workspace_with_lock(
+            &ctx,
+            workspace_id,
             &[first.id, second.id],
             &provider,
         )
@@ -256,7 +178,7 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
         assert!(embedding_is_set(&ctx, first.id).await);
         assert!(embedding_is_set(&ctx, second.id).await);
         assert_eq!(
-            stamped_model(&ctx, workspace.id).await,
+            stamped_model(&ctx, workspace_id).await,
             Some("intfloat/multilingual-e5-base".into()),
             "full success must restamp the workspace to the provider that actually wrote the vectors"
         );
@@ -268,28 +190,64 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
 /// An entity modified between `reindex_workspace`'s batch fetch and its write landing must be reported as a failure, not silently counted as reindexed, or the workspace would restamp while that row still holds a vector from before the concurrent modification: the exact stamp/data mismatch the write-time model check exists to catch, this time caused by the migration tool racing an ordinary write instead of a misconfigured deployment.
 #[tokio::test]
 async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|_request, ctx| async move {
-        let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
-        let first = insert_entity(&ctx, workspace.id, "first entity").await;
-        let second = insert_entity(&ctx, workspace.id, "second entity").await;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let workspace_id = insert_workspace(&request, &ctx, "nomic-ai/nomic-embed-text-v1.5").await;
+        let first = insert_entity(&ctx, workspace_id, "first entity").await;
+        let second = insert_entity(&ctx, workspace_id, "second entity").await;
 
-        let provider = ConcurrentModificationProvider {
-            model_name: "intfloat/multilingual-e5-base",
-            conn: ctx.db.clone(),
-            workspace_id: workspace.id,
-            target_entity_id: first.id,
-            triggered: std::sync::atomic::AtomicBool::new(false),
-        };
-        let outcome = entity_embeddings::reindex_workspace(
-            &ctx.db,
-            workspace.id,
-            &[first.id, second.id],
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (started, gate) = (entered.clone(), release.clone());
+        let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
+            "/embeddings",
+            axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+                let (started, gate, calls) = (started.clone(), gate.clone(), calls.clone());
+                async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        started.notify_one();
+                        gate.acquire().await.unwrap().forget();
+                    }
+                    let data = body["input"].as_array().unwrap().iter().enumerate()
+                        .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; 768]}))
+                        .collect::<Vec<_>>();
+                    axum::Json(serde_json::json!({"data": data}))
+                }
+            }),
+        )).await;
+        let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+            base_url: server.url.clone(),
+            api_key: "test-key".into(),
+            model: "intfloat/multilingual-e5-base".into(),
+            dimensions: 768,
+            send_dimensions_param: false,
+        });
+        let ids = [first.id, second.id];
+        let reindex = yorishiro::db::reindex_workspace_with_lock(
+            &ctx,
+            workspace_id,
+            &ids,
             &provider,
-        )
+        );
+        let modify = async {
+            entered.notified().await;
+            entity_entities::update(
+                &ctx.db,
+                workspace_id,
+                entity_entities::UpdateEntityInput {
+                    id: first.id,
+                    data: serde_json::json!({"title": "modified concurrently with the reindex"}),
+                    updated_by: None,
+                },
+            ).await.expect("concurrent update");
+            release.add_permits(1);
+        };
+        let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            tokio::join!(reindex, modify)
+        })
         .await
+        .expect("concurrent reindex completes");
+        let outcome = outcome
         .expect("reindex_workspace runs even with a concurrent modification");
 
         assert_eq!(outcome.total, 2);
@@ -301,7 +259,7 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
         assert_eq!(outcome.failures[0].entity_id, first.id);
 
         assert_eq!(
-            stamped_model(&ctx, workspace.id).await,
+            stamped_model(&ctx, workspace_id).await,
             Some("nomic-ai/nomic-embed-text-v1.5".into()),
             "a concurrently modified entity must block the restamp exactly like any other failure"
         );

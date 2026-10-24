@@ -120,30 +120,15 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
         // Same durable enqueue as REST, committed atomically with the entity.
-        let dispatcher = match self
-            .app_context()
-            .shared_store
-            .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        {
-            Some(value) => value,
-            None => {
-                return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                    anyhow::anyhow!("dispatcher missing"),
-                )));
-            }
-        };
-        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write_with_dispatcher(
+        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write(
             self.app_context(),
             workspace_id,
             record.id,
-            Some(authorized.txn()),
-            dispatcher.as_ref(),
+            authorized.txn(),
         )
         .await
         {
-            return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                anyhow::anyhow!(err.to_string()),
-            )));
+            return Ok(err_to_tool_result(err));
         }
         authorized.commit().await?;
         ok_json(record)
@@ -197,30 +182,15 @@ impl YorishiroMcpServer {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        let dispatcher = match self
-            .app_context()
-            .shared_store
-            .get::<std::sync::Arc<dyn crate::workers::dispatch::EmbeddingSyncDispatcher>>()
-        {
-            Some(value) => value,
-            None => {
-                return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                    anyhow::anyhow!("dispatcher missing"),
-                )));
-            }
-        };
-        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write_with_dispatcher(
+        if let Err(err) = crate::workers::embedding_sync::enqueue_after_write(
             self.app_context(),
             workspace_id,
             record.id,
-            Some(authorized.txn()),
-            dispatcher.as_ref(),
+            authorized.txn(),
         )
         .await
         {
-            return Ok(err_to_tool_result(crate::error::YorishiroError::Internal(
-                anyhow::anyhow!(err.to_string()),
-            )));
+            return Ok(err_to_tool_result(err));
         }
         authorized.commit().await?;
         ok_json(record)
@@ -328,7 +298,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Fill absent required fields in entities behind a schema's active version (requires migration scope). Takes a snapshot so the operation can be undone with the migration undo endpoint."
+        description = "Enqueue a fill-defaults job (requires migration scope). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log."
     )]
     pub async fn fill_defaults(
         &self,
@@ -341,44 +311,21 @@ impl YorishiroMcpServer {
                 AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
             };
 
-        let workspace_id = authorized.auth_context().workspace_id;
-        let schema_name = args.schema_name;
-        let job_id = Uuid::now_v7();
-        let report = match entity_entities::fill_defaults(
+        let job_id = match crate::workers::fill_defaults::enqueue(
+            self.app_context(),
             authorized.txn(),
-            workspace_id,
-            &schema_name,
-            job_id,
-            authorized.auth_context().user_id,
+            authorized.auth_context(),
+            args.schema_name.clone(),
         )
         .await
         {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
+            Ok(id) => id,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
-
-        if let Err(err) = crate::models::api_key_audit_log::record(
-            authorized.txn(),
-            crate::models::api_key_audit_log::AuditActor {
-                workspace_id,
-                tenant_id: authorized.auth_context().tenant_id,
-                api_key_id: authorized.auth_context().api_key_id,
-                user_id: authorized.auth_context().user_id,
-            },
-            crate::models::api_key_audit_log::AuditAction::FillDefaults,
-            serde_json::json!({
-                "schema_name": schema_name,
-                "job_id": job_id,
-                "entities_updated": report.entities_updated,
-                "fields_filled": report.fields_filled,
-            }),
-        )
-        .await
-        {
-            return Ok(err_to_tool_result(err));
-        }
-
         authorized.commit().await?;
-        ok_json(report)
+        ok_json(crate::dtos::entities::FillDefaultsResponse {
+            schema_name: args.schema_name,
+            job_id,
+        })
     }
 }

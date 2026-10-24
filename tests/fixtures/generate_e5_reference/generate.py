@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates tests/fixtures/multilingual-e5-base_reference_embeddings.json from a real sentence-transformers run of intfloat/multilingual-e5-base.
 
-Unlike tests/fixtures/nomic_reference_embeddings.json (generated once from the now-removed ort implementation and irreplaceable), this fixture is regenerable: rerun this script inside the Docker image built from this directory's Dockerfile whenever the pinned revision changes.
+Rerun this script inside the Docker image built from this directory's Dockerfile whenever the pinned revision changes.
 
 sentence-transformers does not add multilingual-e5-base's query:/passage: prefixes on its own (see the model's own card), so this script prepends them by hand before encoding, exactly the convention src/services/embedding/model_fetch.rs's MULTILINGUAL_E5_BASE definition expects the candle provider to apply on its own via embed_as. The fixture stores raw (unprefixed) text; the Rust-side parity test applies the prefix itself and checks the result against these reference vectors, so the test exercises the prefix plumbing, not just the model's numeric output.
 """

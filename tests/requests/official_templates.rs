@@ -1,13 +1,14 @@
 //! `seed_official_templates` has no HTTP surface (it is a Loco task, `cargo loco task seed_official_templates`), so this calls the service function directly against `ctx.db`, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests in the same suite.
 
-use super::boot_request;
+use super::boot_request_isolated as boot_request;
 use loco_rs::app::Hooks;
-use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ActiveModelTrait, ActiveValue};
 use yorishiro::App;
 use yorishiro::edition::ee::models::template_templates::{
     self as official_templates, OFFICIAL_TENANT_ID,
 };
-use yorishiro::models::_entities::{template_versions, tenant_tenants};
+use yorishiro::models::_entities::template_versions;
+use yorishiro::models::pagination::ListParams;
 
 /// A first run publishes every built-in template and creates the official tenant; a second run republishes nothing.
 #[tokio::test]
@@ -26,24 +27,10 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
         assert_eq!(first.updated.len(), 0);
         assert_eq!(first.unchanged.len(), 0);
 
-        let tenant = tenant_tenants::Entity::find()
-            .filter(tenant_tenants::Column::Id.eq(OFFICIAL_TENANT_ID))
-            .one(&ctx.db)
+        let tenant = yorishiro::models::tenant_tenants::Model::find_by_id(&ctx.db, OFFICIAL_TENANT_ID)
             .await
             .unwrap();
-        assert!(
-            tenant.is_some(),
-            "the official tenant row must exist after seeding"
-        );
-        let published_statuses = template_versions::Entity::find()
-            .all(&ctx.db)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|version| version.status)
-            .collect::<Vec<_>>();
-        assert!(!published_statuses.is_empty());
-        assert!(published_statuses.iter().all(|status| status == "stable"));
+        assert_eq!(tenant.id, OFFICIAL_TENANT_ID);
 
         let second = official_templates::seed_official_templates(&ctx)
             .await
@@ -56,26 +43,31 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
         assert_eq!(second.updated.len(), 0);
         assert_eq!(second.unchanged.len(), built_in_count);
 
-        let task_template = yorishiro::models::_entities::template_templates::Entity::find()
-            .filter(yorishiro::models::_entities::template_templates::Column::Name.eq("task-management"))
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
-        let world_template = yorishiro::models::_entities::template_templates::Entity::find()
-            .filter(yorishiro::models::_entities::template_templates::Column::Name.eq("worldbuilding"))
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
-        for template in [task_template, world_template] {
-            let latest = template_versions::Entity::find()
-                .filter(template_versions::Column::TemplateId.eq(template.id))
-                .order_by_desc(template_versions::Column::Version)
-                .one(&ctx.db)
+        let templates = yorishiro::models::template_templates::list_templates(
+            &ctx.db,
+            OFFICIAL_TENANT_ID,
+            ListParams::new(Some(200), None),
+        )
+        .await
+        .unwrap();
+        let templates = templates.into_iter().filter(|template| template.tenant_id == OFFICIAL_TENANT_ID).collect::<Vec<_>>();
+        assert_eq!(templates.len(), built_in_count);
+        for template in templates {
+            let latest = yorishiro::edition::ee::models::marketplace::list_versions(
+                &ctx.db,
+                OFFICIAL_TENANT_ID,
+                template.id,
+                ListParams::new(Some(1), None),
+            )
                 .await
                 .unwrap()
+                .into_iter()
+                .next()
                 .unwrap();
+            assert_eq!(latest.status.as_db_str(), "stable");
+            if !matches!(template.name.as_str(), "task-management" | "worldbuilding") {
+                continue;
+            }
             let mut previous = latest.definition;
             if template.name == "task-management" {
                 for entity in ["client", "milestone", "assignee", "work_session", "handoff"] {
@@ -92,6 +84,7 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
                     "Characters, locations, factions, and items for creative writing and TRPG worldbuilding"
                 );
             }
+            // Simulate a version published by an older binary; the current publisher only ships current definitions.
             let active = template_versions::ActiveModel {
                 id: ActiveValue::Set(latest.id),
                 definition: ActiveValue::Set(previous),
@@ -117,15 +110,11 @@ async fn hooks_seed_creates_the_official_tenant_without_publishing_templates() {
             .await
             .expect("Hooks::seed");
 
-        let tenant = tenant_tenants::Entity::find()
-            .filter(tenant_tenants::Column::Id.eq(OFFICIAL_TENANT_ID))
-            .one(&ctx.db)
-            .await
-            .unwrap();
-        assert!(
-            tenant.is_some(),
-            "Hooks::seed must create the official tenant on its own"
-        );
+        let tenant =
+            yorishiro::models::tenant_tenants::Model::find_by_id(&ctx.db, OFFICIAL_TENANT_ID)
+                .await
+                .unwrap();
+        assert_eq!(tenant.id, OFFICIAL_TENANT_ID);
     })
     .await;
 }

@@ -10,7 +10,6 @@ use loco_rs::prelude::async_trait;
 use loco_rs::{
     Result,
     app::{AppContext, Initializer},
-    environment::Environment,
 };
 use tokio::task::JoinHandle;
 use tokio::time::interval;
@@ -21,7 +20,8 @@ use crate::models::system_maintenance::{self, AUTO_REASON, MaintenanceMode, Main
 
 /// Starts the load monitor in every process that serves HTTP.
 ///
-/// `after_routes` runs only for start modes that build a router, so queue workers never run it; test boots skip it because the monitor would outlive the test's own database.
+/// `after_routes` runs only for start modes that build a router, so queue workers never run it.
+/// Settings enable the monitor, and the shutdown hook stops it before application resources close.
 pub(crate) struct LoadGuard;
 
 #[async_trait]
@@ -31,9 +31,6 @@ impl Initializer for LoadGuard {
     }
 
     async fn after_routes(&self, router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
-        if matches!(ctx.environment, Environment::Test) {
-            return Ok(router);
-        }
         let settings = ctx
             .shared_store
             .get::<crate::data::settings::Settings>()

@@ -38,12 +38,9 @@ scheduler:
 
 # Queue Configuration
 #
-# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
-# With DATABASE_URL unset (defaults to `sqlite://`) or naming PostgreSQL, the queue
-# defaults to the same backend and QUEUE_URL falls back to DATABASE_URL.
-# QUEUE_URL takes no default when an external backend is required (Redis, or explicit
-# non-SQLite queue), matching this file's own no-silent-fallback convention.
+# This environment fixes the queue provider to PostgreSQL.
+# QUEUE_URL overrides the application DATABASE_URL for queue storage.
+# Missing SQL pool settings inherit the resolved database settings.
 queue:
   kind: Postgres
 
@@ -89,6 +86,10 @@ settings:
     threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
     sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
     poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
+  dispatch:
+    poll_interval_ms: <%= get_env(name="YORISHIRO_DISPATCH_POLL_INTERVAL_MS", default="500") %>
+    claim_lease_seconds: <%= get_env(name="YORISHIRO_DISPATCH_CLAIM_LEASE_SECS", default="30") %>
+    enqueue_timeout_ms: <%= get_env(name="YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS", default="5000") %>
   query_embedding:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
@@ -130,3 +131,20 @@ auth:
     secret: uClCedX7U2MVLKyarzNq
     # Token expiration time in seconds
     expiration: 604800 # 7 days
+
+initializers:
+  plan_policy_enabled: '<%= get_env(name="YORISHIRO_PLAN_POLICY_ENABLED", default="false") %>'
+  worker_admission:
+    shared: '<%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="") %>'
+    tenant_private: '<%= get_env(name="YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", default="") %>'
+    official: '<%= get_env(name="YORISHIRO_WORKER_OFFICIAL_LIMIT", default="") %>'
+  stripe:
+    webhook_secret: '<%= get_env(name="YORISHIRO_STRIPE_WEBHOOK_SECRET", default="") %>'
+    price_pro: '<%= get_env(name="YORISHIRO_STRIPE_PRICE_PRO", default="") %>'
+    price_team: '<%= get_env(name="YORISHIRO_STRIPE_PRICE_TEAM", default="") %>'
+  oauth:
+    issuer_url: '<%= get_env(name="YORISHIRO_OAUTH_ISSUER_URL", default="") %>'
+    client_id: '<%= get_env(name="YORISHIRO_OAUTH_CLIENT_ID", default="") %>'
+    client_secret: '<%= get_env(name="YORISHIRO_OAUTH_CLIENT_SECRET", default="") %>'
+    redirect_uri: '<%= get_env(name="YORISHIRO_OAUTH_REDIRECT_URI", default="") %>'
+  licence_key: '<%= get_env(name="YORISHIRO_LICENSE_KEY", default="") %>'

@@ -57,12 +57,37 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             serde_json::json!([])
         );
         assert!(document["components"]["schemas"]["TenantOverview"].is_object());
+        let schemas = &document["components"]["schemas"];
+        assert_eq!(
+            schemas["InferenceProposalResponse"]["properties"]["status"]["$ref"],
+            "#/components/schemas/ProposalStatus"
+        );
+        assert_eq!(
+            schemas["ProposalStatus"]["enum"],
+            serde_json::json!(["pending", "confirmed", "rejected", "discarded", "stale", "invalid"])
+        );
+        assert_eq!(
+            schemas["EmbeddingKeyRequest"]["properties"]["send_dimensions_param"]["default"],
+            false
+        );
+        assert_eq!(
+            schemas["PublishVersionRequest"]["properties"]["status"]["default"],
+            "draft"
+        );
+        assert_eq!(
+            schemas["TemplateVersionRecord"]["properties"]["created_at"]["format"],
+            "date-time"
+        );
+        assert_eq!(
+            schemas["MergeResponse"]["properties"]["diff"]["$ref"],
+            "#/components/schemas/VersioningDiff"
+        );
         assert_eq!(
             document["components"]["schemas"]["InferFillStatus"]["enum"],
             serde_json::json!(["queued"])
         );
         assert_eq!(
-            document["components"]["schemas"]["InferJobStatusValue"]["enum"],
+            document["components"]["schemas"]["InferenceJobStatus"]["enum"],
             serde_json::json!(["queued", "running", "completed", "failed"])
         );
         assert_eq!(

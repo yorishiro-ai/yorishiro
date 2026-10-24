@@ -11,35 +11,35 @@ pub struct BuiltinTemplate {
 pub const TEMPLATES: &[BuiltinTemplate] = &[
     BuiltinTemplate {
         id: "general-notes",
-        source: include_str!("../../data/templates/general-notes.json"),
+        source: include_str!("../templates/general-notes.json"),
     },
     BuiltinTemplate {
         id: "task-management",
-        source: include_str!("../../data/templates/task-management.json"),
+        source: include_str!("../templates/task-management.json"),
     },
     BuiltinTemplate {
         id: "creative-writing",
-        source: include_str!("../../data/templates/creative-writing.json"),
+        source: include_str!("../templates/creative-writing.json"),
     },
     BuiltinTemplate {
         id: "trpg-campaign",
-        source: include_str!("../../data/templates/trpg-campaign.json"),
+        source: include_str!("../templates/trpg-campaign.json"),
     },
     BuiltinTemplate {
         id: "game-dev-lore",
-        source: include_str!("../../data/templates/game-dev-lore.json"),
+        source: include_str!("../templates/game-dev-lore.json"),
     },
     BuiltinTemplate {
         id: "research-knowledge-base",
-        source: include_str!("../../data/templates/research-knowledge-base.json"),
+        source: include_str!("../templates/research-knowledge-base.json"),
     },
     BuiltinTemplate {
         id: "worldbuilding",
-        source: include_str!("../../data/templates/worldbuilding.json"),
+        source: include_str!("../templates/worldbuilding.json"),
     },
     BuiltinTemplate {
         id: "software-adr",
-        source: include_str!("../../data/templates/software-adr.json"),
+        source: include_str!("../templates/software-adr.json"),
     },
 ];
 

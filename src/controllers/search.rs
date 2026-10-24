@@ -24,36 +24,16 @@ pub(crate) async fn search_entities(
     };
 
     let workspace_id = verified.ctx.workspace_id;
-    if crate::models::workspace_workspaces::embedding_reindexing(&ctx.db, workspace_id).await? {
-        return Err(crate::error::YorishiroError::BackendUnavailable {
-            message: "semantic search is temporarily unavailable while workspace embeddings are being reindexed".into(),
-        }.into());
-    }
+    search::ensure_available(&ctx.db, workspace_id).await?;
     let limiter = search_token_limiter(&ctx)?;
     charge_search_tokens(&limiter, workspace_id, &params.query_text)?;
 
-    // The server holds no model: a worker embeds the query, and no DB connection is held while waiting for it.
-    let vector = crate::workers::query_embedding::embed_query(
+    let hits = search::search_text(
         &ctx,
         verified.ctx.tenant_id,
         workspace_id,
         &params.query_text,
-    )
-    .await?;
-
-    // The tenant-scoped role cannot read `tenant_tenants`, which the embedding chain joins, so the table is resolved on the identity pool before the transaction opens.
-    let embed_table = search::resolve_query_table(&ctx.db, workspace_id, vector.len()).await?;
-
-    // A read-only transaction: dropped without committing when this returns, a no-op since nothing was written.
-    let txn = crate::db::begin_workspace(&ctx, verified.ctx.tenant_id, workspace_id).await?;
-
-    let hits = search::search_in_table(
-        &txn,
-        workspace_id,
-        vector,
-        &params.query_text,
         query,
-        embed_table,
     )
     .await?;
     Ok(Json(hits))

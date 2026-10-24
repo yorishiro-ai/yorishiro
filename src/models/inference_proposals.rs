@@ -1,4 +1,4 @@
-pub(crate) use super::_entities::inference_proposals::{ActiveModel, Entity, Model};
+use super::_entities::inference_proposals::ActiveModel;
 
 use sea_orm::entity::prelude::*;
 
@@ -13,12 +13,3 @@ impl ActiveModelBehavior for ActiveModel {
         Ok(this)
     }
 }
-
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}

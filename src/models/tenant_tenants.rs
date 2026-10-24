@@ -21,14 +21,24 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
+impl Model {
+    /// Fetches a tenant by its primary key.
+    ///
+    /// # Errors
+    /// Returns an error if the tenant is missing or the query fails.
+    pub async fn find_by_id(
+        conn: &impl ConnectionTrait,
+        id: Uuid,
+    ) -> Result<Self, crate::error::YorishiroError> {
+        use crate::error::{ResultExt, YorishiroError};
 
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
+        Entity::find_by_id(id)
+            .one(conn)
+            .await
+            .internal()?
+            .ok_or_else(|| YorishiroError::not_found("tenant not found"))
+    }
+}
 
 pub(crate) async fn list_all(
     conn: &impl ConnectionTrait,

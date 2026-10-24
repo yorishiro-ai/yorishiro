@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub tags: Json,
     #[sea_orm(unique_key = "template_templates_tenant_id_name_key")]
     pub tenant_id: Uuid,
     #[sea_orm(
@@ -29,8 +31,6 @@ pub struct Model {
     pub created_by: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub tags: Json,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

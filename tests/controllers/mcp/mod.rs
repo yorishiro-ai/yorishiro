@@ -93,7 +93,8 @@ mod input_parity_tests {
                     page_size: 5,
                 }),
             }
-            .into();
+            .try_into()
+            .expect("REST relation query");
         let mcp_query: entity_relations::ListRelationsQuery = relations::ListRelationsArgs {
             source_id: Some(source_id),
             target_id: Some(target_id),
@@ -175,10 +176,9 @@ fn assert_inventory_contract(label: &str, tools: &[rmcp::model::Tool]) {
 }
 
 #[test]
-fn community_inventory_contract_and_documentation_are_current() {
+fn community_inventory_contract_is_valid() {
     let community = community_tool_router().list_all();
     assert_inventory_contract("community", &community);
-
     let docs = include_str!("../../fixtures/mcp-inventory.md");
     let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
     let end = "## Enterprise-only tools\n";

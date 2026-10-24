@@ -2,56 +2,17 @@ use reqwest::Client;
 use std::time::Duration;
 use yorishiro::YorishiroError;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-
 use yorishiro::edition::ee::services::oauth::discovery::*;
 
-async fn start_server(response: &str) -> (String, tokio::task::JoinHandle<Vec<u8>>) {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .expect("test listener must bind");
-    let address = listener.local_addr().expect("test listener has an address");
-    let response = response.to_string();
-    let task = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.expect("test request must arrive");
-        let mut request = Vec::new();
-        let mut buffer = [0; 1024];
-        loop {
-            let read = socket
-                .read(&mut buffer)
-                .await
-                .expect("test request must be readable");
-            if read == 0 {
-                break;
-            }
-            request.extend_from_slice(&buffer[..read]);
-            if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                let header_end = request
-                    .windows(4)
-                    .position(|window| window == b"\r\n\r\n")
-                    .expect("request headers must be present")
-                    + 4;
-                let content_length = String::from_utf8_lossy(&request[..header_end])
-                    .lines()
-                    .find_map(|line| {
-                        line.strip_prefix("Content-Length:")
-                            .or_else(|| line.strip_prefix("content-length:"))
-                            .and_then(|value| value.trim().parse::<usize>().ok())
-                    })
-                    .unwrap_or(0);
-                if request.len() >= header_end + content_length {
-                    break;
-                }
-            }
-        }
-        socket
-            .write_all(response.as_bytes())
-            .await
-            .expect("test response must be written");
-        request
-    });
-    (format!("http://{address}"), task)
+pub(super) async fn start_server(
+    response: &str,
+) -> (
+    String,
+    crate::http_stub::HttpStub,
+    tokio::sync::oneshot::Receiver<Vec<u8>>,
+) {
+    let (stub, request) = crate::http_stub::HttpStub::raw_with_request(response.to_owned()).await;
+    (stub.url.clone(), stub, request)
 }
 
 fn client(timeout: Duration) -> Client {
@@ -64,7 +25,7 @@ fn client(timeout: Duration) -> Client {
 
 #[tokio::test]
 async fn production_transport_fetches_discovery_and_jwks_and_exchanges_code() {
-    let (issuer, discovery_task) = start_server(
+    let (issuer, _discovery_task_stub, discovery_task) = start_server(
         "HTTP/1.1 200 OK\r\nContent-Length: 132\r\nConnection: close\r\n\r\n{\"authorization_endpoint\":\"http://127.0.0.1/authorize\",\"token_endpoint\":\"http://127.0.0.1/token\",\"jwks_uri\":\"http://127.0.0.1/jwks\"}",
     )
     .await;
@@ -79,7 +40,7 @@ async fn production_transport_fetches_discovery_and_jwks_and_exchanges_code() {
         "http://127.0.0.1/authorize"
     );
 
-    let (token_endpoint, token_task) = start_server(
+    let (token_endpoint, _token_task_stub, token_task) = start_server(
         "HTTP/1.1 200 OK\r\nContent-Length: 28\r\nConnection: close\r\n\r\n{\"id_token\":\"test-id-token\"}",
     )
     .await;
@@ -116,7 +77,7 @@ async fn production_transport_fetches_discovery_and_jwks_and_exchanges_code() {
         );
     }
 
-    let (jwks_uri, jwks_task) = start_server(
+    let (jwks_uri, _jwks_task_stub, jwks_task) = start_server(
         "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"keys\":[]}",
     )
     .await;
@@ -161,27 +122,19 @@ async fn token_transport_failure_redacts_client_secret() {
 
 #[tokio::test]
 async fn timeout_maps_to_internal() {
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .expect("test listener must bind");
-    let address = listener.local_addr().expect("test listener has an address");
-    let task = tokio::spawn(async move {
-        let (_socket, _) = listener.accept().await.expect("test request must arrive");
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    });
+    let server = crate::http_stub::HttpStub::stalled().await;
     let http = ReqwestOAuthHttp::with_client(client(Duration::from_millis(10)));
     let error = http
-        .fetch_discovery_document(&format!("http://{address}"))
+        .fetch_discovery_document(&server.url)
         .await
         .unwrap_err();
 
-    task.await.expect("timeout server must finish");
     assert!(matches!(error, YorishiroError::Internal(_)));
 }
 
 #[tokio::test]
 async fn invalid_responses_and_provider_statuses_keep_existing_mapping() {
-    let (url, task) =
+    let (url, _task_stub, task) =
         start_server("HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nnot-json")
             .await;
     let http = ReqwestOAuthHttp::with_client(client(Duration::from_secs(1)));
@@ -189,7 +142,7 @@ async fn invalid_responses_and_provider_statuses_keep_existing_mapping() {
     task.await.expect("invalid discovery server must finish");
     assert_decode_error(&error, &format!("{url}/.well-known/openid-configuration"));
 
-    let (url, task) = start_server(
+    let (url, _task_stub, task) = start_server(
         "HTTP/1.1 401 Unauthorized\r\nContent-Length: 20\r\nConnection: close\r\n\r\nprovider-secret-body",
     )
     .await;
@@ -208,7 +161,7 @@ async fn invalid_responses_and_provider_statuses_keep_existing_mapping() {
     assert!(matches!(error, YorishiroError::Unauthenticated));
     assert!(!format!("{error:?}").contains("provider-secret-body"));
 
-    let (url, task) =
+    let (url, _task_stub, task) =
         start_server("HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nnot-json")
             .await;
     let error = http
@@ -225,7 +178,7 @@ async fn invalid_responses_and_provider_statuses_keep_existing_mapping() {
     task.await.expect("invalid token server must finish");
     assert_decode_error(&error, &url);
 
-    let (url, task) =
+    let (url, _task_stub, task) =
         start_server("HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nnot-json")
             .await;
     let error = http.fetch_jwks(&url).await.unwrap_err();
@@ -235,10 +188,10 @@ async fn invalid_responses_and_provider_statuses_keep_existing_mapping() {
 
 #[tokio::test]
 async fn accepted_redirect_status_error_names_the_original_endpoint() {
-    let (final_url, final_task) =
+    let (final_url, _final_task_stub, final_task) =
         start_server("HTTP/1.1 418 I'm a teapot\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await;
-    let (redirect_url, redirect_task) = start_server(&format!(
+    let (redirect_url, _redirect_task_stub, redirect_task) = start_server(&format!(
         "HTTP/1.1 302 Found\r\nLocation: {final_url}/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     ))
     .await;
@@ -269,7 +222,7 @@ async fn rejects_non_https_public_urls_and_redirect_targets() {
         .unwrap_err();
     assert!(matches!(error, YorishiroError::Internal(_)));
 
-    let (url, task) = start_server(
+    let (url, _task_stub, task) = start_server(
         "HTTP/1.1 302 Found\r\nLocation: http://idp.example.invalid/jwks\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
     )
     .await;

@@ -5,7 +5,7 @@ inputs:
   version:
     description: nfpm version without the v prefix
     required: false
-    default: '2.47.0'
+    default: '2.48.0'
 runs:
   using: composite
   steps:

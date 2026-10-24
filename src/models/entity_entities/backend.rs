@@ -1,28 +1,47 @@
-use sea_orm::{ConnectionTrait, DbErr, Statement};
+use sea_orm::{
+    ConnectionTrait, DbErr, ExprTrait,
+    sea_query::{Alias, Expr, Query},
+};
 use uuid::Uuid;
 
 /// Inserts a snapshot from the current entity row in one statement.
-/// SeaORM cannot express this `INSERT ... SELECT` while preserving the snapshot race semantics.
+/// SeaQuery keeps the read and insert atomic on both supported backends.
 pub(super) async fn insert_snapshot(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     entity_id: Uuid,
     job_id: Uuid,
 ) -> Result<u64, DbErr> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        conn.get_database_backend(),
-        "INSERT INTO entity_snapshots \
-            (id, job_id, workspace_id, entity_id, schema_id, schema_version, data) \
-         SELECT $1, $2, workspace_id, id, schema_id, schema_version, data \
-           FROM entity_entities \
-          WHERE workspace_id = $3 AND id = $4",
-        [
-            Uuid::now_v7().into(),
-            job_id.into(),
-            workspace_id.into(),
-            entity_id.into(),
-        ],
-    ))
-    .await
-    .map(|result| result.rows_affected())
+    use crate::models::_entities::{entity_entities, entity_snapshots};
+    let source = Query::select()
+        .expr(Expr::val(Uuid::now_v7()))
+        .expr(Expr::val(job_id))
+        .columns([
+            entity_entities::Column::WorkspaceId,
+            entity_entities::Column::Id,
+            entity_entities::Column::SchemaId,
+            entity_entities::Column::SchemaVersion,
+            entity_entities::Column::Data,
+        ])
+        .from(Alias::new("entity_entities"))
+        .and_where(Expr::col(entity_entities::Column::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(entity_entities::Column::Id).eq(entity_id))
+        .to_owned();
+    let insert = Query::insert()
+        .into_table(Alias::new("entity_snapshots"))
+        .columns([
+            entity_snapshots::Column::Id,
+            entity_snapshots::Column::JobId,
+            entity_snapshots::Column::WorkspaceId,
+            entity_snapshots::Column::EntityId,
+            entity_snapshots::Column::SchemaId,
+            entity_snapshots::Column::SchemaVersion,
+            entity_snapshots::Column::Data,
+        ])
+        .select_from(source)
+        .map_err(|error| DbErr::Custom(error.to_string()))?
+        .to_owned();
+    conn.execute_raw(conn.get_database_backend().build(&insert))
+        .await
+        .map(|result| result.rows_affected())
 }

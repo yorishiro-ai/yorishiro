@@ -20,14 +20,13 @@ use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
 use crate::models::entity_embeddings;
 use crate::models::entity_entities;
-use crate::workers::dispatch::EmbeddingSyncDispatcher;
 
 db_enum! {
     /// What kind of compute a queued job is meant for.
     ///
     /// The class is recorded on the job's lifecycle row and decides its priority band and concurrency limit.
     /// It does not choose the worker: that is the job's [`crate::workers::target::WorkerTarget`], which a `TenantPrivate` job derives from the tenant that owns its workspace.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum WorkerClass {
         /// Runs only on compute a single tenant registered for its own workspaces.
         TenantPrivate = "tenant_private",
@@ -38,53 +37,12 @@ db_enum! {
     }
 }
 
-/// Resolves a workspace's own worker-class assignment, if it has one.
-///
-/// A trait, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`], letting a deployment pin a workspace's jobs to particular compute without touching the callers that enqueue them.
-/// [`DefaultWorkerClassResolver`] keeps every workspace on `Shared`.
-///
-/// `conn` is `ctx.db` rather than the RLS-scoped pool: which compute a tenant pays for is deployment configuration, not tenant content.
-///
-/// Returns `Ok(None)` for a workspace with no assignment, leaving the fallback to the caller rather than deciding it here.
-#[async_trait]
-pub trait WorkerClassResolver: Send + Sync {
-    async fn resolve(
-        &self,
-        conn: &sea_orm::DatabaseConnection,
-        workspace_id: Uuid,
-    ) -> Result<Option<WorkerClass>, YorishiroError>;
-}
-
-/// This crate's own rule: no workspace has a worker-class assignment, so every job stays `Shared`.
-pub(crate) struct DefaultWorkerClassResolver;
-
-#[async_trait]
-impl WorkerClassResolver for DefaultWorkerClassResolver {
-    async fn resolve(
-        &self,
-        _conn: &sea_orm::DatabaseConnection,
-        _workspace_id: Uuid,
-    ) -> Result<Option<WorkerClass>, YorishiroError> {
-        Ok(None)
-    }
-}
-
-/// The resolver a deployment gets when it does not choose one.
-#[must_use]
-pub(crate) fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
-    Arc::new(DefaultWorkerClassResolver)
-}
-
 /// Ids only, not the `EntityRecord` or the provider's model name: everything is re-read inside `perform`, so an update racing ahead of a still-queued job is picked up as the entity's current state rather than overwritten with what was true at enqueue time.
 /// A deleted entity is not found on that re-read, and the job is a no-op.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
-    #[serde(default)]
-    pub dispatch_id: Option<Uuid>,
-    #[serde(default)]
-    pub publishing_epoch: Option<i64>,
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
     pub worker_class: WorkerClass,
@@ -95,7 +53,6 @@ impl EmbeddingSyncArgs {
     pub(crate) const JOB_NAME: &'static str = "embedding_sync";
 }
 
-#[derive(Debug)]
 enum EmbeddingSyncOutcome {
     Persisted,
     Noop(&'static str),
@@ -110,36 +67,13 @@ fn classify_embedding_error(error: YorishiroError) -> Result<EmbeddingSyncOutcom
     }
 }
 
-/// The provider a worker embeds `workspace_id`'s text with: the workspace's own, else the deployment default this worker process installed.
-///
-/// `Ok(None)` means neither exists, which is what a process that never installed a default provider sees.
-///
-/// # Errors
-/// Returns `Internal` when the resolver seam is missing, or the resolver's own error.
-pub(crate) async fn resolve_worker_provider(
-    ctx: &AppContext,
-    workspace_id: Uuid,
-) -> Result<Option<Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError> {
-    let resolver = ctx
-        .shared_store
-        .get::<Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>>()
-        .ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("WorkspaceEmbeddingResolver missing"))
-        })?;
-    Ok(match resolver.resolve(&ctx.db, workspace_id).await? {
-        Some(provider) => Some(provider),
-        None => ctx
-            .shared_store
-            .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
-    })
-}
-
 /// Runs one embedding attempt. It never re-enqueues itself.
 async fn perform_embedding_sync(
     ctx: &AppContext,
     args: &EmbeddingSyncArgs,
 ) -> Result<EmbeddingSyncOutcome, YorishiroError> {
-    let provider = resolve_worker_provider(ctx, args.workspace_id).await?;
+    let provider =
+        crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id).await?;
     let Some(provider) = provider else {
         return Ok(EmbeddingSyncOutcome::Noop(
             "no embedding provider configured",
@@ -196,23 +130,12 @@ async fn perform_embedding_with_lifecycle(
     ctx: &AppContext,
     args: &EmbeddingSyncArgs,
 ) -> loco_rs::Result<()> {
-    if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-        &ctx.db,
-        args.lifecycle_id,
-        args.dispatch_id,
-        args.publishing_epoch,
-    )
-    .await
-    .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-    {
-        return Ok(());
-    }
     let concurrency = ctx
         .shared_store
-        .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
+        .get::<Arc<tokio::sync::Semaphore>>()
         .ok_or_else(|| loco_rs::Error::Message("embedding concurrency missing".into()))?;
     let _permit = concurrency
-        .acquire()
+        .acquire_owned()
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     let Some(id) = args.lifecycle_id else {
@@ -221,19 +144,18 @@ async fn perform_embedding_with_lifecycle(
             .map(|_| ())
             .map_err(Into::into);
     };
-    let attempt =
-        match crate::models::queue_job_lifecycles::Entity::start_ignoring_capacity(&ctx.db, id)
-            .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?
-        {
-            crate::models::queue_job_lifecycles::Admission::Started { attempt }
-            | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
-            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
-            | crate::models::queue_job_lifecycles::Admission::Terminal => return Ok(()),
-            crate::models::queue_job_lifecycles::Admission::Saturated { .. } => {
-                unreachable!("capacity is non-authoritative for embedding workers")
-            }
-        };
+    let attempt = match crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+    {
+        crate::models::queue_job_lifecycles::Admission::Started { attempt }
+        | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
+        crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+        | crate::models::queue_job_lifecycles::Admission::Terminal => return Ok(()),
+        crate::models::queue_job_lifecycles::Admission::Saturated { .. } => {
+            unreachable!("capacity is non-authoritative for embedding workers")
+        }
+    };
     let result = perform_embedding_sync(ctx, args).await;
     let (status, diagnostic, error, superseded) = match result {
         Ok(EmbeddingSyncOutcome::Persisted) => (
@@ -296,53 +218,33 @@ impl BackgroundWorker<EmbeddingSyncArgs> for EmbeddingSyncWorker {
     }
 }
 
-/// Enqueues `args` through the installed dispatcher, which picks the target from `args.worker_class` and the workspace.
+/// Enqueues embedding work through the durable outbox.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the durable enqueue fails.
 pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-    let dispatcher = ctx
-        .shared_store
-        .get::<Arc<dyn EmbeddingSyncDispatcher>>()
-        .ok_or_else(|| loco_rs::Error::Message("EmbeddingSyncDispatcher missing".into()))?;
-    enqueue_for_class_with_dispatcher(ctx, args, None, dispatcher.as_ref()).await
+    crate::workers::dispatch::dispatch_embedding(ctx, args, None)
+        .await
+        .map(|_| ())
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn enqueue_for_class_with_dispatcher(
-    ctx: &AppContext,
-    args: EmbeddingSyncArgs,
-    txn: Option<&sea_orm::DatabaseTransaction>,
-    dispatcher: &dyn EmbeddingSyncDispatcher,
-) -> loco_rs::Result<()> {
-    dispatcher.dispatch(ctx, args, txn).await.map(|_job_id| ())
-}
-
-pub(crate) async fn enqueue_after_write_with_dispatcher(
+pub(crate) async fn enqueue_after_write(
     ctx: &AppContext,
     workspace_id: Uuid,
     entity_id: Uuid,
-    txn: Option<&sea_orm::DatabaseTransaction>,
-    dispatcher: &dyn EmbeddingSyncDispatcher,
-) -> loco_rs::Result<()> {
-    let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+    txn: &sea_orm::DatabaseTransaction,
+) -> Result<(), YorishiroError> {
+    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
         .await
-    {
-        Ok(worker_class) => worker_class,
-        Err(err) => {
-            tracing::warn!(entity_id = %entity_id, error = %err.0, "failed to resolve worker class, defaulting to shared");
-            WorkerClass::Shared
-        }
-    };
+        .map_err(|error| error.0)?;
     let args = EmbeddingSyncArgs {
         lifecycle_id: None,
-        dispatch_id: None,
-        publishing_epoch: None,
         workspace_id,
         entity_id,
         worker_class,
     };
-    enqueue_for_class_with_dispatcher(ctx, args, txn, dispatcher).await
+    crate::workers::dispatch::dispatch_embedding(ctx, args, Some(txn))
+        .await
+        .map(|_| ())
+        .map_err(|error| YorishiroError::Internal(anyhow::anyhow!(error.to_string())))
 }

@@ -24,6 +24,9 @@ def classify_path(path: str) -> set[str]:
         return set()
     groups: set[str] = set()
 
+    if s.startswith("patches/"):
+        groups |= {"deps", "rust", "ee"}
+
     if s.startswith((".github/actions/rust-setup/", ".github/actions/sea-orm-cli/")):
         groups |= RUST_SETUP_CONSUMERS | {"shared"}
     elif s.startswith(".github/actions/package-tests/") or s.startswith(".github/actions/build-and-package/"):
@@ -37,7 +40,7 @@ def classify_path(path: str) -> set[str]:
         groups |= {"rust"}
     if s.startswith("ee/"):
         groups |= {"ee"}
-    if s.startswith("edition/"):
+    if s == "src/lib.rs":
         groups |= {"shared", "rust", "ee"}
     if s.startswith("migration/"):
         groups |= {"migration", "shared", "rust", "ee"}
@@ -47,11 +50,11 @@ def classify_path(path: str) -> set[str]:
         groups |= {"topology", "rust", "ee"}
     if s.startswith(("scripts/classify_ci_changes.py", "scripts/test_classify_ci_changes.py")):
         groups |= {"shared", "rust", "ee"}
-    if s.startswith("packaging/") or s.startswith(".github/actions/package-tests/"):
+    if s.startswith(".github/packaging/") or s.startswith(".github/actions/package-tests/"):
         groups |= {"packaging"}
-    if s.startswith("packaging/"):
+    if s.startswith(".github/packaging/"):
         groups |= {"rust", "ee"}
-    if s.startswith(("Dockerfile", "docker-compose", "docker/")):
+    if s.startswith(("Dockerfile", "docker-compose", "docker/", ".github/docker/")):
         groups |= {"docker"}
     if s.startswith((".github/actions/build-and-package/", ".github/actions/build-docker/", ".github/actions/docker-manifest/", ".github/actions/smoke/")):
         groups |= {"release"}

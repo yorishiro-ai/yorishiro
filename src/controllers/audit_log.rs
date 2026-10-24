@@ -17,7 +17,7 @@ pub(crate) async fn list_audit_log(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<AuditLogRecord>>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let records = authorized.records(workspace_id, page.into()).await?;
+    let records = authorized.records(workspace_id, page.try_into()?).await?;
     Ok(Json(
         records
             .into_iter()

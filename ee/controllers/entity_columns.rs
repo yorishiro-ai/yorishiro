@@ -29,7 +29,8 @@ async fn list_columns(
     let schema_txn =
         crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
     let stored =
-        entity_column_preferences::list(&schema_txn, auth_ctx.workspace_id, page.into()).await?;
+        entity_column_preferences::list(&schema_txn, auth_ctx.workspace_id, page.try_into()?)
+            .await?;
     Ok(Json(stored))
 }
 

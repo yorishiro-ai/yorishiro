@@ -12,7 +12,7 @@ use crate::models::_entities::user_users::Column;
 /// Creates a human user account.
 /// The password is hashed with `loco_rs::hash` (Argon2id) before ever reaching the database.
 ///
-/// Takes `&impl ConnectionTrait` rather than a pool handle so a caller can compose this with `add_member` in one transaction: the two must succeed or fail together, or a failure between them leaves an orphaned user row that can never join a tenant (see `signup`, which wraps both in one transaction).
+/// Creates the user row only; `tenancy::register_member` composes account creation and membership in a caller-owned transaction.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -22,7 +22,11 @@ pub async fn create_user(
     password: &str,
     display_name: Option<&str>,
 ) -> Result<Model, YorishiroError> {
-    let password_hash = hash::hash_password(password).internal()?;
+    let password = password.to_owned();
+    let password_hash = tokio::task::spawn_blocking(move || hash::hash_password(&password))
+        .await
+        .internal()?
+        .internal()?;
 
     let active = ActiveModel {
         email: ActiveValue::Set(email.to_string()),
@@ -59,10 +63,14 @@ pub(crate) async fn verify_login(
         return Ok(None);
     };
 
-    let matches = user
-        .password_hash
-        .as_deref()
-        .is_some_and(|hash| hash::verify_password(password, hash));
+    let Some(password_hash) = user.password_hash.clone() else {
+        return Ok(None);
+    };
+    let password = password.to_owned();
+    let matches =
+        tokio::task::spawn_blocking(move || hash::verify_password(&password, &password_hash))
+            .await
+            .internal()?;
 
     Ok(matches.then_some(user))
 }

@@ -10,7 +10,7 @@ pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model}
 use crate::models::entity_entities::{self, EntityRecord};
 
 db_enum! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum RelationStatus {
         Active = "active",
         Deprecated = "deprecated",
@@ -18,7 +18,7 @@ db_enum! {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RelationRecord {
     pub id: Uuid,
@@ -63,15 +63,6 @@ impl ActiveModelBehavior for ActiveModel {
         Ok(this)
     }
 }
-
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
 
 pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {
     RelationStatus::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
@@ -365,19 +356,8 @@ struct BatchNeighborRow {
     relation_type: String,
     direction: String,
     properties: Value,
-    // Only used to drive the SQL-level ORDER BY; not read on the Rust side.
-    #[sea_orm(alias = "relation_created_at")]
-    _relation_created_at: chrono::DateTime<chrono::FixedOffset>,
-    entity_id: Uuid,
-    entity_workspace_id: Uuid,
-    entity_schema_id: Uuid,
-    entity_schema_version: i32,
-    entity_type: String,
-    entity_data: Value,
-    entity_created_at: chrono::DateTime<chrono::FixedOffset>,
-    entity_updated_at: chrono::DateTime<chrono::FixedOffset>,
-    entity_created_by: Option<Uuid>,
-    entity_updated_by: Option<Uuid>,
+    #[sea_orm(nested(prefix = "entity_"))]
+    entity: EntityRecord,
 }
 
 impl BatchNeighborRow {
@@ -387,18 +367,7 @@ impl BatchNeighborRow {
             relation_type: self.relation_type,
             direction: self.direction,
             properties: self.properties,
-            entity: EntityRecord {
-                id: self.entity_id,
-                workspace_id: self.entity_workspace_id,
-                schema_id: self.entity_schema_id,
-                schema_version: self.entity_schema_version,
-                entity_type: self.entity_type,
-                data: self.entity_data,
-                created_at: self.entity_created_at.into(),
-                updated_at: self.entity_updated_at.into(),
-                created_by: self.entity_created_by,
-                updated_by: self.entity_updated_by,
-            },
+            entity: self.entity,
         }
     }
 }
@@ -407,7 +376,7 @@ impl BatchNeighborRow {
 ///
 /// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from the map rather than present with an empty vec.
 /// A duplicate id in `pivot_ids` contributes only once (deduped before querying).
-/// Raw SQL preserves the per-pivot bound: PostgreSQL uses LATERAL/unnest, which SQLite lacks, so SQLite uses IN and row_number() partitioned by pivot.
+/// SeaQuery preserves the per-pivot bound with PostgreSQL LATERAL/unnest and SQLite row_number() partitions.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub(crate) async fn neighbors_batch(
@@ -427,52 +396,7 @@ pub(crate) async fn neighbors_batch(
         return Ok(std::collections::HashMap::new());
     }
 
-    // The lateral's own ORDER BY/LIMIT already picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY guarantees those rows come back to Rust in per-pivot, most-recent-first order too.
-    // `CROSS JOIN LATERAL` doesn't otherwise promise the driving join order is preserved across pivots, and `recall_context`'s truncation check relies on it.
-    let rows = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        sqlite_neighbor_rows(conn, workspace_id, &pivot_ids, limit).await?
-    } else {
-        BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT pivot.id AS pivot_id, n.relation_id, n.relation_type, n.direction, \
-                    n.properties, n.relation_created_at, n.entity_id, n.entity_workspace_id, \
-                    n.entity_schema_id, n.entity_schema_version, n.entity_type, n.entity_data, \
-                    n.entity_created_at, n.entity_updated_at, n.entity_created_by, \
-                    n.entity_updated_by \
-             FROM unnest($2::uuid[]) AS pivot(id) \
-             CROSS JOIN LATERAL ( \
-                 SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
-                        r.created_at AS relation_created_at, \
-                        e.id AS entity_id, e.workspace_id AS entity_workspace_id, \
-                        e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
-                        e.entity_type, e.data AS entity_data, e.created_at AS entity_created_at, \
-                        e.updated_at AS entity_updated_at, e.created_by AS entity_created_by, \
-                        e.updated_by AS entity_updated_by \
-                 FROM entity_relations r \
-                 JOIN entity_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
-                 WHERE r.workspace_id = $1 AND r.source_id = pivot.id AND r.status = $4 \
-                 UNION ALL \
-                 SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
-                        e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
-                        e.created_at, e.updated_at, e.created_by, e.updated_by \
-                 FROM entity_relations r \
-                 JOIN entity_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
-                 WHERE r.workspace_id = $1 AND r.target_id = pivot.id AND r.status = $4 \
-                 ORDER BY relation_created_at DESC \
-                 LIMIT $3 \
-             ) AS n \
-             ORDER BY pivot.id, n.relation_created_at DESC",
-            [
-                workspace_id.into(),
-                pivot_ids.into(),
-                limit.into(),
-                RelationStatus::Active.as_db_str().into(),
-            ],
-        ))
-        .all(conn)
-        .await
-        .internal()?
-    };
+    let rows = neighbor_rows(conn, workspace_id, &pivot_ids, limit).await?;
 
     let mut by_pivot: std::collections::HashMap<Uuid, Vec<Neighbor>> =
         std::collections::HashMap::new();
@@ -486,48 +410,138 @@ pub(crate) async fn neighbors_batch(
     Ok(by_pivot)
 }
 
-/// Recall's frontier can grow beyond twenty pivots, so SQLite must also fetch a hop in one query.
-async fn sqlite_neighbor_rows(
+/// Fetches one hop in one query, retaining the per-pivot bound on both backends.
+async fn neighbor_rows(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     pivot_ids: &[Uuid],
     limit: i64,
 ) -> Result<Vec<BatchNeighborRow>, YorishiroError> {
-    // Depth three can reach 40,000 pivots, beyond SQLite's bind limit; typed UUID blob literals preserve index lookup without interpolating user text.
-    let pivots = pivot_ids
-        .iter()
-        .map(|id| format!("X'{}'", id.simple()))
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!(
-        "SELECT * FROM ( \
-          SELECT n.*, row_number() OVER (PARTITION BY pivot_id ORDER BY relation_created_at DESC) AS position FROM ( \
-              SELECT r.source_id AS pivot_id, r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
-                    r.created_at AS relation_created_at, \
-                    e.id AS entity_id, e.workspace_id AS entity_workspace_id, \
-                    e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
-                    e.entity_type, e.data AS entity_data, e.created_at AS entity_created_at, \
-                    e.updated_at AS entity_updated_at, e.created_by AS entity_created_by, \
-                    e.updated_by AS entity_updated_by \
-             FROM entity_relations r \
-             JOIN entity_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
-              WHERE r.workspace_id = ?1 AND r.source_id IN ({pivots}) AND r.status = ?2 \
-             UNION ALL \
-              SELECT r.target_id, r.id, r.relation_type, 'in', r.properties, r.created_at, \
-                    e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
-                    e.created_at, e.updated_at, e.created_by, e.updated_by \
-             FROM entity_relations r \
-             JOIN entity_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
-              WHERE r.workspace_id = ?1 AND r.target_id IN ({pivots}) AND r.status = ?2 \
-          ) AS n) AS ranked WHERE position <= ?3 \
-          ORDER BY pivot_id, relation_created_at DESC"
+    use crate::models::_entities::{entity_entities as entity, entity_relations as relation};
+    use sea_orm::sea_query::{
+        Alias, Expr, ExprTrait, Func, JoinType, Order, Query, UnionType, WindowStatement,
+    };
+    let sqlite = conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+    let branch = |pivot, neighbor, direction: &str| {
+        let mut select = Query::select();
+        select
+            .expr_as(Expr::col((relation::Entity, pivot)), "pivot_id")
+            .expr_as(
+                Expr::col((relation::Entity, relation::Column::Id)),
+                "relation_id",
+            )
+            .column((relation::Entity, relation::Column::RelationType))
+            .expr_as(Expr::val(direction), "direction")
+            .column((relation::Entity, relation::Column::Properties))
+            .expr_as(
+                Expr::col((relation::Entity, relation::Column::CreatedAt)),
+                "relation_created_at",
+            );
+        for (column, alias) in [
+            (entity::Column::Id, "entity_id"),
+            (entity::Column::WorkspaceId, "entity_workspace_id"),
+            (entity::Column::SchemaId, "entity_schema_id"),
+            (entity::Column::SchemaVersion, "entity_schema_version"),
+            (entity::Column::EntityType, "entity_entity_type"),
+            (entity::Column::Data, "entity_data"),
+            (entity::Column::CreatedAt, "entity_created_at"),
+            (entity::Column::UpdatedAt, "entity_updated_at"),
+            (entity::Column::CreatedBy, "entity_created_by"),
+            (entity::Column::UpdatedBy, "entity_updated_by"),
+        ] {
+            select.expr_as(Expr::col((entity::Entity, column)), alias);
+        }
+        select
+            .from(relation::Entity)
+            .join(
+                JoinType::InnerJoin,
+                entity::Entity,
+                Expr::col((entity::Entity, entity::Column::Id))
+                    .equals((relation::Entity, neighbor))
+                    .and(
+                        Expr::col((entity::Entity, entity::Column::WorkspaceId))
+                            .equals((relation::Entity, relation::Column::WorkspaceId)),
+                    ),
+            )
+            .and_where(
+                Expr::col((relation::Entity, relation::Column::WorkspaceId)).eq(if sqlite {
+                    sea_orm::Value::from(workspace_id.as_bytes().to_vec())
+                } else {
+                    workspace_id.into()
+                }),
+            );
+        if sqlite {
+            select.and_where(
+                Expr::col((relation::Entity, pivot))
+                    .is_in(pivot_ids.iter().map(|id| id.as_bytes().to_vec())),
+            );
+        } else {
+            select.and_where(Expr::col((relation::Entity, pivot)).equals(Alias::new("pivot")));
+        }
+        select.and_where(
+            Expr::col((relation::Entity, relation::Column::Status))
+                .eq(RelationStatus::Active.as_db_str()),
+        );
+        select
+    };
+    let mut neighbors = branch(
+        relation::Column::SourceId,
+        relation::Column::TargetId,
+        "out",
     );
-    let active = RelationStatus::Active.as_db_str();
-    let values = [workspace_id.into(), active.into(), limit.into()];
-    BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Sqlite,
-        sql,
-        values,
+    neighbors.union(
+        UnionType::All,
+        branch(relation::Column::TargetId, relation::Column::SourceId, "in"),
+    );
+    if !sqlite {
+        neighbors
+            .order_by(Alias::new("relation_created_at"), Order::Desc)
+            .limit(limit as u64);
+        let query = Query::select()
+            .column((Alias::new("n"), sea_orm::sea_query::Asterisk))
+            .from_function(
+                Func::cust(Alias::new("unnest")).arg(Expr::val(pivot_ids.to_vec())),
+                Alias::new("pivot"),
+            )
+            .join_lateral(
+                JoinType::InnerJoin,
+                neighbors,
+                Alias::new("n"),
+                Expr::val(true),
+            )
+            .order_by((Alias::new("n"), Alias::new("pivot_id")), Order::Asc)
+            .order_by(
+                (Alias::new("n"), Alias::new("relation_created_at")),
+                Order::Desc,
+            )
+            .to_owned();
+        return BatchNeighborRow::find_by_statement(conn.get_database_backend().build(&query))
+            .all(conn)
+            .await
+            .internal();
+    }
+    let ranked = Query::select()
+        .column((Alias::new("n"), sea_orm::sea_query::Asterisk))
+        .expr_window_as(
+            Func::cust(Alias::new("row_number")),
+            WindowStatement::partition_by(Alias::new("pivot_id"))
+                .order_by(Alias::new("relation_created_at"), Order::Desc)
+                .to_owned(),
+            "position",
+        )
+        .from_subquery(neighbors, Alias::new("n"))
+        .to_owned();
+    let query = Query::select()
+        .column(sea_orm::sea_query::Asterisk)
+        .from_subquery(ranked, Alias::new("ranked"))
+        .and_where(Expr::col(Alias::new("position")).lte(limit))
+        .order_by(Alias::new("pivot_id"), Order::Asc)
+        .order_by(Alias::new("relation_created_at"), Order::Desc)
+        .to_owned();
+    // A frontier can exceed SQLite's bind limit; SeaQuery safely renders typed UUID literals.
+    BatchNeighborRow::find_by_statement(Statement::from_string(
+        conn.get_database_backend(),
+        query.to_string(sea_orm::sea_query::SqliteQueryBuilder),
     ))
     .all(conn)
     .await

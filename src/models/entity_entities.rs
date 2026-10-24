@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
+use sea_orm::ExprTrait;
 use sea_orm::QuerySelect;
 use sea_orm::entity::prelude::*;
-use sea_orm::{FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -10,6 +10,7 @@ mod backend;
 mod crud;
 mod migration;
 mod snapshots;
+pub(crate) use snapshots::require_job_snapshots;
 mod validation;
 
 use crate::models::_entities::entity_entities::Column;
@@ -118,28 +119,30 @@ pub(crate) struct EmbeddingSnapshot {
 
 /// Finds every entity in a workspace that has no corresponding embedding row.
 ///
-/// Raw SQL keeps the portable anti-join across the width-specific embedding tables explicit.
+/// An anti-subquery per embedding table excludes embedded entities without backend-specific SQL.
 pub(crate) async fn missing_embeddings(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<EmbeddingSnapshot>, DbErr> {
-    let embedded = crate::models::entity_embeddings::embedding_tables()
-        .map(|table| format!("SELECT entity_id FROM {table}"))
-        .collect::<Vec<_>>()
-        .join(" UNION ");
-    EmbeddingSnapshot::find_by_statement(Statement::from_sql_and_values(
-        db.get_database_backend(),
-        format!(
-            "SELECT e.id, e.schema_id, e.entity_type, e.data, e.embedding_sync_token \
-             FROM entity_entities e \
-             LEFT JOIN ({embedded}) ee ON ee.entity_id = e.id \
-             WHERE e.workspace_id = $1 AND ee.entity_id IS NULL"
-        ),
-        [workspace_id.into()],
-    ))
-    .all(db)
-    .await
-    .map(|rows| rows.into_iter().collect())
+    use sea_orm::sea_query::{Alias, Query};
+    let mut select = Entity::find()
+        .select_only()
+        .columns([
+            Column::Id,
+            Column::SchemaId,
+            Column::EntityType,
+            Column::Data,
+            Column::EmbeddingSyncToken,
+        ])
+        .filter(Column::WorkspaceId.eq(workspace_id));
+    for table in crate::models::entity_embeddings::embedding_tables() {
+        let embedded = Query::select()
+            .column(Alias::new("entity_id"))
+            .from(Alias::new(table))
+            .to_owned();
+        select = select.filter(Expr::col(Column::Id).not_in_subquery(embedded));
+    }
+    select.into_model::<EmbeddingSnapshot>().all(db).await
 }
 
 #[loco_rs::prelude::async_trait]
@@ -155,20 +158,11 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
-
 /// A stored entity.
 /// `created_by`/`updated_by` are absent for entities touched by an unattributed API key.
 //
 // Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
-#[derive(Clone, Debug, Serialize, Deserialize, sea_orm::FromQueryResult)]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EntityRecord {
     pub id: Uuid,
@@ -226,7 +220,7 @@ pub struct ListEntitiesQuery {
 /// How one entity stands relative to the active version of its schema.
 ///
 /// Entities are migrated lazily, so a schema gaining a version does not rewrite rows written against earlier versions.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EntityDrift {
     pub entity_id: Uuid,
     pub entity_type: String,
@@ -240,7 +234,7 @@ pub struct EntityDrift {
 }
 
 /// A field an entity predates.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DriftField {
     pub name: String,
     /// The field's type in the active version, so a caller can tell what would go there.
@@ -251,7 +245,7 @@ pub struct DriftField {
 }
 
 /// What a batch migration would find without doing it.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MigrationDryRun {
     pub schema_name: String,
     /// The version everything would be brought to.
@@ -269,7 +263,7 @@ pub struct MigrationDryRun {
     pub by_entity_type: Vec<DryRunByType>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DryRunByType {
     pub entity_type: String,
     pub behind: i64,

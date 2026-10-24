@@ -1,7 +1,7 @@
 # Multi-stage build producing a self-contained runtime image, used both for distribution and as
 # the `app` service in compose.yml.
 #
-#   docker build -t yorishiro .
+#   docker compose up --build
 #   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
 #
 # The default command serves HTTP only. Queued jobs run in a second container from this same
@@ -10,36 +10,40 @@
 #
 #   docker run --rm yorishiro start --worker=worker-target:shared
 #
-# The embedding provider (`candle-core`/`candle-nn`/`candle-transformers`) needs no prebuilt
-# runtime binary and pulls no dynamic TLS library into the link, unlike the ONNX-based provider
-# this Dockerfile used to build.
-#
-# There is no web-asset stage. An earlier version of this file built `ee/web` with pnpm and
-# copied the result into the cargo build so the SPA could be embedded. That directory does not
-# exist on this branch: the frontend is not part of the rebuild yet. When it returns, its stage
-# comes back with it, in the same change that adds the directory.
-# Pinned in rust-toolchain.toml: the release workflows pass that channel as RUST_VERSION, and CI
-# fails when this default drifts from it, so a plain `docker build` agrees with them.
-ARG RUST_VERSION=1.97.0
-FROM rust:${RUST_VERSION}-slim AS builder
-ARG EDITION=ee
+# Local embedding inference uses Candle and safetensors without a separate native runtime.
+
+ARG DEBIAN_IMAGE=debian:trixie-slim
+FROM ${DEBIAN_IMAGE} AS builder
 
 RUN apt-get update && apt-get install -y \
     g++ \
     curl \
     mold \
     pkg-config \
+    python3 \
+    patch \
     libssl-dev \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH=/usr/local/cargo/bin:$PATH
+COPY Cargo.toml .
+RUN channel=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml) \
+    && test -n "$channel" \
+    && curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain "$channel" \
+    && rm /tmp/rustup-init.sh
 COPY . .
+RUN python3 patches/loco-rs/verify.py --prepare
 # The edition is selected at build time with EDITION=ce or EDITION=ee. CE does not compile the
 # enterprise module; EE includes it and retains its runtime licence gate.
+ARG EDITION=ee
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
-    RUSTC_WRAPPER= cargo install sccache --locked --version 0.10.0 \
-    && export RUSTC_WRAPPER=/usr/local/cargo/bin/sccache \
+    --mount=type=cache,target=/build/target,sharing=locked \
+    export RUSTC_WRAPPER= \
     && (case "$EDITION" in \
       ce) cargo build --locked --no-default-features --features community --release --bin yorishiro ;; \
       ee) cargo build --locked --features enterprise --release --bin yorishiro ;; \
@@ -50,8 +54,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # The binary uses the system C++ runtime for candle/tokenizers support, so the runtime image
 # installs the same libgcc/libstdc++ dependencies declared by the native packages.
 # ca-certificates is for the OpenAI-compatible provider's TLS, curl for the HEALTHCHECK.
-# The base stays on the same glibc as the builder (debian trixie, matching the rust:*-slim builder).
-FROM debian:trixie-slim
+# The builder and runtime share the same base and glibc.
+FROM ${DEBIAN_IMAGE}
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -70,10 +74,7 @@ RUN mkdir -p /var/lib/yorishiro \
 # The image owns the canonical runtime configuration and loads it through LOCO_CONFIG_FOLDER.
 COPY config/production.yaml /app/config/production.yaml
 
-# Relative paths in embedding provider settings (YORISHIRO_LOCAL_MODEL_PATH defaults to
-# `models/model.safetensors`) resolve against this directory, so a model directory can be
-# bind-mounted here without also needing an absolute-path override. Without a mount the provider
-# fetches the model on first use instead, into $HOME/.cache/yorishiro/models.
+# Mount pinned artifacts under /app/models/<short_id> or fetch them into the home cache on first use.
 WORKDIR /app
 # The production configuration defaults SQLite state to /var/lib/yorishiro.
 # The directory is already created with root:yorishiro 1770 above.
@@ -81,16 +82,7 @@ RUN chown -R yorishiro:yorishiro /app \
     && mkdir -p /var/lib/yorishiro/state /home/yorishiro/.cache/yorishiro \
     && chown -R yorishiro:yorishiro /var/lib/yorishiro/state /home/yorishiro/.cache/yorishiro
 
-# The account has a real home, and `HOME` is set for it, because the model fetch needs somewhere
-# to write. `services::embedding::model_fetch::cache_dir` reads `HOME` and gives up when it is
-# unset or empty, which makes the provider degrade to erroring on every call rather than
-# fetching. `compose.yml` selects the local provider and deliberately leaves the local model
-# paths unset so that fetch is what runs, so an image whose user had no home would take exactly
-# that degraded path on a machine with no model mounted.
-#
-# `--no-create-home` was what this used, and `src/services/embedding/mod.rs` cites a
-# `--no-create-home` container as the reason the no-`HOME` branch exists at all. It was
-# describing this image.
+# Automatic model fetching requires a writable home cache.
 ENV HOME=/home/yorishiro
 ENV LOCO_ENV=production
 ENV LOCO_CONFIG_FOLDER=/app/config

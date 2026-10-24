@@ -13,14 +13,14 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::compute_credit_ledger::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, ExprTrait,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use serde::Serialize;
 use uuid::Uuid;
 
 /// A single row in the compute credit ledger.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct LedgerEntry {
     pub workspace_id: Uuid,
     /// Positive for earn, negative for spend.
@@ -30,7 +30,7 @@ pub struct LedgerEntry {
 
 crate::db_enum::db_enum! {
     /// Which kind of ledger event this row records.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Eq, PartialEq)]
     pub enum TransactionType {
         Earn = "earn",
         Spend = "spend",
@@ -151,7 +151,10 @@ pub async fn balance(
         .filter(Column::WorkspaceId.eq(workspace_id))
         .select_only()
         .column_as(
-            Expr::cust("CAST(COALESCE(SUM(amount), 0) AS BIGINT)"),
+            Expr::col(Column::Amount)
+                .sum()
+                .if_null(0)
+                .cast_as(sea_orm::sea_query::Alias::new("bigint")),
             "total",
         )
         .into_tuple::<(Option<i64>,)>()

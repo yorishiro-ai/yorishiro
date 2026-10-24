@@ -7,13 +7,6 @@ use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
 
-#[derive(PartialEq, Eq)]
-enum ReindexStep {
-    Reindexed,
-    NothingToEmbed,
-    Deleted,
-}
-
 /// One entity that failed during a [`reindex_workspace`] run.
 pub struct ReindexFailure {
     pub entity_id: Uuid,
@@ -32,9 +25,15 @@ async fn reindex_embedding_for_record(
     workspace_id: Uuid,
     record: &EmbeddingSnapshot,
     provider: &dyn EmbeddingProvider,
-) -> Result<ReindexStep, YorishiroError> {
-    let schema =
-        crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
+    schemas: &mut std::collections::HashMap<Uuid, crate::models::schema_schemas::SchemaRecord>,
+) -> Result<bool, YorishiroError> {
+    // Schema definitions are versioned by ID; a new version cannot change this snapshot's schema.
+    let schema = match schemas.entry(record.schema_id) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+            crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?,
+        ),
+    };
     let entity_type_def = schema
         .definition
         .entity_types
@@ -47,10 +46,10 @@ async fn reindex_embedding_for_record(
         })?;
 
     let Some(text) = super::write::compose_embedding_text(entity_type_def, &record.data) else {
-        return Ok(ReindexStep::NothingToEmbed);
+        return Ok(true);
     };
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
-    match embed_and_write(
+    embed_and_write(
         conn,
         VectorWriteInput {
             workspace_id,
@@ -60,11 +59,7 @@ async fn reindex_embedding_for_record(
             dimension: provider.dimensions(),
         },
     )
-    .await?
-    {
-        true => Ok(ReindexStep::Reindexed),
-        false => Ok(ReindexStep::Deleted),
-    }
+    .await
 }
 
 /// Re-embeds every candidate entity and restamps the workspace after full success.
@@ -87,6 +82,7 @@ pub async fn reindex_workspace(
 
     let mut reindexed = 0;
     let mut failures = Vec::new();
+    let mut schemas = std::collections::HashMap::new();
     for &entity_id in candidate_ids {
         let Some(record) = records.get(&entity_id) else {
             failures.push(ReindexFailure {
@@ -95,9 +91,10 @@ pub async fn reindex_workspace(
             });
             continue;
         };
-        match reindex_embedding_for_record(conn, workspace_id, record, provider).await {
-            Ok(ReindexStep::Reindexed | ReindexStep::NothingToEmbed) => reindexed += 1,
-            Ok(ReindexStep::Deleted) => failures.push(ReindexFailure {
+        match reindex_embedding_for_record(conn, workspace_id, record, provider, &mut schemas).await
+        {
+            Ok(true) => reindexed += 1,
+            Ok(false) => failures.push(ReindexFailure {
                 entity_id,
                 error: YorishiroError::not_found(format!(
                     "entity {entity_id} was deleted during the reindex"

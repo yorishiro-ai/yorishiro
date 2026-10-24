@@ -8,7 +8,6 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::Rng;
 use sha2::{Digest, Sha256};
 
 use crate::edition::ee::controllers::hmac_sign;
@@ -16,10 +15,6 @@ use crate::edition::ee::controllers::hmac_sign;
 /// How long a `state` value remains acceptable after being issued.
 /// Also used as the CSRF cookie's max-age, so the cookie never outlives the `state` that depends on it.
 pub const STATE_TTL_SECS: i64 = 600;
-
-/// Number of random bytes in the CSRF cookie value.
-/// Only its SHA-256 hash is ever embedded in `state`, so this need not resist offline brute-forcing on its own.
-const CSRF_COOKIE_BYTES: usize = 16;
 
 pub struct IssuedState {
     /// The opaque value to embed in the authorize URL's `state` query parameter.
@@ -44,14 +39,11 @@ pub fn issue(signing_key: &[u8]) -> IssuedState {
 }
 
 pub fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
-    let mut csrf_bytes = [0u8; CSRF_COOKIE_BYTES];
-    rand::rng().fill_bytes(&mut csrf_bytes);
-    let csrf_cookie_value = URL_SAFE_NO_PAD.encode(csrf_bytes);
-    let csrf_hash = hex::encode(Sha256::digest(csrf_cookie_value.as_bytes()));
+    let csrf_cookie_value = loco_rs::hash::random_string(22);
+    let csrf_hash = crate::data::encoding::hex(Sha256::digest(csrf_cookie_value.as_bytes()));
 
-    let mut verifier_bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut verifier_bytes);
-    let pkce_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+    // 43 alphanumeric characters provide over 256 bits and satisfy RFC 7636's verifier grammar.
+    let pkce_verifier = loco_rs::hash::random_string(43);
     let pkce_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pkce_verifier.as_bytes()));
 
     let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
@@ -106,5 +98,5 @@ pub fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedSt
 
 /// Hashes a CSRF cookie value the same way [`issue`] does, for `callback` to compare against [`VerifiedState::csrf_hash`].
 pub fn hash_csrf_cookie(cookie_value: &str) -> String {
-    hex::encode(Sha256::digest(cookie_value.as_bytes()))
+    crate::data::encoding::hex(Sha256::digest(cookie_value.as_bytes()))
 }

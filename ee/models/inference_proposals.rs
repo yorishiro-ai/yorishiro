@@ -2,13 +2,13 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::inference_proposals::Column;
-use crate::models::inference_proposals::{ActiveModel, Entity, Model};
+use crate::models::_entities::inference_proposals::{ActiveModel, Entity, Model};
 use crate::models::schema_schemas::SchemaStatus;
 use crate::models::{entity_entities, schema_schemas};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, SqlErr,
+    QuerySelect, SelectExt, Set, SqlErr,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 crate::db_enum::db_enum! {
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum ProposalStatus {
         Pending = "pending",
         Confirmed = "confirmed",
@@ -27,7 +27,9 @@ crate::db_enum::db_enum! {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = InferenceProposalResponse))]
 pub struct ProposalRecord {
     pub id: Uuid,
     pub job_id: Uuid,
@@ -61,7 +63,9 @@ impl TryFrom<Model> for ProposalRecord {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = ProposalConfirmResponse))]
 pub struct ConfirmReport {
     pub job_id: Uuid,
     pub confirmed: i64,
@@ -69,7 +73,9 @@ pub struct ConfirmReport {
     pub invalid: i64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = ProposalActionResponse))]
 pub struct ProposalActionReport {
     pub job_id: Uuid,
     pub changed: i64,
@@ -177,7 +183,7 @@ pub async fn for_job(
         .collect()
 }
 
-async fn require_completed_job(
+pub(crate) async fn require_completed_job(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
@@ -198,10 +204,9 @@ async fn require_completed_job(
     let has_proposals = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
-        .one(conn)
+        .exists(conn)
         .await
-        .internal()?
-        .is_some();
+        .internal()?;
     if !has_proposals {
         return Err(YorishiroError::Conflict {
             message: format!("inference job '{job_id}' did not produce proposals"),

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::Duration;
 
 use candle_core::{DType, Device, Tensor};
@@ -9,7 +9,7 @@ use loco_rs::prelude::async_trait;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 
 use super::EmbeddingProvider;
-use super::model_fetch::{Architecture, LocalModelDef};
+use super::model_fetch::LocalModelDef;
 use crate::error::YorishiroError;
 
 /// Lower bound for `max_sequence_length`.
@@ -31,26 +31,6 @@ pub struct LocalEmbeddingConfig {
     /// Maximum sequence length for tokenization.
     /// Text longer than this is truncated. Must not exceed `def.max_sequence_length`; see [`LocalEmbeddingProvider::load`].
     pub max_sequence_length: usize,
-}
-
-/// One of the `candle-transformers` model families this provider can load, selected by [`Architecture`].
-enum LoadedModel {
-    Xlm(XLMRobertaModel),
-}
-
-impl LoadedModel {
-    fn forward(
-        &self,
-        input_ids: &Tensor,
-        token_type_ids: &Tensor,
-        attention_mask: &Tensor,
-    ) -> candle_core::Result<Tensor> {
-        match self {
-            Self::Xlm(model) => {
-                model.forward(input_ids, attention_mask, token_type_ids, None, None, None)
-            }
-        }
-    }
 }
 
 /// `intfloat/multilingual-e5-base`'s `config.json` at revision `d128750597153bb5987e10b1c3493a34e5a4502a`, transcribed field-by-field rather than fetched: `xlm_roberta::Config` has no `Default` impl, and this avoids a third pinned-and-digested artifact for a file that never changes independently of the revision already pinned on [`super::model_fetch::DEFAULT_MODEL`].
@@ -75,20 +55,16 @@ fn multilingual_e5_base_config() -> XlmRobertaConfig {
 /// Provider that generates embeddings using a local, in-process model.
 /// Has no runtime dependency on external services, making it suitable for closed/offline environments.
 ///
-/// Which model loads is selected by [`super::model_fetch::LocalModelDef`], read through one of two `candle-transformers` architectures from a `safetensors` checkpoint: a different model here is a different [`LoadedModel`] variant, not a config change.
-///
-/// Token embeddings are aggregated into a sentence vector via mean pooling weighted by the attention mask, then L2-normalized for stable cosine-distance search: both models this provider loads were trained and evaluated this way, and neither definition carries a pooling field of its own for exactly that reason.
-/// A field with one legal value on every definition so far would encode a future constraint on the field; one arrives the day a model that pools differently does.
+/// Loads the pinned multilingual-e5-base checkpoint through Candle's XLM-RoBERTa model.
+/// Uses attention-masked mean pooling and L2 normalization for cosine search.
 pub struct LocalEmbeddingProvider {
-    // candle's `Tensor` ops on CPU are not internally parallel across an inference the way onnxruntime's
-    // intra-op threading was, but the model is `Send + Sync` regardless; the Mutex here still exists to bound
-    // memory: without it, concurrent requests would each build their own batch of activations on a CPU-only
-    // process, which is worse than queuing them.
     inner: Arc<Inner>,
+    // Bound activation memory before allocating tensors or occupying a blocking thread.
+    inference: Arc<tokio::sync::Semaphore>,
 }
 
 struct Inner {
-    model: Mutex<LoadedModel>,
+    model: XLMRobertaModel,
     tokenizer: Tokenizer,
     def: &'static LocalModelDef,
     device: Device,
@@ -158,19 +134,11 @@ impl LocalEmbeddingProvider {
                     config.model_path.display()
                 ))
             })?;
-        let model = match def.architecture {
-            Architecture::XlmRoberta => XLMRobertaModel::new(&multilingual_e5_base_config(), vb)
-                .map(LoadedModel::Xlm)
-                .map_err(|err| {
-                    internal(format!(
-                        "failed to build the xlm-roberta model from '{}': {err}",
-                        config.model_path.display()
-                    ))
-                })?,
-        };
+        let model = XLMRobertaModel::new(&multilingual_e5_base_config(), vb)
+            .map_err(|err| internal(format!("failed to build the xlm-roberta model: {err}")))?;
 
         let inner = Inner {
-            model: Mutex::new(model),
+            model,
             tokenizer,
             def,
             device,
@@ -182,6 +150,7 @@ impl LocalEmbeddingProvider {
 
         Ok(Self {
             inner: Arc::new(inner),
+            inference: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
 }
@@ -194,7 +163,7 @@ impl Inner {
 
         let encodings = self
             .tokenizer
-            .encode_batch(texts.to_vec(), true)
+            .encode_batch(texts.iter().map(String::as_str).collect::<Vec<_>>(), true)
             .map_err(|err| internal(format!("tokenization failed: {err}")))?;
 
         let batch = encodings.len();
@@ -226,15 +195,17 @@ impl Inner {
             Tensor::from_vec(attention_mask.clone(), (batch, seq), &self.device)
                 .map_err(|err| internal(format!("failed to build attention_mask tensor: {err}")))?;
 
-        // Recovers from poisoning: even if a panic occurs while the lock is held, the model carries no
-        // mutable state across inferences (`&mut` is only an artifact of holding it behind a Mutex for
-        // memory bounding, not something `forward` itself needs), so the invariant isn't actually broken.
-        // Permanently disabling embedding until a process restart over a poison would cause more harm.
-        let model = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-        let hidden_states = model
-            .forward(&input_ids, &token_type_ids, &attention_mask_tensor)
+        let hidden_states = self
+            .model
+            .forward(
+                &input_ids,
+                &attention_mask_tensor,
+                &token_type_ids,
+                None,
+                None,
+                None,
+            )
             .map_err(|err| internal(format!("model inference failed: {err}")))?;
-        drop(model);
 
         let dims = hidden_states.dims();
         if dims.len() != 3 || dims[0] != batch || dims[1] != seq {
@@ -348,15 +319,29 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
         // Inference is CPU-bound and blocks for tens to hundreds of ms, so it's offloaded to the blocking pool to avoid stalling tokio worker threads.
-        // On timeout, the blocking task itself still runs to completion (it can't be cancelled), but the caller returns an error immediately instead of waiting, freeing up whatever resources it holds.
+        // Timeout includes admission; a started inference retains its permit until completion.
         let texts: Vec<String> = texts.iter().map(|text| text.to_string()).collect();
         let inner = Arc::clone(&self.inner);
-        let task = tokio::task::spawn_blocking(move || inner.embed_blocking(&texts));
+        let inference = Arc::clone(&self.inference);
+        let task = async move {
+            let permit = inference
+                .acquire_owned()
+                .await
+                .map_err(|error| internal(format!("embedding admission failed: {error}")))?;
+            // A timed-out caller must not release admission while its blocking inference still runs.
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                inner.embed_blocking(&texts)
+            })
+            .await
+            .map_err(|err| internal(format!("embedding task panicked: {err}")))?
+        };
         match tokio::time::timeout(EMBED_TIMEOUT, task).await {
-            Ok(joined) => {
-                joined.map_err(|err| internal(format!("embedding task panicked: {err}")))?
-            }
+            Ok(result) => result,
             Err(_) => Err(internal(format!(
                 "embedding timed out after {}s (inference queue congested?)",
                 EMBED_TIMEOUT.as_secs()

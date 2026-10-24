@@ -1,49 +1,27 @@
+use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
 use yorishiro::App;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenant_memberships::MembershipRole;
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::tenant_memberships::{self, MembershipRole};
+use yorishiro::models::user_users;
 
-async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(name.to_string()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".to_string()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-
-    (tenant.id, workspace.id)
-}
-
-async fn issue_key_for(
+/// A member of an existing tenant with a key of their own, created through the same model operations an invite redemption uses.
+async fn member_key(
     ctx: &loco_rs::app::AppContext,
+    tenant_id: uuid::Uuid,
     workspace_id: uuid::Uuid,
-    user_id: uuid::Uuid,
+    role: MembershipRole,
 ) -> String {
-    api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace_id,
-        ApiKeyScope::Migration,
-        Some(user_id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext
+    let email = format!("member-{}@example.com", uuid::Uuid::new_v4().simple());
+    let member = user_users::create_user(&ctx.db, &email, "hunter2-hunter2", None)
+        .await
+        .expect("create member");
+    tenant_memberships::add_member(&ctx.db, tenant_id, member.id, role)
+        .await
+        .expect("add member");
+    issue_api_key(ctx, workspace_id, member.id, ApiKeyScope::Migration, false).await
 }
 
 #[tokio::test]
@@ -61,28 +39,14 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             chrono_tz::UTC,
             "test must boot with a non-default zone"
         );
-        let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
-        let owner = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            "owner@example.com",
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .expect("create owner");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_id,
-            owner.id,
-            MembershipRole::Owner,
-        )
-        .await
-        .expect("add owner");
-        let owner_key = issue_key_for(&ctx, main_id, owner.id).await;
+        let args = TenantArgs::default();
+        let initial_name = args.workspace_name.clone();
+        let tenant = TestTenant::create(&request, &ctx, args).await;
+        let tenant_id = tenant.tenant_id;
+        let request = tenant.authenticated(request);
 
         let response = request
             .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {owner_key}"))
             .json(&serde_json::json!({ "name": "staging" }))
             .await;
         assert_eq!(response.status_code(), StatusCode::CREATED);
@@ -91,10 +55,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
         assert_eq!(body["tenant_id"], tenant_id.to_string());
         let staging_id = body["id"].as_str().unwrap().to_string();
 
-        let response = request
-            .get("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {owner_key}"))
-            .await;
+        let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         let names: Vec<&str> = body
@@ -103,7 +64,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .iter()
             .map(|w| w["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"main"));
+        assert!(names.contains(&initial_name.as_str()));
         assert!(names.contains(&"staging"));
         for workspace in body.as_array().unwrap() {
             let created_at =
@@ -116,10 +77,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             assert_eq!(created_at.offset().local_minus_utc(), expected_offset);
         }
 
-        let response = request
-            .get(&format!("/api/workspaces/{staging_id}"))
-            .add_header("Authorization", format!("Bearer {owner_key}"))
-            .await;
+        let response = request.get(&format!("/api/workspaces/{staging_id}")).await;
         assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["entity_count"], 0);
@@ -135,14 +93,10 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 
         let response = request
             .delete(&format!("/api/workspaces/{staging_id}"))
-            .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), StatusCode::NO_CONTENT);
 
-        let response = request
-            .get(&format!("/api/workspaces/{staging_id}"))
-            .add_header("Authorization", format!("Bearer {owner_key}"))
-            .await;
+        let response = request.get(&format!("/api/workspaces/{staging_id}")).await;
         assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
@@ -150,25 +104,12 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 
 #[tokio::test]
 async fn cannot_delete_a_tenants_only_workspace() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
-        let owner = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            "owner@example.com",
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .expect("create owner");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_id,
-            owner.id,
-            MembershipRole::Owner,
-        )
-        .await
-        .expect("add owner");
-        let owner_key = issue_key_for(&ctx, main_id, owner.id).await;
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let TestTenant {
+            workspace_id: main_id,
+            api_key: owner_key,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
             .delete(&format!("/api/workspaces/{main_id}"))
@@ -182,24 +123,12 @@ async fn cannot_delete_a_tenants_only_workspace() {
 #[tokio::test]
 async fn member_role_cannot_create_or_delete_workspaces() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
-        let member = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            "member@example.com",
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .expect("create member");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
+        let TestTenant {
             tenant_id,
-            member.id,
-            MembershipRole::Member,
-        )
-        .await
-        .expect("add member");
-        let member_key = issue_key_for(&ctx, main_id, member.id).await;
+            workspace_id: main_id,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let member_key = member_key(&ctx, tenant_id, main_id, MembershipRole::Member).await;
 
         let response = request
             .post("/api/workspaces")
@@ -234,28 +163,20 @@ async fn workspaces_endpoints_require_authentication() {
 }
 
 #[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn workspace_endpoints_enforce_tenant_isolation() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (tenant_a, workspace_a) = setup_tenant(&ctx, "acme").await;
-        let owner_a = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            "owner-a@example.com",
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .expect("create owner a");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_a,
-            owner_a.id,
-            MembershipRole::Owner,
-        )
-        .await
-        .expect("add owner a");
-        let owner_a_key = issue_key_for(&ctx, workspace_a, owner_a.id).await;
-
-        let (_tenant_b, workspace_b) = setup_tenant(&ctx, "beta").await;
+        let TestTenant {
+            api_key: owner_a_key,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let TestTenant {
+            workspace_id: workspace_b,
+            ..
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // Tenant A's key must not be able to see or delete tenant B's workspace by guessing its id: workspace_workspaces has no RLS of its own, so get_workspace_in_tenant's explicit tenant_id check is the only thing enforcing this boundary.
         let response = request

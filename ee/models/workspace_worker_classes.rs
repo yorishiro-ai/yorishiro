@@ -2,33 +2,20 @@
 //!
 //! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `workspace_llm_keys`/`workspace_embedding_keys`.
 //!
-//! A workspace with no row here stays `WorkerClass::Shared` (`WorkerClassResolver::resolve` returns `None`); this module never falls back on its own, so the caller (`WorkerClassAssignmentResolver`) decides that.
+//! A missing assignment leaves the shared-compute fallback to the caller.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
-use crate::workers::embedding_sync::{WorkerClass, WorkerClassResolver};
-use loco_rs::prelude::async_trait;
+use crate::workers::embedding_sync::WorkerClass;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
 use uuid::Uuid;
 
-/// Resolves the explicit assignment from this table, leaving the shared fallback to the caller.
-pub struct WorkerClassAssignmentResolver;
-
-#[async_trait]
-impl WorkerClassResolver for WorkerClassAssignmentResolver {
-    async fn resolve(
-        &self,
-        conn: &sea_orm::DatabaseConnection,
-        workspace_id: Uuid,
-    ) -> Result<Option<WorkerClass>, YorishiroError> {
-        get(conn, workspace_id).await
-    }
-}
-
 /// What a workspace has configured, for an endpoint to report.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = WorkerClassResponse))]
 pub(crate) struct WorkerClassAssignment {
     pub(crate) worker_class: WorkerClass,
 }
@@ -84,7 +71,7 @@ pub(crate) async fn describe(
         .map(|found| found.map(|worker_class| WorkerClassAssignment { worker_class }))
 }
 
-/// The assignment itself, as `WorkerClassAssignmentResolver` reads it to route a queued job.
+/// The persisted assignment used to route a queued job.
 /// `None` means the workspace has configured none, which the resolver reads as "fall back to `WorkerClass::Shared`".
 pub(crate) async fn get(
     conn: &impl ConnectionTrait,

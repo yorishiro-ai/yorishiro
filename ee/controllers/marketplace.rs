@@ -45,7 +45,7 @@ async fn list_marketplace(
 ) -> Result<Json<Vec<MarketplaceListing>>, ApiError> {
     // The listing spans every tenant, so the identity is not read, but a valid key is still required, which is what authenticating here enforces.
     let _ = licensed_tenant(&ctx, &headers).await?;
-    let listings = marketplace_models::list_marketplace(&ctx.db, page.into()).await?;
+    let listings = marketplace_models::list_marketplace(&ctx.db, page.try_into()?).await?;
     Ok(Json(listings))
 }
 
@@ -59,7 +59,8 @@ async fn list_versions(
 ) -> Result<Json<Vec<TemplateVersionRecord>>, ApiError> {
     let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
     let versions =
-        marketplace_models::list_versions(&ctx.db, tenant_id, template_id, page.into()).await?;
+        marketplace_models::list_versions(&ctx.db, tenant_id, template_id, page.try_into()?)
+            .await?;
     Ok(Json(versions))
 }
 
@@ -92,7 +93,7 @@ async fn list_reviews(
 ) -> Result<Json<Vec<TemplateReviewRecord>>, ApiError> {
     let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
     let reviews =
-        marketplace_models::list_reviews(&ctx.db, tenant_id, template_id, page.into()).await?;
+        marketplace_models::list_reviews(&ctx.db, tenant_id, template_id, page.try_into()?).await?;
     Ok(Json(reviews))
 }
 

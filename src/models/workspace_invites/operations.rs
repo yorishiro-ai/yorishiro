@@ -2,18 +2,19 @@
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    QueryFilter,
 };
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_invites::Column;
-use crate::models::api_keys::{hash_key, random_hex};
+use crate::models::api_keys::hash_key;
 use crate::models::tenant_memberships::MembershipRole;
 
 use super::{ActiveModel, Entity, Model, RedeemedInvite};
 
-const INVITE_TOKEN_BYTES: usize = 24;
+const INVITE_TOKEN_LENGTH: usize = 48;
 
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
 /// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
@@ -43,7 +44,7 @@ pub async fn create_invite_at(
     ttl: Duration,
     now: DateTime<Utc>,
 ) -> Result<(Model, String), YorishiroError> {
-    let token = random_hex(INVITE_TOKEN_BYTES);
+    let token = loco_rs::hash::random_string(INVITE_TOKEN_LENGTH);
     let token_hash = hash_key(&token);
     let expires_at = now + ttl;
 
@@ -60,17 +61,35 @@ pub async fn create_invite_at(
     Ok((invite, token))
 }
 
-/// Redeems an invite token: atomically marks it used and returns the tenant/email/role it grants, or `None` if the token doesn't match any invite, is already used, or has expired.
-///
-/// The lookup and the `used_at` update happen in a single statement (`UpdateMany` with all three conditions in its `WHERE`), so two concurrent redemptions of the same token can't both succeed: whichever commits first's `used_at IS NULL` no longer holds for the loser.
-pub(crate) async fn redeem_invite(
-    conn: &impl ConnectionTrait,
+/// Registers an invited user and consumes the invite only if registration and membership both succeed.
+pub(crate) async fn register_user(
+    db: &DatabaseConnection,
     raw_token: &str,
-) -> Result<Option<RedeemedInvite>, YorishiroError> {
-    redeem_invite_at(conn, raw_token, crate::time::now()).await
+    password: &str,
+    display_name: Option<&str>,
+) -> Result<(crate::models::user_users::Model, RedeemedInvite), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let invite = redeem_invite_at(&txn, raw_token, crate::time::now())
+        .await?
+        .ok_or_else(|| YorishiroError::ValidationFailed {
+            message: "invite token is invalid, expired, or already used".into(),
+            details: vec![],
+            hint: "ask a tenant admin for a fresh invite".into(),
+        })?;
+    let user = crate::models::tenancy::register_member(
+        &txn,
+        invite.tenant_id,
+        &invite.email,
+        password,
+        display_name,
+        invite.role,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok((user, invite))
 }
 
-/// [`redeem_invite`] with the redemption time supplied by the caller, so expiry boundaries can be tested without a clock.
+/// Atomically consumes an unused, unexpired invite at the supplied time.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -81,32 +100,20 @@ pub async fn redeem_invite_at(
 ) -> Result<Option<RedeemedInvite>, YorishiroError> {
     let token_hash = hash_key(raw_token);
 
-    // Read first to build the response: the update itself does not return rows affected as model data, and a second SELECT after the UPDATE could observe a different row (e.g. one this same call just marked used) if invites were ever deletable, which they are not, so this is safe, not merely convenient.
-    let invite = Entity::find()
-        .filter(Column::TokenHash.eq(token_hash.clone()))
+    let invite = Entity::update_many()
+        .col_expr(Column::UsedAt, sea_orm::sea_query::Expr::value(now))
+        .filter(Column::TokenHash.eq(token_hash))
         .filter(Column::UsedAt.is_null())
         .filter(Column::ExpiresAt.gt(now))
-        .one(conn)
+        .exec_with_returning(conn)
         .await
-        .internal()?;
+        .internal()?
+        .into_iter()
+        .next();
 
     let Some(invite) = invite else {
         return Ok(None);
     };
-
-    let update_result = Entity::update_many()
-        .col_expr(Column::UsedAt, sea_orm::sea_query::Expr::value(now))
-        .filter(Column::Id.eq(invite.id))
-        .filter(Column::UsedAt.is_null())
-        .filter(Column::ExpiresAt.gt(now))
-        .exec(conn)
-        .await
-        .internal()?;
-
-    if update_result.rows_affected == 0 {
-        // Lost the race: another concurrent redemption already claimed this token between the read above and this UPDATE.
-        return Ok(None);
-    }
 
     let role = MembershipRole::from_db_str(&invite.role).ok_or_else(|| {
         YorishiroError::Internal(anyhow::anyhow!(

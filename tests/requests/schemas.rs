@@ -4,26 +4,20 @@ use yorishiro::App;
 use yorishiro::data::templates::TEMPLATES;
 use yorishiro::models::api_keys::ApiKeyScope;
 
-use super::fixtures::{self, TenantArgs};
-
-struct Setup {
-    tenant_id: uuid::Uuid,
-    key: String,
-}
-
-async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let args = TenantArgs {
-        key_scope: ApiKeyScope::Schema,
-        ..Default::default()
-    };
-    let (tenant_id, _, _, key) = fixtures::create_tenant_workspace_owner(ctx, args).await;
-    Setup { tenant_id, key }
-}
+use super::fixtures::{TenantArgs, TestTenant};
 
 #[tokio::test]
 async fn create_schema_from_a_builtin_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let Setup { key, .. } = setup(&ctx).await;
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let response = request
             .post("/api/schemas")
@@ -44,7 +38,15 @@ async fn create_schema_from_a_builtin_template() {
 #[tokio::test]
 async fn create_schema_from_every_builtin_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let Setup { key, .. } = setup(&ctx).await;
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
         for template in TEMPLATES {
             let response = request
                 .post("/api/schemas")
@@ -66,7 +68,15 @@ async fn create_schema_from_every_builtin_template() {
 #[tokio::test]
 async fn create_schema_rejects_an_unknown_template_id() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let Setup { key, .. } = setup(&ctx).await;
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let response = request
             .post("/api/schemas")
@@ -86,7 +96,15 @@ async fn create_schema_rejects_an_unknown_template_id() {
 #[tokio::test]
 async fn list_templates_and_get_template_over_rest() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let Setup { key, .. } = setup(&ctx).await;
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let response = request
             .get("/api/templates")
@@ -141,29 +159,40 @@ async fn list_templates_and_get_template_over_rest() {
 #[tokio::test]
 async fn create_schema_from_a_library_template_links_the_origin() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let Setup { tenant_id, key } = setup(&ctx).await;
+        let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
-        let template = yorishiro::models::_entities::template_templates::ActiveModel {
-            tenant_id: sea_orm::ActiveValue::Set(tenant_id),
-            name: sea_orm::ActiveValue::Set("library-note".into()),
-            definition: sea_orm::ActiveValue::Set(serde_json::json!({
-                "name": "library-note",
-                "entity_types": {
-                    "note": { "fields": { "title": { "type": "string", "required": true } } }
+        let response = request
+            .post("/api/template-library")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({
+                "name": name,
+                "definition": {
+                    "name": name,
+                    "entity_types": {
+                        "note": { "fields": { "title": { "type": "string", "required": true } } }
+                    }
                 }
-            })),
-            visibility: sea_orm::ActiveValue::Set("tenant".into()),
-            tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
-            ..Default::default()
-        };
-        let template = sea_orm::ActiveModelTrait::insert(template, &ctx.db)
-            .await
-            .expect("insert library template");
+            }))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::CREATED);
+        let template_id = response.json::<serde_json::Value>()["id"]
+            .as_str()
+            .expect("created template ID")
+            .to_owned();
 
         let response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({ "template_id": template.id.to_string() }))
+            .json(&serde_json::json!({ "template_id": template_id }))
             .await;
         assert_eq!(
             response.status_code(),
@@ -172,11 +201,8 @@ async fn create_schema_from_a_library_template_links_the_origin() {
             response.text()
         );
         let body: serde_json::Value = response.json();
-        assert_eq!(body["schema"]["name"], "library-note");
-        assert_eq!(
-            body["schema"]["origin_template_id"],
-            template.id.to_string()
-        );
+        assert_eq!(body["schema"]["name"], name);
+        assert_eq!(body["schema"]["origin_template_id"], template_id);
         assert_eq!(body["schema"]["origin_status"], "linked");
         assert!(
             body["schema"]["origin_snapshot"].is_object(),
@@ -190,29 +216,40 @@ async fn create_schema_from_a_library_template_links_the_origin() {
 #[tokio::test]
 async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let Setup { tenant_id, key } = setup(&ctx).await;
+        let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
-        let template = yorishiro::models::_entities::template_templates::ActiveModel {
-            tenant_id: sea_orm::ActiveValue::Set(tenant_id),
-            name: sea_orm::ActiveValue::Set("library-note".into()),
-            definition: sea_orm::ActiveValue::Set(serde_json::json!({
-                "name": "library-note",
-                "entity_types": {
-                    "note": { "fields": { "title": { "type": "string", "required": true } } }
+        let response = request
+            .post("/api/template-library")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({
+                "name": name,
+                "definition": {
+                    "name": name,
+                    "entity_types": {
+                        "note": { "fields": { "title": { "type": "string", "required": true } } }
+                    }
                 }
-            })),
-            visibility: sea_orm::ActiveValue::Set("tenant".into()),
-            tags: sea_orm::ActiveValue::Set(serde_json::json!([])),
-            ..Default::default()
-        };
-        let template = sea_orm::ActiveModelTrait::insert(template, &ctx.db)
-            .await
-            .expect("insert library template");
+            }))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::CREATED);
+        let template_id = response.json::<serde_json::Value>()["id"]
+            .as_str()
+            .expect("created template ID")
+            .to_owned();
 
         let response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({ "template_id": template.id.to_string() }))
+            .json(&serde_json::json!({ "template_id": template_id }))
             .await;
         assert_eq!(
             response.status_code(),
@@ -226,7 +263,7 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({
-                "name": "library-note",
+                "name": name,
                 "entity_types": {
                     "note": {
                         "fields": {
@@ -246,8 +283,7 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
         let body: serde_json::Value = response.json();
         assert_eq!(body["schema"]["version"], 2);
         assert_eq!(
-            body["schema"]["origin_template_id"],
-            template.id.to_string(),
+            body["schema"]["origin_template_id"], template_id,
             "the link to the library template must survive an edit with no explicit origin: {body}"
         );
         assert_eq!(body["schema"]["origin_status"], "linked");

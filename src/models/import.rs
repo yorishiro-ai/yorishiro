@@ -14,7 +14,7 @@ pub(crate) use crate::models::export::ExportRecord;
 
 /// Outcome of a successful import: how many records of each kind were inserted.
 //
-// The whole import runs on the caller's RLS-scoped request transaction, so an error return means the caller never calls `Authorized::commit()` and nothing is applied (rollback on drop).
+// The caller supplies an RLS-scoped transaction and commits only after all records and embedding jobs succeed; an error rolls back on drop.
 #[derive(Clone, Default, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ImportResult {

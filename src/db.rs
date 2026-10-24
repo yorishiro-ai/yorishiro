@@ -26,103 +26,49 @@ impl AppContextBackend for loco_rs::app::AppContext {
     }
 }
 
-/// Registers SQLite extensions (sqlite-vec) so every connection opened on a SQLite URL
-/// auto-loads them.
-///
-/// Called from two places — `src/bin/main.rs` (covers all CLI subcommands) and
-/// `App::boot` (covers the test harness, which never runs `main.rs`) — each guarded by
-/// `std::sync::Once::call_once` so the C-level registration is atomic and idempotent.
-///
-/// The registration must happen **before** any SQLite connection opens: `loco-rs 1.2.0`'s
-/// `cli::main` calls `create_context::<H>` unconditionally at line 777, before the
-/// `match cli.command` that dispatches to `Start`/`create_app`/`H::boot`.  Every
-/// subcommand (`task`, `db`, `scheduler`) opens `ctx.db` there, before any `Hooks` method
-/// runs.
-/// Builds tenant and identity pools on PostgreSQL and stores them as the [`DbHandle`] every authenticated path resolves through.
+/// Builds the tenant pool and stores it with the existing identity pool in [`DbHandle`].
 ///
 /// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI).
 /// Both pools install the configured PostgreSQL session timezone per connection and reset it on release.
 pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Result<()> {
-    let database_url = &ctx.config.database.uri;
-    let max_connections = ctx.config.database.max_connections;
     let timezone = crate::time::configured(ctx).to_string();
-    let tenant = TenantDb::connect(database_url, max_connections, timezone.clone())
+    let tenant = TenantDb::connect(&ctx.config.database, timezone)
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
-    let identity = connect_postgres_pool(
-        database_url,
-        max_connections,
-        timezone.clone(),
-        false,
-        false,
-        Some(ctx.config.database.min_connections),
-        Some(std::time::Duration::from_millis(
-            ctx.config.database.idle_timeout,
-        )),
-        ctx.config
-            .database
-            .acquire_timeout
-            .map(std::time::Duration::from_millis),
-    )
-    .await
-    .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
-    let identity = identity.get_postgres_connection_pool().clone();
+    let identity = ctx.db.get_postgres_connection_pool().clone();
     ctx.shared_store.insert(DbHandle { tenant, identity });
     Ok(())
 }
 
-/// Replaces Loco's PostgreSQL application pool with one that initializes the
-/// configured session timezone on every physical connection.
+/// Replaces Loco's application pool with the backend's configured timezone hooks.
 ///
 /// # Errors
 /// Returns an error if the configured application pool cannot be opened.
-pub(crate) async fn replace_postgres_app_pool(
-    ctx: &mut loco_rs::app::AppContext,
-) -> loco_rs::Result<()> {
-    if !ctx.is_postgres() {
-        return Ok(());
-    }
-
+pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco_rs::Result<()> {
     let config = &ctx.config.database;
-    let mut options = sea_orm::ConnectOptions::new(config.uri.clone());
-    options
-        .max_connections(config.max_connections)
-        .min_connections(config.min_connections)
-        .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
-        .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
-        .sqlx_logging(config.enable_logging);
-    if let Some(acquire_timeout) = config.acquire_timeout {
-        options.acquire_timeout(std::time::Duration::from_millis(acquire_timeout));
-    }
-
-    let timezone = crate::time::configured(ctx).to_string();
-    let connect_timezone = timezone.clone();
-    let release_timezone = timezone;
-    options.map_sqlx_postgres_pool_opts(move |pool| {
-        let connect_timezone = connect_timezone.clone();
-        let release_timezone = release_timezone.clone();
-        let pool = pool.after_connect(move |conn, _meta| {
-            let timezone = connect_timezone.clone();
-            Box::pin(async move {
-                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
-                    .bind(timezone)
-                    .execute(&mut *conn)
-                    .await?;
-                Ok(())
+    let mut options = loco_rs::db::connection_options(config);
+    let zone = crate::time::configured(ctx);
+    if ctx.is_sqlite() {
+        require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
+        // Close before reopening SQLite so connection-local functions own the configured zone.
+        ctx.db.close_by_ref().await.map_err(|error| {
+            loco_rs::Error::Message(format!(
+                "failed to close Loco's default SQLite app pool: {error}"
+            ))
+        })?;
+        options.map_sqlx_sqlite_pool_opts(move |pool| {
+            pool.after_connect(move |conn, _meta| {
+                Box::pin(async move {
+                    register_sqlite_timestamp(conn, zone).await?;
+                    Ok(())
+                })
             })
         });
-        pool.after_release(move |conn, _meta| {
-            let timezone = release_timezone.clone();
-            Box::pin(async move {
-                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
-                    .bind(timezone)
-                    .execute(&mut *conn)
-                    .await?;
-                Ok(true)
-            })
-        })
-    });
-
+    } else if ctx.is_postgres() {
+        postgres_session_options(&mut options, zone.to_string(), PoolRole::Identity);
+    } else {
+        return Ok(());
+    }
     let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
         loco_rs::Error::Message(format!("failed to build application pool: {error}"))
     })?;
@@ -132,58 +78,6 @@ pub(crate) async fn replace_postgres_app_pool(
             "failed to close Loco's default application pool: {error}"
         ))
     })?;
-    Ok(())
-}
-
-/// Replaces Loco's SQLite application pool with one whose timestamp default uses the configured zone.
-///
-/// SQLite's special keyword is shadowed by a per-connection scalar so each app context owns its zone.
-///
-/// # Errors
-/// Returns an error when a replacement connection or per-connection callback fails.
-pub(crate) async fn replace_sqlite_app_pool(
-    ctx: &mut loco_rs::app::AppContext,
-) -> loco_rs::Result<()> {
-    if !ctx.is_sqlite() {
-        return Ok(());
-    }
-    let zone = crate::time::configured(ctx);
-    let config = &ctx.config.database;
-    let mut options = sea_orm::ConnectOptions::new(config.uri.clone());
-    options
-        .max_connections(config.max_connections)
-        .min_connections(config.min_connections)
-        .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
-        .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
-        .sqlx_logging(config.enable_logging);
-    let run_on_start = config.run_on_start.clone();
-    if let Some(timeout) = config.acquire_timeout {
-        options.acquire_timeout(std::time::Duration::from_millis(timeout));
-    }
-    ctx.db.close_by_ref().await.map_err(|error| {
-        loco_rs::Error::Message(format!(
-            "failed to close Loco's default SQLite app pool: {error}"
-        ))
-    })?;
-    options.map_sqlx_sqlite_pool_opts(move |pool| {
-        let run_on_start = run_on_start.clone();
-        pool.after_connect(move |conn, _meta| {
-            let run_on_start = run_on_start.clone();
-            Box::pin(async move {
-                register_sqlite_timestamp(conn, zone).await?;
-                if let Some(sql) = run_on_start.as_deref() {
-                    sea_orm::sqlx::raw_sql(sea_orm::sqlx::AssertSqlSafe(sql))
-                        .execute(&mut *conn)
-                        .await?;
-                }
-                Ok(())
-            })
-        })
-    });
-    let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
-        loco_rs::Error::Message(format!("failed to build SQLite app pool: {error}"))
-    })?;
-    ctx.db = replacement;
     Ok(())
 }
 
@@ -239,7 +133,7 @@ unsafe extern "C" fn sqlite_current_timestamp(
         }
         .copied()
         .unwrap_or(chrono_tz::UTC);
-        crate::time::sqlite_timestamp(chrono::Utc::now(), timezone)
+        crate::time::sqlite_timestamp(crate::time::now(), timezone)
     });
     match result {
         // SAFETY: `timestamp` remains live for the call and SQLITE_TRANSIENT copies it immediately.
@@ -262,44 +156,51 @@ unsafe extern "C" fn sqlite_current_timestamp(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-/// Builds a PostgreSQL pool through SeaORM with the application's session hooks.
-///
-/// # Errors
-/// Returns a database error if SeaORM cannot initialize the configured connection.
-pub fn connect_postgres_pool(
-    database_url: &str,
-    max_connections: u32,
+#[derive(Clone, Copy)]
+enum PoolRole {
+    Identity,
+    Tenant,
+}
+
+impl PoolRole {
+    async fn initialize(
+        self,
+        conn: &mut sea_orm::sqlx::PgConnection,
+    ) -> Result<(), sea_orm::sqlx::Error> {
+        if matches!(self, Self::Tenant) {
+            sea_orm::sqlx::query("SET ROLE yorishiro_app")
+                .execute(conn)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn reset(
+        self,
+        conn: &mut sea_orm::sqlx::PgConnection,
+    ) -> Result<(), sea_orm::sqlx::Error> {
+        if matches!(self, Self::Tenant) {
+            sea_orm::sqlx::raw_sql("RESET app.current_tenant; RESET app.current_workspace")
+                .execute(conn)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+/// Installs session ownership and reset policy for every application-owned PostgreSQL pool.
+fn postgres_session_options(
+    options: &mut sea_orm::ConnectOptions,
     timezone: String,
-    tenant: bool,
-    lazy: bool,
-    min_connections: Option<u32>,
-    idle_timeout: Option<std::time::Duration>,
-    acquire_timeout: Option<std::time::Duration>,
-) -> impl std::future::Future<Output = Result<DatabaseConnection, DbErr>> + Send + '_ {
-    let mut options = sea_orm::ConnectOptions::new(database_url.to_owned());
-    options.max_connections(max_connections);
-    if let Some(min_connections) = min_connections {
-        options.min_connections(min_connections);
-    }
-    if let Some(idle_timeout) = idle_timeout {
-        options.idle_timeout(Some(idle_timeout));
-    }
-    if let Some(acquire_timeout) = acquire_timeout {
-        options.acquire_timeout(acquire_timeout);
-    }
-    options.connect_lazy(lazy);
+    role: PoolRole,
+) {
     options.map_sqlx_postgres_pool_opts(move |pool| {
         let connect_timezone = timezone.clone();
         let release_timezone = timezone.clone();
         let pool = pool.after_connect(move |conn, _meta| {
             let timezone = connect_timezone.clone();
             Box::pin(async move {
-                if tenant {
-                    sea_orm::sqlx::query("SET ROLE yorishiro_app")
-                        .execute(&mut *conn)
-                        .await?;
-                }
+                role.initialize(conn).await?;
                 sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
                     .bind(timezone)
                     .execute(&mut *conn)
@@ -310,14 +211,7 @@ pub fn connect_postgres_pool(
         pool.after_release(move |conn, _meta| {
             let timezone = release_timezone.clone();
             Box::pin(async move {
-                if tenant {
-                    sea_orm::sqlx::query("RESET app.current_tenant")
-                        .execute(&mut *conn)
-                        .await?;
-                    sea_orm::sqlx::query("RESET app.current_workspace")
-                        .execute(&mut *conn)
-                        .await?;
-                }
+                role.reset(conn).await?;
                 sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
                     .bind(timezone)
                     .execute(&mut *conn)
@@ -326,21 +220,29 @@ pub fn connect_postgres_pool(
             })
         })
     });
-    async move { sea_orm::Database::connect(options).await }
 }
 
 /// Reads PostgreSQL's process-level activity view for the load guard.
-/// This is backend-specific operational state that SeaORM does not model.
+/// The activity view is queried with SeaQuery rather than an application entity.
 pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::YorishiroError> {
     use crate::error::ResultExt;
 
-    sea_orm::sqlx::query_scalar(
-        "SELECT count(*) FROM pg_stat_activity \
-         WHERE datname = current_database() AND state = 'active'",
-    )
-    .fetch_one(pool)
-    .await
-    .internal()
+    use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Query};
+    let query = Query::select()
+        .expr(Func::count(Expr::col(Asterisk)))
+        .from(Alias::new("pg_stat_activity"))
+        .and_where(Expr::col(Alias::new("datname")).eq(Func::cust(Alias::new("current_database"))))
+        .and_where(Expr::col(Alias::new("state")).eq("active"))
+        .to_owned();
+    let db = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
+    db.query_one_raw(db.get_database_backend().build(&query))
+        .await
+        .internal()?
+        .ok_or_else(|| {
+            crate::YorishiroError::Internal(anyhow::anyhow!("activity count returned no row"))
+        })?
+        .try_get_by_index(0)
+        .internal()
 }
 
 /// A vector in the BLOB layout `sqlite-vec` reads: consecutive little-endian `f32` values.
@@ -353,7 +255,8 @@ pub fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
         .collect()
 }
 
-/// Public entry point for `main.rs` and `App::boot` to call.
+/// Registers sqlite-vec once before `main.rs` or `App::boot` opens any SQLite connections.
+/// The CLI creates its context before dispatching subcommands, so registration cannot wait for a hook.
 ///
 /// The configured-zone timestamp function is installed separately per app-pool connection.
 pub fn register_sqlite_extensions() {
@@ -396,23 +299,16 @@ impl TenantDb {
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
-    pub async fn connect(
-        database_url: &str,
-        max_connections: u32,
+    pub(crate) async fn connect(
+        config: &loco_rs::config::Database,
         timezone: String,
     ) -> Result<Self, sea_orm::sqlx::Error> {
-        let connection = connect_postgres_pool(
-            database_url,
-            max_connections,
-            timezone,
-            true,
-            true,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|error| sea_orm::sqlx::Error::Protocol(error.to_string()))?;
+        let mut options = loco_rs::db::connection_options(config);
+        options.connect_lazy(true);
+        postgres_session_options(&mut options, timezone, PoolRole::Tenant);
+        let connection = sea_orm::Database::connect(options)
+            .await
+            .map_err(|error| sea_orm::sqlx::Error::Protocol(error.to_string()))?;
         let pool = connection.get_postgres_connection_pool().clone();
         let orm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
         Ok(TenantDb { pool, orm })
@@ -440,14 +336,8 @@ impl TenantDb {
         // SeaORM has no API for executing non-SELECT configuration statements, so raw SQL is required.
         txn.execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            "SELECT set_config('app.current_tenant', $1, true)",
-            [tenant_id.to_string().into()],
-        ))
-        .await?;
-        txn.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT set_config('app.current_workspace', $1, true)",
-            [workspace_id.to_string().into()],
+            "SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true)",
+            [tenant_id.to_string().into(), workspace_id.to_string().into()],
         ))
         .await?;
 
@@ -468,11 +358,10 @@ impl TenantDb {
     {
         let mut conn = self.pool.acquire().await?;
 
-        sea_orm::sqlx::query("SELECT set_config('app.current_tenant', $1, false)")
+        sea_orm::sqlx::query(
+            "SELECT set_config('app.current_tenant', $1, false), set_config('app.current_workspace', $2, false)",
+        )
             .bind(tenant_id.to_string())
-            .execute(conn.as_mut())
-            .await?;
-        sea_orm::sqlx::query("SELECT set_config('app.current_workspace', $1, false)")
             .bind(workspace_id.to_string())
             .execute(conn.as_mut())
             .await?;
@@ -480,13 +369,17 @@ impl TenantDb {
     }
 }
 
-/// Sets a PostgreSQL session's timezone using an escaped IANA name.
+/// Sets a PostgreSQL session's timezone using a bound IANA name.
 ///
 /// # Errors
 /// Returns an error if the statement fails.
 pub async fn set_session_timezone(db: &DatabaseConnection, timezone: &str) -> Result<(), DbErr> {
-    db.execute_unprepared(&format!("SET TIME ZONE '{}'", timezone.replace('\'', "''")))
-        .await?;
+    db.execute_raw(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT set_config('TimeZone', $1, false)",
+        [timezone.into()],
+    ))
+    .await?;
     Ok(())
 }
 
@@ -497,7 +390,7 @@ pub async fn set_session_timezone(db: &DatabaseConnection, timezone: &str) -> Re
 ///
 /// # Errors
 /// Returns an error if the transaction cannot be started, or if a PostgreSQL deployment has no tenant pool.
-pub(crate) async fn begin_workspace(
+pub async fn begin_workspace(
     ctx: &loco_rs::app::AppContext,
     tenant_id: Uuid,
     workspace_id: Uuid,
@@ -516,6 +409,31 @@ pub(crate) async fn begin_workspace(
         .begin_for_workspace(tenant_id, workspace_id)
         .await
         .internal()
+}
+
+/// Begins a read-modify-write transaction, acquiring SQLite's writer reservation before reads.
+/// Other backends retain their normal transaction semantics.
+pub(crate) async fn begin_write(db: &DatabaseConnection) -> Result<DatabaseTransaction, DbErr> {
+    db.begin_with_options(sea_orm::TransactionOptions {
+        sqlite_transaction_mode: Some(sea_orm::SqliteTransactionMode::Immediate),
+        ..Default::default()
+    })
+    .await
+}
+
+/// Opens a workspace-scoped write transaction without exposing backend selection to workers.
+pub(crate) async fn begin_workspace_write(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<DatabaseTransaction, crate::YorishiroError> {
+    use crate::error::ResultExt;
+
+    if ctx.is_sqlite() {
+        begin_write(&ctx.db).await.internal()
+    } else {
+        begin_workspace(ctx, tenant_id, workspace_id).await
+    }
 }
 
 /// Which pools this deployment holds for control-plane vs. tenant-scoped access.
@@ -734,38 +652,44 @@ pub async fn acquire_workspace_reindex_lock(
     })
 }
 
-/// Acquires the session-scoped advisory lock and runs a reindex under it, returning the outcome.
-///
-/// This is the single-entry-point the concurrency test exercises: it races two such calls
-/// against the same workspace with different providers so the lock's serialization — and the
-/// restamp-on-full-success invariant that depends on it — can be verified.
+/// Runs a reindex with the backend's workspace serialization policy.
+/// PostgreSQL holds a detached session lock; SQLite retains the model's transactional writes without a session lock.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn reindex_workspace_with_lock(
-    pool: PgPool,
+    ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
-    conn: &impl ConnectionTrait,
     candidate_ids: &[Uuid],
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    let lock = acquire_workspace_reindex_lock(pool, workspace_id)
-        .await
-        .map_err(|err| {
+    let lock = if ctx.is_sqlite() {
+        None
+    } else {
+        let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
             crate::YorishiroError::Internal(anyhow::anyhow!(
-                "failed to acquire workspace lock: {err}"
+                "reindex requires the tenant pool, which this deployment did not build"
             ))
         })?;
+        Some(
+            acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
+                .await
+                .map_err(|err| {
+                    crate::YorishiroError::Internal(anyhow::anyhow!(
+                        "failed to acquire workspace lock: {err}"
+                    ))
+                })?,
+        )
+    };
     let outcome = crate::models::entity_embeddings::reindex_workspace(
-        conn,
+        &ctx.db,
         workspace_id,
         candidate_ids,
         provider,
     )
     .await;
-    let _ = lock.release().await;
-    match outcome {
-        Ok(ok) => Ok(ok),
-        Err(err) => Err(err),
+    if let Some(lock) = lock {
+        let _ = lock.release().await;
     }
+    outcome
 }

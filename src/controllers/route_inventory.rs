@@ -1,3 +1,5 @@
+#[cfg(feature = "openapi")]
+use super::swagger::implementation::openapi_method;
 use axum::http::Method;
 use loco_rs::controller::AppRoutes;
 #[cfg(feature = "openapi")]
@@ -6,7 +8,7 @@ use utoipa::openapi::path::{HttpMethod, Operation};
 use utoipa::openapi::{RefOr, Schema};
 
 /// Whether a route is part of the public REST contract or an implementation endpoint.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RouteClass {
     Public,
     #[cfg(feature = "openapi")]
@@ -14,7 +16,7 @@ pub enum RouteClass {
 }
 
 /// One operation expanded from a mounted Loco route group.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RouteEntry {
     pub path: String,
     pub method: Method,
@@ -43,21 +45,6 @@ pub struct RouteDoc {
 }
 
 #[cfg(feature = "openapi")]
-fn openapi_method(method: &Method) -> HttpMethod {
-    match *method {
-        Method::GET => HttpMethod::Get,
-        Method::POST => HttpMethod::Post,
-        Method::PUT => HttpMethod::Put,
-        Method::DELETE => HttpMethod::Delete,
-        Method::PATCH => HttpMethod::Patch,
-        Method::HEAD => HttpMethod::Head,
-        Method::OPTIONS => HttpMethod::Options,
-        Method::TRACE => HttpMethod::Trace,
-        _ => panic!("unsupported OpenAPI method: {method}"),
-    }
-}
-
-#[cfg(feature = "openapi")]
 pub(crate) fn path_doc<P>(_: P) -> RouteDoc
 where
     P: utoipa::Path + utoipa::__dev::SchemaReferences,
@@ -72,7 +59,7 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct InfrastructureExclusion {
     pub path: &'static str,
     pub reason: &'static str,

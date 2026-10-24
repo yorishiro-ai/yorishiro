@@ -7,14 +7,16 @@ use crate::error::YorishiroError;
 ///
 /// Wraps Loco's `query::PaginationQuery` (1-based page + page_size).  Loco's own
 /// query-string deserializer maps `?page=&page_size=` into the struct fields, so
-/// all existing API callers work without changes.  The `From` impl converts to the
+/// all existing API callers work without changes.  The `TryFrom` impl converts to the
 /// internal 0-based offset/limit representation that every list function expects.
 #[derive(Default, serde::Deserialize)]
 #[serde(transparent)]
 pub struct PageParams(pub loco_rs::model::query::PaginationQuery);
 
-impl From<PageParams> for crate::models::pagination::ListParams {
-    fn from(params: PageParams) -> Self {
+impl TryFrom<PageParams> for crate::models::pagination::ListParams {
+    type Error = YorishiroError;
+
+    fn try_from(params: PageParams) -> Result<Self, Self::Error> {
         Self::from_pagination_query(params.0.page, params.0.page_size)
     }
 }

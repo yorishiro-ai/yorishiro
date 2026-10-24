@@ -22,7 +22,7 @@ pub(crate) async fn list_schemas(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let summaries = schema_schemas::list(authorized.txn(), workspace_id, page.into()).await?;
+    let summaries = schema_schemas::list(authorized.txn(), workspace_id, page.try_into()?).await?;
     Ok(Json(summaries))
 }
 

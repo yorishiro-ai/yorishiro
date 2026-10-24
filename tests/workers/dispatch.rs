@@ -1,145 +1,105 @@
-/// What a provider swap must not change: a target keeps draining its own jobs however many another target has queued.
-///
-/// Redis filters tags client-side over the first 1000 entries of a queue, where the SQL providers filter in the query, so every target has to get a queue of its own on Redis.
-/// Runs only where the lane's queue is the reserved Valkey database.
-mod redis_routing {
-    use std::sync::Arc;
-    use std::time::Duration;
+//! A target drains independently of a backlog on another target's named queue.
 
-    use loco_rs::bgworker::{self, BackgroundWorker};
-    use loco_rs::config::RedisQueueConfig;
-    use std::sync::Mutex;
-    use uuid::Uuid;
+use std::time::Duration;
 
-    static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+use futures::FutureExt;
+use loco_rs::app::Hooks;
+use loco_rs::bgworker::{BackgroundWorker, Job, JobStatus};
+use uuid::Uuid;
+use yorishiro::App;
+use yorishiro::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
+use yorishiro::workers::target::WorkerTarget;
 
-    struct RoutingProbe;
-
-    #[loco_rs::prelude::async_trait]
-    impl BackgroundWorker<serde_json::Value> for RoutingProbe {
-        fn build(_ctx: &loco_rs::app::AppContext) -> Self {
-            Self
-        }
-
-        async fn perform(&self, args: serde_json::Value) -> loco_rs::Result<()> {
-            SEEN.lock()
-                .expect("seen tags")
-                .push(args["tag"].as_str().unwrap_or_default().to_owned());
-            Ok(())
-        }
-    }
-
-    async fn remove_owned_jobs(uri: &str, jobs: &[(String, String)]) {
-        let client = loco_rs::bgworker::redis::RedisPool::open(uri).expect("open cleanup client");
-        let mut connection = client
-            .get_multiplexed_async_connection()
-            .await
-            .expect("connect cleanup client");
-        for (queue_name, id) in jobs {
-            let _: usize = redis::cmd("ZREM")
-                .arg(format!("queue:{queue_name}"))
-                .arg(id)
-                .query_async(&mut connection)
-                .await
-                .expect("remove owned queued member");
-            let _: usize = redis::cmd("SREM")
-                .arg(format!("processing:{queue_name}"))
-                .arg(id)
-                .query_async(&mut connection)
-                .await
-                .expect("remove owned processing member");
-            let _: usize = redis::cmd("DEL")
-                .arg(format!("job:{id}"))
-                .query_async(&mut connection)
-                .await
-                .expect("remove owned job key");
-        }
-    }
-
-    #[tokio::test]
-    #[serial_test::serial(queue_backend)]
-    #[serial_test::serial(process_environment)]
-    async fn a_target_drains_its_own_jobs_behind_a_backlog_of_another_target() {
-        let Some(uri) = crate::valkey_test_url() else {
-            eprintln!(
-                "skipping Valkey routing test: the lane's queue is not the reserved Valkey database"
-            );
+#[tokio::test]
+async fn a_target_drains_its_own_jobs_behind_a_backlog_of_another_target() {
+    crate::requests::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
+        let loco_rs::config::QueueConfig::Redis(config) = ctx.config.queue.as_ref().unwrap() else {
             return;
         };
-        let suffix = Uuid::now_v7();
-        let shared_tag = format!("worker-target:shared:test:{suffix}");
-        let official_tag = format!("worker-target:official:test:{suffix}");
-        let shared_queue = format!("queue-test:shared:{suffix}");
-        let official_queue = format!("queue-test:official:{suffix}");
-        let queue = Arc::new(
-            bgworker::redis::create_provider(&RedisQueueConfig {
-                uri: uri.clone(),
-                dangerously_flush: false,
-                queues: Some(vec![shared_queue.clone(), official_queue.clone()]),
-                num_workers: 1,
-                reaper: None,
-            })
-            .await
-            .expect("the worker's Redis queue provider"),
-        );
-        queue.setup().await.expect("set up Redis queue");
-        queue.register(RoutingProbe).await.expect("register probe");
-
-        // More than the 1000 entries the Redis provider scans for one tag, isolated
-        // on this run's two named queues so unrelated DB15 backlog cannot enter it.
-        let backlog_ids = queue
+        let producer = ctx.queue_provider.as_ref().unwrap();
+        // Late deliveries have no pending request, so production query workers acknowledge them without an external provider call.
+        let payload = serde_json::to_value(QueryEmbeddingArgs {
+            request_id: Uuid::now_v7(),
+            workspace_id: Uuid::now_v7(),
+        })
+        .unwrap();
+        let backlog = producer
             .enqueue_batch(
-                RoutingProbe::class_name(),
-                Some(official_queue.clone()),
-                (0..1100)
-                    .map(|_| {
-                        (
-                            serde_json::json!({ "tag": official_tag.clone() }),
-                            Some(200),
-                        )
-                    })
-                    .collect(),
-                Some(vec![official_tag.clone()]),
+                QueryEmbeddingWorker::class_name(),
+                Some(WorkerTarget::Official.queue()),
+                (0..1100).map(|_| (payload.clone(), Some(200))).collect(),
+                Some(vec![WorkerTarget::Official.tag()]),
             )
             .await
-            .expect("enqueue official backlog");
-        let mut owned_jobs: Vec<(String, String)> = backlog_ids
-            .into_iter()
-            .map(|id| (official_queue.clone(), id))
-            .collect();
-        let shared_id = queue
+            .unwrap();
+        assert_eq!(backlog.len(), 1100);
+        let shared = producer
             .enqueue(
-                RoutingProbe::class_name(),
-                Some(shared_queue.clone()),
-                serde_json::json!({ "tag": shared_tag.clone() }),
-                Some(vec![shared_tag.clone()]),
+                QueryEmbeddingWorker::class_name(),
+                Some(WorkerTarget::Shared.queue()),
+                payload,
+                Some(vec![WorkerTarget::Shared.tag()]),
                 Some(100),
             )
             .await
-            .expect("enqueue shared probe")
-            .expect("provider returns shared job ID");
-        owned_jobs.push((shared_queue, shared_id));
-
-        let running = queue.clone();
-        let worker_tag = shared_tag.clone();
-        let handle = tokio::spawn(async move { running.run(vec![worker_tag]).await });
-        let completed = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                if SEEN.lock().expect("seen tags").contains(&shared_tag) {
-                    return;
+            .unwrap()
+            .unwrap();
+        let client = redis::Client::open(config.uri.clone()).unwrap();
+        let mut observer = client.get_multiplexed_async_connection().await.unwrap();
+        let keys: Vec<_> = backlog
+            .iter()
+            .chain(std::iter::once(&shared))
+            .map(|id| format!("job:{id}"))
+            .collect();
+        {
+            let target = WorkerTarget::Shared;
+            let queue = crate::requests::query_worker::target_queue(&ctx, target).await;
+            let mut worker_ctx = ctx.clone();
+            worker_ctx.queue_provider = Some(queue.clone());
+            App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            let running = queue.clone();
+            let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
+            let outcome = std::panic::AssertUnwindSafe(async {
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+                loop {
+                    // Observe only this case's deliveries, not every retained job in the shared deployment.
+                    let records: Vec<String> = redis::cmd("MGET")
+                        .arg(&keys)
+                        .query_async(&mut observer)
+                        .await
+                        .unwrap();
+                    let jobs: Vec<Job> = records
+                        .iter()
+                        .map(|record| serde_json::from_str(record).unwrap())
+                        .collect();
+                    let shared_job = jobs.iter().find(|job| job.id == shared).unwrap();
+                    assert_ne!(shared_job.status, JobStatus::Failed, "{}", shared_job.data);
+                    if shared_job.status == JobStatus::Completed {
+                        assert!(backlog.iter().all(|id| {
+                            jobs.iter()
+                                .any(|job| job.id == *id && job.status == JobStatus::Queued)
+                        }));
+                        break;
+                    }
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "the shared target completes independently of the official backlog"
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(20)).await;
+            })
+            .catch_unwind()
+            .await;
+            App::on_shutdown(&worker_ctx).await;
+            queue.shutdown().unwrap();
+            let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;
+            queue.close().await.unwrap();
+            match outcome {
+                Ok(()) => {}
+                Err(panic) => std::panic::resume_unwind(panic),
             }
-        })
-        .await;
-        let _ = queue.shutdown();
-        let _ = handle.await;
-        remove_owned_jobs(&uri, &owned_jobs).await;
-        assert!(completed.is_ok(), "the shared job was not run");
-        assert_eq!(
-            SEEN.lock().expect("seen tags").as_slice(),
-            [shared_tag.as_str()],
-            "only this target's job may run"
-        );
-    }
+            drained.unwrap().unwrap().unwrap();
+        }
+    })
+    .await;
 }

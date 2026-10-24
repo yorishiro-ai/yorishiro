@@ -3,7 +3,7 @@ fn configured_timer_renders_dst_offsets_and_json_safe_timestamp() {
     use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
 
     let mut tokyo = String::new();
-    yorishiro::initializers::timezone_logger::ConfiguredTimer::new(
+    yorishiro::initializers::logger::ConfiguredTimer::new(
         yorishiro::time::parse_timezone("Asia/Tokyo").unwrap(),
     )
     .format_time(&mut Writer::new(&mut tokyo))
@@ -12,7 +12,7 @@ fn configured_timer_renders_dst_offsets_and_json_safe_timestamp() {
     assert!(tokyo.contains("+09:00"));
 
     let mut new_york = String::new();
-    yorishiro::initializers::timezone_logger::ConfiguredTimer::new(
+    yorishiro::initializers::logger::ConfiguredTimer::new(
         yorishiro::time::parse_timezone("America/New_York").unwrap(),
     )
     .format_time(&mut Writer::new(&mut new_york))

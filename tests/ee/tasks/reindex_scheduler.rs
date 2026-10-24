@@ -1,13 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
 use uuid::Uuid;
+use yorishiro::edition::ee::tasks::reindex_scheduler::TenantReindexScheduler;
 
 use chrono::{TimeZone, Utc};
-use loco_rs::prelude::async_trait;
 
-use yorishiro::edition::ee::tasks::reindex_scheduler::{
+use yorishiro::edition::ee::models::tenant_reindex_schedules::{
     dispatch_reindex_batch, is_due, scheduler_failure_message,
 };
 
@@ -28,50 +24,39 @@ fn due_decision_keeps_the_exact_tick_boundary_matrix() {
     }
 }
 
-struct FailingDispatcher {
-    attempts: AtomicUsize,
-}
-
-#[async_trait]
-impl yorishiro::workers::dispatch::ReindexDispatcher for FailingDispatcher {
-    async fn dispatch(
-        &self,
-        _ctx: &loco_rs::app::AppContext,
-        _args: yorishiro::workers::reindex::ReindexArgs,
-        _txn: Option<&sea_orm::DatabaseTransaction>,
-    ) -> loco_rs::Result<String> {
-        self.attempts.fetch_add(1, Ordering::SeqCst);
-        Err(loco_rs::Error::Message("dispatch failed".into()))
-    }
-}
-
 #[tokio::test]
 async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
-    let ctx = crate::workers::test_context().await;
-    let dispatcher = Arc::new(FailingDispatcher {
-        attempts: AtomicUsize::new(0),
-    });
-    ctx.shared_store
-        .insert(dispatcher.clone() as Arc<dyn yorishiro::workers::dispatch::ReindexDispatcher>);
-    let dispatches = (0..3)
-        .map(|_| {
-            (
-                Uuid::now_v7(),
-                yorishiro::workers::reindex::ReindexArgs {
-                    lifecycle_id: None,
-                    dispatch_id: None,
-                    publishing_epoch: None,
-                    workspace_id: Uuid::now_v7(),
-                    worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
-                    startup: false,
-                },
-            )
-        })
-        .collect();
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let dispatches: Vec<_> = (0..3)
+            .map(|_| {
+                (
+                    Uuid::now_v7(),
+                    yorishiro::workers::reindex::ReindexArgs {
+                        lifecycle_id: None,
+                        workspace_id: Uuid::now_v7(),
+                        worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
+                        startup: false,
+                    },
+                )
+            })
+            .collect();
 
-    let errors = dispatch_reindex_batch(&ctx, dispatches).await;
-    assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 3);
-    assert_eq!(errors.len(), 3);
+        let workspaces: Vec<_> = dispatches
+            .iter()
+            .map(|(_, args)| args.workspace_id)
+            .collect();
+        // Missing workspaces exercise the real enqueue failure path without replacing dispatch.
+        let errors = dispatch_reindex_batch(&ctx, dispatches).await;
+        assert_eq!(errors.len(), 3);
+        for workspace in workspaces {
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| error.starts_with(&format!("workspace {workspace}:")))
+            );
+        }
+    })
+    .await;
 }
 
 #[test]
@@ -93,77 +78,54 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
 
 #[tokio::test]
 async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
-    use loco_rs::app::AppContext;
-    use migration::{Migrator, MigratorTrait};
-    use sea_orm::{ActiveModelTrait, ActiveValue, Database, EntityTrait};
-    use tempfile::tempdir;
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    if !crate::require_sqlite_backend() { return; }
 
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("scheduler.sqlite");
-    let uri = format!("sqlite://{}?mode=rwc", path.display());
-    yorishiro::db::register_sqlite_extensions();
-    let db = Database::connect(&uri).await.unwrap();
-    Migrator::up(&db, None).await.unwrap();
-    let config = crate::sqlite_fixture_config(&uri);
-    let ctx = AppContext::builder(loco_rs::environment::Environment::Test, db, config).build();
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
-    let tenant = yorishiro::models::_entities::tenant_tenants::ActiveModel {
-        name: ActiveValue::Set("scheduler-test".into()),
-        ..Default::default()
+    let crate::requests::fixtures::TestTenant { tenant_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+    let transaction = ctx.db.begin().await.unwrap();
+    for name in ["second"] {
+        yorishiro::models::tenancy::create_workspace(&transaction, tenant_id, name, None, None)
+            .await
+            .unwrap();
     }
-    .insert(&ctx.db)
-    .await
-    .unwrap();
-    for name in ["one", "two"] {
-        yorishiro::models::_entities::workspace_workspaces::ActiveModel {
-            tenant_id: ActiveValue::Set(tenant.id),
-            name: ActiveValue::Set(name.into()),
-            status: ActiveValue::Set(
-                yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE.into(),
-            ),
-            ..Default::default()
-        }
-        .insert(&ctx.db)
+    transaction.commit().await.unwrap();
+    // Database fault injection: real enqueue must fail after schedule advancement.
+    ctx.db.execute_unprepared(
+        "CREATE TRIGGER refuse_test_dispatch BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'test outbox unavailable'); END"
+    ).await.unwrap();
+    set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
+    let tick = get(&ctx.db, tenant_id)
         .await
-        .unwrap();
-    }
-    let initial = at(-1);
-    yorishiro::models::_entities::tenant_reindex_schedules::ActiveModel {
-        tenant_id: ActiveValue::Set(tenant.id),
-        interval: ActiveValue::Set("P1D".into()),
-        scheduled_for: ActiveValue::Set(Some(initial.into())),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .unwrap();
+        .unwrap()
+        .unwrap()
+        .scheduled_for
+        .unwrap()
+        .to_utc();
 
-    let dispatcher = Arc::new(FailingDispatcher {
-        attempts: AtomicUsize::new(0),
-    });
-    ctx.shared_store
-        .insert(dispatcher.clone() as Arc<dyn yorishiro::workers::dispatch::ReindexDispatcher>);
     let task = yorishiro::edition::ee::tasks::reindex_scheduler::TenantReindexScheduler;
     let first = task
-        .run_at(&ctx, &loco_rs::task::Vars::default(), at(0))
-        .await;
-    assert!(first.is_err());
-    assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 2);
+        .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
+        .await
+        .expect_err("outbox rejects both jobs");
+    let diagnostic = first.to_string();
+    assert!(diagnostic.contains("2 workspace(s)"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("test outbox unavailable"),
+        "{diagnostic}"
+    );
 
-    let schedule =
-        yorishiro::models::_entities::tenant_reindex_schedules::Entity::find_by_id(tenant.id)
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
-    let expected: chrono::DateTime<chrono::FixedOffset> = at(86_400).into();
+    let schedule = get(&ctx.db, tenant_id).await.unwrap().unwrap();
+    let expected: chrono::DateTime<chrono::FixedOffset> = (tick + chrono::Duration::days(1)).into();
     assert_eq!(schedule.scheduled_for.unwrap(), expected);
 
     let second = task
-        .run_at(&ctx, &loco_rs::task::Vars::default(), at(0))
+        .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
         .await;
     assert!(second.is_ok());
-    assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 2);
+
     let ownership = yorishiro::edition::ee::db::acquire_scheduler_ownership(
         &ctx,
         "yorishiro:tenant-reindex-scheduler",
@@ -172,135 +134,67 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     .unwrap()
     .unwrap();
     ownership.release().await.unwrap();
-}
-
-/// A migrated SQLite database with one tenant, which is all `set` and the ticker need.
-async fn scheduler_context() -> (loco_rs::app::AppContext, Uuid, tempfile::TempDir) {
-    use migration::{Migrator, MigratorTrait};
-    use sea_orm::{ActiveModelTrait, ActiveValue, Database};
-
-    let dir = tempfile::tempdir().unwrap();
-    let uri = format!(
-        "sqlite://{}?mode=rwc",
-        dir.path().join("scheduler.sqlite").display()
-    );
-    yorishiro::db::register_sqlite_extensions();
-    let db = Database::connect(&uri).await.unwrap();
-    Migrator::up(&db, None).await.unwrap();
-    let config = crate::sqlite_fixture_config(&uri);
-    let ctx =
-        loco_rs::app::AppContext::builder(loco_rs::environment::Environment::Test, db, config)
-            .build();
-    let tenant = yorishiro::models::_entities::tenant_tenants::ActiveModel {
-        name: ActiveValue::Set("interval-test".into()),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .unwrap();
-    (ctx, tenant.id, dir)
+    }).await;
 }
 
 #[tokio::test]
 async fn intervals_that_cannot_be_scheduled_are_refused() {
-    use yorishiro::edition::ee::tasks::reindex_scheduler::set;
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        use yorishiro::edition::ee::models::tenant_reindex_schedules::set;
 
-    let (ctx, tenant_id, _dir) = scheduler_context().await;
-    for bad in [
-        "",
-        "abc",
-        "1D",
-        "P",
-        "PT",
-        "P1Y",
-        "P1M",
-        "P0D",
-        "P1.5D",
-        "PT1M",
-        "PT299S",
-        "P1D1D",
-        "PT1H1H",
-        "PT9223372036854775807S",
-    ] {
-        assert!(
-            set(&ctx.db, tenant_id, bad, None).await.is_err(),
-            "{bad:?} must be refused"
-        );
-    }
-    for good in ["P1D", "P1W", "PT6H", "P1DT12H", "PT5M", "PT300S"] {
-        set(&ctx.db, tenant_id, good, None)
-            .await
-            .unwrap_or_else(|error| panic!("{good:?} must be accepted: {error:?}"));
-    }
+        let crate::requests::fixtures::TestTenant { tenant_id, .. } =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        for bad in [
+            "",
+            "abc",
+            "1D",
+            "P",
+            "PT",
+            "P1Y",
+            "P1M",
+            "P0D",
+            "P1.5D",
+            "PT1M",
+            "PT299S",
+            "P1D1D",
+            "PT1H1H",
+            "PT9223372036854775807S",
+        ] {
+            assert!(
+                set(&ctx.db, tenant_id, bad, None).await.is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+        for good in ["P1D", "P1W", "PT6H", "P1DT12H", "PT5M", "PT300S"] {
+            set(&ctx.db, tenant_id, good, None)
+                .await
+                .unwrap_or_else(|error| panic!("{good:?} must be accepted: {error:?}"));
+        }
+    })
+    .await;
 }
 
 /// The first run is one interval after the schedule is set, and every tick schedules the next run one interval after itself.
 #[tokio::test]
 async fn a_schedule_advances_by_its_own_interval() {
-    use yorishiro::edition::ee::tasks::reindex_scheduler::{TenantReindexScheduler, get, set};
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
-    let (ctx, tenant_id, _dir) = scheduler_context().await;
-    let before = Utc::now();
-    set(&ctx.db, tenant_id, "PT6H", None).await.unwrap();
-    let first = get(&ctx.db, tenant_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .scheduled_for
-        .unwrap();
-    let six_hours = chrono::Duration::hours(6);
-    assert!(first >= before + six_hours);
-    assert!(first <= Utc::now() + six_hours);
-
-    let tick = first.to_utc();
-    TenantReindexScheduler
-        .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
-        .await
-        .unwrap();
-    let next = get(&ctx.db, tenant_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .scheduled_for
-        .unwrap();
-    assert_eq!(next.to_utc(), tick + six_hours);
-
-    set(&ctx.db, tenant_id, "P1W", None).await.unwrap();
-    let weekly = get(&ctx.db, tenant_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .scheduled_for
-        .unwrap();
-    assert!(weekly >= before + chrono::Duration::weeks(1));
-}
-
-/// Legacy intervals cannot create a tight loop or leave the next run at the current tick.
-#[tokio::test]
-async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
-    use sea_orm::ConnectionTrait;
-    use yorishiro::edition::ee::tasks::reindex_scheduler::{TenantReindexScheduler, get, set};
-
-    let (ctx, tenant_id, _dir) = scheduler_context().await;
-    for (interval, seconds) in [
-        ("PT1S", 300),
-        ("P1D1D", 86_400),
-        ("PT9223372036854775S", 86_400),
-    ] {
-        set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
-        ctx.db
-            .execute_unprepared(&format!(
-                "UPDATE tenant_reindex_schedules SET interval = '{interval}'"
-            ))
-            .await
-            .unwrap();
-        let tick = get(&ctx.db, tenant_id)
+        let crate::requests::fixtures::TestTenant { tenant_id, .. } =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let before = Utc::now();
+        set(&ctx.db, tenant_id, "PT6H", None).await.unwrap();
+        let first = get(&ctx.db, tenant_id)
             .await
             .unwrap()
             .unwrap()
             .scheduled_for
-            .unwrap()
-            .to_utc();
+            .unwrap();
+        let six_hours = chrono::Duration::hours(6);
+        assert!(first >= before + six_hours);
+        assert!(first <= Utc::now() + six_hours);
+
+        let tick = first.to_utc();
         TenantReindexScheduler
             .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
             .await
@@ -310,12 +204,65 @@ async fn legacy_intervals_are_clamped_or_fall_back_to_daily() {
             .unwrap()
             .unwrap()
             .scheduled_for
+            .unwrap();
+        assert_eq!(next.to_utc(), tick + six_hours);
+
+        set(&ctx.db, tenant_id, "P1W", None).await.unwrap();
+        let weekly = get(&ctx.db, tenant_id)
+            .await
             .unwrap()
-            .to_utc();
-        assert_eq!(
-            next,
-            tick + chrono::Duration::seconds(seconds),
-            "{interval}"
-        );
-    }
+            .unwrap()
+            .scheduled_for
+            .unwrap();
+        assert!(weekly >= before + chrono::Duration::weeks(1));
+    })
+    .await;
+}
+
+/// Invalid stored intervals fail without advancing the schedule.
+#[tokio::test]
+async fn invalid_stored_intervals_are_rejected_without_advancement() {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+
+        let crate::requests::fixtures::TestTenant { tenant_id, .. } =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        for interval in ["PT1S", "P1D1D", "PT9223372036854775S"] {
+            set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
+            // Bypass input validation to exercise detection of corrupt stored data.
+            yorishiro::models::_entities::tenant_reindex_schedules::Entity::update_many()
+                .col_expr(
+                    yorishiro::models::_entities::tenant_reindex_schedules::Column::Interval,
+                    sea_orm::sea_query::Expr::value(interval),
+                )
+                .filter(
+                    yorishiro::models::_entities::tenant_reindex_schedules::Column::TenantId
+                        .eq(tenant_id),
+                )
+                .exec(&ctx.db)
+                .await
+                .unwrap();
+            let tick = get(&ctx.db, tenant_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .scheduled_for
+                .unwrap()
+                .to_utc();
+            TenantReindexScheduler
+                .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
+                .await
+                .expect_err("invalid stored interval must fail");
+            let next = get(&ctx.db, tenant_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .scheduled_for
+                .unwrap()
+                .to_utc();
+            assert_eq!(next, tick, "{interval}");
+        }
+    })
+    .await;
 }

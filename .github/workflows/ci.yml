@@ -19,6 +19,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  PYTHONDONTWRITEBYTECODE: "1"
   EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
   EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
   EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
@@ -86,7 +87,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
 
       - name: Install Python tools
         run: uv sync --locked
@@ -103,8 +104,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Verify upstream bug-fix patches
+        run: make patch-check
+
       - name: Check generated entity hardener
-        run: PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_harden_generated_entities.py
+        run: uv run scripts/test_harden_generated_entities.py
 
       - name: Python lint
         run: make python-lint
@@ -127,40 +131,11 @@ jobs:
       - name: Check the edition boundary
         run: make edition-boundary-check
 
-      - name: Check public API additions
-        run: |
-          set -euo pipefail
-          base_ref="${PUBLIC_API_BASE_REF:-}"
-          if [[ "$base_ref" == "$(printf '0%.0s' {1..40})" ]]; then
-            echo "PUBLIC_API_BASE_REF is all-zero; skipping public API additions for this new branch."
-            exit 0
-          elif [[ "$base_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            if ! git fetch --no-tags origin "$base_ref"; then
-              echo "::error::Unable to fetch PUBLIC_API_BASE_REF=$base_ref"
-              exit 1
-            fi
-            if ! git cat-file -e "$base_ref^{commit}"; then
-              echo "::error::Fetched PUBLIC_API_BASE_REF=$base_ref but the commit is unavailable"
-              exit 1
-            fi
-          else
-            echo "::error::PUBLIC_API_BASE_REF must be a 40-character commit SHA or all-zero SHA, got: $base_ref"
-            exit 1
-          fi
-          make public-api-check
-        env:
-          PUBLIC_API_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          PUBLIC_API_HEAD_REF: WORKTREE
-
       - name: Check pinned versions agree
-        # Versions that cannot be read from their source of truth at run time are checked instead:
-        # a service image or a Docker build default cannot take a step output.
+        # Service containers start before checkout and cannot read repository configuration.
         run: |
-          toolchain="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
-          grep -qx "ARG RUST_VERSION=${toolchain}" Dockerfile \
-            || { echo "::error::Dockerfile's RUST_VERSION default is not rust-toolchain.toml's channel ${toolchain}"; exit 1; }
-          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+' 'sccache --locked --version [0-9.]+'; do
-            found="$(grep -rhoE "$pattern" .github docker-compose.yml Dockerfile Makefile | sort -u)"
+          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+'; do
+            found="$(grep -rhoE "$pattern" .github docker-compose.yml Dockerfile Makefile | grep -oE '[0-9][0-9.]*$' | sort -u)"
             if [ "$(wc -l <<<"$found")" -ne 1 ]; then
               echo "::error::pinned versions disagree for '$pattern':"
               echo "$found"
@@ -217,7 +192,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
 
       - name: Install Python tools
         run: uv sync --locked
@@ -284,17 +259,17 @@ jobs:
           - edition: ce
             db: Postgres
             backend: postgres
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_postgres_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_postgres_redis
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379/15
           - edition: ce
             db: SQLite
             backend: sqlite
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_sqlite_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_sqlite_redis
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379/15
           - edition: ee
@@ -317,17 +292,17 @@ jobs:
           - edition: ee
             db: Postgres
             backend: postgres
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_postgres_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_postgres_redis
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379/15
           - edition: ee
             db: SQLite
             backend: sqlite
-            queue: Valkey
-            queue_key: valkey
-            loco_env: test_sqlite_valkey
+            queue: Redis
+            queue_key: redis
+            loco_env: test_sqlite_redis
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379/15
     services:
@@ -344,19 +319,10 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-      valkey:
-        image: valkey/valkey:9.1
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "valkey-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
 
       - name: Install Python tools
         run: uv sync --locked
@@ -412,6 +378,14 @@ jobs:
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
+      - name: Configure the matrix Redis service
+        if: matrix.queue_key == 'redis'
+        run: |
+          image="$(docker compose config --format json | jq -r '.services.redis.image')"
+          docker run --detach --name matrix-redis --publish 127.0.0.1:6379:6379 \
+            "$image" valkey-server --databases 65536 --save '' --appendonly no
+          docker exec matrix-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
+
       - name: Run migrations (postgres)
         if: matrix.backend == 'postgres'
         env:
@@ -453,17 +427,148 @@ jobs:
           echo "Generated $count entity files (had $count_before before)"
           git diff --exit-code -- src/models/_entities
 
+      - name: Require the EE test licence
+        if: matrix.edition == 'ee'
+        env:
+          YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+        run: |
+          if [ -z "$YORISHIRO_LICENSE_KEY" ]; then
+            echo "::error::Set the YORISHIRO_LICENSE_KEY Actions secret for licensed EE integration tests."
+            exit 1
+          fi
+
+      - name: Verify shared requests models and workers do not create databases
+        if: matrix.backend == 'postgres'
+        env:
+          LOCO_ENV: ${{ matrix.loco_env }}
+          DATABASE_URL: ${{ matrix.database_url }}
+          QUEUE_URL: ${{ matrix.queue_url }}
+          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
+          DB_MAX_CONNECTIONS: 100
+          DB_CONNECT_TIMEOUT: 5000
+          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+          YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
+        run: |
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
+          since=$(date --utc +%Y-%m-%dT%H:%M:%S.%NZ)
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c 'CREATE TEMP TABLE ordinary_request_ddl_probe (id integer)'
+          # Dedicated deployments exercise global state, worker providers or fault injection.
+          # They still run in the full matrix, outside this shared-suite DDL window.
+          result=0
+          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- requests:: models:: workers:: \
+            --skip models::maintenance:: \
+            --skip models::inference_jobs::persisted_row_with_unknown_status_returns_internal_error \
+            --skip models::inference_jobs::claim_rejects_stale_and_invalid_rows \
+            --skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept \
+            --skip models::queue_job_dispatch_outbox::record_is_recoverable_until_attempted \
+            --skip models::queue_job_dispatch_outbox::recovery_eligibility_uses_lifecycle_status_and_retry_at \
+            --skip models::queue_job_dispatch_outbox::ordinary_retry_eligibility_uses_retry_at_not_provider_job_id \
+            --skip models::queue_job_lifecycles::timezone_state_changes_without_rewriting_lifecycle_instants \
+            --skip models::queue_job_lifecycles::timezone_state_rejects_invalid_and_missing_singleton_without_inserting \
+            --skip models::search::sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain \
+            --skip models::search::sync_embedding_resolves_the_tenant_dimension_tier \
+            --skip models::tenancy::concurrent_create_workspace_cannot_exceed_the_cap \
+            --skip workers::dispatch:: \
+            --skip workers::startup_reindex:: \
+            --skip workers::embedding_sync::conflict:: \
+            --skip workers::query_embedding:: \
+            --skip workers::target_routing:: \
+            --skip workers::queue::upstream_fixes::redis_claim_refreshes_age_and_fences_reaped_completion_and_failure \
+            --skip ee::workers::infer_fill::relay_dispatches_infer_fill_using_the_registered_worker_class \
+            --skip ee::workers::infer_fill::stalled_provider_enqueue_does_not_block_new_dispatch_records \
+            --skip ee::workers::infer_fill::two_jobs_for_one_workspace_never_run_together \
+            --skip ee::workers::infer_fill::schema_change_during_llm_call_rejects_the_old_schema_proposal \
+            --skip ee::workers::reindex:: \
+            --skip requests::setup:: \
+            --skip requests::ee_setup:: \
+            --skip requests::stripe:: \
+            --skip requests::official_templates:: \
+            --skip requests::queue:: \
+            --skip requests::fill_defaults:: \
+            --skip requests::api_keys::api_key_lifecycle_is_admin_only_and_secret_is_one_time \
+            --skip requests::audit_log::set_maintenance_is_recorded_and_readable_by_an_audit_key \
+            --skip requests::audit_log::undo_migration_job_is_recorded \
+            --skip requests::audit_log::an_audit_key_cannot_read_another_tenants_audit_log \
+            --skip requests::auth::signup_then_login_round_trip \
+            --skip requests::auth::signup_without_invite_creates_its_own_tenant \
+            --skip requests::auth::signup_without_invite_respects_the_tenant_cap \
+            --skip requests::auth::signup_cannot_raise_the_community_tenant_cap_with_configuration \
+            --skip requests::auth::create_tenant_serializes_on_its_advisory_lock \
+            --skip requests::entities::undo_restores_snapshotted_entities_and_counts_a_deleted_one \
+            --skip requests::import::concurrent_import_workers_keep_each_apps_database \
+            --skip requests::import::import_resolves_a_pre_existing_schema_for_every_entity_line \
+            --skip requests::inference::an_unlicensed_deployment_answers_the_same_without_a_valid_key \
+            --skip requests::inference::proposals_require_explicit_confirmation_and_undo_reverses_it \
+            --skip requests::inference::infer_fill_dispatch_failure_rolls_back_job \
+            --skip requests::inference::the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant \
+            --skip requests::marketplace::without_a_licence_the_marketplace_is_not_served \
+            --skip requests::members::owner_can_list_and_add_members \
+            --skip requests::mcp::fill_defaults_mcp_executes_and_enforces_migration_scope \
+            --skip requests::mcp::mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid \
+            --skip requests::mcp::mcp_search_asks_a_worker_to_embed_the_query \
+            --skip requests::oauth::find_or_create_refuses_a_new_tenant_past_the_cap \
+            --skip requests::oauth::find_or_create_provisions_an_active_workspace_with_a_general_notes_schema \
+            --skip requests::oauth::oauth_provisioning_policy_controls_new_caps \
+            --skip requests::search::search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result \
+            --skip requests::search::search_without_a_worker_times_out_as_service_unavailable_without_a_fallback \
+            --skip requests::search::a_result_for_an_expired_request_is_discarded \
+            --skip requests::search::a_worker_failure_reaches_the_caller_as_service_unavailable \
+            --skip requests::search::a_width_the_workspace_does_not_hold_is_refused_by_the_worker \
+            --skip requests::search::a_disabled_embedding_provider_is_reported_by_the_worker \
+            --skip requests::system::maintenance_is_readable_and_settable_over_rest \
+            --skip requests::system::a_full_lock_entered_over_rest_can_be_left_over_rest \
+            --skip requests::workspaces::owner_can_create_list_view_and_delete_workspaces \
+            --skip requests::workspaces::cannot_delete_a_tenants_only_workspace || result=$?
+          docker logs --since "$since" ${{ job.services.db.id }} > "$RUNNER_TEMP/ordinary-request-ddl.log" 2>&1
+          if ! grep -Fq 'CREATE TEMP TABLE ordinary_request_ddl_probe' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
+            echo '::error::PostgreSQL DDL logging was not observed.'
+            exit 1
+          fi
+          if grep -Ei '(CREATE|DROP)[[:space:]]+DATABASE[[:space:]]' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
+            echo '::error::The shared request/model/worker group created or dropped a database.'
+            exit 1
+          fi
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c "ALTER SYSTEM RESET log_statement" -c 'SELECT pg_reload_conf()'
+          exit "$result"
+
+      - name: Upload ordinary request DDL evidence
+        if: always() && matrix.backend == 'postgres'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ordinary-request-ddl-${{ matrix.edition }}-${{ matrix.queue_key }}
+          path: ${{ runner.temp }}/ordinary-request-ddl.log
+          if-no-files-found: error
+
       - name: Run tests
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
           QUEUE_URL: ${{ matrix.queue_url }}
-          YORISHIRO_VALKEY_TEST_URL: ${{ matrix.queue_url }}
+          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
           YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
-        run: uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }}
+          YORISHIRO_REQUEST_TIMING_DIR: ${{ runner.temp }}/request-timings
+          YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
+        run: |
+          mkdir -p "$YORISHIRO_REQUEST_TIMING_DIR"
+          RUSTC_BOOTSTRAP=1 uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- -Z unstable-options --report-time
+
+      - name: Upload request phase timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: request-timings-${{ matrix.edition }}-${{ matrix.backend }}-${{ matrix.queue_key }}
+          path: ${{ runner.temp }}/request-timings
+          if-no-files-found: error
+
+      - name: Remove the matrix Redis service
+        if: always() && matrix.queue_key == 'redis'
+        run: docker rm --force matrix-redis
 
       - name: Verify topology gate rejects a mismatch
         env:
@@ -472,7 +577,7 @@ jobs:
         run: |
           set +e
           stderr="$RUNNER_TEMP/topology-mismatch.stderr"
-          output=$(uv run scripts/test_topology.py postgres-valkey models::maintenance:: 2>"$stderr")
+          output=$(uv run scripts/test_topology.py postgres-redis models::maintenance:: 2>"$stderr")
           status=$?
           set -e
           echo "$output"

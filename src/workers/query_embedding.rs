@@ -23,7 +23,7 @@ use crate::error::YorishiroError;
 use crate::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
 use crate::models::search;
 use crate::services::embedding::EmbedKind;
-use crate::workers::embedding_sync::{WorkerClass, resolve_worker_provider};
+use crate::workers::embedding_sync::WorkerClass;
 use crate::workers::target::WorkerTarget;
 
 /// How long a client is told to wait before retrying a search no worker answered.
@@ -31,12 +31,10 @@ const RETRY_AFTER: Duration = Duration::from_secs(1);
 
 /// What a query job carries: which request to answer and whose it is.
 /// The text stays in the row, so the job payload holds no user content.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct QueryEmbeddingArgs {
     pub request_id: Uuid,
     pub workspace_id: Uuid,
-    pub dispatch_id: Option<Uuid>,
-    pub publishing_epoch: Option<i64>,
 }
 
 /// The worker type for [`QueryEmbeddingArgs`].
@@ -51,17 +49,6 @@ impl BackgroundWorker<QueryEmbeddingArgs> for QueryEmbeddingWorker {
     }
 
     async fn perform(&self, args: QueryEmbeddingArgs) -> loco_rs::Result<()> {
-        if !crate::models::queue_job_dispatch_outbox::delivery_epoch_allowed(
-            &self.ctx.db,
-            None,
-            args.dispatch_id,
-            args.publishing_epoch,
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?
-        {
-            return Ok(());
-        }
         // The message, not the HTTP-shaped conversion: Loco stores this text as the failed job's diagnostic, so an operator reads the cause in the queue.
         answer(&self.ctx, &args)
             .await
@@ -114,19 +101,19 @@ async fn embed(
         message: "legacy query request has no durable caller deadline".into(),
         retry_after: RETRY_AFTER,
     })?;
-    let provider = resolve_worker_provider(ctx, workspace_id)
+    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, workspace_id)
         .await?
         .ok_or_else(|| YorishiroError::BackendUnavailable {
             message: "no embedding provider is configured on the worker".into(),
         })?;
     let concurrency = ctx
         .shared_store
-        .get::<crate::services::embedding::concurrency::EmbeddingConcurrency>()
+        .get::<std::sync::Arc<tokio::sync::Semaphore>>()
         .ok_or_else(|| {
             YorishiroError::Internal(anyhow::anyhow!("embedding concurrency missing"))
         })?;
     let _permit = concurrency
-        .acquire()
+        .acquire_owned()
         .await
         .map_err(|error| YorishiroError::Internal(error.into()))?;
     if deadline_at <= crate::time::now().fixed_offset() {
@@ -269,13 +256,6 @@ impl Scope<'_> {
         let args = QueryEmbeddingArgs {
             request_id: id,
             workspace_id: self.workspace_id,
-            dispatch_id: Some(dispatch_id),
-            publishing_epoch: Some(
-                crate::models::queue_job_dispatch_outbox::publishing_state(&txn)
-                    .await
-                    .map_err(|error| YorishiroError::Internal(error.into()))?
-                    .epoch,
-            ),
         };
         let mut payload =
             serde_json::to_value(&args).map_err(|error| YorishiroError::Internal(error.into()))?;

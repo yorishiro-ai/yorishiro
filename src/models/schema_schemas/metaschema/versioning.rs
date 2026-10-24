@@ -7,7 +7,7 @@ use super::types::{FieldDef, MetaSchemaDefinition};
 /// Whether a schema change is backward compatible, and if not, why.
 //
 // When `is_breaking = true`, the caller must INSERT a new version row.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct VersioningDiff {
     pub is_breaking: bool,

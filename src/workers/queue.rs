@@ -5,8 +5,6 @@
 use std::sync::Arc;
 
 use loco_rs::app::AppContext;
-use loco_rs::bgworker::Queue;
-use loco_rs::config::QueueConfig;
 use loco_rs::prelude::async_trait;
 use uuid::Uuid;
 
@@ -78,11 +76,7 @@ const TENANT_PRIVATE_PRIORITY: i32 = 300;
 const OFFICIAL_PRIORITY: i32 = 200;
 const SHARED_PRIORITY: i32 = 100;
 
-/// The provider priority bands used by all three supported Loco providers.
-///
-/// Loco defines larger values as more urgent and resolves ties by `run_at`, then
-/// by the stable provider job id. Keeping a band per class means the provider
-/// does the ordering, while this module owns the application policy.
+/// The provider priority band of each class: Loco dequeues larger values first, so the provider does the ordering.
 pub const fn priority(class: WorkerClass) -> i32 {
     match class {
         WorkerClass::TenantPrivate => TENANT_PRIVATE_PRIORITY,
@@ -90,100 +84,3 @@ pub const fn priority(class: WorkerClass) -> i32 {
         WorkerClass::Shared => SHARED_PRIORITY,
     }
 }
-
-pub const STARVATION_WAIT_SECONDS: i64 = 60;
-pub const STARVATION_PRIORITY: i32 = 50;
-
-/// A queue decision recorded for operators and deterministic unit tests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Decision {
-    pub class: WorkerClass,
-    pub priority: i32,
-    pub fallback: bool,
-}
-
-/// Demotes a newly arriving higher class while an older lower class is waiting.
-///
-/// Loco does not expose a portable reprioritization operation for an already
-/// queued job, so this boundary protects a waiting job by making subsequent
-/// higher-class arrivals yield to it. The one-minute threshold and bounded
-/// priority band make the result deterministic without a new queue provider.
-pub(crate) async fn decide_for_dispatch(
-    db: &sea_orm::DatabaseConnection,
-    class: WorkerClass,
-) -> Result<Decision, sea_orm::DbErr> {
-    decide_for_dispatch_at(db, class, crate::time::now().fixed_offset()).await
-}
-
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn decide_for_dispatch_at(
-    db: &sea_orm::DatabaseConnection,
-    class: WorkerClass,
-    now: chrono::DateTime<chrono::FixedOffset>,
-) -> Result<Decision, sea_orm::DbErr> {
-    let lower_classes: &[WorkerClass] = match class {
-        WorkerClass::TenantPrivate => &[WorkerClass::Official, WorkerClass::Shared],
-        WorkerClass::Official => &[WorkerClass::Shared],
-        WorkerClass::Shared => &[],
-    };
-    if lower_classes.is_empty() {
-        return Ok(decide(class));
-    }
-    let cutoff = now - chrono::Duration::seconds(STARVATION_WAIT_SECONDS);
-    let waiting = crate::models::queue_job_lifecycles::Entity::count_waiting_lower_classes(
-        db,
-        lower_classes,
-        cutoff,
-    )
-    .await?;
-    Ok(if waiting > 0 {
-        Decision {
-            class,
-            priority: STARVATION_PRIORITY,
-            fallback: true,
-        }
-    } else {
-        decide(class)
-    })
-}
-
-/// Selects the initial class priority without consulting wall-clock time.
-///
-/// Capacity is deliberately not borrowed between classes. When a preferred
-/// class is full, its job remains queued for that class instead of silently
-/// consuming another class's reserved capacity. The independent class worker
-/// is the starvation guard: work in another class can continue while this job
-/// waits.
-pub fn decide(class: WorkerClass) -> Decision {
-    Decision {
-        class,
-        priority: priority(class),
-        fallback: false,
-    }
-}
-
-/// Builds the queue configured for this application, retaining Loco's queue
-/// contract while storing application-owned timestamps in the configured zone.
-pub(crate) async fn timezone_queue(ctx: &AppContext) -> loco_rs::Result<Option<Queue>> {
-    let timezone = crate::time::configured(ctx);
-    let queue = match ctx.config.queue.as_ref() {
-        Some(QueueConfig::Postgres(config)) => Some(Queue::from_provider(Arc::new(
-            postgres::PostgresTimezoneQueue::connect(config, timezone).await?,
-        ))),
-        Some(QueueConfig::Sqlite(config)) => Some(Queue::from_provider(Arc::new(
-            sqlite::SqliteTimezoneQueue::connect(config, timezone).await?,
-        ))),
-        Some(QueueConfig::Redis(config)) => Some(Queue::from_provider(Arc::new(
-            valkey::ValkeyTimezoneQueue::connect(config, timezone).await?,
-        ))),
-        None => return Ok(None),
-        Some(_) => return Err(loco_rs::Error::Message("unsupported queue kind".into())),
-    };
-    Ok(queue)
-}
-
-pub mod postgres;
-pub mod sqlite;
-pub mod valkey;

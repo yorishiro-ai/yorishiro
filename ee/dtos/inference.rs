@@ -2,13 +2,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::edition::ee::models::inference_jobs::InferenceJobStatus;
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct InferFillResponse {
     pub(crate) job_id: String,
-    pub(crate) status: InferenceJobStatus,
+    pub(crate) status: InferFillStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum InferFillStatus {
+    Queued,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct InferJobStatusResponse {
     pub(crate) job_id: String,
     pub(crate) status: InferenceJobStatus,
@@ -19,6 +28,8 @@ pub(crate) struct InferJobStatusResponse {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(as = LlmKeyRequest))]
 pub(crate) struct SetLlmKeyRequest {
     pub(crate) base_url: String,
     pub(crate) model: String,

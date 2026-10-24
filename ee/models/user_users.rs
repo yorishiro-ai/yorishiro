@@ -36,7 +36,6 @@ pub(crate) async fn find_by_oauth_identity(
     Ok(user.map(|u| OAuthUser { id: u.id }))
 }
 
-#[derive(Debug)]
 pub(crate) enum CreateOauthUserError {
     /// Some unique constraint on `user_users` rejected the insert.
     /// This can only be the `email` column's own constraint (a genuinely different account already holds this email): `find_or_create` holds `pg_advisory_xact_lock` for this exact `(provider, subject_id)` for the whole first-login path, including a re-check via `find_by_oauth_identity` immediately before this insert, so no other caller can be concurrently inserting the same identity.

@@ -67,10 +67,8 @@ pub async fn create_tenant_api_key(
         }
     }
 
-    // Same shape as base's own keys, so nothing downstream has to tell them apart by their text.
-    // The randomness is two v4 UUIDs: 122 bits each, from the same CSPRNG base's own generator draws on, and `uuid` is already a dependency here.
-    let prefix = format!("ysr_{}", &Uuid::new_v4().simple().to_string()[..12]);
-    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let prefix = format!("ysr_{}", loco_rs::hash::random_string(12));
+    let secret = loco_rs::hash::random_string(48);
     let plaintext = format!("{prefix}_{secret}");
 
     let active = api_keys::ActiveModel {

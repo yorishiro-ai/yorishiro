@@ -2,6 +2,7 @@ pub mod api_keys;
 pub mod auth;
 pub mod common;
 pub mod entities;
+pub mod jobs;
 pub mod members;
 pub mod relations;
 pub mod schemas;

@@ -8,10 +8,7 @@
 //! The lifecycle insert is also protected by a backend-parity unique admission index, so separate processes cannot both record an active reindex.
 
 use loco_rs::app::AppContext;
-use loco_rs::environment::Environment;
 use sea_orm::TransactionTrait;
-
-use crate::workers::embedding_sync::{WorkerClass, resolve_worker_provider};
 
 /// The advisory lock key every replica contends on.
 const SCAN_LOCK: &str = "startup-reindex-scan";
@@ -19,10 +16,6 @@ const SCAN_LOCK: &str = "startup-reindex-scan";
 /// Runs the scan once.
 /// A failure is logged and never stops the worker from starting: a missed scan is repaired by the next start or by an explicit reindex.
 pub async fn run(ctx: &AppContext) {
-    // Test boots skip the scan: it would outlive the test's own database.
-    if matches!(ctx.environment, Environment::Test) {
-        return;
-    }
     // Held to the end of this function, so the lock covers the whole scan and is released by the commit or by dropping the transaction.
     let guard = match ctx.db.begin().await {
         Ok(txn) => txn,
@@ -56,13 +49,18 @@ async fn detect_startup_reindex(ctx: &AppContext) {
     let workspaces = match crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db).await {
         Ok(workspaces) => workspaces,
         Err(err) => {
-            tracing::error!("startup reindex: failed to list workspaces: {err}");
+            tracing::error!(error = %err, "startup reindex: failed to list workspaces");
             return;
         }
     };
 
     for workspace in workspaces {
-        let provider = match resolve_worker_provider(ctx, workspace.id).await {
+        let provider = match crate::models::workspace_workspaces::embedding_provider(
+            ctx,
+            workspace.id,
+        )
+        .await
+        {
             Ok(Some(provider)) => provider,
             Ok(None) => {
                 tracing::warn!(
@@ -80,7 +78,9 @@ async fn detect_startup_reindex(ctx: &AppContext) {
                 continue;
             }
         };
-        if provider.embed_batch(&[]).await.is_err() {
+        if provider.availability()
+            == crate::services::embedding::EmbeddingProviderAvailability::Disabled
+        {
             tracing::warn!(
                 workspace_id = %workspace.id,
                 "startup reindex: embedding provider must be configured"
@@ -109,14 +109,12 @@ async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
                 tracing::warn!(
                     %workspace_id,
                     error = %err.0,
-                    "startup reindex: failed to resolve worker class, defaulting to shared"
+                    "startup reindex: failed to resolve worker class, skipping workspace"
                 );
-                WorkerClass::Shared
+                return;
             }
         };
     let args = crate::workers::reindex::ReindexArgs {
-        dispatch_id: None,
-        publishing_epoch: None,
         lifecycle_id: None,
         workspace_id,
         worker_class,

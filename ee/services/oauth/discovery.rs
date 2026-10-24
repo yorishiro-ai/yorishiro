@@ -1,13 +1,10 @@
 //! OIDC discovery, authorization-code exchange, and JWKS retrieval.
 //!
-//! The private transport seam covers exactly the provider operations used by the OAuth flow.
-//! URL policy, timeout, response parsing, and error redaction stay in the production adapter.
+//! URL policy, timeout, response parsing, and error redaction stay in the production client.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use jsonwebtoken::jwk::JwkSet;
-use loco_rs::prelude::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -61,29 +58,6 @@ fn require_https_or_loopback(url: &str) -> Result<(), YorishiroError> {
     )))
 }
 
-/// The OAuth/OIDC HTTP boundary used by the flow.
-///
-/// It is private to the OAuth service and names only the three provider operations that need deterministic substitution.
-#[async_trait]
-pub trait OAuthHttp: Send + Sync {
-    async fn fetch_discovery_document(
-        &self,
-        issuer_url: &str,
-    ) -> Result<DiscoveryDocument, YorishiroError>;
-
-    async fn exchange_code_for_tokens(
-        &self,
-        token_endpoint: &str,
-        client_id: &str,
-        client_secret: &str,
-        code: &str,
-        redirect_uri: &str,
-        pkce_verifier: &str,
-    ) -> Result<TokenResponse, YorishiroError>;
-
-    async fn fetch_jwks(&self, jwks_uri: &str) -> Result<JwkSet, YorishiroError>;
-}
-
 /// The subset of an OIDC discovery document (`{issuer}/.well-known/openid-configuration`) this crate reads.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiscoveryDocument {
@@ -102,7 +76,7 @@ pub struct ReqwestOAuthHttp {
 }
 
 impl ReqwestOAuthHttp {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             client: http_client(),
         }
@@ -128,13 +102,10 @@ impl ReqwestOAuthHttp {
     }
 }
 
-pub(super) fn production() -> Arc<dyn OAuthHttp> {
-    Arc::new(ReqwestOAuthHttp::new())
-}
-
-#[async_trait]
-impl OAuthHttp for ReqwestOAuthHttp {
-    async fn fetch_discovery_document(
+impl ReqwestOAuthHttp {
+    /// # Errors
+    /// Returns an error if the provider URL, response, or transport is invalid.
+    pub async fn fetch_discovery_document(
         &self,
         issuer_url: &str,
     ) -> Result<DiscoveryDocument, YorishiroError> {
@@ -142,7 +113,9 @@ impl OAuthHttp for ReqwestOAuthHttp {
             .await
     }
 
-    async fn exchange_code_for_tokens(
+    /// # Errors
+    /// Returns an error if the provider rejects the code or the response or transport is invalid.
+    pub async fn exchange_code_for_tokens(
         &self,
         token_endpoint: &str,
         client_id: &str,
@@ -179,7 +152,9 @@ impl OAuthHttp for ReqwestOAuthHttp {
         response_body(response, token_endpoint, Some(client_secret)).await
     }
 
-    async fn fetch_jwks(&self, jwks_uri: &str) -> Result<JwkSet, YorishiroError> {
+    /// # Errors
+    /// Returns an error if the provider URL, response, or transport is invalid.
+    pub async fn fetch_jwks(&self, jwks_uri: &str) -> Result<JwkSet, YorishiroError> {
         self.get_json(jwks_uri).await
     }
 }
@@ -214,8 +189,5 @@ fn request_error(error: reqwest::Error, secret: Option<&str>) -> YorishiroError 
 }
 
 fn internal_reqwest(error: reqwest::Error) -> YorishiroError {
-    match Err::<(), _>(error).internal() {
-        Ok(()) => unreachable!("an error result cannot convert to Ok"),
-        Err(error) => error,
-    }
+    YorishiroError::Internal(error.into())
 }

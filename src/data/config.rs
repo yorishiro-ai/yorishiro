@@ -29,7 +29,10 @@ pub async fn load(environment: &Environment) -> Result<Config> {
     {
         load_example(folder, &environment)?
     } else {
-        environment.load()?
+        Config::from_folder(
+            &environment,
+            folder.as_deref().unwrap_or_else(|| Path::new("config")),
+        )?
     };
     validate(&config)?;
     Ok(config)
@@ -58,12 +61,16 @@ fn test_environment(environment: &Environment) -> Environment {
     match environment {
         Environment::Test => {
             if let Ok(topology) = crate::data::env::Env::TestTopology.read() {
-                return Environment::Any(format!("test_{}", topology.replace('-', "_")));
+                return Environment::Any(match topology.as_str() {
+                    "sqlite-sqlite" => "test_sqlite".into(),
+                    "postgres-postgres" => "test_postgres".into(),
+                    _ => format!("test_{}", topology.replace('-', "_")),
+                });
             }
-            let url = crate::data::env::Env::DatabaseUrl
+            let sqlite = crate::data::env::Env::DatabaseUrl
                 .read()
-                .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());
-            if url.starts_with("sqlite:") {
+                .is_ok_and(|url| is_sqlite_uri(&url));
+            if sqlite {
                 Environment::Any("test_sqlite".into())
             } else {
                 Environment::Any("test_postgres".into())
@@ -78,6 +85,7 @@ fn test_environment(environment: &Environment) -> Environment {
 /// # Errors
 /// Returns an error when a setting is invalid.
 pub fn validate(config: &Config) -> Result<()> {
+    validate_queue_policy(config)?;
     let settings = config.settings::<crate::data::settings::Settings>()?;
     crate::time::parse_timezone(&settings.timezone).map_err(|_| {
         Error::Message(format!(
@@ -114,7 +122,19 @@ pub fn validate(config: &Config) -> Result<()> {
         ));
     }
     validate_query_embedding(&settings.query_embedding)?;
-    validate_queue_policy(config)
+    let dispatch = settings.dispatch;
+    if dispatch.poll_interval_ms == 0 || dispatch.enqueue_timeout_ms == 0 {
+        return Err(Error::Message(
+            "settings.dispatch poll_interval_ms and enqueue_timeout_ms must be greater than zero"
+                .into(),
+        ));
+    }
+    if u64::from(dispatch.claim_lease_seconds) * 1000 <= dispatch.enqueue_timeout_ms {
+        return Err(Error::Message(
+            "settings.dispatch.claim_lease_seconds must exceed enqueue_timeout_ms".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The longest a search may be told to wait for a worker, so a typo cannot hold a request open for hours.
@@ -159,23 +179,31 @@ pub fn validate_queue_policy(config: &Config) -> Result<()> {
             "BackgroundQueue requires a configured queue provider".into(),
         ));
     };
+    if let QueueConfig::Redis(redis) = queue
+        && (redis.connect_timeout == 0 || redis.response_timeout == 0)
+    {
+        return Err(Error::Message(
+            "Redis queue connect_timeout and response_timeout must be greater than zero".into(),
+        ));
+    }
     // Restrict the existing SQL providers only; future providers validate their own backend requirements.
     let sqlite_database = is_sqlite_uri(&config.database.uri);
     let mismatch = match queue {
-        QueueConfig::Postgres(_) if sqlite_database => Some(
-            "a PostgreSQL queue is not allowed with a SQLite database / SQLite DB では PostgreSQL キューを利用できません",
-        ),
-        QueueConfig::Sqlite(_) if !sqlite_database => Some(
-            "a SQLite queue is not allowed with a PostgreSQL database / PostgreSQL DB では SQLite キューを利用できません",
-        ),
+        QueueConfig::Postgres(_) if sqlite_database => {
+            Some("a PostgreSQL queue is not allowed with a SQLite database")
+        }
+        QueueConfig::Sqlite(_) if !sqlite_database => {
+            Some("a SQLite queue is not allowed with a PostgreSQL database")
+        }
         _ => None,
     };
     if let Some(message) = mismatch {
         return Err(YorishiroError::ValidationFailed {
             message: message.into(),
             details: vec![],
-            hint: "Use a SQL queue matching the database, or a Redis-compatible (Valkey) queue / DB と同じ種類の SQL キュー、または Redis 互換 (Valkey) キューを指定してください".into(),
-        }.into());
+            hint: "Use a SQL queue matching the database, or a Redis-compatible queue".into(),
+        }
+        .into());
     }
     let workers = match queue {
         QueueConfig::Postgres(queue) => queue.num_workers,

@@ -42,14 +42,16 @@ impl From<CreateRelationRequest> for entity_relations::CreateRelationInput {
     }
 }
 
-impl From<ListRelationsParams> for entity_relations::ListRelationsQuery {
-    fn from(params: ListRelationsParams) -> Self {
-        Self {
+impl TryFrom<ListRelationsParams> for entity_relations::ListRelationsQuery {
+    type Error = crate::YorishiroError;
+
+    fn try_from(params: ListRelationsParams) -> Result<Self, Self::Error> {
+        Ok(Self {
             source_id: params.source_id,
             target_id: params.target_id,
             relation_type: params.relation_type,
             status: params.status,
-            page: params.page.into(),
-        }
+            page: params.page.try_into()?,
+        })
     }
 }

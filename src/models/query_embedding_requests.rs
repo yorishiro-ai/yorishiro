@@ -21,7 +21,7 @@ use crate::error::YorishiroError;
 db_enum! {
     /// Where a query embedding request stands.
     /// Matches `status`'s CHECK constraint string-for-string.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum QueryEmbeddingStatus {
         Pending = "pending",
         Succeeded = "succeeded",

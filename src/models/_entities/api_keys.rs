@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub name: String,
     pub workspace_id: Option<Uuid>,
     pub tenant_id: Uuid,
     pub user_id: Option<Uuid>,
@@ -20,7 +21,6 @@ pub struct Model {
     pub created_at: DateTimeWithTimeZone,
     pub last_used_at: Option<DateTimeWithTimeZone>,
     pub audit: bool,
-    pub name: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

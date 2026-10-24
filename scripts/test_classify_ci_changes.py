@@ -10,12 +10,8 @@ def test_unknown_defaults_to_full() -> None:
     assert classify_path(".github/workflows/unknown.yml") == ALL
 
 
-def test_ee_paths_select_ee() -> None:
-    assert classify_path("ee/models/example.rs") == {"ee"}
-
-
 def test_root_markdown_runs_no_ci() -> None:
-    assert classify_path("README.md") == set()
+    assert classify_path("ee/models/example.rs") == {"ee"}
     result = classify(["README.md", "README.jp.md", "CONTRIBUTING.md", "AGENTS.md"])
     assert not result["full"]
     assert not any(result[group] for group in ALL)
@@ -23,9 +19,19 @@ def test_root_markdown_runs_no_ci() -> None:
     assert classify_path("scripts/notes.md") == ALL
 
 
+def test_dependency_patches_always_select_rust_and_security() -> None:
+    for path in ("patches/loco-rs/fixes.patch", "patches/loco-rs/source/src/boot.rs", "patches/serde_yaml/src/lib.rs", "patches/README.md"):
+        result = classify([path])
+        assert result["rust_validation"] and result["security_validation"]
+        assert result["rust"] and result["ee"]
+
+
 def test_packaging_selects_package_and_rust() -> None:
-    result = classify(["packaging/nfpm-yorishiro-ce.yaml"])
+    result = classify([".github/packaging/nfpm-yorishiro-ce.yaml"])
     assert result["package_build"] and result["package_validation"]
+    assert result["rust"] and result["ee"]
+    assert not result["full"]
+    assert classify_path("src/lib.rs") == {"shared", "rust", "ee"}
 
 
 def test_release_workflow_selects_all_validations() -> None:
@@ -33,18 +39,13 @@ def test_release_workflow_selects_all_validations() -> None:
     assert result["release"]
     assert result["package_validation"]
     assert result["docker_validation"]
+    assert classify([".github/docker/docker-bake.hcl"])["docker_validation"]
 
 
 def test_manual_full_run_selects_every_group() -> None:
     result = classify([], force_full=True)
     assert result["full"]
     assert all(result[group] for group in ALL)
-
-
-def test_misc_workflow_change_does_not_force_package_matrix() -> None:
-    result = classify([".github/workflows/stale.yml"])
-    assert not result["package_build"]
-    assert not result["package_validation"]
 
 
 def test_housekeeping_workflow_is_light_but_unknown_workflow_is_full() -> None:
@@ -80,6 +81,8 @@ def test_package_and_docker_groups_are_independent() -> None:
     docker = classify(["Dockerfile"])
     assert docker["package_build"] and docker["package_validation"]
     assert docker["docker_validation"]
+    markdown = classify(["README.md"])
+    assert not markdown["package_build"] and not markdown["package_validation"]
     dependency = classify(["Cargo.lock"])
     assert dependency["security_validation"]
 
@@ -94,12 +97,11 @@ def test_package_build_prerequisite_selection() -> None:
 if __name__ == "__main__":
     for test in (
         test_unknown_defaults_to_full,
-        test_ee_paths_select_ee,
         test_root_markdown_runs_no_ci,
+        test_dependency_patches_always_select_rust_and_security,
         test_packaging_selects_package_and_rust,
         test_release_workflow_selects_all_validations,
         test_manual_full_run_selects_every_group,
-        test_misc_workflow_change_does_not_force_package_matrix,
         test_housekeeping_workflow_is_light_but_unknown_workflow_is_full,
         test_shared_actions_fan_out_to_consumers,
         test_missing_paths_force_full_and_manual_force_is_full,

@@ -9,7 +9,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         path: dist
         pattern: binary-*
@@ -23,34 +23,36 @@ runs:
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./packaging/test-artifacts.sh dist "$VERSION"
+      run: ./.github/packaging/test-artifacts.sh dist "$VERSION"
 
     - name: Verify artifact metadata checks reject invalid packages
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./packaging/test-artifacts-self.sh dist "$VERSION"
+      run: ./.github/packaging/test-artifacts-self.sh dist "$VERSION"
 
     - name: Verify installed-path policy allows the optional admin override
       shell: bash
-      run: ./packaging/test-install-paths-self.sh
+      run: ./.github/packaging/test-install-paths-self.sh
 
     - name: Test package transitions and co-install refusal
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./packaging/test-transitions.sh dist "$VERSION"
+      run: ./.github/packaging/test-transitions.sh dist "$VERSION"
 
     - name: Test representative installed packages
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
       run: |
-        ./packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
-        ./packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
+        ./.github/packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
+        ./.github/packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
+
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
     - name: Test Docker configuration ownership and fallback
       shell: bash
       run: |
-        docker build --build-arg EDITION=ce -t yorishiro-package-test:${{ inputs.version }} .
+        IMAGE=yorishiro-package-test TAG=${{ inputs.version }} EDITION=ce docker buildx bake -f .github/docker/docker-bake.hcl --load app
         make package-docker-check IMAGE=yorishiro-package-test:${{ inputs.version }}
