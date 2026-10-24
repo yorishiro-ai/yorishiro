@@ -83,7 +83,7 @@ services:
       - "127.0.0.1:15432:5432"
 
   redis:
-    image: valkey/valkey:9.1
+    image: valkey/valkey:9.1.2
     container_name: redis
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
