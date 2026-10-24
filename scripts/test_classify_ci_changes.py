@@ -10,14 +10,13 @@ def test_unknown_defaults_to_full() -> None:
     assert classify_path(".github/workflows/unknown.yml") == ALL
 
 
-def test_docs_are_lightweight() -> None:
-    assert classify_path("ee/docs/installation.md") == {"docs"}
-    assert classify(["ee/docs/installation.md"])["docs_only"]
+def test_root_markdown_runs_no_ci() -> None:
     assert classify_path("ee/models/example.rs") == {"ee"}
-    result = classify(["docs/en/contributing.md", "docs/ja/contributing.md"])
-    assert result["docs_only"]
-    assert not result["rust_validation"]
-    assert not result["package_validation"]
+    result = classify(["README.md", "README.jp.md", "CONTRIBUTING.md", "AGENTS.md"])
+    assert not result["full"]
+    assert not any(result[group] for group in ALL)
+    assert not result["rust_validation"] and not result["package_build"]
+    assert classify_path("scripts/notes.md") == ALL
 
 
 def test_dependency_patches_always_select_rust_and_security() -> None:
@@ -25,7 +24,6 @@ def test_dependency_patches_always_select_rust_and_security() -> None:
         result = classify([path])
         assert result["rust_validation"] and result["security_validation"]
         assert result["rust"] and result["ee"]
-        assert not result["docs_only"]
 
 
 def test_packaging_selects_package_and_rust() -> None:
@@ -68,7 +66,6 @@ def test_shared_actions_fan_out_to_consumers() -> None:
 
 def test_missing_paths_force_full_and_manual_force_is_full() -> None:
     assert classify([], force_full=True)["full"]
-    assert classify(["docs/ja/contributing.md"])["docs_only"]
 
 
 def test_selected_gate_states_fail_unless_success_or_intentionally_skipped() -> None:
@@ -84,8 +81,8 @@ def test_package_and_docker_groups_are_independent() -> None:
     docker = classify(["Dockerfile"])
     assert docker["package_build"] and docker["package_validation"]
     assert docker["docker_validation"]
-    docs = classify(["docs/en/contributing.md"])
-    assert not docs["package_build"] and not docs["package_validation"]
+    markdown = classify(["README.md"])
+    assert not markdown["package_build"] and not markdown["package_validation"]
     dependency = classify(["Cargo.lock"])
     assert dependency["security_validation"]
 
@@ -100,7 +97,7 @@ def test_package_build_prerequisite_selection() -> None:
 if __name__ == "__main__":
     for test in (
         test_unknown_defaults_to_full,
-        test_docs_are_lightweight,
+        test_root_markdown_runs_no_ci,
         test_dependency_patches_always_select_rust_and_security,
         test_packaging_selects_package_and_rust,
         test_release_workflow_selects_all_validations,

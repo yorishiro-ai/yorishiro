@@ -177,7 +177,7 @@ mailer:
 database:
   # Database connection URI
   # SQLite by default so a clone with nothing configured boots and works.
-  # Point DATABASE_URL at Postgres for anything needing RLS, multi-tenancy or vector search, none of which this backend has; docs/sqlite.md has the boundary.
+  # Point DATABASE_URL at Postgres for anything needing RLS, multi-tenancy or vector search, none of which this backend has.
   uri: <%= get_env(name="DATABASE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc") %>
   # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>

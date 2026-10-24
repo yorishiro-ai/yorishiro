@@ -1,5 +1,9 @@
 # Loco 1.2.0 upstream bug fixes
 
+This directory contains queue bug fixes for the published Loco 1.2.0 crate and integration extensions for CLI parsing and connection configuration.
+The extensions are documented separately from upstream bug fixes, with their own removal conditions.
+These are not application-specific features.
+
 ## Provenance and application
 
 `source/` is ignored generated material: the published `loco-rs` 1.2.0 crate with `fixes.patch` applied.
@@ -65,19 +69,3 @@ Existing configuration/topology cases cover SQL inheritance, explicit queue over
 Replace this override with a published Loco release only when it contains equivalent atomic claim/reaper/completion fencing, payload-safe error logs, atomic enqueue and awaited resource cleanup.
 Run the regression tests and the CE/EE queue topologies before deleting the override, source, patch and verifier together.
 No upstream issue or accepted upstream fix is implied by these local defect IDs.
-
-## 日本語
-
-これはアプリ機能の追加ではなく、公開済みLoco 1.2.0のキューに対する上流バグ修正です。
-元ソースとライセンスを保持し、変更差分を `fixes.patch` に分離しています。
-`source/` はGit管理せず、`python3 patches/loco-rs/verify.py --prepare` で復元します。
-元の空白と `Cargo.lock` も復元し、差分ファイルだけを空白検査の例外にします。
-`source/Cargo.lock` は上流配布物の記録であり、アプリのビルドと監査にはルートの `Cargo.lock` を使います。
-`verify.py` は配布アーカイブのハッシュ、パッチ適用結果、同梱ソースの一致を検証します。
-LQ-01は単一投入の途中失敗、LQ-02は取得直後の誤った再配信、LQ-03はreaperと古いworkerによる状態の上書き、LQ-04はログへのpayload露出、LQ-05は終了時のプールとworker contextの保持、LQ-06はPostgreSQLキュー初期化の同時初回起動での競合を修正します。
-回帰試験では実際のproviderとRedisを使い、古い試行の成功・失敗が新しい試行を上書きしないことを確認します。
-`shutdown()` は停止通知のままで、workerの終了後に `close().await` でリソース解放を待ちます。
-稼働中workerのプールを先に閉じてはいけません。
-旧workerは試行トークンを扱わないため、新旧workerを混在させず、処理をdrainしてから置き換えます。
-過去に観測したPostgreSQLの認証・cleanup遅延との因果関係は未確定であり、その障害まで解消したとは扱いません。
-上流の公開リリースに同等の修正が入り、回帰試験とCE/EEの各キュー構成が成功したときに、overrideとこのフォルダをまとめて削除します。

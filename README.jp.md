@@ -1,117 +1,57 @@
 # Yorishiro (依り代)
 
-**[English](README.md)** | 日本語
+[English](README.md) | **日本語**
 
-自分のデータ構造を定義し、キーワードだけでなく意味で検索できるナレッジストア。
+[インストール](#始め方) · [初回起動](https://yorishiro-ai.github.io/wiki/ja/installation/first-run/) · [ドキュメント](https://yorishiro-ai.github.io/wiki/ja/) · [リリース](https://github.com/yorishiro-ai/yorishiro/releases)
 
-## できること
+**AIエージェントから読み書きできる、スキーマを自分で定義するナレッジストア。**
 
-- **自分のデータ構造を定義する**
-  - フィールド、バリデーションルール、エンティティ間のリレーションを持つエンティティ型を作成できます。データモデルが変わってもコード修正は不要。
-  - APIでスキーマ、エンティティ型、リレーションを管理。
-  - JSONLファイルからデータをインポート。
+Yorishiroは、構造を持つデータと、そのデータ同士のつながりを保存します。
+MCPを通してスキーマを作り、データを書き込み、必要な情報を意味で検索できます。
 
-- **意味で検索する**
-  - 「配送に関する顧客クレーム」といった説明を入力すると、正確に同じ言葉がなくても関連するレコードが見つかります。
-  - ローカル埋め込み（multilingual-e5-base）またはOpenAI互換エンドポイントでのベクトル検索対応。
-  - 埋め込みがまだ生成されていないレコードもキーワード検索でカバー。
+- **保存する構造を自分で決める。** エンティティの構造をスキーマで定義し、そのスキーマに沿ってデータを管理します。
+- **言葉が一致しなくても探す。** キーワードだけでなく意味でエンティティを検索できます。
+- **MCPから読み書きする。** スキーマの作成、エンティティの取得・更新、検索をMCPツールとして提供します。[ツール一覧](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/)
+- **データ同士のつながりも残す。** エンティティ間にリレーションを作成し、保存した関係を一覧や個別取得で参照できます。
+- **テンプレートから始める。** スキーマの構成にはテンプレートも使えます。[テンプレートガイド](https://yorishiro-ai.github.io/wiki/ja/guides/templates/)
+- **自分の環境で動かす。** SQLiteは単一テナント向け、PostgreSQLはRLSによるテナント分離に対応しています。[SQLiteの対応範囲](https://yorishiro-ai.github.io/wiki/ja/guides/sqlite/)
 
-- **AIツールに接続**
-  - コミュニティモードでは、Claude、Cursor、他のMCP対応クライアントが組み込みMCPツールを使ってデータを検索・作成・管理できます。
-  - ライセンスが有効なエンタープライズ環境では、originテンプレートの更新検出、プレビュー、マージのツールが追加されます。
+---
 
-- **REST API**
-  - 標準HTTPエンドポイントで自動化できます。
+## 始め方
 
-- **チームで整理する**
-  - テナントとワークスペース、ロールベースのアクセス制御でデータを適切に分割・共有できます。
+サーバー、ワーカー、スケジューラーをDocker Composeで起動します。
+[Docker Composeガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)の構成を `compose.yml` に保存し、イメージの `<VERSION>` を使うリリースタグに置き換えてください。
+そのファイルのあるディレクトリで実行します。
 
-## アーキテクチャ
-
-### リクエストの流れ
-
-```mermaid
-flowchart LR
-    Clients["REST・MCP クライアント"] --> Router["Loco ルーター"]
-    Router --> Community["Community のコントローラー<br/>エンティティ、スキーマ、検索、認証"]
-    Router --> Enterprise["Enterprise のコントローラー<br/>OAuth、課金、マーケットプレイス、推論"]
-    Community --> Models["モデルとポリシー"]
-    Enterprise --> Models
-    Models --> DB[("アプリケーション DB<br/>PostgreSQL または SQLite")]
+```bash
+docker compose up -d
 ```
 
-### バックグラウンドジョブ
+起動したサーバーには `http://localhost:5150` で接続できます。
+[初回起動の手順](https://yorishiro-ai.github.io/wiki/ja/installation/first-run/)で最初のアカウントと API キーを作成してください。
 
-```mermaid
-flowchart LR
-    Dispatch["ジョブの投入"] --> Queue["キュープロバイダー<br/>SQLite、PostgreSQL、Redis 互換"]
-    Queue --> Workers["対象別ワーカー<br/>埋め込み同期、再インデックス、infer-fill (Enterprise)"]
-    Workers --> DB[("アプリケーション DB<br/>PostgreSQL または SQLite")]
-    Workers -->|埋め込み同期| Embed["埋め込みプロバイダー<br/>ローカルモデルまたは OpenAI 互換エンドポイント"]
-```
-
-二つの図は同じアプリケーションを示しています。
-Enterprise ビルドでは Community の機能にコントローラーとワーカーが加わります。
-ライセンス対象の機能には有効なキーが必要です。
-SQLite は単一テナント用です。
-PostgreSQL では行レベルセキュリティでテナントを分離します。
-
-## エディション
-
-Community の機能は Enterprise でも利用できます。
-Enterprise では次の機能が加わります。
-
-| 機能 | コミュニティエディション(無料) | エンタープライズエディション |
-|---|---|---|
-| ワークスペースごとの埋め込みプロバイダ割り当て | — | 利用可能 |
-| ワークスペースごとのLLM推論キー & fill | — | 利用可能 |
-| テンプレートマーケットプレイス | — | 利用可能 |
-| OAuth2 / OIDCログイン | — | 利用可能 |
-| Stripe課金 | — | 利用可能 |
-
-Enterprise の機能にはライセンスキーが必要です。
-
-### MCPツール
-
-利用できるツールと入力項目は [MCPツール](docs/ja/mcp-tools.md) を参照してください。
-
-ライセンスが有効なエンタープライズ環境では、同ドキュメントに示すoriginテンプレート用ツールが追加されます。
-コミュニティモードでは、これらのツールはMCP上に表示されず、呼び出すこともできません。
-
-## クイックスタート
-
-既定では SQLite を使うため、外部データベースは不要です。
-
-1. Docker（記載のポート割り当てを使用）の場合は `http://localhost/`、パッケージまたはソースからの起動では `http://localhost:5150/` にアクセスし、セットアップウィザードでアカウントを作成します。
-2. API キーを発行して、エンティティを作成します。
-
-バックグラウンドキューを使うソースチェックアウトでは、サーバーとタグ付きワーカーを別々に起動します。
-`cargo loco start` と `cargo loco start --worker=worker-target:shared` を実行してください。
-
-インストール手順は [docs/ja/installation.md](docs/ja/installation.md) を参照してください。
-
-## 設定
-
-Yorishiro の設定には `config/<environment>.yaml` と、その設定ファイルから読み込む環境変数を使います。
-`LOCO_ENV` で設定環境を選びます。
-ソースからのローカル実行では `development`、パッケージと Docker では `production` を使います。
-別の設定ディレクトリを使う場合は `LOCO_CONFIG_FOLDER` を指定してください。
-アプリケーションデータは SQLite または PostgreSQL を利用できます。
-キューの保存先は別に設定します。
-アプリケーションのデータベースが SQLite の場合は別ファイルの SQLite キューか Redis 互換サービス、PostgreSQL の場合は PostgreSQL キューか Redis 互換サービスを使えます。
-バックエンド変数を設定しない場合のみ、パッケージと Docker は SQLite の既定データを `/var/lib/yorishiro` に保存します。
+データの保存先、埋め込みモデル、DBの選択は[Docker Composeガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)を参照してください。
+Docker以外では、[パッケージのインストール](https://yorishiro-ai.github.io/wiki/ja/installation/packages/)と[ソースからのビルド](https://yorishiro-ai.github.io/wiki/ja/installation/build/)を案内しています。
 
 ## ドキュメント
 
-| ドキュメント | 内容 |
-|---|---|
-| [docs/ja/installation.md](docs/ja/installation.md) | Docker、Docker Compose、deb/rpm、ソースからビルド |
-| [docs/ja/configuration.md](docs/ja/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
-| [docs/ja/sqlite.md](docs/ja/sqlite.md) | SQLiteモード：機能と制限 |
-| [docs/ja/templates.md](docs/ja/templates.md) | 組み込みテンプレートと非推奨の `worldbuilding` テンプレート |
-| [開発に参加する](docs/ja/contributing.md) | 開発とテストの手順 |
-| [AGENTS.md](AGENTS.md) | AI エージェント向けの開発規約 |
+使い方、設定、運用手順は[Wiki](https://yorishiro-ai.github.io/wiki/ja/)にまとめています。
+READMEでは概要と始め方を案内し、詳しい説明はWikiで管理します。
+
+[インストール](https://yorishiro-ai.github.io/wiki/ja/installation/) · [設定](https://yorishiro-ai.github.io/wiki/ja/configuration/) · [埋め込み](https://yorishiro-ai.github.io/wiki/ja/configuration/embedding/) · [ワーカーとキュー](https://yorishiro-ai.github.io/wiki/ja/configuration/workers-and-queues/) · [MCPツール](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/)
+
+## このリポジトリで作業するエージェントへ
+
+このリポジトリで作業する AI エージェントは、まず [AGENTS.md](AGENTS.md)（英語）を読んでください。
+
+## 開発
+
+コードの構成、開発環境、テスト、変更を送る前の確認事項は [CONTRIBUTING.md](CONTRIBUTING.md)（英語）にあります。
+依存ライブラリへのローカル修正は [patches/README.md](patches/README.md) で管理しています。
 
 ## ライセンス
 
-[Business Source License 1.1](LICENSE) の下でライセンスされています。セルフホスティングは許可されています。2030-07-14 にこのバージョンはGNU General Public License Version 2.0以降に自動的に変換されます。
+[Business Source License 1.1](LICENSE) を適用しています。
+セルフホスティングは許可されています。
+2030-07-14 に、このバージョンのライセンスは GNU General Public License Version 2.0 以降へ自動的に変わります。

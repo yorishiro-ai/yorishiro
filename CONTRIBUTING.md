@@ -1,6 +1,6 @@
 # Contributing
 
-**English** | [日本語](docs/ja/contributing.md)
+User documentation: [English and Japanese wiki](https://yorishiro-ai.github.io/wiki/).
 
 ## Code layout
 
@@ -74,7 +74,7 @@ Tests need PostgreSQL with `vector` and `pg_trgm` in `template1`, and a non-supe
 
 Branch from `develop`.
 Merge commits preferred.
-`docs/` and `ee/docs/` are managed separately; code changes do not require documentation updates.
+User-facing documentation lives in the [wiki](https://github.com/yorishiro-ai/wiki) and is managed separately from code changes.
 
 ## Rules
 

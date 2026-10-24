@@ -1,7 +1,23 @@
+use crate::controllers::render_inventory_section;
 use std::collections::HashSet;
 
 use yorishiro::controllers::mcp::community_tool_router;
 use yorishiro::edition::ee::controllers::mcp::tool_router;
+
+fn render_inventory_fragment(
+    community: &[rmcp::model::Tool],
+    enterprise: &[rmcp::model::Tool],
+) -> String {
+    let mut community = community.to_vec();
+    let mut enterprise = enterprise.to_vec();
+    community.sort_by(|a, b| a.name.cmp(&b.name));
+    enterprise.sort_by(|a, b| a.name.cmp(&b.name));
+    format!(
+        "{}{}",
+        render_inventory_section("Community tools", &community),
+        render_inventory_section("Enterprise-only tools", &enterprise)
+    )
+}
 
 #[test]
 fn enterprise_inventory_contract_is_disjoint_and_contains_community() {
@@ -38,4 +54,15 @@ fn enterprise_inventory_contract_is_disjoint_and_contains_community() {
         assert_eq!(schema["type"], "object");
         assert!(jsonschema::meta::options().is_valid(&schema));
     }
+    let docs = include_str!("../../../fixtures/mcp-inventory.md");
+    let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
+    let end = "<!-- END GENERATED MCP INVENTORY -->";
+    let generated = docs
+        .split_once(start)
+        .and_then(|(_, rest)| rest.split_once(end).map(|(body, _)| body))
+        .expect("English MCP documentation markers");
+    assert_eq!(
+        generated,
+        render_inventory_fragment(&community, &enterprise)
+    );
 }

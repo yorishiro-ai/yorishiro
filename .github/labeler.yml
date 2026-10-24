@@ -11,9 +11,6 @@ web-ui:
 ee:
   - changed-files:
       - any-glob-to-any-file: "ee/**"
-docs:
-  - changed-files:
-      - any-glob-to-any-file: "docs/**"
 migrations:
   - changed-files:
       - any-glob-to-any-file: "migration/**"

@@ -133,7 +133,7 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - Branch from latest `develop`. Merge commits preferred.
 - Run `make check-all` for CE changes and `make check-all-ee` for EE changes or shared API compatibility.
 - Run the PostgreSQL or SQLite suites relevant to the change before pushing.
-- `docs/` and `ee/docs/` are managed separately; do not update them as part of code changes or require documentation synchronization.
+- User-facing documentation lives in the wiki (`yorishiro-ai/wiki`) and is managed separately from code changes.
 
 ## Rules
 
