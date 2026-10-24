@@ -1,5 +1,9 @@
 # Loco 1.2.0 upstream bug fixes
 
+This directory contains queue bug fixes for the published Loco 1.2.0 crate and integration extensions for CLI parsing and connection configuration.
+The extensions are documented separately from upstream bug fixes, with their own removal conditions.
+These are not application-specific features.
+
 ## Provenance and application
 
 `source/` is ignored generated material: the published `loco-rs` 1.2.0 crate with `fixes.patch` applied.
@@ -68,10 +72,13 @@ No upstream issue or accepted upstream fix is implied by these local defect IDs.
 
 ## 日本語
 
-これはアプリ機能の追加ではなく、公開済みLoco 1.2.0のキューに対する上流バグ修正です。
+このフォルダには、公開済みLoco 1.2.0のキューのバグ修正と、CLI・接続設定の連携用拡張を置いています。
+連携用拡張は上流バグの修正とは区別し、それぞれの説明と削除条件を上に記載しています。
+アプリ固有機能の追加ではありません。
 元ソースとライセンスを保持し、変更差分を `fixes.patch` に分離しています。
 `source/` はGit管理せず、`python3 patches/loco-rs/verify.py --prepare` で復元します。
-元の空白と `Cargo.lock` も復元し、差分ファイルだけを空白検査の例外にします。
+元の空白と `Cargo.lock` も復元します。
+差分ファイルだけを空白検査の例外にします。
 `source/Cargo.lock` は上流配布物の記録であり、アプリのビルドと監査にはルートの `Cargo.lock` を使います。
 `verify.py` は配布アーカイブのハッシュ、パッチ適用結果、同梱ソースの一致を検証します。
 LQ-01は単一投入の途中失敗、LQ-02は取得直後の誤った再配信、LQ-03はreaperと古いworkerによる状態の上書き、LQ-04はログへのpayload露出、LQ-05は終了時のプールとworker contextの保持、LQ-06はPostgreSQLキュー初期化の同時初回起動での競合を修正します。
