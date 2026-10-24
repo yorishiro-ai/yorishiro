@@ -186,8 +186,10 @@ fn vector_blob_to_f32(blob: Vec<u8>) -> Vec<f32> {
         0,
         "embedding BLOB not a multiple of 4 bytes"
     );
-    blob.chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    blob.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
         .collect()
 }
 

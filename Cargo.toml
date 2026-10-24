@@ -53,9 +53,9 @@ chrono = { version = "0.4.45", features = ["serde"] }
 chrono-tz = "0.10.4"
 reqwest = { version = "0.13.5", features = ["json", "rustls", "form"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.151" }
+serde_json = { version = "1.0.154" }
 serial_test = { version = "4.0.1" }
-sha2 = { version = "0.11.0" }
+sha2 = { version = "0.11.1" }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["json"] }
 tracing-appender = "0.2.5"
@@ -67,15 +67,15 @@ sea-orm = { version = "2.0.4", features = [
   "macros",
   "postgres-vector",
 ] }
-uuid = { version = "1.26.1", features = ["v4", "v7", "serde"] }
-redis = { version = "=1.7.1", features = ["aio", "tokio-comp"] }
+uuid = { version = "1.29.0", features = ["v4", "v7", "serde"] }
+redis = { version = "=1.8.0", features = ["aio", "tokio-comp"] }
 
 [dependencies]
 loco-rs = { workspace = true }
 migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.53.1", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util"] }
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util"] }
 futures = "0.3.34"
 axum.workspace = true
 tracing.workspace = true
@@ -87,9 +87,9 @@ chrono-tz.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
 sha2.workspace = true
-jsonschema = { version = "=0.59.0" }
-rmcp = { version = "3.3.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
-schemars = { version = "1.2.2", features = ["uuid1"] }
+jsonschema = { version = "=0.60.1" }
+rmcp = { version = "3.7.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+schemars = { version = "1.2.3", features = ["uuid1"] }
 # OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
 # vLLM/real OpenAI over HTTP.
 reqwest.workspace = true
@@ -99,7 +99,6 @@ reqwest.workspace = true
 candle-core = { version = "0.11.0" }
 candle-nn = { version = "0.11.0" }
 candle-transformers = { version = "0.11.0" }
-# Current upstream Candle and Swagger UI releases constrain ZIP to 8.x; see the security follow-up before upgrading this group.
 tokenizers = { version = "0.23.2", features = ["onig"] }
 sqlite-vec = "=0.1.9"
 # Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
@@ -108,11 +107,11 @@ sqlite-vec = "=0.1.9"
 libsqlite3-sys = "=0.37.0"
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
-jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"], optional = true }  # licence and OIDC verification without the vulnerable RustCrypto RSA backend
+jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"], optional = true }  # licence and OIDC verification without the vulnerable RustCrypto RSA backend
 hmac = { version = "0.13.0", optional = true }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 utoipa = { version = "6.0.0", features = ["axum_extras", "uuid", "chrono"], optional = true }
-utoipa-swagger-ui = { version = "10.0.1", features = ["axum"], optional = true }
+utoipa-swagger-ui = { version = "10.0.2", features = ["axum"], optional = true }
 serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 
 [[bin]]
