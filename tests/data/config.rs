@@ -59,8 +59,6 @@ fn a_redis_queue_serves_every_worker_queue_once_and_keeps_its_own() {
     );
     let queue = partial.queue.as_mut().unwrap();
     assert!(queue.dangerously_flush());
-    queue.preserve_jobs();
-    assert!(!queue.dangerously_flush());
 }
 
 #[test]
@@ -77,8 +75,6 @@ fn a_sql_queue_is_left_alone() {
         sqlite.dangerously_flush = true;
     }
     assert!(queue.dangerously_flush());
-    queue.preserve_jobs();
-    assert!(!queue.dangerously_flush());
 }
 
 #[test]

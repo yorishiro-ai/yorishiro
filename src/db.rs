@@ -46,7 +46,7 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
 /// Returns an error if the configured application pool cannot be opened.
 pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco_rs::Result<()> {
     let config = &ctx.config.database;
-    let mut options = database_options(config);
+    let mut options = loco_rs::db::connection_options(config);
     let zone = crate::time::configured(ctx);
     if ctx.is_sqlite() {
         require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
@@ -154,20 +154,6 @@ unsafe extern "C" fn sqlite_current_timestamp(
             );
         },
     }
-}
-
-fn database_options(config: &loco_rs::config::Database) -> sea_orm::ConnectOptions {
-    let mut options = sea_orm::ConnectOptions::new(config.uri.clone());
-    options
-        .max_connections(config.max_connections)
-        .min_connections(config.min_connections)
-        .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
-        .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
-        .sqlx_logging(config.enable_logging);
-    if let Some(timeout) = config.acquire_timeout {
-        options.acquire_timeout(std::time::Duration::from_millis(timeout));
-    }
-    options
 }
 
 #[derive(Clone, Copy)]
@@ -317,7 +303,7 @@ impl TenantDb {
         config: &loco_rs::config::Database,
         timezone: String,
     ) -> Result<Self, sea_orm::sqlx::Error> {
-        let mut options = database_options(config);
+        let mut options = loco_rs::db::connection_options(config);
         options.connect_lazy(true);
         postgres_session_options(&mut options, timezone, PoolRole::Tenant);
         let connection = sea_orm::Database::connect(options)

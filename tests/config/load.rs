@@ -274,7 +274,9 @@ async fn production_example_is_used_when_local_config_is_absent() {
         "queue:\n  connect_timeout: 1234\n  max_connections: 3\n",
     )
     .unwrap();
-    let overridden = load(&Environment::Production).await.unwrap();
+    let overridden =
+        loco_rs::config::Config::from_folder(&Environment::Production, directory.path())
+            .expect("framework resolves SQL defaults after local overrides");
     let Some(QueueConfig::Sqlite(queue)) = overridden.queue else {
         panic!("the local override must preserve the selected SQL provider");
     };

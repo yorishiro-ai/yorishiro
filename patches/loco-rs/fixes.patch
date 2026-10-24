@@ -992,26 +992,7 @@
  }
 --- a/src/config/mod.rs
 +++ b/src/config/mod.rs
-@@ -173,6 +173,18 @@
-     /// let config = Config::from_folder(&Environment::Development, Path::new("config"))?;
-     /// ```
-     pub fn from_folder(env: &Environment, path: &Path) -> Result<Self> {
-+        Self::from_folder_with(env, path, |_| Ok(()))
-+    }
-+
-+    /// Loads and merges configuration, then resolves application defaults before deserialization.
-+    ///
-+    /// # Errors
-+    /// Returns an error if loading, resolution or deserialization fails.
-+    pub fn from_folder_with(
-+        env: &Environment,
-+        path: &Path,
-+        resolve: impl FnOnce(&mut serde_yaml::Value) -> Result<()>,
-+    ) -> Result<Self> {
-         // `{env}.yaml` is the base configuration, `{env}.local.yaml` is an
-         // optional, git-ignorable override layered on top of it. When both
-         // exist they are deep-merged (local wins), rather than one file
-@@ -183,7 +195,7 @@
+@@ -183,7 +183,7 @@
          let base_exists = base_path.exists();
          let local_exists = local_path.exists();
  
@@ -1020,33 +1001,57 @@
              (false, false) => {
                  return Err(Error::Message(format!(
                      "no configuration file found in folder: {}",
-@@ -217,6 +229,7 @@
+@@ -217,6 +217,7 @@
              "loading environment from"
          );
  
-+        resolve(&mut merged)?;
++        resolve_connection_defaults(&mut merged)?;
          serde_yaml::from_value(merged).map_err(|err| Error::YAMLFile(err, selected_path_display))
      }
  
---- a/src/config/queue.rs
-+++ b/src/config/queue.rs
-@@ -16,6 +16,15 @@
- }
- 
- impl QueueConfig {
-+    /// Disables destructive startup actions for an additional provider on the same queue.
-+    pub fn preserve_jobs(&mut self) {
-+        match self {
-+            Self::Redis(config) => config.dangerously_flush = false,
-+            Self::Postgres(config) => config.dangerously_flush = false,
-+            #[cfg(feature = "db-sqlite")]
-+            Self::Sqlite(config) => config.dangerously_flush = false,
+@@ -250,6 +251,39 @@
+                 Ok,
+             )
+     }
++}
++
++fn resolve_connection_defaults(value: &mut serde_yaml::Value) -> Result<()> {
++    let Some(queue) = value.get("queue").filter(|queue| !queue.is_null()) else {
++        return Ok(());
++    };
++    let provider: QueueConfig = serde_yaml::from_value(queue.clone())
++        .map_err(|error| Error::Message(format!("invalid queue configuration: {error}")))?;
++    match provider {
++        QueueConfig::Postgres(_) => {}
++        #[cfg(feature = "db-sqlite")]
++        QueueConfig::Sqlite(_) => {}
++        _ => return Ok(()),
++    }
++    let database = value["database"].clone();
++    let queue = value["queue"]
++        .as_mapping_mut()
++        .ok_or_else(|| Error::Message("queue configuration must be a mapping".into()))?;
++    // Resolve after local-file merging so explicit queue settings always win.
++    for field in [
++        "min_connections",
++        "max_connections",
++        "connect_timeout",
++        "idle_timeout",
++        "enable_logging",
++    ] {
++        if let Some(default) = database.get(field) {
++            queue
++                .entry(serde_yaml::Value::from(field))
++                .or_insert_with(|| default.clone());
 +        }
 +    }
-     /// Whether this queue is configured to discard all jobs on startup,
-     /// whichever backend it uses.
-     #[must_use]
-@@ -32,6 +41,12 @@
++    Ok(())
+ }
+ 
+ /// Deep-merges two YAML values, with `override_` taking precedence over
+--- a/src/config/queue.rs
++++ b/src/config/queue.rs
+@@ -32,6 +32,12 @@
  #[derive(Debug, Clone, Deserialize, Serialize)]
  pub struct RedisQueueConfig {
      pub uri: String,
@@ -1059,7 +1064,7 @@
      #[serde(default)]
      pub dangerously_flush: bool,
  
-@@ -45,6 +60,14 @@
+@@ -45,6 +51,14 @@
      /// Opt-in visibility-timeout reaper. See [`ReaperConfig`].
      #[serde(default)]
      pub reaper: Option<ReaperConfig>,
@@ -1094,6 +1099,46 @@
                  dangerously_flush: false,
                  queues: None,
                  num_workers: 1,
+--- a/src/db/connect.rs
++++ b/src/db/connect.rs
+@@ -82,14 +82,9 @@
+     Ok(())
+ }
+ 
+-/// Establish a connection to the database using the provided configuration
+-/// settings.
+-///
+-/// # Errors
+-///
+-/// Returns a [`sea_orm::DbErr`] if an error occurs during the database
+-/// connection establishment.
+-pub async fn connect(config: &config::Database) -> Result<DbConn, sea_orm::DbErr> {
++/// Builds pool options without connecting or executing startup statements.
++#[must_use]
++pub fn connection_options(config: &config::Database) -> ConnectOptions {
+     let mut opt = ConnectOptions::new(&config.uri);
+     opt.max_connections(config.max_connections)
+         .min_connections(config.min_connections)
+@@ -101,7 +96,18 @@
+         opt.acquire_timeout(Duration::from_millis(acquire_timeout));
+     }
+ 
+-    let db = Database::connect(opt).await?;
++    opt
++}
++
++/// Establish a connection to the database using the provided configuration
++/// settings.
++///
++/// # Errors
++///
++/// Returns a [`sea_orm::DbErr`] if an error occurs during the database
++/// connection establishment.
++pub async fn connect(config: &config::Database) -> Result<DbConn, sea_orm::DbErr> {
++    let db = Database::connect(connection_options(config)).await?;
+ 
+     match db.get_database_backend() {
+         #[cfg(feature = "db-sqlite")]
 --- a/src/testing/db.rs
 +++ b/src/testing/db.rs
 @@ -125,6 +125,7 @@

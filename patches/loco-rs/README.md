@@ -48,11 +48,14 @@ Remove this extension when upstream exposes equivalent parsed start-mode informa
 
 ## Connection configuration integration
 
-`Config::from_folder_with` lets the application fill missing connection settings after base/local merging and before typed deserialization.
-The application owns SQL queue inheritance in `src/data/config.rs`; explicit queue settings take precedence.
+`Config::from_folder` fills missing SQL queue connection settings from the database configuration after base/local merging and before typed deserialization.
+Explicit queue settings take precedence, and Redis does not inherit SQL pool settings.
+This is framework configuration resolution rather than an application callback API.
+`db::connection_options` builds SeaORM pool options from the same database configuration used by `db::connect` without opening a pool or replaying startup statements.
+Application identity and tenant pools reuse these options and retain their own timezone, role and release hooks.
 Redis queue configuration exposes millisecond `connect_timeout` and `response_timeout` values, retaining the existing worker defaults of 10000 and 5000.
 Its provider keeps these settings with the client so producers, administration and workers use the same transport policy instead of silently using different library defaults.
-`QueueConfig::preserve_jobs` lets an additional provider opt out of destructive first-boot flushing without duplicating provider variants in callers.
+Provider creation and `Queue::setup` do not flush jobs; only boot's explicit `converge` applies `dangerously_flush`.
 These are integration extensions, not claims of upstream bug fixes.
 Remove them when upstream supplies equivalent merged-config resolution and consistent producer/worker connection configuration.
 Existing configuration/topology cases cover SQL inheritance, explicit queue overrides and Redis defaults; all queue topologies must still pass in CI.

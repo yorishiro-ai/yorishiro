@@ -29,10 +29,9 @@ pub async fn load(environment: &Environment) -> Result<Config> {
     {
         load_example(folder, &environment)?
     } else {
-        Config::from_folder_with(
+        Config::from_folder(
             &environment,
             folder.as_deref().unwrap_or_else(|| Path::new("config")),
-            resolve_connection_defaults,
         )?
     };
     validate(&config)?;
@@ -52,40 +51,10 @@ fn load_example(folder: &Path, environment: &Environment) -> Result<Config> {
         if local.exists() {
             fs::copy(&local, example_folder.join("production.local.yaml"))?;
         }
-        Config::from_folder_with(environment, &example_folder, resolve_connection_defaults)
+        Config::from_folder(environment, &example_folder)
     })();
     fs::remove_dir_all(example_folder)?;
     result
-}
-
-fn resolve_connection_defaults(value: &mut serde_yaml::Value) -> Result<()> {
-    let Some(queue) = value.get("queue").filter(|queue| !queue.is_null()) else {
-        return Ok(());
-    };
-    let provider: QueueConfig = serde_yaml::from_value(queue.clone())
-        .map_err(|error| Error::Message(format!("invalid queue configuration: {error}")))?;
-    if !matches!(provider, QueueConfig::Postgres(_) | QueueConfig::Sqlite(_)) {
-        return Ok(());
-    }
-    let database = value["database"].clone();
-    let queue = value["queue"]
-        .as_mapping_mut()
-        .ok_or_else(|| Error::Message("queue configuration must be a mapping".into()))?;
-    // Resolve after local-file merging so explicit queue settings always win.
-    for field in [
-        "min_connections",
-        "max_connections",
-        "connect_timeout",
-        "idle_timeout",
-        "enable_logging",
-    ] {
-        if let Some(default) = database.get(field) {
-            queue
-                .entry(serde_yaml::Value::from(field))
-                .or_insert_with(|| default.clone());
-        }
-    }
-    Ok(())
 }
 
 fn test_environment(environment: &Environment) -> Environment {
