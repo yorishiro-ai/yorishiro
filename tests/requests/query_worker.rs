@@ -31,11 +31,6 @@ pub(crate) async fn target_queue(
     target: WorkerTarget,
 ) -> Arc<loco_rs::bgworker::Queue> {
     let mut config = ctx.config.clone();
-    config
-        .queue
-        .as_mut()
-        .expect("configured queue")
-        .preserve_jobs();
     yorishiro::data::config::serve_worker_queues(&mut config, &[target.queue()]);
     let queue = loco_rs::bgworker::create_queue_provider(&config)
         .await

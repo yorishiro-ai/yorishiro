@@ -15,8 +15,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `make clippy-ce` | Clippy for every CE target, including public error and panic docs | CE |
 | `make clippy-ee` | Clippy for every EE target, including public error and panic docs | EE |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
-| `make check-all` | Formatting, Python/public API checks, CE check, and CE Clippy | CE |
-| `make check-all-ee` | Formatting, Python/public API checks, EE check, and EE Clippy | EE |
+| `make check-all` | Formatting, Python/boundary checks, CE check, and CE Clippy | CE |
+| `make check-all-ee` | Formatting, Python/boundary checks, EE check, and EE Clippy | EE |
 | `make build-ce` | `cargo build --locked --no-default-features --workspace` | CE |
 | `make build-ee` | `cargo build --locked --features enterprise --workspace` | EE |
 | `make entities` | Spin up pgvector container, migrate, generate entities, tear down | PostgreSQL |
