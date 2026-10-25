@@ -86,11 +86,6 @@ Merge commit is the usual strategy, not squash. PRs that carry an empirical reco
 
 When unclear, prefer a merge commit: losing an empirical record is the more expensive mistake.
 
-## Docs
-
-`docs/` and `ee/docs/` are managed separately and are outside code-change scope.
-Do not require documentation updates or English/Japanese synchronization for source changes.
-
 ## Versioning
 
 - `version = "0.60.0"` in the root `[package]` is the source of truth.
