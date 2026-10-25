@@ -1,6 +1,7 @@
 mod query_embedding_requests;
 mod queue_job_dispatch_outbox;
 mod queue_job_lifecycles;
+mod startup_reindex_metadata;
 mod workspace_workspaces;
 
 mod api_keys;

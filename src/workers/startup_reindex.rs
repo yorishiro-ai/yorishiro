@@ -88,7 +88,7 @@ async fn detect_startup_reindex(ctx: &AppContext) {
             continue;
         }
         let provider_model = provider.model_name();
-        if !workspace.is_stamped_with_other_model(&provider_model) {
+        if !workspace.is_stamped_with_other_embedding(&provider_model, provider.dimensions()) {
             continue;
         }
         tracing::info!(
@@ -99,6 +99,53 @@ async fn detect_startup_reindex(ctx: &AppContext) {
         );
         enqueue_reindex(ctx, workspace.id).await;
     }
+}
+
+/// Scans persisted stamps using provider metadata without constructing providers.
+///
+/// # Errors
+/// Returns an error if workspace enumeration or metadata resolution fails.
+pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
+    let settings = ctx
+        .config
+        .settings::<crate::data::settings::Settings>()
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let workspaces = crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let mut failures = Vec::new();
+    for workspace in workspaces {
+        let metadata = match resolve_workspace_metadata(ctx, workspace.id, &settings).await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                failures.push(format!("workspace {}: {error}", workspace.id));
+                continue;
+            }
+        };
+        let Some(metadata) = metadata else { continue };
+        if workspace.is_stamped_with_other_embedding(&metadata.model, metadata.dimensions)
+            && let Err(error) = enqueue_metadata_reindex(ctx, workspace.id).await
+        {
+            failures.push(format!("workspace {}: {error}", workspace.id));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(loco_rs::Error::Message(format!(
+            "startup reindex metadata scan failed: {}",
+            failures.join("; ")
+        )))
+    }
+}
+
+async fn resolve_workspace_metadata(
+    ctx: &AppContext,
+    workspace_id: uuid::Uuid,
+    settings: &crate::data::settings::Settings,
+) -> Result<Option<crate::services::embedding::EmbeddingMetadata>, crate::YorishiroError> {
+    crate::models::workspace_workspaces::effective_embedding_metadata(ctx, workspace_id, settings)
+        .await
 }
 
 async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
@@ -126,4 +173,51 @@ async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
             tracing::error!(%workspace_id, error = %err, "startup reindex: failed to enqueue reindex");
         }
     }
+}
+
+async fn enqueue_metadata_reindex(
+    ctx: &AppContext,
+    workspace_id: uuid::Uuid,
+) -> loco_rs::Result<()> {
+    if active_startup_reindex_exists(ctx, workspace_id).await? {
+        return Ok(());
+    }
+    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+        .await
+        .map_err(|error| {
+            loco_rs::Error::Message(format!("workspace {workspace_id}: {}", error.0))
+        })?;
+    let args = crate::workers::reindex::ReindexArgs {
+        lifecycle_id: None,
+        workspace_id,
+        worker_class,
+        startup: true,
+    };
+    // A concurrent scan can win the unique admission after this precheck; the next tick observes it.
+    crate::workers::reindex::enqueue_for_class(ctx, args)
+        .await
+        .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))
+}
+
+async fn active_startup_reindex_exists(
+    ctx: &AppContext,
+    workspace_id: uuid::Uuid,
+) -> loco_rs::Result<bool> {
+    let tenant = crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
+    let txn = crate::db::begin_workspace(ctx, tenant, workspace_id)
+        .await
+        .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
+    let exists = crate::models::queue_job_lifecycles::Entity::has_active(
+        &txn,
+        crate::workers::reindex::ReindexArgs::STARTUP_JOB_NAME,
+        workspace_id,
+    )
+    .await
+    .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
+    txn.commit()
+        .await
+        .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
+    Ok(exists)
 }

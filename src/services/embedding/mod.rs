@@ -6,6 +6,51 @@ pub mod openai;
 
 pub(crate) const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 
+/// Provider identity used for workspace stamp comparisons without constructing a provider.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddingMetadata {
+    pub model: String,
+    pub dimensions: usize,
+}
+
+/// Resolves deployment provider identity without loading local model files.
+///
+/// # Errors
+/// Returns an error when the configured provider metadata is incomplete or invalid.
+pub fn deployment_embedding_metadata(
+    settings: &crate::data::settings::Settings,
+) -> anyhow::Result<Option<EmbeddingMetadata>> {
+    let config = &settings.embedding;
+    if let (Some(_), Some(model)) = (&config.base_url, &config.model) {
+        return Ok(Some(EmbeddingMetadata {
+            model: model.clone(),
+            dimensions: config.dimensions,
+        }));
+    }
+    match config.provider {
+        crate::data::settings::EmbeddingProvider::None => Ok(None),
+        crate::data::settings::EmbeddingProvider::Openai => {
+            anyhow::bail!("embedding provider openai requires base_url and model")
+        }
+        crate::data::settings::EmbeddingProvider::Local => {
+            let def = if config.local_model == model_fetch::DEFAULT_MODEL.short_id {
+                model_fetch::DEFAULT_MODEL
+            } else {
+                anyhow::bail!("unknown local embedding model {:?}", config.local_model)
+            };
+            if config.dimensions != def.dimensions {
+                anyhow::bail!(
+                    "configured embedding dimensions do not match local model output width"
+                )
+            }
+            Ok(Some(EmbeddingMetadata {
+                model: def.id.to_owned(),
+                dimensions: def.dimensions,
+            }))
+        }
+    }
+}
+
 pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
 use loco_rs::prelude::async_trait;

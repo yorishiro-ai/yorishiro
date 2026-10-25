@@ -1,5 +1,5 @@
 use uuid::Uuid;
-use yorishiro::edition::ee::tasks::reindex_scheduler::TenantReindexScheduler;
+use yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler;
 
 use chrono::{TimeZone, Utc};
 
@@ -11,6 +11,17 @@ const TICK: i64 = 1_700_000_000;
 
 fn at(offset: i64) -> chrono::DateTime<Utc> {
     Utc.timestamp_opt(TICK + offset, 0).single().unwrap()
+}
+
+fn install_active_licence(ctx: &loco_rs::app::AppContext) {
+    use std::sync::Arc;
+    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+    ctx.shared_store
+        .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+            sub: "scheduler-test".into(),
+            plan: "pro".into(),
+            exp: Utc::now().timestamp() + 3600,
+        })));
 }
 
 #[test]
@@ -79,6 +90,7 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
 #[tokio::test]
 async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    install_active_licence(&ctx);
     if !crate::require_sqlite_backend() { return; }
 
     use sea_orm::{ConnectionTrait, TransactionTrait};
@@ -105,7 +117,7 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
         .unwrap()
         .to_utc();
 
-    let task = yorishiro::edition::ee::tasks::reindex_scheduler::TenantReindexScheduler;
+    let task = TenantReindexScheduler;
     let first = task
         .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
         .await
@@ -178,6 +190,7 @@ async fn intervals_that_cannot_be_scheduled_are_refused() {
 #[tokio::test]
 async fn a_schedule_advances_by_its_own_interval() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        install_active_licence(&ctx);
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
@@ -219,10 +232,66 @@ async fn a_schedule_advances_by_its_own_interval() {
     .await;
 }
 
+#[tokio::test]
+async fn licensed_task_ticks_schedule_while_unlicensed_task_only_scans_mismatches() {
+    use std::sync::Arc;
+    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        install_active_licence(&ctx);
+        let crate::requests::fixtures::TestTenant { tenant_id, .. } =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        set(&ctx.db, tenant_id, "PT6H", None).await.unwrap();
+        let before = get(&ctx.db, tenant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .scheduled_for
+            .unwrap();
+
+        ctx.shared_store
+            .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+                sub: "scheduler-test".into(),
+                plan: "pro".into(),
+                exp: Utc::now().timestamp() + 3600,
+            })));
+        TenantReindexScheduler
+            .run_at(&ctx, &loco_rs::task::Vars::default(), Utc::now())
+            .await
+            .unwrap();
+        let after = get(&ctx.db, tenant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .scheduled_for
+            .unwrap();
+        assert_eq!(after, before, "not-yet-due schedule stays unchanged");
+
+        ctx.shared_store.insert(Arc::new(LicenceState::default()));
+        TenantReindexScheduler
+            .run_at(&ctx, &loco_rs::task::Vars::default(), Utc::now())
+            .await
+            .unwrap();
+        let after_unlicensed = get(&ctx.db, tenant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .scheduled_for
+            .unwrap();
+        assert_eq!(
+            after_unlicensed, before,
+            "unlicensed tick does not advance schedules"
+        );
+    })
+    .await;
+}
+
 /// Invalid stored intervals fail without advancing the schedule.
 #[tokio::test]
 async fn invalid_stored_intervals_are_rejected_without_advancement() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        install_active_licence(&ctx);
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 

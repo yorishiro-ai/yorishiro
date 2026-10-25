@@ -15,3 +15,4 @@ pub(crate) mod recover_worker_dispatches;
 pub mod reindex_embeddings;
 pub(crate) mod resync_embeddings;
 pub(crate) mod revoke_api_key;
+pub mod tenant_reindex_scheduler;

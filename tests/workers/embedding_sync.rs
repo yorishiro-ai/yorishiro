@@ -1771,12 +1771,19 @@ mod conflict {
             .await
             .expect("persist original vector and workspace stamp");
             let (provider, _server, _, _) = vector_provider(1024, false).await;
-            ctx.shared_store.insert(provider);
+            ctx.shared_store.insert(original_provider.clone());
 
             let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
             let mut worker_ctx = ctx.clone();
             worker_ctx.queue_provider = Some(queue.clone());
             App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            assert!(
+                !Entity::has_active(&ctx.db, "startup_reindex", workspace_id)
+                    .await
+                    .unwrap()
+            );
+            // Switch providers after connect so the startup scan sees the stamped width.
+            ctx.shared_store.insert(provider);
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {

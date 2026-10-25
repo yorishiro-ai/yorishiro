@@ -61,6 +61,10 @@ server:
 scheduler:
   output: stdout
   jobs:
+    tenant_reindex_scheduler:
+      run: "tenant_reindex_scheduler"
+      schedule: "0 * * * * *"
+      run_on_start: true
     worker_dispatch_recovery:
       run: "recover_worker_dispatches"
       schedule: "0 * * * * *"

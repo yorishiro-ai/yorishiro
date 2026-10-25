@@ -47,7 +47,7 @@ server:
 scheduler:
   output: stdout      # stdout | silent (default for all jobs)
   jobs:
-    tenant_reindex_every_hour:
+    tenant_reindex_scheduler:
       run: "tenant_reindex_scheduler"
       schedule: "0 * * * * *"
       run_on_start: true
