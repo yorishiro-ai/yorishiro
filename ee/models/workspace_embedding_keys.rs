@@ -210,6 +210,19 @@ pub(crate) async fn describe(
         .internal()
 }
 
+/// Resolves the workspace's provider identity without selecting its secret key.
+pub(crate) async fn metadata(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Option<crate::services::embedding::EmbeddingMetadata>, YorishiroError> {
+    Ok(describe(conn, workspace_id).await?.map(|description| {
+        crate::services::embedding::EmbeddingMetadata {
+            model: description.model,
+            dimensions: description.dimensions as usize,
+        }
+    }))
+}
+
 /// The credentials themselves, for building a provider.
 /// `None` means the workspace has configured none, which the provider lookup reads as "fall back to the deployment default".
 pub(crate) async fn get(

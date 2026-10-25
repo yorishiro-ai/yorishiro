@@ -30,6 +30,6 @@ impl TenantReindexScheduler {
         _vars: &Vars,
         tick: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
-        crate::edition::ee::models::tenant_reindex_schedules::tick(ctx, tick).await
+        crate::edition::tenant_reindex_scheduler(ctx, tick).await
     }
 }

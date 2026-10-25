@@ -24,6 +24,19 @@ pub(crate) async fn embedding_provider(
     )
 }
 
+/// Resolves effective workspace/deployment embedding identity without constructing a provider.
+pub(crate) async fn effective_embedding_metadata(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: Uuid,
+    settings: &crate::data::settings::Settings,
+) -> Result<Option<crate::services::embedding::EmbeddingMetadata>, YorishiroError> {
+    if let Some(metadata) = crate::workspace_embedding_metadata(&ctx.db, workspace_id).await? {
+        return Ok(Some(metadata));
+    }
+    crate::services::embedding::deployment_embedding_metadata(settings)
+        .map_err(YorishiroError::Internal)
+}
+
 pub(crate) use tenancy::{
     delete_workspace, get_workspace, get_workspace_tenant, list_workspaces,
     workspace_count_lock_key,
@@ -61,18 +74,21 @@ pub(crate) struct EmbeddingChainRow {
 pub struct StartupReindexRow {
     pub id: Uuid,
     pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
     pub embedding_reindexing: bool,
 }
 
 impl StartupReindexRow {
-    /// Whether the workspace's stored vectors came from a model other than `provider_model`.
+    /// Whether the workspace's stored vectors differ from the effective provider identity.
     /// A workspace with no stamp has no vectors to replace: its first write stamps it.
-    pub fn is_stamped_with_other_model(&self, provider_model: &str) -> bool {
+    pub fn is_stamped_with_other_embedding(&self, provider_model: &str, dimensions: usize) -> bool {
         self.embedding_reindexing
-            || self
-                .embedding_model
-                .as_deref()
-                .is_some_and(|stamped| stamped != provider_model)
+            || self.embedding_model.as_deref().is_some_and(|model| {
+                model != provider_model
+                    || self
+                        .embedding_dimensions
+                        .is_none_or(|width| usize::try_from(width).ok() != Some(dimensions))
+            })
     }
 }
 
@@ -142,6 +158,7 @@ pub(crate) async fn stamped_for_reindex(
         .columns([
             Column::Id,
             Column::EmbeddingModel,
+            Column::EmbeddingDimensions,
             Column::EmbeddingReindexing,
         ])
         .filter(

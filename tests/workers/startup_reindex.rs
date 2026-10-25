@@ -89,6 +89,50 @@ async fn a_workspace_already_on_the_configured_model_is_left_alone() {
     .await;
 }
 
+#[tokio::test]
+async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let workspace = TestTenant::create(&request, &ctx, TenantArgs::default())
+            .await
+            .workspace_id;
+        let old = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+            base_url: "http://unused.invalid".into(),
+            api_key: "key".into(),
+            model: "same-model".into(),
+            dimensions: 1536,
+            send_dimensions_param: false,
+        });
+        yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &[], &old)
+            .await
+            .unwrap();
+        let current: Arc<dyn EmbeddingProvider> =
+            Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+                base_url: "http://unused.invalid".into(),
+                api_key: "key".into(),
+                model: "same-model".into(),
+                dimensions: 768,
+                send_dimensions_param: false,
+            }));
+        ctx.shared_store.insert(current);
+        startup_reindex::run(&ctx).await;
+        assert!(
+            queued(&ctx, workspace).await,
+            "width-only mismatch queues reindex"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn model_change_remains_a_reindex_mismatch() {
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let (worker, _server, workspace) = scenario(&request, &ctx, "previous-model").await;
+        startup_reindex::run(&worker).await;
+        assert!(queued(&ctx, workspace).await);
+    })
+    .await;
+}
+
 /// An already-admitted startup scan wins the atomic admission without another queue delivery.
 #[tokio::test]
 async fn a_workspace_with_a_reindex_already_active_is_skipped() {

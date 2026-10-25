@@ -27,6 +27,29 @@ pub(crate) async fn workspace_embedding_provider(
     crate::edition::ee::models::workspace_embedding_keys::resolve(conn, workspace_id).await
 }
 
+pub(crate) async fn workspace_embedding_metadata(
+    conn: &sea_orm::DatabaseConnection,
+    workspace_id: uuid::Uuid,
+) -> std::result::Result<Option<crate::services::embedding::EmbeddingMetadata>, crate::YorishiroError>
+{
+    crate::edition::ee::models::workspace_embedding_keys::metadata(conn, workspace_id).await
+}
+
+pub(crate) fn is_active(ctx: &AppContext) -> bool {
+    edition::is_active(ctx)
+}
+
+pub(crate) async fn tenant_reindex_scheduler(
+    ctx: &AppContext,
+    tick: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    if is_active(ctx) {
+        crate::edition::ee::models::tenant_reindex_schedules::tick(ctx, tick).await
+    } else {
+        crate::workers::startup_reindex::run_metadata_scan(ctx).await
+    }
+}
+
 pub(crate) fn tenant_creation_cap(
     configured: i32,
     ctx: &AppContext,
@@ -142,7 +165,6 @@ pub(crate) fn mcp_tools(tools: McpToolSet) -> McpToolSet {
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(crate::edition::ee::tasks::seed_official_templates::SeedOfficialTemplates);
     tasks.register(crate::edition::ee::tasks::create_tenant_api_key::CreateTenantApiKey);
-    tasks.register(crate::edition::ee::tasks::reindex_scheduler::TenantReindexScheduler);
     tasks.register(crate::edition::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark);
     // tasks-inject (do not remove)
 }

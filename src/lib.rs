@@ -66,6 +66,23 @@ pub mod edition {
         active::workspace_embedding_provider(conn, workspace_id).await
     }
 
+    pub(crate) async fn workspace_embedding_metadata(
+        conn: &sea_orm::DatabaseConnection,
+        workspace_id: uuid::Uuid,
+    ) -> std::result::Result<
+        Option<crate::services::embedding::EmbeddingMetadata>,
+        crate::YorishiroError,
+    > {
+        active::workspace_embedding_metadata(conn, workspace_id).await
+    }
+
+    pub(crate) async fn tenant_reindex_scheduler(
+        ctx: &AppContext,
+        tick: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        active::tenant_reindex_scheduler(ctx, tick).await
+    }
+
     #[async_trait]
     impl Hooks for App {
         fn app_name() -> &'static str {
@@ -179,6 +196,23 @@ pub mod edition {
             Ok(None)
         }
 
+        pub(super) async fn workspace_embedding_metadata(
+            _conn: &sea_orm::DatabaseConnection,
+            _workspace_id: uuid::Uuid,
+        ) -> std::result::Result<
+            Option<crate::services::embedding::EmbeddingMetadata>,
+            crate::YorishiroError,
+        > {
+            Ok(None)
+        }
+
+        pub(super) async fn tenant_reindex_scheduler(
+            ctx: &AppContext,
+            _tick: chrono::DateTime<chrono::Utc>,
+        ) -> Result<()> {
+            crate::workers::startup_reindex::run_metadata_scan(ctx).await
+        }
+
         pub(super) fn compose_context(_ctx: &AppContext) -> Result<()> {
             Ok(())
         }
@@ -220,5 +254,7 @@ pub mod time;
 pub mod workers;
 
 pub use edition::App;
-pub(crate) use edition::{workspace_embedding_provider, workspace_worker_class};
+pub(crate) use edition::{
+    workspace_embedding_metadata, workspace_embedding_provider, workspace_worker_class,
+};
 pub use error::YorishiroError;

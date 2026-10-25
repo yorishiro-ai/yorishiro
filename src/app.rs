@@ -350,6 +350,7 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::maintenance::Maintenance);
     tasks.register(tasks::maintenance_status::MaintenanceStatus);
     tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
+    tasks.register(tasks::tenant_reindex_scheduler::TenantReindexScheduler);
     tasks.register(tasks::db_load_guard::DbLoadGuard);
 }
 
