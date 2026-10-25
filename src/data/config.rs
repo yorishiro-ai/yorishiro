@@ -86,6 +86,31 @@ fn test_environment(environment: &Environment) -> Environment {
 /// Returns an error when a setting is invalid.
 pub fn validate(config: &Config) -> Result<()> {
     validate_queue_policy(config)?;
+    if let Some(cors) = config
+        .server
+        .middlewares
+        .cors
+        .as_ref()
+        .filter(|cors| cors.enable)
+    {
+        for origin in &cors.allow_origins {
+            let valid = origin.parse::<axum::http::Uri>().is_ok_and(|uri| {
+                matches!(uri.scheme_str(), Some("http" | "https"))
+                    && uri
+                        .authority()
+                        .is_some_and(|authority| !authority.as_str().contains(['*', '@']))
+                    && uri.path() == "/"
+                    && uri.query().is_none()
+                    && !origin.ends_with('/')
+            });
+            if !valid {
+                return Err(Error::Message(
+                    "server.middlewares.cors.allow_origins requires exact http(s) origins without wildcards or paths".into(),
+                ));
+            }
+        }
+        let _ = cors.cors()?;
+    }
     let settings = config.settings::<crate::data::settings::Settings>()?;
     crate::time::parse_timezone(&settings.timezone).map_err(|_| {
         Error::Message(format!(

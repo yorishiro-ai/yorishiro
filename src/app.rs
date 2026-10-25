@@ -258,7 +258,7 @@ impl RouteMounts {
 /// Loco's `MiddlewareLayer` trait requires `tower::Layer` implementations
 /// that `from_fn_with_state` does not provide (axum 0.8).  The
 /// `server.middlewares:` config block is used only for Loco's built-in
-/// middleware (`request_id`, `logger`).
+/// middleware (`request_id`, `logger`, and shared REST/MCP CORS).
 ///
 /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not
 /// something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here
@@ -280,6 +280,18 @@ pub(crate) fn after_routes(
         .get::<CredentialPaths>()
         .ok_or_else(|| loco_rs::Error::Message("credential paths missing".into()))?;
     let router = initializers::rate_limit::after_routes(router, ctx, &credential_paths.0)?;
+    let router = if let Some(cors) = ctx
+        .config
+        .server
+        .middlewares
+        .cors
+        .as_ref()
+        .filter(|cors| cors.enable)
+    {
+        router.layer(cors.cors()?)
+    } else {
+        router
+    };
     Ok(router.layer(axum::middleware::from_fn_with_state(
         ctx.clone(),
         crate::controllers::middleware::maintenance::maintenance_guard,
@@ -303,6 +315,8 @@ pub(crate) fn middlewares(
         .clone()
         .unwrap_or(loco_rs::controller::middleware::logger::Config { enable: true });
     let mut stack = loco_rs::controller::middleware::default_middleware_stack(ctx);
+    // Apply CORS after mounting MCP so REST and MCP share the same layer.
+    stack.retain(|middleware| middleware.name() != "cors");
     stack.replace(
         "logger",
         Box::new(crate::controllers::middleware::access_log::Middleware::new(

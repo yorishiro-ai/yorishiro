@@ -328,28 +328,13 @@ pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
 /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not a Loco `Routes`/axum handler function, so it can't go through `Hooks::routes()`/`AppRoutes` like the REST controllers: it's mounted via `Router::nest_service` in `Hooks::after_routes` instead.
 ///
 /// # Panics
-/// Panics if application settings were not installed before routes are mounted.
+/// Panics if application settings cannot be decoded.
 pub fn mount<F>(router: Router, ctx: &AppContext, server_factory: F) -> Router
 where
     F: Fn(AppContext) -> YorishiroMcpServer + Clone + Send + Sync + 'static,
 {
     let ctx = ctx.clone();
-    let settings = ctx
-        .shared_store
-        .get::<crate::data::settings::Settings>()
-        .expect("application settings missing");
-    let mut transport_config = StreamableHttpServerConfig::default();
-    if let Some(allowed_hosts) = settings.mcp.allowed_hosts.as_deref() {
-        let mut hosts = transport_config.allowed_hosts.clone();
-        hosts.extend(
-            allowed_hosts
-                .split(',')
-                .map(str::trim)
-                .filter(|host| !host.is_empty())
-                .map(str::to_owned),
-        );
-        transport_config = transport_config.with_allowed_hosts(hosts);
-    }
+    let transport_config = transport_config(&ctx.config).expect("invalid MCP configuration");
     let mcp_service = StreamableHttpService::new(
         move || Ok(server_factory(ctx.clone())),
         LocalSessionManager::default().into(),
@@ -357,4 +342,63 @@ where
     );
 
     router.nest("/mcp", Router::new().fallback_service(mcp_service))
+}
+
+/// Derives MCP HTTP security settings from the server's shared network configuration.
+///
+/// # Errors
+/// Returns an error if application settings cannot be decoded.
+pub fn transport_config(
+    config: &loco_rs::config::Config,
+) -> loco_rs::Result<StreamableHttpServerConfig> {
+    let settings = config.settings::<crate::data::settings::Settings>()?;
+    let mut transport = StreamableHttpServerConfig::default().enforce_origin_validation();
+    let binding = config.server.binding.as_str();
+    if binding
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_unspecified())
+    {
+        tracing::warn!(
+            binding,
+            "MCP accepts any Host on an explicitly public listener; use a Host-validating reverse proxy"
+        );
+        transport = transport.disable_allowed_hosts();
+    } else {
+        transport.allowed_hosts.push(binding.to_owned());
+        transport.allowed_hosts.extend(comma_separated(
+            settings.mcp.allowed_hosts.as_deref().unwrap_or_default(),
+        ));
+    }
+    if let Some(cors) = config
+        .server
+        .middlewares
+        .cors
+        .as_ref()
+        .filter(|cors| cors.enable)
+    {
+        // rmcp treats portless entries as any port, unlike browser CORS's exact origins.
+        for origin in &cors.allow_origins {
+            let uri = origin.parse::<axum::http::Uri>().map_err(|error| {
+                loco_rs::Error::Message(format!("invalid allowed origin: {error}"))
+            })?;
+            let port = match uri.scheme_str() {
+                Some("https") => 443,
+                _ => 80,
+            };
+            transport.allowed_origins.push(if uri.port_u16().is_none() {
+                format!("{origin}:{port}")
+            } else {
+                origin.clone()
+            });
+        }
+    }
+    Ok(transport)
+}
+
+fn comma_separated(value: &str) -> impl Iterator<Item = String> + '_ {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }

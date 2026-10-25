@@ -40,14 +40,20 @@ server:
   # Port on which the server listens, on the interface selected by BINDING.
   port: <%= get_env(name="PORT", default="5150") %>
   # Binding for the server (which interface to bind to).
-  # `0.0.0.0`, not `localhost`: inside a container or a VM, a server bound to
-  # loopback is unreachable from outside it.
-  binding: <%= get_env(name="BINDING", default="0.0.0.0") %>
+  # Explicit 0.0.0.0 or :: enables network access and accepts any MCP Host.
+  binding: <%= get_env(name="BINDING", default="localhost") %>
   # The UI hostname or IP address that mailers will point to.
   # Defaults to localhost for an unconfigured trial instance.
   host: <%= get_env(name="HOST", default="http://localhost") %>
   # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
+    cors:
+      enable: true
+      # JSON array of exact browser origins, shared by REST and MCP.
+      allow_origins: <%= get_env(name="YORISHIRO_ALLOWED_ORIGINS", default="[]") %>
+      allow_headers: [Authorization, Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID]
+      allow_methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      expose_headers: [Mcp-Session-Id, MCP-Protocol-Version, X-Request-Id]
     # Stamps every request/response with an `x-request-id` header, generating one if the caller sent none.
     # This is the correlation ID that ties a log line to a response.
     request_id:
