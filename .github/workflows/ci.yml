@@ -35,7 +35,7 @@ env:
 jobs:
   changes:
     name: Classify changed files
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       full: ${{ steps.classify.outputs.full }}
       rust_validation: ${{ steps.classify.outputs.rust_validation }}
@@ -60,7 +60,7 @@ jobs:
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     needs: changes
     name: Community edition
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -80,7 +80,7 @@ jobs:
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     needs: changes
     name: Enterprise edition
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -169,7 +169,7 @@ jobs:
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     needs: changes
     name: MSRV
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -187,7 +187,7 @@ jobs:
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     needs: changes
     name: Models
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -233,7 +233,7 @@ jobs:
     name: "Test (Edition: ${{ matrix.edition }}, DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})"
     needs: [changes, prepare-embedding]
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -599,7 +599,7 @@ jobs:
     name: Package validation
     needs: [changes, package-build]
     if: ${{ always() && needs.changes.result == 'success' && needs.package-build.result == 'success' && needs.changes.outputs.package_validation == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -655,7 +655,7 @@ jobs:
     name: Required validation
     if: ${{ always() }}
     needs: [changes, ce, check, msrv, prepare-embedding, test, package-build, package-validation]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
         env:

@@ -51,6 +51,8 @@ workers:
   mode: BackgroundQueue
 
 settings:
+  # Deployment routing declaration, not live worker discovery.
+  worker_targets: <%= get_env(name="YORISHIRO_WORKER_TARGETS", default='["worker-target:shared"]') %>
   timezone: <%= get_env(name="YORISHIRO_TIMEZONE", default="UTC") %>
   mcp:
     allowed_hosts: "<%= get_env(name="YORISHIRO_MCP_ALLOWED_HOSTS", default="") %>"

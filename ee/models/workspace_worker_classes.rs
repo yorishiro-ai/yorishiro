@@ -7,6 +7,8 @@
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
 use crate::workers::embedding_sync::WorkerClass;
+use crate::workers::target::WorkerTarget;
+use loco_rs::app::AppContext;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
@@ -25,10 +27,28 @@ pub(crate) struct WorkerClassAssignment {
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn set(
-    conn: &impl ConnectionTrait,
+    ctx: &AppContext,
     workspace_id: Uuid,
     worker_class: WorkerClass,
 ) -> Result<(), YorishiroError> {
+    let target = WorkerTarget::for_job(&ctx.db, worker_class, workspace_id).await?;
+    let settings = ctx
+        .config
+        .settings::<crate::data::settings::Settings>()
+        .internal()?;
+    if !settings.worker_targets.contains(&target.tag()) {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!(
+                "worker target {} is not configured for this deployment",
+                target.tag()
+            ),
+            details: vec![],
+            hint: format!(
+                "Run a worker with `start --worker={}` and include that tag in settings.worker_targets on the server; this setting declares routing availability, not worker health",
+                target.tag()
+            ),
+        });
+    }
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
         worker_class: ActiveValue::Set(worker_class.as_db_str().to_string()),
@@ -41,7 +61,7 @@ pub async fn set(
                 .update_columns([Column::WorkerClass, Column::UpdatedAt])
                 .to_owned(),
         )
-        .exec(conn)
+        .exec(&ctx.db)
         .await
         .internal()?;
     Ok(())

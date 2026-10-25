@@ -3,6 +3,9 @@ use serde::Deserialize;
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    /// Deployment-declared worker target tags, not a live worker inventory.
+    #[serde(default = "default_worker_targets")]
+    pub worker_targets: Vec<String>,
     #[serde(default = "default_timezone")]
     pub timezone: String,
     #[serde(default = "default_max_tenants")]
@@ -16,6 +19,10 @@ pub struct Settings {
     pub query_embedding: QueryEmbedding,
     #[serde(default)]
     pub(crate) dispatch: Dispatch,
+}
+
+fn default_worker_targets() -> Vec<String> {
+    vec!["worker-target:shared".into()]
 }
 
 #[derive(Clone, Copy, Deserialize)]
