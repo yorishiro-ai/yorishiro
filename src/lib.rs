@@ -255,6 +255,7 @@ pub mod workers;
 
 pub use edition::App;
 pub(crate) use edition::{
-    workspace_embedding_metadata, workspace_embedding_provider, workspace_worker_class,
+    tenant_reindex_scheduler, workspace_embedding_metadata, workspace_embedding_provider,
+    workspace_worker_class,
 };
 pub use error::YorishiroError;
