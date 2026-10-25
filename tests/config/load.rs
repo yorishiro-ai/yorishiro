@@ -640,7 +640,16 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         .add_header("Origin", "https://example.com:8443")
         .await;
     assert_eq!(wrong_port.status_code(), StatusCode::FORBIDDEN);
-    for origin in ["*", "example.com", "https://example.com:443/path", "null"] {
+    for origin in [
+        "*",
+        "example.com",
+        "https://example.com:443/path",
+        "null",
+        "https://user@example.com",
+        "https://*.example.com",
+        "https://example.com?x=1",
+        "https://example.com/",
+    ] {
         guard.set(
             "YORISHIRO_ALLOWED_ORIGINS",
             serde_json::to_string(&[origin]).unwrap(),
