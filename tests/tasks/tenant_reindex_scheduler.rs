@@ -329,6 +329,18 @@ async fn stamp_workspace(
 }
 
 fn configure_deployment_metadata(ctx: &mut loco_rs::app::AppContext) {
+    #[cfg(feature = "enterprise")]
+    {
+        use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
+        ctx.shared_store
+            .insert(std::sync::Arc::new(LicenceState::default()));
+        assert!(
+            !ctx.shared_store
+                .get::<std::sync::Arc<LicenceState>>()
+                .unwrap()
+                .is_active()
+        );
+    }
     let mut value = ctx.config.settings.as_ref().unwrap().clone();
     value["embedding"]["provider"] = serde_json::json!("openai");
     value["embedding"]["base_url"] = serde_json::json!("http://unused.invalid");
