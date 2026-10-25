@@ -115,7 +115,7 @@ async fn redis_test_config_keeps_queue_independent_from_database() {
     let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
     _guard.remove("YORISHIRO_TEST_TOPOLOGY");
     _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
-    _guard.set("QUEUE_URL", "redis://queue.example:6379");
+    _guard.set("QUEUE_URL", "redis://queue.example.com:6379");
 
     let config = load(&Environment::Any("test_sqlite_redis".into()))
         .await
@@ -127,7 +127,7 @@ async fn redis_test_config_keeps_queue_independent_from_database() {
     );
     assert!(matches!(
         config.queue,
-        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example:6379"
+        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example.com:6379"
     ));
 }
 
@@ -308,14 +308,14 @@ async fn production_selects_queue_provider_independently_from_database() {
     ));
 
     _guard.set("YORISHIRO_QUEUE_KIND", "Redis");
-    _guard.set("QUEUE_URL", "redis://queue.example:6379");
+    _guard.set("QUEUE_URL", "redis://queue.example.com:6379");
 
     let redis_queue = load(&Environment::Production).await.unwrap();
 
     assert_eq!(redis_queue.database.uri, "postgres://db/yorishiro");
     assert!(matches!(
         redis_queue.queue,
-        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example:6379"
+        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example.com:6379"
     ));
 }
 
@@ -464,13 +464,13 @@ async fn mcp_allowed_hosts_load_and_reject_wildcards() {
     );
     guard.set(
         "YORISHIRO_MCP_ALLOWED_HOSTS",
-        "mcp.example.test,10.0.0.4:5150",
+        "mcp.example.com,10.0.0.4:5150",
     );
     let config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
     assert_eq!(
         settings["mcp"]["allowed_hosts"],
-        "mcp.example.test,10.0.0.4:5150"
+        "mcp.example.com,10.0.0.4:5150"
     );
 
     guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "*");
@@ -532,7 +532,7 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         ("::1", "[::1]:5150", None, StatusCode::NOT_ACCEPTABLE),
         (
             "localhost",
-            "untrusted.example",
+            "untrusted.example.com",
             None,
             StatusCode::FORBIDDEN,
         ),
@@ -545,20 +545,15 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         ("192.0.2.10", "192.0.2.11:5150", None, StatusCode::FORBIDDEN),
         (
             "0.0.0.0",
-            "remote.example:5150",
+            "example.com:5150",
             None,
             StatusCode::NOT_ACCEPTABLE,
         ),
-        (
-            "::",
-            "remote.example:5150",
-            None,
-            StatusCode::NOT_ACCEPTABLE,
-        ),
+        ("::", "example.com:5150", None, StatusCode::NOT_ACCEPTABLE),
         (
             "0.0.0.0",
-            "remote.example",
-            Some("https://evil.example"),
+            "example.com",
+            Some("https://evil.example.com"),
             StatusCode::FORBIDDEN,
         ),
         (
@@ -588,7 +583,7 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         );
     }
 
-    guard.set("YORISHIRO_ALLOWED_ORIGINS", r#"["https://client.example"]"#);
+    guard.set("YORISHIRO_ALLOWED_ORIGINS", r#"["https://example.com"]"#);
     config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
     let service = StreamableHttpService::new(
         || Ok(EmptyServer),
@@ -614,7 +609,7 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         let response = server
             .method(axum::http::Method::OPTIONS, path)
             .add_header("Host", "localhost")
-            .add_header("Origin", "https://client.example")
+            .add_header("Origin", "https://example.com")
             .add_header("Access-Control-Request-Method", "POST")
             .add_header(
                 "Access-Control-Request-Headers",
@@ -624,11 +619,11 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         assert_eq!(response.status_code(), StatusCode::OK);
         assert_eq!(
             response.header("access-control-allow-origin"),
-            "https://client.example"
+            "https://example.com"
         );
         let denied = server
             .method(axum::http::Method::OPTIONS, path)
-            .add_header("Origin", "https://evil.example")
+            .add_header("Origin", "https://evil.example.com")
             .add_header("Access-Control-Request-Method", "POST")
             .await;
         assert!(!denied.headers().contains_key("access-control-allow-origin"));
@@ -636,21 +631,16 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
     let response = server
         .post("/mcp")
         .add_header("Host", "localhost")
-        .add_header("Origin", "https://client.example")
+        .add_header("Origin", "https://example.com")
         .await;
     assert_eq!(response.status_code(), StatusCode::NOT_ACCEPTABLE);
     let wrong_port = server
         .post("/mcp")
         .add_header("Host", "localhost")
-        .add_header("Origin", "https://client.example:8443")
+        .add_header("Origin", "https://example.com:8443")
         .await;
     assert_eq!(wrong_port.status_code(), StatusCode::FORBIDDEN);
-    for origin in [
-        "*",
-        "example.com",
-        "https://client.example:443/path",
-        "null",
-    ] {
+    for origin in ["*", "example.com", "https://example.com:443/path", "null"] {
         guard.set(
             "YORISHIRO_ALLOWED_ORIGINS",
             serde_json::to_string(&[origin]).unwrap(),
