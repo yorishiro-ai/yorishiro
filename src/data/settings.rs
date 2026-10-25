@@ -47,7 +47,7 @@ fn default_max_tenants() -> i32 {
 #[derive(Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Mcp {
-    /// Comma-separated exact Host values accepted in addition to loopback.
+    /// Comma-separated Host authorities accepted in addition to loopback and the bind address.
     pub(crate) allowed_hosts: Option<String>,
 }
 

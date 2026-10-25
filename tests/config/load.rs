@@ -483,3 +483,181 @@ async fn mcp_allowed_hosts_load_and_reject_wildcards() {
         "unexpected validation error: {error}"
     );
 }
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn mcp_network_policy_follows_binding_and_validates_origins() {
+    use axum::http::StatusCode;
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpService, session::local::LocalSessionManager,
+    };
+    use yorishiro::controllers::mcp::transport_config;
+
+    struct EmptyServer;
+    impl rmcp::ServerHandler for EmptyServer {}
+
+    let guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "BINDING",
+        "YORISHIRO_MCP_ALLOWED_HOSTS",
+        "YORISHIRO_ALLOWED_ORIGINS",
+    ]);
+    guard.set("DATABASE_URL", "sqlite:///tmp/mcp-policy.sqlite3?mode=rwc");
+    guard.set(
+        "QUEUE_URL",
+        "sqlite:///tmp/mcp-policy-queue.sqlite3?mode=rwc",
+    );
+    guard.remove("BINDING");
+    guard.remove("YORISHIRO_MCP_ALLOWED_HOSTS");
+    guard.remove("YORISHIRO_ALLOWED_ORIGINS");
+    let mut config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
+    assert_eq!(config.server.binding, "localhost");
+    let production = load(&Environment::Production).await.unwrap();
+    assert_eq!(production.server.binding, "localhost");
+
+    for (binding, host, origin, expected) in [
+        (
+            "localhost",
+            "localhost:5150",
+            None,
+            StatusCode::NOT_ACCEPTABLE,
+        ),
+        (
+            "127.0.0.1",
+            "127.0.0.1:5150",
+            None,
+            StatusCode::NOT_ACCEPTABLE,
+        ),
+        ("::1", "[::1]:5150", None, StatusCode::NOT_ACCEPTABLE),
+        (
+            "localhost",
+            "untrusted.example",
+            None,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "192.0.2.10",
+            "192.0.2.10:5150",
+            None,
+            StatusCode::NOT_ACCEPTABLE,
+        ),
+        ("192.0.2.10", "192.0.2.11:5150", None, StatusCode::FORBIDDEN),
+        (
+            "0.0.0.0",
+            "remote.example:5150",
+            None,
+            StatusCode::NOT_ACCEPTABLE,
+        ),
+        (
+            "::",
+            "remote.example:5150",
+            None,
+            StatusCode::NOT_ACCEPTABLE,
+        ),
+        (
+            "0.0.0.0",
+            "remote.example",
+            Some("https://evil.example"),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "localhost",
+            "localhost",
+            Some("null"),
+            StatusCode::FORBIDDEN,
+        ),
+    ] {
+        config.server.binding = binding.into();
+        let service = StreamableHttpService::new(
+            || Ok(EmptyServer),
+            LocalSessionManager::default().into(),
+            transport_config(&config).unwrap(),
+        );
+        let server =
+            loco_rs::TestServer::new(axum::Router::new().fallback_service(service)).unwrap();
+        let mut request = server.post("/").add_header("Host", host);
+        if let Some(origin) = origin {
+            request = request.add_header("Origin", origin);
+        }
+        let response = request.await;
+        assert_eq!(
+            response.status_code(),
+            expected,
+            "{binding} / {host} / {origin:?}"
+        );
+    }
+
+    guard.set("YORISHIRO_ALLOWED_ORIGINS", r#"["https://client.example"]"#);
+    config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
+    let service = StreamableHttpService::new(
+        || Ok(EmptyServer),
+        LocalSessionManager::default().into(),
+        transport_config(&config).unwrap(),
+    );
+    let cors = config
+        .server
+        .middlewares
+        .cors
+        .as_ref()
+        .unwrap()
+        .cors()
+        .unwrap();
+    let server = loco_rs::TestServer::new(
+        axum::Router::new()
+            .route("/rest", axum::routing::post(|| async { "ok" }))
+            .nest_service("/mcp", service)
+            .layer(cors),
+    )
+    .unwrap();
+    for path in ["/rest", "/mcp"] {
+        let response = server
+            .method(axum::http::Method::OPTIONS, path)
+            .add_header("Host", "localhost")
+            .add_header("Origin", "https://client.example")
+            .add_header("Access-Control-Request-Method", "POST")
+            .add_header(
+                "Access-Control-Request-Headers",
+                "authorization,mcp-session-id",
+            )
+            .await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+        assert_eq!(
+            response.header("access-control-allow-origin"),
+            "https://client.example"
+        );
+        let denied = server
+            .method(axum::http::Method::OPTIONS, path)
+            .add_header("Origin", "https://evil.example")
+            .add_header("Access-Control-Request-Method", "POST")
+            .await;
+        assert!(!denied.headers().contains_key("access-control-allow-origin"));
+    }
+    let response = server
+        .post("/mcp")
+        .add_header("Host", "localhost")
+        .add_header("Origin", "https://client.example")
+        .await;
+    assert_eq!(response.status_code(), StatusCode::NOT_ACCEPTABLE);
+    let wrong_port = server
+        .post("/mcp")
+        .add_header("Host", "localhost")
+        .add_header("Origin", "https://client.example:8443")
+        .await;
+    assert_eq!(wrong_port.status_code(), StatusCode::FORBIDDEN);
+    for origin in [
+        "*",
+        "ftp://client.example",
+        "https://client.example:443/path",
+        "null",
+    ] {
+        guard.set(
+            "YORISHIRO_ALLOWED_ORIGINS",
+            serde_json::to_string(&[origin]).unwrap(),
+        );
+        assert!(
+            load(&Environment::Any("test_sqlite".into())).await.is_err(),
+            "{origin}"
+        );
+    }
+}
