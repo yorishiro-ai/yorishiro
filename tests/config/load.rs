@@ -647,7 +647,7 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
     assert_eq!(wrong_port.status_code(), StatusCode::FORBIDDEN);
     for origin in [
         "*",
-        "ftp://client.example",
+        "example.com",
         "https://client.example:443/path",
         "null",
     ] {
