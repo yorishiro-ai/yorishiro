@@ -32,7 +32,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
         let put = request
             .put("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .json(&serde_json::json!({ "worker_class": "tenant_private" }))
+            .json(&serde_json::json!({ "worker_class": "shared" }))
             .await;
         assert_eq!(
             put.status_code(),
@@ -52,7 +52,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
             get.text()
         );
         let body: serde_json::Value = get.json();
-        assert_eq!(body["worker_class"], "tenant_private");
+        assert_eq!(body["worker_class"], "shared");
 
         let delete = request
             .delete("/api/workspace/worker-class")
@@ -74,9 +74,9 @@ async fn worker_class_set_get_and_clear_round_trip() {
     .await;
 }
 
-/// Re-`PUT`ting a different class replaces the assignment rather than erroring or adding a second row, matching the `ON CONFLICT` upsert `workspace_embedding_keys::set`/`workspace_llm_keys::set` both use.
+/// An undeclared destination is refused without replacing the existing assignment.
 #[tokio::test]
-async fn setting_a_new_class_replaces_the_old_one() {
+async fn an_unconfigured_target_preserves_the_old_assignment() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(
             &request,
@@ -91,7 +91,7 @@ async fn setting_a_new_class_replaces_the_old_one() {
         let first = request
             .put("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .json(&serde_json::json!({ "worker_class": "tenant_private" }))
+            .json(&serde_json::json!({ "worker_class": "shared" }))
             .await;
         assert_eq!(
             first.status_code(),
@@ -107,7 +107,7 @@ async fn setting_a_new_class_replaces_the_old_one() {
             .await;
         assert_eq!(
             second.status_code(),
-            StatusCode::NO_CONTENT,
+            StatusCode::UNPROCESSABLE_ENTITY,
             "response: {:?}",
             second.text()
         );
@@ -118,9 +118,57 @@ async fn setting_a_new_class_replaces_the_old_one() {
             .await;
         let body: serde_json::Value = get.json();
         assert_eq!(
-            body["worker_class"], "official",
-            "the second PUT must replace the first, not add a second row"
+            body["worker_class"], "shared",
+            "a refused assignment must leave the previous destination intact"
         );
+
+        let private = request
+            .put("/api/workspace/worker-class")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({ "worker_class": "tenant_private" }))
+            .await;
+        assert_eq!(private.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let mut configured = ctx.clone();
+        let mut settings = configured.config.settings::<serde_json::Value>().unwrap();
+        settings["worker_targets"] = serde_json::json!([
+            "worker-target:shared",
+            "worker-target:official",
+            format!("worker-target:tenant:{}", setup.tenant_id)
+        ]);
+        configured.config.settings = Some(settings);
+        let mut wrong_tenant = configured.clone();
+        let mut settings = wrong_tenant.config.settings::<serde_json::Value>().unwrap();
+        settings["worker_targets"] =
+            serde_json::json!([format!("worker-target:tenant:{}", uuid::Uuid::now_v7())]);
+        wrong_tenant.config.settings = Some(settings);
+        assert!(matches!(
+            yorishiro::edition::ee::models::workspace_worker_classes::set(
+                &wrong_tenant,
+                setup.workspace_id,
+                yorishiro::workers::embedding_sync::WorkerClass::TenantPrivate,
+            )
+            .await,
+            Err(yorishiro::YorishiroError::ValidationFailed { .. })
+        ));
+        for class in [
+            yorishiro::workers::embedding_sync::WorkerClass::Official,
+            yorishiro::workers::embedding_sync::WorkerClass::TenantPrivate,
+        ] {
+            yorishiro::edition::ee::models::workspace_worker_classes::set(
+                &configured,
+                setup.workspace_id,
+                class,
+            )
+            .await
+            .unwrap();
+            let get = request
+                .get("/api/workspace/worker-class")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .await;
+            let body: serde_json::Value = get.json();
+            assert_eq!(body["worker_class"], class.as_db_str());
+        }
     })
     .await;
 }

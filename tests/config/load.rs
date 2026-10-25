@@ -8,6 +8,45 @@ use super::EnvGuard;
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_WORKER_TARGETS"]);
+    guard.set(
+        "DATABASE_URL",
+        "sqlite:///tmp/worker-target-config.sqlite3?mode=rwc",
+    );
+    guard.set(
+        "QUEUE_URL",
+        "sqlite:///tmp/worker-target-queue.sqlite3?mode=rwc",
+    );
+    guard.remove("YORISHIRO_WORKER_TARGETS");
+    let config = load(&Environment::Development).await.unwrap();
+    let settings = config
+        .settings::<yorishiro::data::settings::Settings>()
+        .unwrap();
+    assert_eq!(settings.worker_targets, vec!["worker-target:shared"]);
+    guard.set(
+        "YORISHIRO_WORKER_TARGETS",
+        r#"["worker-target:shared","worker-target:official"]"#,
+    );
+    assert!(load(&Environment::Development).await.is_ok());
+    for value in [
+        "[]",
+        r#"["official"]"#,
+        r#"["worker-target:tenant:not-a-uuid"]"#,
+    ] {
+        guard.set("YORISHIRO_WORKER_TARGETS", value);
+        let error = load(&Environment::Development)
+            .await
+            .expect_err("invalid target declaration");
+        assert!(
+            error.to_string().contains("settings.worker_targets"),
+            "{error}"
+        );
+    }
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn development_uses_loco_environment_config_and_typed_settings() {
     let _guard = EnvGuard::capture(&[
         "DATABASE_URL",

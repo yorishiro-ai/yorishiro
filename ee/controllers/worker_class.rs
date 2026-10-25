@@ -18,6 +18,8 @@ use crate::edition::ee::dtos::worker_class::SetWorkerClassRequest;
 use crate::edition::ee::models::workspace_worker_classes::{self, WorkerClassAssignment};
 
 /// `PUT /api/workspace/worker-class`
+/// Requires the destination tag in `settings.worker_targets` and a separately running worker serving that tag.
+/// The deployment declaration does not guarantee that the worker is currently online.
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/worker-class", request_body = crate::edition::ee::controllers::openapi::WorkerClassRequest, responses((status = 204, description = "Worker class saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn set_worker_class(
     State(ctx): State<AppContext>,
@@ -26,7 +28,7 @@ async fn set_worker_class(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_worker_classes::set(&ctx.db, auth_ctx.workspace_id, body.worker_class).await?;
+    workspace_worker_classes::set(&ctx, auth_ctx.workspace_id, body.worker_class).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
