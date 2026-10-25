@@ -65,6 +65,7 @@ async fn queued(ctx: &AppContext, workspace: Uuid) -> bool {
 async fn a_workspace_stamped_with_another_model_is_queued_for_reindex() {
     boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
+        assert!(matches!(worker.environment, Environment::Test));
         startup_reindex::run(&worker).await;
         assert!(queued(&ctx, workspace).await);
         // Queue-routing observation: the default assignment must remain shared.
@@ -92,9 +93,22 @@ async fn a_workspace_already_on_the_configured_model_is_left_alone() {
 #[tokio::test]
 async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
     boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let workspace = TestTenant::create(&request, &ctx, TenantArgs::default())
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let workspace = tenant.workspace_id;
+        let matching_workspace = {
+            let transaction = ctx.db.begin().await.unwrap();
+            let workspace = yorishiro::models::tenancy::create_workspace(
+                &transaction,
+                tenant.tenant_id,
+                "matching-stamp-workspace",
+                None,
+                None,
+            )
             .await
-            .workspace_id;
+            .unwrap();
+            transaction.commit().await.unwrap();
+            workspace.id
+        };
         let old = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
             base_url: "http://unused.invalid".into(),
             api_key: "key".into(),
@@ -114,21 +128,27 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
                 send_dimensions_param: false,
             }));
         ctx.shared_store.insert(current);
+        let matching = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+            base_url: "http://unused.invalid".into(),
+            api_key: "key".into(),
+            model: "same-model".into(),
+            dimensions: 768,
+            send_dimensions_param: false,
+        });
+        yorishiro::models::entity_embeddings::reindex_workspace(
+            &ctx.db,
+            matching_workspace,
+            &[],
+            &matching,
+        )
+        .await
+        .unwrap();
         startup_reindex::run(&ctx).await;
         assert!(
             queued(&ctx, workspace).await,
             "width-only mismatch queues reindex"
         );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn model_change_remains_a_reindex_mismatch() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let (worker, _server, workspace) = scenario(&request, &ctx, "previous-model").await;
-        startup_reindex::run(&worker).await;
-        assert!(queued(&ctx, workspace).await);
+        assert!(!queued(&ctx, matching_workspace).await);
     })
     .await;
 }
@@ -159,18 +179,6 @@ async fn a_workspace_with_a_reindex_already_active_is_skipped() {
                 .unwrap(),
             1
         );
-    })
-    .await;
-}
-
-/// Test environments run the same finite startup scan as deployed workers.
-#[tokio::test]
-async fn test_environments_run_the_startup_scan() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
-        assert!(matches!(worker.environment, Environment::Test));
-        startup_reindex::run(&worker).await;
-        assert!(queued(&ctx, workspace).await);
     })
     .await;
 }

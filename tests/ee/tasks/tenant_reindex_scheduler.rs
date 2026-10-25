@@ -1,7 +1,7 @@
 use loco_rs::{app::Hooks, task::Tasks};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    TransactionTrait,
+    QuerySelect, QueryTrait, TransactionTrait,
 };
 use std::sync::Arc;
 use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
@@ -25,6 +25,8 @@ fn tenant_reindex_scheduler_is_registered_in_enterprise() {
 async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+        let mut ctx = ctx;
+        configure_deployment_metadata(&mut ctx);
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         set(&ctx.db, fixture.tenant_id, "PT6H", None).await.unwrap();
@@ -55,6 +57,43 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
         assert_eq!(next.to_utc(), due + chrono::Duration::hours(6));
 
         ctx.shared_store.insert(Arc::new(LicenceState::default()));
+        let task = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler;
+        let lifecycle_count = || {
+            yorishiro::models::queue_job_lifecycles::Entity::find()
+                .filter(
+                    yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
+                        .eq(fixture.workspace_id),
+                )
+                .filter(
+                    yorishiro::models::queue_job_lifecycles::Column::JobName.eq("startup_reindex"),
+                )
+        };
+        let outbox_count = || {
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+                .filter(
+                    yorishiro::models::_entities::queue_job_dispatch_outbox::Column::WorkspaceId
+                        .eq(fixture.workspace_id),
+                )
+                .filter(
+                    yorishiro::models::_entities::queue_job_dispatch_outbox::Column::Id
+                        .in_subquery(
+                            yorishiro::models::queue_job_lifecycles::Entity::find()
+                                .select_only()
+                                .column(yorishiro::models::queue_job_lifecycles::Column::Id)
+                                .filter(
+                                    yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
+                                        .eq(fixture.workspace_id),
+                                )
+                                .filter(
+                                    yorishiro::models::queue_job_lifecycles::Column::JobName
+                                        .eq("startup_reindex"),
+                                )
+                                .into_query(),
+                        ),
+                )
+        };
+        assert_eq!(lifecycle_count().count(&ctx.db).await.unwrap(), 0);
+        assert_eq!(outbox_count().count(&ctx.db).await.unwrap(), 0);
         let old = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
             base_url: "http://unused.invalid".into(),
             api_key: "secret".into(),
@@ -70,17 +109,13 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
         )
         .await
         .unwrap();
-        let current: Arc<dyn EmbeddingProvider> =
-            Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-                base_url: "http://unused.invalid".into(),
-                api_key: "secret".into(),
-                model: "current-model".into(),
-                dimensions: 768,
-                send_dimensions_param: false,
-            }));
-        ctx.shared_store.insert(current);
-        yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
-            .run_at(&ctx, &loco_rs::task::Vars::default(), due)
+        assert!(
+            ctx.shared_store
+                .get::<Arc<dyn EmbeddingProvider>>()
+                .is_none(),
+            "scheduler scan does not require a provider"
+        );
+        task.run_at(&ctx, &loco_rs::task::Vars::default(), due)
             .await
             .unwrap();
         assert!(
@@ -92,6 +127,13 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
             .await
             .unwrap()
         );
+        assert_eq!(lifecycle_count().count(&ctx.db).await.unwrap(), 1);
+        assert_eq!(outbox_count().count(&ctx.db).await.unwrap(), 1);
+        task.run_at(&ctx, &loco_rs::task::Vars::default(), due)
+            .await
+            .unwrap();
+        assert_eq!(lifecycle_count().count(&ctx.db).await.unwrap(), 1);
+        assert_eq!(outbox_count().count(&ctx.db).await.unwrap(), 1);
         assert_eq!(
             get(&ctx.db, fixture.tenant_id)
                 .await
@@ -106,102 +148,12 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
 }
 
 #[tokio::test]
-async fn repeated_metadata_scan_has_one_active_lifecycle_and_one_outbox_row() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let old = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-            base_url: "http://unused.invalid".into(),
-            api_key: "secret".into(),
-            model: "previous-model".into(),
-            dimensions: 768,
-            send_dimensions_param: false,
-        });
-        yorishiro::models::entity_embeddings::reindex_workspace(
-            &ctx.db,
-            fixture.workspace_id,
-            &[],
-            &old,
-        )
-        .await
-        .unwrap();
-        let current: Arc<dyn EmbeddingProvider> =
-            Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-                base_url: "http://unused.invalid".into(),
-                api_key: "secret".into(),
-                model: "current-model".into(),
-                dimensions: 768,
-                send_dimensions_param: false,
-            }));
-        ctx.shared_store.insert(current);
-        ctx.shared_store.insert(Arc::new(LicenceState::default()));
-        let task = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler;
-        task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
-            .await
-            .unwrap();
-        task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
-            .await
-            .unwrap();
-        assert_eq!(
-            yorishiro::models::queue_job_lifecycles::Entity::find()
-                .filter(
-                    yorishiro::models::queue_job_lifecycles::Column::JobName.eq("startup_reindex")
-                )
-                .filter(
-                    yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
-                        .eq(fixture.workspace_id)
-                )
-                .count(&ctx.db)
-                .await
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
-                .filter(
-                    yorishiro::models::_entities::queue_job_dispatch_outbox::Column::WorkspaceId
-                        .eq(fixture.workspace_id)
-                )
-                .count(&ctx.db)
-                .await
-                .unwrap(),
-            1
-        );
-        task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
-            .await
-            .unwrap();
-        assert!(
-            yorishiro::models::queue_job_lifecycles::Entity::has_active(
-                &ctx.db,
-                "startup_reindex",
-                fixture.workspace_id
-            )
-            .await
-            .unwrap()
-        );
-        assert_eq!(
-            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
-                .filter(
-                    yorishiro::models::_entities::queue_job_dispatch_outbox::Column::WorkspaceId
-                        .eq(fixture.workspace_id)
-                )
-                .count(&ctx.db)
-                .await
-                .unwrap(),
-            1
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        let mut ctx = ctx;
+        configure_deployment_metadata(&mut ctx);
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let provider = ctx.shared_store.remove::<Arc<dyn EmbeddingProvider>>();
-        assert!(provider.is_some());
-        let provider = provider.unwrap();
         let txn = ctx.db.begin().await.unwrap();
         yorishiro::edition::ee::models::workspace_embedding_keys::set(
             &txn,
@@ -226,8 +178,8 @@ async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider
         workspace.embedding_model = sea_orm::ActiveValue::Set(Some("previous-model".into()));
         workspace.embedding_dimensions = sea_orm::ActiveValue::Set(Some(768));
         workspace.update(&ctx.db).await.unwrap();
-        yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
-            .run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
+        let task = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler;
+        task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
             .await
             .unwrap();
         assert!(
@@ -239,7 +191,36 @@ async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider
             .await
             .unwrap()
         );
-        ctx.shared_store.insert(provider);
+        let before = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+            .filter(
+                yorishiro::models::_entities::queue_job_dispatch_outbox::Column::WorkspaceId
+                    .eq(fixture.workspace_id),
+            )
+            .count(&ctx.db)
+            .await
+            .unwrap();
+        task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+                .filter(
+                    yorishiro::models::_entities::queue_job_dispatch_outbox::Column::WorkspaceId
+                        .eq(fixture.workspace_id)
+                )
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            before
+        );
     })
     .await;
+}
+
+fn configure_deployment_metadata(ctx: &mut loco_rs::app::AppContext) {
+    let mut value = ctx.config.settings.as_ref().unwrap().clone();
+    value["embedding"]["provider"] = serde_json::json!("openai");
+    value["embedding"]["base_url"] = serde_json::json!("http://unused.invalid");
+    value["embedding"]["model"] = serde_json::json!("current-model");
+    ctx.config.settings = Some(value);
 }

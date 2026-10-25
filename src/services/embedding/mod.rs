@@ -14,6 +14,9 @@ pub struct EmbeddingMetadata {
 }
 
 /// Resolves deployment provider identity without loading local model files.
+///
+/// # Errors
+/// Returns an error when the configured provider metadata is incomplete or invalid.
 pub fn deployment_embedding_metadata(
     settings: &crate::data::settings::Settings,
 ) -> anyhow::Result<Option<EmbeddingMetadata>> {
