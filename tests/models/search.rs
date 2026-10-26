@@ -1308,7 +1308,7 @@ async fn reindex_switches_between_arbitrary_widths() {
         let other_workspace = yorishiro::models::tenancy::create_workspace(
             &transaction,
             fixture.tenant_id,
-            "other-width-workspace",
+            &format!("other-width-{}", uuid::Uuid::new_v4()),
             None,
             None,
         )
