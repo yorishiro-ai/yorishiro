@@ -3,7 +3,7 @@
 //! `YORISHIRO_EMBEDDING_PROVIDER=local` needs a safetensors checkpoint and its tokenizer, neither of which is in the repository: the model checkpoint is about 1.1 GB, which does not belong in git.
 //! Rather than making an operator fetch them by hand, the default path is fetched on first use and verified against a hardcoded digest.
 //!
-//! The model and tokenizer files live at `models/<short_id>/model.safetensors` and `models/<short_id>/tokenizer.json` for the selected model, or are fetched into `$HOME/.cache/yorishiro/models/<short_id>/` on first use when absent.
+//! The model and tokenizer files are fetched into `models/<short_id>/` on first use when absent.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -96,31 +96,15 @@ static NEXT_STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
 
 /// Where an auto-fetched model lives, scoped to `def` so two models' cached files can never collide or be mismatched with each other.
 ///
-/// Returns `None` when `HOME` does not resolve.
-/// The Docker image sets `HOME` for its service user for exactly this reason, but nothing here may assume that holds for every deployment: an operator running the binary directly, under a different supervisor, or in a container image of their own can still reach a user with no home.
-/// No guessed destination is used when HOME is missing.
-pub(crate) fn cache_dir(def: &LocalModelDef) -> Option<PathBuf> {
-    let home = crate::data::env::Env::Home.read_os()?;
-    if home.is_empty() {
-        return None;
-    }
-    Some(
-        PathBuf::from(home)
-            .join(".cache/yorishiro/models")
-            .join(def.short_id),
-    )
+pub(crate) fn cache_dir(def: &LocalModelDef) -> PathBuf {
+    PathBuf::from("models").join(def.short_id)
 }
 
 /// The model and tokenizer paths to load from, fetching either one first if it is absent.
 ///
-/// `Ok(None)` means the destination could not be resolved at all (no `HOME`), so the caller degrades rather than failing.
-/// `Err` means a fetch was attempted and failed, which fails the boot; see `super::build_local_provider` for why those two outcomes differ.
-pub(super) async fn ensure_model_files(
-    def: &LocalModelDef,
-) -> anyhow::Result<Option<(PathBuf, PathBuf)>> {
-    let Some(dir) = cache_dir(def) else {
-        return Ok(None);
-    };
+/// A failed fetch fails startup.
+pub(super) async fn ensure_model_files(def: &LocalModelDef) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let dir = cache_dir(def);
 
     let client = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -128,7 +112,7 @@ pub(super) async fn ensure_model_files(
         .build()?;
     let model = ensure_file(&dir, def, &def.model, &client).await?;
     let tokenizer = ensure_file(&dir, def, &def.tokenizer, &client).await?;
-    Ok(Some((model, tokenizer)))
+    Ok((model, tokenizer))
 }
 
 async fn ensure_file(

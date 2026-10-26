@@ -40,6 +40,14 @@ runs:
         toolchain: ${{ steps.resolve.outputs.toolchain }}
         components: ${{ inputs.components }}
 
+    - name: Use repository-local Cargo storage
+      shell: bash
+      run: |
+        echo "CARGO_HOME=$GITHUB_WORKSPACE/.cargo-cache" >> "$GITHUB_ENV"
+        echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
+        mkdir -p "$GITHUB_WORKSPACE/.cargo-cache/bin"
+        echo "$GITHUB_WORKSPACE/.cargo-cache/bin" >> "$GITHUB_PATH"
+
     - name: Add targets
       if: inputs.targets != ''
       shell: bash

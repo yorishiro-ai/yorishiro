@@ -105,11 +105,8 @@ services:
     #   volumes:
     #     - ./models:/app/models:ro
     #
-    # Not mounted by default because `models/` is gitignored, so docker would create it as an
-    # empty root-owned directory. That is not an error: with no files there the provider fetches
-    # the model on first use into $HOME/.cache/yorishiro/models instead, which blocks that first
-    # start while the model downloads. Both files or neither, though: exactly one present is a startup
-    # error rather than a partial fetch.
+    # Without a mount, the provider downloads verified files into /app/models on first use.
+    # A read-only mount must contain both files.
     ports:
       - "5150:5150"
     depends_on:

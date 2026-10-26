@@ -74,15 +74,14 @@ RUN mkdir -p /var/lib/yorishiro \
 # The image owns the canonical runtime configuration and loads it through LOCO_CONFIG_FOLDER.
 COPY config/production.yaml /app/config/production.yaml
 
-# Mount pinned artifacts under /app/models/<short_id> or fetch them into the home cache on first use.
+# Mount pinned artifacts under /app/models/<short_id> or fetch them there on first use.
 WORKDIR /app
 # The production configuration defaults SQLite state to /var/lib/yorishiro.
 # The directory is already created with root:yorishiro 1770 above.
 RUN chown -R yorishiro:yorishiro /app \
-    && mkdir -p /var/lib/yorishiro/state /home/yorishiro/.cache/yorishiro \
-    && chown -R yorishiro:yorishiro /var/lib/yorishiro/state /home/yorishiro/.cache/yorishiro
+    && mkdir -p /var/lib/yorishiro/state /app/models \
+    && chown -R yorishiro:yorishiro /var/lib/yorishiro/state /app/models
 
-# Automatic model fetching requires a writable home cache.
 ENV HOME=/home/yorishiro
 ENV LOCO_ENV=production
 ENV LOCO_CONFIG_FOLDER=/app/config

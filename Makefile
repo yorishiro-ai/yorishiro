@@ -8,6 +8,9 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
 export RUSTUP_TOOLCHAIN ?= $(shell sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+export CARGO_HOME := $(abspath .cargo-cache)
+export CARGO_TARGET_DIR := $(abspath target)
+export PATH := $(CARGO_HOME)/bin:$(PATH)
 
 coverage test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
 coverage test-postgres task doctor migrate entities: export LOCO_ENV = test_postgres
@@ -47,7 +50,7 @@ python-lint:
 	uv run scripts/test_ci_matrix.py
 	uv run scripts/test_classify_ci_changes.py
 	uv run scripts/test_topology_self.py
-	bash -n .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh
+	bash -n .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh
 
 edition-boundary-check:
 	uv run scripts/test_edition_boundary.py
@@ -112,21 +115,14 @@ migrate: build
 	./target/debug/yorishiro db migrate
 
 # Generate SeaORM entity structs from the current schema.
-# Starts a disposable pgvector/pgvector:pg18 container on port 15432,
-# runs migrations, generates entities, tears everything down.
+# Uses an isolated disposable PostgreSQL container without touching development databases.
 entities: build
 	@expected=$$(awk '/^name = "sea-orm-cli"$$/ { getline; gsub(/[^0-9.]/, ""); print; exit }' Cargo.lock); \
 	actual=$$(sea-orm-cli --version | awk '{print $$2}'); \
 	if [ "$$actual" != "$$expected" ]; then \
 		echo "ERROR: make entities requires sea-orm-cli $$expected from Cargo.lock, found $$actual; install the pinned CLI before regenerating" >&2; exit 1; \
 	fi
-	docker compose up -d --wait testdb
-	./target/debug/yorishiro db migrate
-	rm -f src/models/_entities/*.rs
-	@if echo '$(DATABASE_URL)' | grep -q '^sqlite://'; then echo "ERROR: entities requires PostgreSQL (DATABASE_URL must start with postgres://)" >&2; exit 1; fi
-	./target/debug/yorishiro db entities
-	uv run scripts/harden_generated_entities.py
-	docker compose down -v testdb
+	bash scripts/generate_entities.sh
 
 # CE is the base boundary. EE compatibility is checked separately after CE work is complete.
 patch-check:

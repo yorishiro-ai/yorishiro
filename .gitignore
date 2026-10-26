@@ -18,9 +18,11 @@
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
-.cargo-cache
+/.cargo-cache/*
+!/.cargo-cache/.gitkeep
 .worktrees/
-/models
+/models/*
+!/models/.gitkeep
 # `ee/web/` carries its own .gitignore for `dist/` and `node_modules/`, including the
 # `!dist/.gitkeep` exception the embed needs.
 
