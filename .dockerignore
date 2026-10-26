@@ -1,6 +1,8 @@
 .git
 .gitignore
 target
+models
+.cargo-cache
 dist
 tmp
 node_modules

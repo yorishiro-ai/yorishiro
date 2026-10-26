@@ -250,7 +250,7 @@ note "the systemd unit is valid"
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq systemd /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-  systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-scheduler.service 2>&1' 2>&1)
+  systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-jobs.service /lib/systemd/system/yorishiro-scheduler.service 2>&1' 2>&1)
 if [ -z "$(echo "$out" | grep -v '^$')" ]; then
   ok "systemd-analyze verify is silent on server and worker units"
 else
@@ -282,7 +282,7 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-  units="/lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-scheduler.service"
+  units="/lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-jobs.service /lib/systemd/system/yorishiro-scheduler.service"
   for unit in $units; do
     [ -f "$unit" ] || { echo "NO_UNIT:$unit"; exit 1; }
   done
@@ -339,6 +339,7 @@ else
   docker exec -d \
     -e DATABASE_URL="postgres://yorishiro:secret@pg-$$:5432/yorishiro" \
     -e HOST=http://127.0.0.1:5150 \
+    -e BINDING=127.0.0.1 \
     -e DB_CONNECT_TIMEOUT=5000 \
     "app-$$" bash -c \
     'cd /var/lib/yorishiro && exec su -s /bin/sh yorishiro -c \

@@ -84,14 +84,36 @@ impl WorkerRegistry {
         self
     }
 
-    /// Registers every worker with `queue`, in registration order.
+    /// Registers only this process role's handlers, in registration order.
     ///
     /// # Errors
     /// Returns the first registration error Loco reports.
     pub(crate) async fn connect(&self, ctx: &AppContext, queue: &Queue) -> Result<()> {
+        let role = ctx
+            .config
+            .settings::<crate::data::settings::Settings>()?
+            .consumer_role;
         for registration in &self.registrations {
+            let worker_role = if is_embedding_worker(&registration.class_name) {
+                crate::data::settings::ConsumerRole::Embedding
+            } else {
+                crate::data::settings::ConsumerRole::Jobs
+            };
+            if worker_role != role {
+                continue;
+            }
             (registration.connect)(ctx, queue).await?;
         }
         Ok(())
     }
+}
+
+pub(crate) fn is_embedding_worker(name: &str) -> bool {
+    [
+        EmbeddingSyncWorker::class_name(),
+        ReindexWorker::class_name(),
+        QueryEmbeddingWorker::class_name(),
+    ]
+    .iter()
+    .any(|embedding| embedding == name)
 }

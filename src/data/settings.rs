@@ -1,8 +1,20 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+/// Selects the handlers and resources a queue consumer owns.
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsumerRole {
+    #[default]
+    Embedding,
+    Jobs,
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    /// Internal process role selected from the CLI worker target.
+    #[serde(default)]
+    pub(crate) consumer_role: ConsumerRole,
     /// Deployment-declared worker target tags, not a live worker inventory.
     #[serde(default = "default_worker_targets")]
     pub worker_targets: Vec<String>,
@@ -28,6 +40,7 @@ fn default_worker_targets() -> Vec<String> {
 #[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Dispatch {
+    pub(crate) publish_concurrency: usize,
     pub(crate) poll_interval_ms: u64,
     pub(crate) claim_lease_seconds: u32,
     pub(crate) enqueue_timeout_ms: u64,
@@ -36,6 +49,7 @@ pub(crate) struct Dispatch {
 impl Default for Dispatch {
     fn default() -> Self {
         Self {
+            publish_concurrency: 4,
             poll_interval_ms: 500,
             claim_lease_seconds: 30,
             enqueue_timeout_ms: 5_000,

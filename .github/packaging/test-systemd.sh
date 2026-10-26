@@ -41,7 +41,7 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 # The container's PID 1 is systemd, so `docker logs` never carries the service's output.
-dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -u yorishiro-scheduler -n 40 --no-pager >&2; }
+dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -u yorishiro-jobs -u yorishiro-scheduler -n 40 --no-pager >&2; }
 
 DEB="$(basename "$PKG_FILE")"
 NET="ysr-sd-$$" APP="ysr-sd-app-$$" PG="ysr-sd-pg-$$"
@@ -90,6 +90,10 @@ execstart=$(docker exec "$APP" bash -c '
 [ "$execstart" = "ExecStart=/usr/bin/yorishiro start --worker=worker-target:shared" ] \
   && ok "yorishiro-worker.service serves the shared target" \
   || bad "yorishiro-worker.service has an unexpected ExecStart: $execstart"
+jobs_execstart=$(docker exec "$APP" grep -m1 "^ExecStart=" /lib/systemd/system/yorishiro-jobs.service 2>/dev/null)
+[ "$jobs_execstart" = "ExecStart=/usr/bin/yorishiro start --worker=job-target:shared" ] \
+  && ok "application jobs use a separate consumer" \
+  || bad "unexpected application job consumer: $jobs_execstart"
 docker exec "$APP" test ! -e /var/lib/yorishiro/worker-wrapper.sh \
   && ok "no worker wrapper is installed" \
   || bad "a worker wrapper is still installed at /var/lib/yorishiro/worker-wrapper.sh"
@@ -196,13 +200,13 @@ docker exec "$APP" systemctl reset-failed yorishiro >/dev/null 2>&1
 docker exec "$APP" systemctl start yorishiro >/dev/null 2>&1
 # Short timeout: no model fetch means a fast boot (~2-3 seconds).
 for _ in $(seq 1 20); do
-  docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
+  docker exec "$APP" curl --noproxy localhost -fsS http://localhost:5150/_ping >/dev/null 2>&1 && break
   sleep 3
 done
 
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
-  echo "ping=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:5150/_ping)"' 2>&1)
+  echo "ping=$(curl --noproxy localhost -s -o /dev/null -w %{http_code} http://localhost:5150/_ping)"' 2>&1)
 
 if grep -q 'active=active' <<<"$state"; then
   ok "the packaged SQLite service is active"
@@ -244,13 +248,13 @@ docker exec "$APP" systemctl set-environment \
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
-  systemctl enable yorishiro yorishiro-worker yorishiro-scheduler
+  systemctl enable yorishiro yorishiro-worker yorishiro-jobs yorishiro-scheduler
   systemctl restart yorishiro' >/dev/null 2>&1
 
 server_ready=
 # Wait for the server before starting the worker.
 for _ in $(seq 1 120); do
-  docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 \
+  docker exec "$APP" curl --noproxy localhost -fsS http://localhost:5150/_ping >/dev/null 2>&1 \
     && server_ready=1
   if [ -n "$server_ready" ]; then
     break
@@ -269,6 +273,12 @@ if [ -z "${worker_skipped:-}" ]; then
   docker exec "$APP" bash -c '
     systemctl reset-failed yorishiro-worker
     systemctl restart yorishiro-worker' >/dev/null 2>&1
+fi
+
+if [ -z "${worker_skipped:-}" ]; then
+  docker exec "$APP" bash -c '
+    systemctl reset-failed yorishiro-jobs
+    systemctl restart yorishiro-jobs' >/dev/null 2>&1
 fi
 
 if [ -z "${worker_skipped:-}" ]; then
@@ -296,39 +306,52 @@ fi
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
   echo "worker-active=$(systemctl is-active yorishiro-worker)"
+  echo "jobs-active=$(systemctl is-active yorishiro-jobs)"
   echo "scheduler-active=$(systemctl is-active yorishiro-scheduler)"
   echo "enabled=$(systemctl is-enabled yorishiro)"
   echo "worker-enabled=$(systemctl is-enabled yorishiro-worker)"
+  echo "jobs-enabled=$(systemctl is-enabled yorishiro-jobs)"
   echo "scheduler-enabled=$(systemctl is-enabled yorishiro-scheduler)"
-  echo "ping=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:5150/_ping)"' 2>&1)
+  echo "ping=$(curl --noproxy localhost -s -o /dev/null -w %{http_code} http://localhost:5150/_ping)"' 2>&1)
 
-grep -q 'active=active' <<<"$state" \
+grep -qx 'active=active' <<<"$state" \
   && ok "the service is active" \
   || bad "expected active, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
 if [ -n "${worker_skipped:-}" ]; then
   :
 elif [ -n "${worker_assertion_recorded:-}" ]; then
   :
-elif grep -q 'worker-active=active' <<<"$state"; then
+elif grep -qx 'worker-active=active' <<<"$state"; then
   ok "the worker is active"
 else
   bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
   dump_logs
 fi
-if [ -z "${worker_skipped:-}" ] && grep -q 'scheduler-active=active' <<<"$state"; then
+if [ -z "${worker_skipped:-}" ]; then
+  if grep -qx 'jobs-active=active' <<<"$state"; then
+    ok "the application jobs consumer is active"
+  else
+    bad "expected application jobs consumer active, got: $(grep -o 'jobs-active=[a-z-]*' <<<"$state")"
+    dump_logs
+  fi
+fi
+if [ -z "${worker_skipped:-}" ] && grep -qx 'scheduler-active=active' <<<"$state"; then
   ok "the scheduler is active"
 else
   [ -n "${worker_skipped:-}" ] || bad "expected scheduler active, got: $(grep -o 'scheduler-active=[a-z-]*' <<<"$state")"
 fi
-grep -q 'enabled=enabled' <<<"$state" \
+grep -qx 'enabled=enabled' <<<"$state" \
   && ok "the service is enabled" \
   || bad "expected enabled, got: $(grep -o 'enabled=[a-z-]*' <<<"$state")"
-grep -q 'worker-enabled=enabled' <<<"$state" \
+grep -qx 'worker-enabled=enabled' <<<"$state" \
   && ok "the worker is enabled" \
   || bad "expected worker enabled, got: $(grep -o 'worker-enabled=[a-z-]*' <<<"$state")"
-grep -q 'scheduler-enabled=enabled' <<<"$state" \
+grep -qx 'scheduler-enabled=enabled' <<<"$state" \
   && ok "the scheduler is enabled" \
   || bad "expected scheduler enabled, got: $(grep -o 'scheduler-enabled=[a-z-]*' <<<"$state")"
+grep -qx 'jobs-enabled=enabled' <<<"$state" \
+  && ok "the application jobs consumer is enabled" \
+  || bad "expected application jobs consumer enabled, got: $(grep -o 'jobs-enabled=[a-z-]*' <<<"$state")"
 grep -q 'ping=200' <<<"$state" \
   && ok "it answers /_ping" \
   || { bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"; dump_logs; }

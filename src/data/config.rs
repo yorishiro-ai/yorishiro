@@ -150,9 +150,12 @@ pub fn validate(config: &Config) -> Result<()> {
     }
     validate_query_embedding(&settings.query_embedding)?;
     let dispatch = settings.dispatch;
-    if dispatch.poll_interval_ms == 0 || dispatch.enqueue_timeout_ms == 0 {
+    if dispatch.poll_interval_ms == 0
+        || dispatch.enqueue_timeout_ms == 0
+        || dispatch.publish_concurrency == 0
+    {
         return Err(Error::Message(
-            "settings.dispatch poll_interval_ms and enqueue_timeout_ms must be greater than zero"
+            "settings.dispatch poll_interval_ms, enqueue_timeout_ms and publish_concurrency must be greater than zero"
                 .into(),
         ));
     }
@@ -206,13 +209,6 @@ pub fn validate_queue_policy(config: &Config) -> Result<()> {
             "BackgroundQueue requires a configured queue provider".into(),
         ));
     };
-    if let QueueConfig::Redis(redis) = queue
-        && (redis.connect_timeout == 0 || redis.response_timeout == 0)
-    {
-        return Err(Error::Message(
-            "Redis queue connect_timeout and response_timeout must be greater than zero".into(),
-        ));
-    }
     // Restrict the existing SQL providers only; future providers validate their own backend requirements.
     let sqlite_database = is_sqlite_uri(&config.database.uri);
     let mismatch = match queue {

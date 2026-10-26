@@ -40,7 +40,7 @@ async fn scenario(
         dimensions: 768,
         send_dimensions_param: true,
     });
-    yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &[], &previous)
+    yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &previous)
         .await
         .expect("stamp the previous deployed model through reindex");
     ctx.shared_store.insert(
@@ -116,7 +116,7 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
             dimensions: 1536,
             send_dimensions_param: false,
         });
-        yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &[], &old)
+        yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &old)
             .await
             .unwrap();
         let current: Arc<dyn EmbeddingProvider> =
@@ -138,7 +138,6 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
         yorishiro::models::entity_embeddings::reindex_workspace(
             &ctx.db,
             matching_workspace,
-            &[],
             &matching,
         )
         .await
@@ -153,34 +152,39 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
     .await;
 }
 
-/// An already-admitted startup scan wins the atomic admission without another queue delivery.
+/// Startup repair must not duplicate an explicit reindex that is already queued.
 #[tokio::test]
 async fn a_workspace_with_a_reindex_already_active_is_skipped() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
-        yorishiro::workers::reindex::enqueue_for_class(
-            &worker,
-            yorishiro::workers::reindex::ReindexArgs {
-                lifecycle_id: None,
-                worker_class: WorkerClass::Shared,
-                workspace_id: workspace,
-                startup: true,
-            },
-        )
-        .await
-        .expect("record an active reindex");
+    for startup in [false, true] {
+        boot_request_isolated::<App, _, _>(|request, ctx| async move {
+            let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
+            yorishiro::workers::reindex::enqueue_for_class(
+                &worker,
+                yorishiro::workers::reindex::ReindexArgs {
+                    lifecycle_id: None,
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: workspace,
+                    startup,
+                },
+            )
+            .await
+            .expect("record an active reindex");
 
-        startup_reindex::run(&worker).await;
-        assert_eq!(
-            Lifecycles::find()
-                .filter(yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(workspace))
-                .count(&ctx.db)
-                .await
-                .unwrap(),
-            1
-        );
-    })
-    .await;
+            startup_reindex::run(&worker).await;
+            startup_reindex::run_metadata_scan(&worker).await.unwrap();
+            assert_eq!(
+                Lifecycles::find()
+                    .filter(
+                        yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(workspace)
+                    )
+                    .count(&ctx.db)
+                    .await
+                    .unwrap(),
+                1
+            );
+        })
+        .await;
+    }
 }
 
 /// On PostgreSQL one replica scans at a time: while another holds the scan lock a starting worker skips, and once it is released the next start scans.

@@ -79,6 +79,8 @@ contents:
     dst: /lib/systemd/system/yorishiro.service
   - src: ./.github/packaging/yorishiro-worker.service
     dst: /lib/systemd/system/yorishiro-worker.service
+  - src: ./.github/packaging/yorishiro-jobs.service
+    dst: /lib/systemd/system/yorishiro-jobs.service
   - src: ./.github/packaging/yorishiro-scheduler.service
     dst: /lib/systemd/system/yorishiro-scheduler.service
   # Install a reference copy of the production defaults.

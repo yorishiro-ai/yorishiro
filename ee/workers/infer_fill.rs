@@ -273,7 +273,9 @@ impl InferFillWorker {
         let claim = if already_reconciled {
             Ok(true)
         } else if has_lifecycle {
-            let attempt = attempt.expect("lifecycle admission has an attempt");
+            let attempt = attempt.ok_or_else(|| {
+                loco_rs::Error::Message("lifecycle admission is missing its attempt".into())
+            })?;
             inference_jobs::reconcile_attempt(&self.ctx.db, job_id, attempt).await
         } else {
             inference_jobs::claim(&self.ctx.db, job_id).await
@@ -410,8 +412,8 @@ async fn defer_and_enqueue(
         lifecycle_id,
         payload,
         InferFillWorker::class_name(),
-        Some(target.queue()),
-        Some(vec![target.tag()]),
+        Some(target.job_tag()),
+        Some(vec![target.job_tag()]),
     )
     .await
     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;

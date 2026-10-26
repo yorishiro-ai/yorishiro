@@ -202,8 +202,8 @@ jobs:
         id: embedding-cache
         with:
           path: |
-            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
       - name: Reject an uncacheable fork pull request miss
@@ -214,7 +214,7 @@ jobs:
 
       - name: Prepare and verify multilingual-e5-base artifacts
         env:
-          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
           MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
           TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
@@ -225,8 +225,8 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: |
-            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
   test:
@@ -342,13 +342,13 @@ jobs:
         id: embedding-cache
         with:
           path: |
-            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
       - name: Verify populated multilingual-e5-base cache
         env:
-          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
           MODEL_URL: unused
           TOKENIZER_URL: unused
@@ -543,6 +543,7 @@ jobs:
           if-no-files-found: error
 
       - name: Run tests
+        id: topology-tests
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
@@ -559,7 +560,7 @@ jobs:
           RUSTC_BOOTSTRAP=1 uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- -Z unstable-options --report-time
 
       - name: Upload request phase timings
-        if: always()
+        if: always() && (steps.topology-tests.outcome == 'success' || steps.topology-tests.outcome == 'failure')
         uses: actions/upload-artifact@v7
         with:
           name: request-timings-${{ matrix.edition }}-${{ matrix.backend }}-${{ matrix.queue_key }}
@@ -589,7 +590,7 @@ jobs:
 
       - name: Verify embedding artifacts before cache save
         env:
-          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
           CACHE_HIT: "true"
           MODEL_URL: unused
           TOKENIZER_URL: unused

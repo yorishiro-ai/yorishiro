@@ -4,7 +4,6 @@ use futures::FutureExt;
 use loco_rs::app::{AppContext, Hooks};
 use sea_orm::{ConnectionTrait, EntityTrait};
 use uuid::Uuid;
-use yorishiro::workers::target::WorkerTarget;
 
 pub(crate) use super::boot_request_isolated as boot_request;
 
@@ -66,15 +65,10 @@ async fn finish_job(
         .unwrap()
         .unwrap();
     let tag = outbox.tags.unwrap()[0].as_str().unwrap().to_owned();
-    let target = WorkerTarget::parse_tag(&tag).unwrap();
-    let queue = super::query_worker::target_queue(ctx, target).await;
     let mut worker_ctx = ctx.clone();
-    worker_ctx.queue_provider = Some(queue.clone());
-    yorishiro::App::connect_workers(&worker_ctx, &queue)
-        .await
-        .expect("register production workers");
+    let queue = super::query_worker::queue_for_tag(&mut worker_ctx, tag.clone()).await;
     let running = queue.clone();
-    let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
+    let worker = tokio::spawn(async move { running.run(vec![tag]).await });
     let result =
         std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(20), async {
             loop {
@@ -98,7 +92,20 @@ async fn finish_job(
                 };
                 if matches!(status.as_str(), "completed" | "failed") {
                     assert_eq!(status, expected, "worker outcome");
-                    break;
+                    let directory = tempfile::tempdir().expect("queue result directory");
+                    let path = queue.dump(directory.path(), None, None).await.unwrap();
+                    let jobs: Vec<loco_rs::bgworker::Job> =
+                        serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+                    let expected_status = if expected == "failed" {
+                        loco_rs::bgworker::JobStatus::Failed
+                    } else {
+                        loco_rs::bgworker::JobStatus::Completed
+                    };
+                    if jobs.iter().any(|job| {
+                        job.data["lifecycle_id"] == id.to_string() && job.status == expected_status
+                    }) {
+                        break;
+                    }
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }

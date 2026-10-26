@@ -26,6 +26,20 @@ impl AppContextBackend for loco_rs::app::AppContext {
     }
 }
 
+fn connection_options(config: &loco_rs::config::Database) -> sea_orm::ConnectOptions {
+    let mut options = sea_orm::ConnectOptions::new(&config.uri);
+    options
+        .max_connections(config.max_connections)
+        .min_connections(config.min_connections)
+        .connect_timeout(std::time::Duration::from_millis(config.connect_timeout))
+        .idle_timeout(std::time::Duration::from_millis(config.idle_timeout))
+        .sqlx_logging(config.enable_logging);
+    if let Some(timeout) = config.acquire_timeout {
+        options.acquire_timeout(std::time::Duration::from_millis(timeout));
+    }
+    options
+}
+
 /// Builds the tenant pool and stores it with the existing identity pool in [`DbHandle`].
 ///
 /// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI).
@@ -46,7 +60,7 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
 /// Returns an error if the configured application pool cannot be opened.
 pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco_rs::Result<()> {
     let config = &ctx.config.database;
-    let mut options = loco_rs::db::connection_options(config);
+    let mut options = connection_options(config);
     let zone = crate::time::configured(ctx);
     if ctx.is_sqlite() {
         require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
@@ -303,7 +317,7 @@ impl TenantDb {
         config: &loco_rs::config::Database,
         timezone: String,
     ) -> Result<Self, sea_orm::sqlx::Error> {
-        let mut options = loco_rs::db::connection_options(config);
+        let mut options = connection_options(config);
         options.connect_lazy(true);
         postgres_session_options(&mut options, timezone, PoolRole::Tenant);
         let connection = sea_orm::Database::connect(options)
@@ -614,6 +628,12 @@ impl Drop for WorkspaceReindexLockGuard {
     }
 }
 
+/// The advisory lock namespace for reindexes, separate from entity quota locks.
+#[must_use]
+pub fn workspace_reindex_lock_key(workspace_id: Uuid) -> String {
+    format!("embedding-reindex:{workspace_id}")
+}
+
 /// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
 ///
 /// Acquires `pg_advisory_lock` on a bare pooled connection and detaches it. The lock is held
@@ -633,7 +653,8 @@ pub async fn acquire_workspace_reindex_lock(
 ) -> Result<WorkspaceReindexLockGuard, sea_orm::sqlx::Error> {
     let mut conn = pool.acquire().await?;
 
-    let key = workspace_id.to_string();
+    // Reindexes serialize with each other, not with entity quota locks during provider calls.
+    let key = workspace_reindex_lock_key(workspace_id);
     tracing::info!(%key, "waiting for workspace reindex lock");
 
     sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
@@ -660,7 +681,6 @@ pub async fn acquire_workspace_reindex_lock(
 pub async fn reindex_workspace_with_lock(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
-    candidate_ids: &[Uuid],
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
     let lock = if ctx.is_sqlite() {
@@ -681,13 +701,8 @@ pub async fn reindex_workspace_with_lock(
                 })?,
         )
     };
-    let outcome = crate::models::entity_embeddings::reindex_workspace(
-        &ctx.db,
-        workspace_id,
-        candidate_ids,
-        provider,
-    )
-    .await;
+    let outcome =
+        crate::models::entity_embeddings::reindex_workspace(&ctx.db, workspace_id, provider).await;
     if let Some(lock) = lock {
         let _ = lock.release().await;
     }

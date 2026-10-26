@@ -64,10 +64,8 @@ async fn provider() -> (
 }
 
 async fn deliver_stale_request(ctx: &AppContext, workspace_id: Uuid, request_id: Uuid) {
-    let queue = crate::requests::query_worker::shared_target_queue(ctx).await;
     let mut worker_ctx = ctx.clone();
-    worker_ctx.queue_provider = Some(queue.clone());
-    App::connect_workers(&worker_ctx, &queue).await.unwrap();
+    let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
     // Inject a late provider delivery after its caller's request is gone or expired.
     let provider_id = queue
         .enqueue(

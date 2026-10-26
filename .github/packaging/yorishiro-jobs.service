@@ -1,0 +1,33 @@
+# Enable with `systemctl enable --now yorishiro-jobs` alongside yorishiro.service.
+#
+# This unit serves the shared target, which is what a deployment without dedicated workers runs.
+# A worker serves the targets named after `--worker=`, separated by commas:
+#   job-target:shared
+#   job-target:official
+#   job-target:tenant:<tenant-id>
+# To serve others, or to add a process for one tenant, override ExecStart in a drop-in (`systemctl edit yorishiro-jobs`)
+# or copy this unit under another name.
+[Unit]
+Description=Yorishiro durable application jobs
+After=network.target yorishiro.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=yorishiro
+Group=yorishiro
+WorkingDirectory=/var/lib/yorishiro
+Environment=LOCO_ENV=production
+Environment=LOCO_CONFIG_FOLDER=/etc/yorishiro
+ExecStart=/usr/bin/yorishiro start --worker=job-target:shared
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yorishiro
+
+[Install]
+WantedBy=multi-user.target

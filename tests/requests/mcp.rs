@@ -964,14 +964,10 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
         );
         let calls = inputs.lock().unwrap().len();
         let (failed_provider, _failed_server) = unavailable_provider().await;
-        let reindex = entity_embeddings::reindex_workspace(
-            &ctx.db,
-            workspace_id,
-            &candidates,
-            failed_provider.as_ref(),
-        )
-        .await
-        .expect("record failed reindex");
+        let reindex =
+            entity_embeddings::reindex_workspace(&ctx.db, workspace_id, failed_provider.as_ref())
+                .await
+                .expect("record failed reindex");
         assert_eq!(reindex.failures.len(), candidates.len());
         let unavailable = mcp_call(
             &request,
@@ -996,14 +992,10 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
         assert_eq!(rest.status_code(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(rest.json::<Value>()["error"]["code"], "backend_unavailable");
         assert_eq!(inputs.lock().unwrap().len(), calls);
-        let recovered = entity_embeddings::reindex_workspace(
-            &ctx.db,
-            workspace_id,
-            &candidates,
-            provider.as_ref(),
-        )
-        .await
-        .expect("recover reindex");
+        let recovered =
+            entity_embeddings::reindex_workspace(&ctx.db, workspace_id, provider.as_ref())
+                .await
+                .expect("recover reindex");
         assert!(recovered.failures.is_empty());
         // The worker's provider is replaced by one that fails: the tool reports the worker's diagnostic.
         ctx.shared_store.insert(failed_provider);

@@ -20,8 +20,8 @@ runs:
       id: cache
       uses: actions/cache@v6
       with:
-        path: ~/.cargo/bin/sea-orm-cli
-        key: sea-orm-cli-${{ runner.os }}-${{ steps.version.outputs.version }}-postgres-vector-sqlx-postgres-sqlx-sqlite
+        path: ${{ env.CARGO_HOME }}/bin/sea-orm-cli
+        key: sea-orm-cli-local-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}-postgres-vector-sqlx-postgres-sqlx-sqlite
 
     - name: Install sea-orm-cli with postgres-vector feature
       if: steps.cache.outputs.cache-hit != 'true'

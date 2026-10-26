@@ -47,9 +47,15 @@ scheduler:
 #
 # This environment fixes the queue provider to PostgreSQL.
 # QUEUE_URL overrides the application DATABASE_URL for queue storage.
-# Missing SQL pool settings inherit the resolved database settings.
+# SQL pool settings are declared explicitly alongside database settings.
 queue:
   kind: Postgres
+
+  enable_logging: true
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
 
   # Postgres connection URI. Commonly the same value as DATABASE_URL.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
@@ -96,6 +102,7 @@ settings:
     sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
     poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
   dispatch:
+    publish_concurrency: <%= get_env(name="YORISHIRO_DISPATCH_PUBLISH_CONCURRENCY", default="4") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_DISPATCH_POLL_INTERVAL_MS", default="500") %>
     claim_lease_seconds: <%= get_env(name="YORISHIRO_DISPATCH_CLAIM_LEASE_SECS", default="30") %>
     enqueue_timeout_ms: <%= get_env(name="YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS", default="5000") %>

@@ -9,6 +9,37 @@ use yorishiro::edition::ee::models::tenant_reindex_schedules::{
 
 const TICK: i64 = 1_700_000_000;
 
+#[tokio::test]
+async fn schedules_validate_timezones_with_the_application_parser() {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+
+        let tenant =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        for invalid in ["", "Not/AZone"] {
+            assert!(
+                set(&ctx.db, tenant.tenant_id, "P1D", Some(invalid))
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(get(&ctx.db, tenant.tenant_id).await.unwrap().is_none());
+        set(&ctx.db, tenant.tenant_id, "P1D", Some(" Europe/London "))
+            .await
+            .unwrap();
+        assert_eq!(
+            get(&ctx.db, tenant.tenant_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .timezone
+                .as_deref(),
+            Some("Europe/London")
+        );
+    })
+    .await;
+}
+
 fn at(offset: i64) -> chrono::DateTime<Utc> {
     Utc.timestamp_opt(TICK + offset, 0).single().unwrap()
 }
@@ -57,7 +88,7 @@ async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
             .map(|(_, args)| args.workspace_id)
             .collect();
         // Missing workspaces exercise the real enqueue failure path without replacing dispatch.
-        let errors = dispatch_reindex_batch(&ctx, dispatches).await;
+        let errors = dispatch_reindex_batch(&ctx, dispatches, None).await;
         assert_eq!(errors.len(), 3);
         for workspace in workspaces {
             assert!(
@@ -82,13 +113,13 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
     .unwrap();
 
     assert!(message.starts_with("reindex scheduler dispatch failed for 2 workspace(s)"));
-    assert!(message.contains("interval is not retried"));
+    assert!(message.contains("schedule advancement rolled back"));
     assert!(message.contains("workspace one: enqueue failed"));
     assert!(message.contains("scheduler ownership release also failed: unlock failed"));
 }
 
 #[tokio::test]
-async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
+async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
     install_active_licence(&ctx);
     if !crate::require_sqlite_backend() { return; }
@@ -104,7 +135,7 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
             .unwrap();
     }
     transaction.commit().await.unwrap();
-    // Database fault injection: real enqueue must fail after schedule advancement.
+    // A failed outbox insert must roll back both schedule advancement and all jobs.
     ctx.db.execute_unprepared(
         "CREATE TRIGGER refuse_test_dispatch BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'test outbox unavailable'); END"
     ).await.unwrap();
@@ -130,13 +161,15 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     );
 
     let schedule = get(&ctx.db, tenant_id).await.unwrap().unwrap();
-    let expected: chrono::DateTime<chrono::FixedOffset> = (tick + chrono::Duration::days(1)).into();
+    let expected: chrono::DateTime<chrono::FixedOffset> = tick.into();
     assert_eq!(schedule.scheduled_for.unwrap(), expected);
 
+    ctx.db.execute_unprepared("DROP TRIGGER refuse_test_dispatch").await.unwrap();
     let second = task
         .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
         .await;
     assert!(second.is_ok());
+    assert_eq!(get(&ctx.db, tenant_id).await.unwrap().unwrap().scheduled_for.unwrap().to_utc(), tick + chrono::Duration::days(1));
 
     let ownership = yorishiro::edition::ee::db::acquire_scheduler_ownership(
         &ctx,

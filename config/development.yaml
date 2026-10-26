@@ -72,7 +72,7 @@ scheduler:
 #
 # YORISHIRO_QUEUE_KIND selects Redis, Sqlite or Postgres.
 # Without an explicit kind, the template selects SQLite for sqlite:// and PostgreSQL otherwise.
-# Missing SQL queue pool settings inherit the resolved database settings.
+# SQL queue pool settings are declared explicitly alongside database settings.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
 queue:
   kind: Redis
@@ -86,6 +86,12 @@ queue:
 queue:
   kind: Sqlite
 
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
+
   # Keep the queue in a separate file from the application database.
   # Two SQLite connection pools sharing one file can block dequeue transactions.
   uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro_queue.sqlite3?mode=rwc") %>
@@ -98,6 +104,12 @@ queue:
 <% else %>
 queue:
   kind: Postgres
+
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
 
   # Use QUEUE_URL when set, otherwise use the application DATABASE_URL.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro_development")) %>
@@ -143,6 +155,7 @@ settings:
     sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
     poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
   dispatch:
+    publish_concurrency: <%= get_env(name="YORISHIRO_DISPATCH_PUBLISH_CONCURRENCY", default="4") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_DISPATCH_POLL_INTERVAL_MS", default="500") %>
     claim_lease_seconds: <%= get_env(name="YORISHIRO_DISPATCH_CLAIM_LEASE_SECS", default="30") %>
     enqueue_timeout_ms: <%= get_env(name="YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS", default="5000") %>

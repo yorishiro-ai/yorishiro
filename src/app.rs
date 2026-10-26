@@ -43,16 +43,8 @@ pub(crate) async fn load_config(env: &Environment) -> Result<Config> {
     let mut config = crate::data::config::load(env).await?;
     let start = crate::workers::start::worker_start_from_args(std::env::args_os())
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    serve_start(start, &mut config);
+    crate::workers::start::configure_start(&mut config, start);
     Ok(config)
-}
-
-/// Makes a Redis queue poll the queue of each target a start serves.
-fn serve_start(start: crate::workers::start::WorkerStart, config: &mut Config) {
-    if let crate::workers::start::WorkerStart::Targets(targets) = start {
-        let queues: Vec<String> = targets.iter().map(|target| target.queue()).collect();
-        crate::data::config::serve_worker_queues(config, &queues);
-    }
 }
 
 /// Validates the queue policy and the worker targets, then boots through Loco as `H`.
@@ -67,9 +59,7 @@ pub(crate) async fn boot<H: Hooks>(
     mut config: Config,
 ) -> Result<BootResult> {
     crate::data::config::validate(&config)?;
-    let start = crate::workers::start::worker_start_from_mode(&mode)
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    serve_start(start, &mut config);
+    crate::workers::start::configure(&mut config, &mode)?;
     // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
     // The call site in main.rs already covers all CLI subcommands.
     crate::db::register_sqlite_extensions();
@@ -340,10 +330,18 @@ pub(crate) async fn connect_workers(
     queue: &loco_rs::bgworker::Queue,
     workers: &WorkerRegistry,
 ) -> Result<()> {
-    initializers::embedding::install_provider(ctx).await?;
+    let role = ctx
+        .config
+        .settings::<crate::data::settings::Settings>()?
+        .consumer_role;
+    if role == crate::data::settings::ConsumerRole::Embedding {
+        initializers::embedding::install_provider(ctx).await?;
+    }
     workers.connect(ctx, queue).await?;
     initializers::queue::start_relay(ctx)?;
-    crate::workers::startup_reindex::run(ctx).await;
+    if role == crate::data::settings::ConsumerRole::Embedding {
+        crate::workers::startup_reindex::run(ctx).await;
+    }
     Ok(())
 }
 

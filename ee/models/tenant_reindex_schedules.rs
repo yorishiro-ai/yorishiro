@@ -4,7 +4,7 @@
 //! not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table,
 //! matching `workspace_embedding_keys` and `workspace_llm_keys`.
 //!
-//! A scheduler row tells the deployment-wide ticker (started in `Hooks::after_context`)
+//! A scheduler row tells the deployment-wide Loco scheduled task
 //! to enqueue a reindex for every workspace under this tenant on each tick.
 //! A tenant with no row is not scheduled.
 //!
@@ -18,9 +18,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_reindex_schedules::{ActiveModel, Column, Entity};
 use loco_rs::prelude::*;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait,
-};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 /// The shortest interval a schedule may name, so a typo cannot make every workspace of a tenant reindex every few seconds.
@@ -85,23 +83,12 @@ pub async fn set(
         });
     }
 
-    // Validate timezone if provided.
     if let Some(tz) = timezone {
-        if tz.trim().is_empty() {
-            return Err(YorishiroError::ValidationFailed {
-                message: "timezone must not be empty if provided".into(),
-                details: vec![],
-                hint: "IANA time zone name, e.g. Asia/Tokyo or UTC. Omit to use UTC.".into(),
-            });
-        }
-        // Basic check: IANA tz names contain at least one "/".
-        if !tz.contains('/') && tz != "UTC" && tz != "Etc/UTC" {
-            return Err(YorishiroError::ValidationFailed {
-                message: format!("timezone {tz:?} does not look like a valid IANA time zone name"),
-                details: vec![],
-                hint: "Use names like Asia/Tokyo, America/New_York, or UTC.".into(),
-            });
-        }
+        crate::time::parse_timezone(tz.trim()).map_err(|_| YorishiroError::ValidationFailed {
+            message: format!("timezone {tz:?} is not a recognized IANA time zone"),
+            details: vec![],
+            hint: "Use an IANA time zone name recognized by the application.".into(),
+        })?;
     }
 
     let Some(every) = parse_interval(interval) else {
@@ -184,16 +171,14 @@ pub(crate) async fn tick(
     use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
     use crate::workers::reindex::ReindexArgs;
 
-    // Ownership is held on a detached PostgreSQL session or an OS file handle through every
-    // queue dispatch. The schedule transaction is separate so dispatch cannot hold a DB
-    // transaction open, and the guard is released explicitly after the final dispatch.
-    let mut ownership = match crate::edition::ee::db::acquire_scheduler_ownership(
+    // Ownership serializes ticks; the transaction records schedules and outbox rows together.
+    let ownership = match crate::edition::ee::db::acquire_scheduler_ownership(
         app_context,
         "yorishiro:tenant-reindex-scheduler",
     )
     .await
     {
-        Ok(Some(ownership)) => Some(ownership),
+        Ok(Some(ownership)) => ownership,
         Ok(None) => {
             tracing::info!(
                 ownership_key = "yorishiro:tenant-reindex-scheduler",
@@ -215,16 +200,15 @@ pub(crate) async fn tick(
             "sqlite"
         },
         ownership_lock_path = ownership
-            .as_ref()
-            .and_then(crate::edition::ee::db::SchedulerOwnership::sqlite_path)
+            .sqlite_path()
             .map(|path| path.display().to_string()),
         "reindex scheduler tick ownership acquired"
     );
 
-    let txn = match app_context.db.begin().await {
+    let txn = match crate::db::begin_write(&app_context.db).await {
         Ok(txn) => txn,
         Err(err) => {
-            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let _ = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(format!(
                 "scheduler ownership transaction: {err}"
             )));
@@ -234,7 +218,7 @@ pub(crate) async fn tick(
         Ok(schedules) => schedules,
         Err(err) => {
             let _ = txn.rollback().await;
-            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let _ = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(err.to_string()));
         }
     };
@@ -254,7 +238,7 @@ pub(crate) async fn tick(
             .and_then(|every| tick.checked_add_signed(every));
         let Some(next) = next else {
             let _ = txn.rollback().await;
-            let release = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let release = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(format!(
                 "invalid stored reindex interval for tenant {}: {:?}; ownership release: {release:?}",
                 schedule.tenant_id, schedule.interval
@@ -270,7 +254,7 @@ pub(crate) async fn tick(
             Ok(workspaces) => workspaces,
             Err(err) => {
                 let _ = txn.rollback().await;
-                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+                let _ = release_scheduler_ownership(ownership).await;
                 return Err(Error::Message(err.to_string()));
             }
         };
@@ -284,12 +268,12 @@ pub(crate) async fn tick(
             {
                 Ok(worker_class) => worker_class,
                 Err(err) => {
-                    tracing::warn!(
-                        workspace_id = %ws.id,
-                        error = %err.0,
-                        "reindex scheduler: failed to resolve worker class, skipping workspace"
-                    );
-                    continue;
+                    let _ = txn.rollback().await;
+                    let release = release_scheduler_ownership(ownership).await;
+                    return Err(Error::Message(format!(
+                        "reindex scheduler: workspace {} target resolution failed: {}; ownership release: {release:?}",
+                        ws.id, err.0
+                    )));
                 }
             };
             let args = ReindexArgs {
@@ -301,25 +285,35 @@ pub(crate) async fn tick(
             dispatches.push((schedule.tenant_id, args));
         }
 
-        // Advance before dispatch for the deliberate at-most-once policy. A crash or queue
-        // failure after this commit loses the current interval until the next one.
+        // This update commits only if every durable dispatch is recorded successfully.
         let mut active = schedule.clone().into_active_model();
         active.scheduled_for = ActiveValue::Set(Some(next.into()));
         active.updated_at = ActiveValue::Set(tick.into());
         if let Err(err) = active.update(&txn).await {
             let _ = txn.rollback().await;
-            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let _ = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(err.to_string()));
         }
     }
 
+    let dispatch_errors = dispatch_reindex_batch(app_context, dispatches, Some(&txn)).await;
+    if !dispatch_errors.is_empty() {
+        let _ = txn.rollback().await;
+        let release_error = release_scheduler_ownership(ownership).await;
+        return Err(Error::Message(
+            scheduler_failure_message(
+                &dispatch_errors,
+                release_error.as_ref().err().map(String::as_str),
+            )
+            .unwrap_or_else(|| "reindex scheduler durable dispatch failed".into()),
+        ));
+    }
     if let Err(err) = txn.commit().await {
-        let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+        let _ = release_scheduler_ownership(ownership).await;
         return Err(Error::Message(format!("scheduler ownership commit: {err}")));
     }
 
-    let dispatch_errors = dispatch_reindex_batch(app_context, dispatches).await;
-    let release_error = release_scheduler_ownership(ownership.take().unwrap()).await;
+    let release_error = release_scheduler_ownership(ownership).await;
     if let Some(message) = scheduler_failure_message(
         &dispatch_errors,
         release_error.as_ref().err().map(String::as_str),
@@ -340,7 +334,7 @@ pub fn scheduler_failure_message(
     }
 
     let mut message = format!(
-        "reindex scheduler dispatch failed for {} workspace(s) after schedule advancement; interval is not retried: {}",
+        "reindex scheduler dispatch failed for {} workspace(s); schedule advancement rolled back: {}",
         dispatch_errors.len(),
         dispatch_errors.join("; ")
     );
@@ -353,16 +347,17 @@ pub fn scheduler_failure_message(
 pub async fn dispatch_reindex_batch(
     app_context: &AppContext,
     dispatches: Vec<(Uuid, crate::workers::reindex::ReindexArgs)>,
+    txn: Option<&sea_orm::DatabaseTransaction>,
 ) -> Vec<String> {
     let mut dispatch_errors = Vec::new();
     for (tenant_id, args) in dispatches {
         let workspace_id = args.workspace_id;
-        if let Err(err) = crate::workers::reindex::enqueue_for_class(app_context, args).await {
+        if let Err(err) = crate::workers::dispatch::dispatch_reindex(app_context, args, txn).await {
             tracing::warn!(
                 tenant_id = %tenant_id,
                 workspace_id = %workspace_id,
                 error = %err,
-                "reindex scheduler: dispatch failed after schedule advancement"
+                "reindex scheduler: durable dispatch failed"
             );
             dispatch_errors.push(format!("workspace {workspace_id}: {err}"));
         } else {

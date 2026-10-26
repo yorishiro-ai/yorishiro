@@ -11,6 +11,24 @@ fn tenant(id: &str) -> WorkerTarget {
 }
 
 #[test]
+fn job_targets_are_separate_and_preserve_tenant_validation() {
+    for target in [
+        WorkerTarget::Shared,
+        WorkerTarget::Official,
+        tenant(TENANT_A),
+    ] {
+        assert_ne!(target.tag(), target.job_tag());
+        assert_eq!(WorkerTarget::parse_job_tag(&target.job_tag()), Ok(target));
+        assert!(WorkerTarget::parse_tag(&target.job_tag()).is_err());
+        assert!(WorkerTarget::parse_job_tag(&target.tag()).is_err());
+    }
+    assert!(
+        WorkerTarget::parse_job_tag("job-target:tenant:0198F3A0-0000-7000-8000-00000000000A")
+            .is_err()
+    );
+}
+
+#[test]
 fn each_target_has_one_tag_class_and_concurrency_key() {
     assert_eq!(WorkerTarget::Shared.tag(), "worker-target:shared");
     assert_eq!(WorkerTarget::Shared.class(), WorkerClass::Shared);
@@ -32,18 +50,6 @@ fn each_target_has_one_tag_class_and_concurrency_key() {
     );
 }
 
-/// Redis keeps one queue per target so that a backlog for one target cannot hide the jobs of another from the first 1000 entries a worker scans.
-#[test]
-fn a_targets_queue_is_its_tag() {
-    for target in [
-        WorkerTarget::Shared,
-        WorkerTarget::Official,
-        tenant(TENANT_A),
-    ] {
-        assert_eq!(target.queue(), target.tag());
-    }
-}
-
 #[test]
 fn a_tag_reads_back_into_the_target_that_wrote_it() {
     for target in [
@@ -53,6 +59,7 @@ fn a_tag_reads_back_into_the_target_that_wrote_it() {
         WorkerTarget::Tenant(Uuid::now_v7()),
     ] {
         assert_eq!(WorkerTarget::parse_tag(&target.tag()), Ok(target));
+        assert_eq!(target.queue(), target.tag());
     }
 }
 
@@ -160,8 +167,6 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
     let mut config = crate::sqlite_fixture_config("sqlite::memory:");
     config.queue = Some(QueueConfig::Redis(RedisQueueConfig {
         uri: "redis://localhost:6379/15".into(),
-        connect_timeout: 10_000,
-        response_timeout: 5_000,
         dangerously_flush: false,
         queues: None,
         num_workers: 1,
@@ -183,6 +188,39 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
             format!("worker-target:tenant:{TENANT_A}"),
         ])
     );
+}
+
+#[test]
+fn production_start_configuration_selects_roles_and_rejects_mixed_targets() {
+    use loco_rs::boot::StartMode;
+    use yorishiro::workers::start::configure;
+
+    let mut config = crate::sqlite_fixture_config("sqlite::memory:");
+    for (tag, role) in [
+        ("job-target:shared", "jobs"),
+        ("worker-target:shared", "embedding"),
+    ] {
+        configure(
+            &mut config,
+            &StartMode::WorkerOnly {
+                tags: vec![tag.into()],
+            },
+        )
+        .unwrap();
+        assert_eq!(config.settings.as_ref().unwrap()["consumer_role"], role);
+    }
+    let before = config.settings.clone();
+    assert!(
+        configure(
+            &mut config,
+            &StartMode::WorkerOnly {
+                tags: vec!["job-target:shared".into(), "worker-target:shared".into()],
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(config.settings, before);
+    assert!(configure(&mut config, &StartMode::WorkerOnly { tags: vec![] }).is_err());
 }
 
 /// Target keys group a tenant's workspaces, while shared and official keys span the deployment; limits are opt-in.

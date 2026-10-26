@@ -75,7 +75,7 @@ async fn recover_pending_on_while(
     };
     // Bound provider pressure while letting unrelated deliveries pass a slow publish.
     let keep_running = &keep_running;
-    stream::iter(pending).for_each_concurrent(4, |row| async move {
+    stream::iter(pending).for_each_concurrent(timing.publish_concurrency, |row| async move {
         if !keep_running() {
             return;
         }
@@ -255,9 +255,14 @@ pub(crate) async fn dispatch_job(
     } else {
         None
     };
-    let txn = caller_txn
-        .or(owned_txn.as_ref())
-        .expect("one transaction exists");
+    let txn = caller_txn.or(owned_txn.as_ref()).ok_or_else(|| {
+        loco_rs::Error::Message("dispatch requires a recording transaction".into())
+    })?;
+    let tag = if super::registry::is_embedding_worker(&spec.worker_name) {
+        target.tag()
+    } else {
+        target.job_tag()
+    };
     crate::models::queue_job_dispatch_outbox::record_in_transaction(
         txn,
         Enqueue {
@@ -271,8 +276,8 @@ pub(crate) async fn dispatch_job(
         },
         payload,
         spec.worker_name,
-        Some(target.queue()),
-        Some(vec![target.tag()]),
+        Some(tag.clone()),
+        Some(vec![tag]),
     )
     .await
     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;

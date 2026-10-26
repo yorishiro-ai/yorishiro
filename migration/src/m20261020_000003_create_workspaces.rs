@@ -24,6 +24,18 @@ impl MigrationTrait for Migration {
             )
             .col(ColumnDef::new(Alias::new("embedding_model")).text())
             .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
+            .col(
+                ColumnDef::new(Alias::new("embedding_content_revision"))
+                    .big_integer()
+                    .not_null()
+                    .default(0),
+            )
+            .col(
+                ColumnDef::new(Alias::new("embedding_revision"))
+                    .big_integer()
+                    .not_null()
+                    .default(0),
+            )
             .col(helpers::uuid_col(manager, Alias::new("schema_id")))
             .col(helpers::created_at(manager))
             .col(

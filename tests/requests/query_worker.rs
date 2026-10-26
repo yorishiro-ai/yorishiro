@@ -18,25 +18,46 @@ use yorishiro::workers::target::WorkerTarget;
 
 use super::boot_request_isolated;
 
-/// The queue a worker for the shared target runs on.
+/// Configures and registers a shared-target consumer through Loco, without starting its loop.
 ///
 /// A Redis worker polls only the queues its configuration names, which `yorishiro start --worker=...` fills in from the targets it serves.
-/// The booted test app is a server, so for Redis this builds the provider a worker process would have, over the same database.
-pub(crate) async fn shared_target_queue(ctx: &AppContext) -> Arc<loco_rs::bgworker::Queue> {
+/// Updates the worker context before building its queue and running Loco's worker boot hooks over the already migrated database.
+pub(crate) async fn shared_target_queue(ctx: &mut AppContext) -> Arc<loco_rs::bgworker::Queue> {
     target_queue(ctx, WorkerTarget::Shared).await
 }
 
 pub(crate) async fn target_queue(
-    ctx: &AppContext,
+    ctx: &mut AppContext,
     target: WorkerTarget,
 ) -> Arc<loco_rs::bgworker::Queue> {
-    let mut config = ctx.config.clone();
-    yorishiro::data::config::serve_worker_queues(&mut config, &[target.queue()]);
-    let queue = loco_rs::bgworker::create_queue_provider(&config)
+    queue_for_tag(ctx, target.queue()).await
+}
+
+#[cfg(feature = "enterprise")]
+pub(crate) async fn job_target_queue(
+    ctx: &mut AppContext,
+    target: WorkerTarget,
+) -> Arc<loco_rs::bgworker::Queue> {
+    queue_for_tag(ctx, target.job_tag()).await
+}
+
+pub(crate) async fn queue_for_tag(
+    ctx: &mut AppContext,
+    tag: String,
+) -> Arc<loco_rs::bgworker::Queue> {
+    let mode = loco_rs::boot::StartMode::WorkerOnly { tags: vec![tag] };
+    yorishiro::workers::start::configure(&mut ctx.config, &mode)
+        .expect("configure production worker role");
+    let queue = loco_rs::bgworker::create_queue_provider(&ctx.config)
         .await
         .expect("create worker queue")
         .expect("background queue mode");
     queue.setup().await.expect("set up worker queue");
+    ctx.queue_provider = Some(queue.clone());
+    let boot = loco_rs::boot::run_app::<App>(&mode, ctx.clone())
+        .await
+        .expect("boot production worker through Loco");
+    *ctx = boot.app_context;
     queue
 }
 
@@ -65,12 +86,8 @@ pub(crate) async fn boot_with_query_worker_and_drain<F, Fut, D, Done>(
 {
     let run = move |request: TestServer, ctx: AppContext| async move {
         ctx.shared_store.insert(provider);
-        let queue = shared_target_queue(&ctx).await;
         let mut worker_ctx = ctx.clone();
-        worker_ctx.queue_provider = Some(queue.clone());
-        App::connect_workers(&worker_ctx, &queue)
-            .await
-            .expect("connect production workers and dispatch relay");
+        let queue = shared_target_queue(&mut worker_ctx).await;
         let running = queue.clone();
         let worker =
             tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });

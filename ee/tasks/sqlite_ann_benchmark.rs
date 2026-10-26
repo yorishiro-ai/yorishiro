@@ -30,7 +30,6 @@ use crate::models::_entities::entity_entities::Column as EntityColumn;
 use crate::models::entity_entities;
 use crate::models::search::SearchHit;
 use crate::models::search::SearchRow;
-use crate::models::search::resolve_search_table;
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use sea_orm::FromQueryResult;
@@ -81,31 +80,22 @@ impl Task for SqliteAnnBenchmark {
             Err(_) => 200,
         };
 
-        // Resolve the correct width-partitioned table for this workspace.
-        let (_dimension, table_name) = resolve_search_table(&ctx.db, workspace_id)
-            .await
-            .map_err(|e| Error::Message(e.to_string()))?;
+        let table_name = crate::models::entity_embeddings::TABLE.to_owned();
 
         // Count entities with embeddings in this workspace.
-        let count = Query::select()
-            .expr(sea_orm::sea_query::Func::count(Expr::col(Asterisk)))
-            .from_as(Alias::new(&table_name), Alias::new("ee"))
-            .join_as(
+        use crate::models::_entities::entity_embeddings;
+        use sea_orm::{
+            ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+        };
+        let entity_count = entity_embeddings::Entity::find()
+            .join(
                 JoinType::InnerJoin,
-                entity_entities::Entity,
-                Alias::new("e"),
-                Expr::col((Alias::new("e"), EntityColumn::Id))
-                    .equals((Alias::new("ee"), Alias::new("entity_id"))),
+                entity_embeddings::Relation::EntityEntities.def(),
             )
-            .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
-            .and_where(Expr::col((Alias::new("ee"), Alias::new("embedding"))).is_not_null())
-            .to_owned();
-        let entity_count: i64 = ctx
-            .db
-            .query_one_raw(ctx.db.get_database_backend().build(&count))
-            .await?
-            .ok_or_else(|| Error::Message("embedding count returned no row".into()))?
-            .try_get_by_index(0)?;
+            .filter(EntityColumn::WorkspaceId.eq(workspace_id))
+            .filter(entity_embeddings::Column::Embedding.is_not_null())
+            .count(&ctx.db)
+            .await?;
         let entity_count = usize::try_from(entity_count)
             .map_err(|_| Error::Message("embedding count exceeds platform limits".into()))?;
 

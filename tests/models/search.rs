@@ -175,7 +175,7 @@ async fn fixed_width_provider(
         "/embeddings",
         axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| async move {
             let data = body["input"].as_array().unwrap().iter().enumerate()
-                .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; width]}))
+                .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![1.0_f32; width]}))
                 .collect::<Vec<_>>();
             axum::Json(serde_json::json!({"data": data}))
         }),
@@ -233,7 +233,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             ..
         } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         let (stamp_provider, _stamp_server) = fixed_width_provider(768).await;
-        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[], &stamp_provider)
+        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &stamp_provider)
             .await
             .expect("stamp workspace through reindex");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
@@ -271,10 +271,9 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             "result: {result:?}"
         );
 
-        let stored = entity_embeddings::Entity768::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find_by_id(entity.id)
             .filter(
-                yorishiro::models::_entities::entity_embeddings_768::Column::Embedding
-                    .is_not_null(),
+                yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
             .exists(&ctx.db)
             .await
@@ -343,7 +342,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
         } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         let (stamp_provider, _stamp_server) =
             model_provider("nomic-ai/nomic-embed-text-v1.5").await;
-        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[], &stamp_provider)
+        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &stamp_provider)
             .await
             .expect("stamp workspace through reindex");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
@@ -382,10 +381,9 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             "result: {result:?}"
         );
 
-        let stored = entity_embeddings::Entity768::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find_by_id(entity.id)
             .filter(
-                yorishiro::models::_entities::entity_embeddings_768::Column::Embedding
-                    .is_not_null(),
+                yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
             .exists(&ctx.db)
             .await
@@ -464,10 +462,9 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         assert!(result.is_ok(), "result: {result:?}");
 
         // Verify the embedding was written.
-        let stored = entity_embeddings::Entity768::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find_by_id(entity.id)
             .filter(
-                yorishiro::models::_entities::entity_embeddings_768::Column::Embedding
-                    .is_not_null(),
+                yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
             .exists(&ctx.db)
             .await
@@ -630,7 +627,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 
         // Pre-stamp with an old model to simulate a workspace that needs reindexing.
         let (stamp_provider, _stamp_server) = model_provider("old-model").await;
-        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[], &stamp_provider)
+        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &stamp_provider)
             .await
             .expect("stamp workspace through reindex");
 
@@ -643,13 +640,11 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         let provider2 = std::sync::Arc::new(provider2);
 
         let provider1_clone = provider1.clone();
-        let cids1 = candidate_ids.clone();
         let ctx1 = ctx.clone();
         let h1 = tokio::spawn(async move {
             yorishiro::db::reindex_workspace_with_lock(
                 &ctx1,
                 workspace_id,
-                &cids1,
                 provider1_clone.as_ref(),
             )
             .await
@@ -659,12 +654,10 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             .await.expect("first reindex reached its second embedding request");
         let ctx2 = ctx.clone();
         let provider2_clone = provider2.clone();
-        let cids2 = candidate_ids.clone();
         let h2 = tokio::spawn(async move {
             yorishiro::db::reindex_workspace_with_lock(
                 &ctx2,
                 workspace_id,
-                &cids2,
                 provider2_clone.as_ref(),
             )
             .await
@@ -679,7 +672,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 let waiting = LockWait::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
                     "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS waiting",
-                    [workspace_id.to_string().into()],
+                    [yorishiro::db::workspace_reindex_lock_key(workspace_id).into()],
                 )).one(&ctx.db).await.expect("observe workspace advisory lock")
                     .expect("lock observation row").waiting;
                 if waiting { break; }
@@ -741,9 +734,9 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity768::find_by_id(*entity_id)
+                entity_embeddings::Entity::find_by_id(*entity_id)
                     .select_only()
-                    .column(yorishiro::models::_entities::entity_embeddings_768::Column::Embedding)
+                    .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
                     .one(&ctx.db)
                     .await
@@ -836,9 +829,9 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity768::find_by_id(entity_id)
+                entity_embeddings::Entity::find_by_id(entity_id)
                     .select_only()
-                    .column(yorishiro::models::_entities::entity_embeddings_768::Column::Embedding)
+                    .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
                     .one(&ctx.db)
                     .await
@@ -856,17 +849,15 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         // reindex's entire purpose is to re-embed regardless, so this stamp is only there
         // to make the test realistic.
         let (stamp_provider, _stamp_server) = model_provider("old-model-a").await;
-        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[], &stamp_provider)
+        entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &stamp_provider)
             .await
             .expect("stamp workspace through reindex");
 
         // Reindex with the new model provider.
         let (new_provider, _new_provider_server) = model_provider("new-model-b").await;
-        let candidate_ids = vec![e1.id, e2.id];
         let outcome = yorishiro::models::entity_embeddings::reindex_workspace(
             &ctx.db,
             workspace_id,
-            &candidate_ids,
             &new_provider,
         )
         .await
@@ -892,31 +883,21 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 
         let new_v = model_vector(&new_provider.model_name());
 
-        // Per-row: assert_ne against old model (the row was NOT left untouched) and
-        // assert_eq against new model (the new embedding was actually written).
-        // Both halves are required: assert_ne alone passes on a zeroed or corrupted row,
-        // assert_eq alone passes if the row already held the new value.
         for entity_id in [e1.id, e2.id] {
             let stored: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity768::find_by_id(entity_id)
+                entity_embeddings::Entity::find_by_id(entity_id)
                     .select_only()
-                    .column(yorishiro::models::_entities::entity_embeddings_768::Column::Embedding)
+                    .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
                     .one(&ctx.db)
                     .await
                     .expect("query embedding")
                     .and_then(|r| r.embedding)
             };
-            let old_vec = model_vector(&old_provider.model_name());
-            assert_ne!(
-                stored.as_ref().map(|v| v.as_slice()),
-                Some(old_vec.as_slice()),
-                "entity {entity_id} embedding must NOT match old model {final_model:?}"
-            );
             assert_eq!(
                 stored.as_ref().map(|v| v.as_slice()),
                 Some(new_v.as_slice()),
@@ -1162,12 +1143,12 @@ async fn sqlite_document_embed_persist_and_search() {
             .await
             .expect("embed entity");
 
-            // Verify the embedding was written to the width-specific table.
-            let has_embedding = entity_embeddings::Entity768::find_by_id(entity.id)
+            // Verify the embedding was written to the shared table.
+            let has_embedding = entity_embeddings::Entity::find_by_id(entity.id)
                 .select_only()
                 .expr_as(
                     sea_orm::sea_query::Expr::col(
-                        yorishiro::models::_entities::entity_embeddings_768::Column::Embedding,
+                        yorishiro::models::_entities::entity_embeddings::Column::Embedding,
                     ).is_not_null(),
                     "has_embedding",
                 )
@@ -1200,33 +1181,34 @@ async fn sqlite_document_embed_persist_and_search() {
                 SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
                     ("workspace_id".into(), workspace_id.to_string()),
                 ])).await.expect("benchmark stored embedding without a vec0 table");
-                ctx.db.execute_unprepared("CREATE VIRTUAL TABLE entity_embeddings_768_vec0 USING vec0(entity_id TEXT PRIMARY KEY, workspace_id TEXT PARTITION KEY, embedding FLOAT[768] distance_metric=cosine)")
+                ctx.db.execute_unprepared("CREATE VIRTUAL TABLE entity_embeddings_vec0 USING vec0(entity_id TEXT PRIMARY KEY, workspace_id TEXT PARTITION KEY, embedding FLOAT[768] distance_metric=cosine)")
                     .await.unwrap();
                 let unrelated_workspace = uuid::Uuid::now_v7();
-                for _ in 0..11 {
-                    ctx.db.execute_raw(Statement::from_sql_and_values(
-                        sea_orm::DatabaseBackend::Sqlite,
-                        "INSERT INTO entity_embeddings_768_vec0(entity_id, workspace_id, embedding) VALUES (?, ?, ?)",
-                        [uuid::Uuid::now_v7().to_string().into(), unrelated_workspace.to_string().into(),
-                            yorishiro::db::sqlite_vec_blob(&model_vector(&provider.model_name())).into()],
-                    )).await.unwrap();
+                use sea_orm::sea_query::{Alias, Expr, Query};
+                // Fault injection populates the optional vec0 index, not application-owned rows.
+                for (id, workspace) in (0..11)
+                    .map(|_| (uuid::Uuid::now_v7(), unrelated_workspace))
+                    .chain(std::iter::once((entity.id, workspace_id)))
+                {
+                    let insert = Query::insert()
+                        .into_table(Alias::new("entity_embeddings_vec0"))
+                        .columns([Alias::new("entity_id"), Alias::new("workspace_id"), Alias::new("embedding")])
+                        .values_panic([
+                            id.to_string().into(), workspace.to_string().into(),
+                            yorishiro::db::sqlite_vec_blob(&model_vector(&provider.model_name())).into(),
+                        ]).to_owned();
+                    ctx.db.execute_raw(ctx.db.get_database_backend().build(&insert)).await.unwrap();
                 }
-                ctx.db.execute_raw(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "INSERT INTO entity_embeddings_768_vec0(entity_id, workspace_id, embedding) VALUES (?, ?, ?)",
-                    [entity.id.to_string().into(), workspace_id.to_string().into(),
-                        yorishiro::db::sqlite_vec_blob(&model_vector(&provider.model_name())).into()],
-                )).await.unwrap();
                 SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
                     ("workspace_id".into(), workspace_id.to_string()),
                     ("min_entities".into(), "0".into()),
                     ("max_latency_ms".into(), "0".into()),
                 ])).await.expect("benchmark real vec0 KNN with UUID keys and workspace partition");
-                ctx.db.execute_raw(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "DELETE FROM entity_embeddings_768_vec0 WHERE entity_id = ?",
-                    [entity.id.to_string().into()],
-                )).await.unwrap();
+                let delete = Query::delete()
+                    .from_table(Alias::new("entity_embeddings_vec0"))
+                    .and_where(Expr::col(Alias::new("entity_id")).eq(entity.id.to_string()))
+                    .to_owned();
+                ctx.db.execute_raw(ctx.db.get_database_backend().build(&delete)).await.unwrap();
                 let error = SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
                     ("workspace_id".into(), workspace_id.to_string()),
                     ("min_entities".into(), "0".into()),
@@ -1273,10 +1255,9 @@ async fn reindex_replaces_existing_vectors_and_restamps_the_workspace() {
             .expect("first embed");
 
         let (second, _second_server) = model_provider("model-b").await;
-        let outcome =
-            entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &[entity.id], &second)
-                .await
-                .expect("reindex");
+        let outcome = entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &second)
+            .await
+            .expect("reindex");
 
         assert_eq!(outcome.total, 1);
         assert_eq!(outcome.reindexed, 1);
@@ -1290,6 +1271,63 @@ async fn reindex_replaces_existing_vectors_and_restamps_the_workspace() {
             .expect("read workspace")
             .expect("workspace row");
         assert_eq!(stamped.embedding_model.as_deref(), Some("model-b"));
+    })
+    .await;
+}
+
+/// Width switching uses the actual vectors rather than a fixed registry of storage tables.
+#[tokio::test]
+async fn reindex_switches_between_arbitrary_widths() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let entity = entity_entities::create(
+            &ctx.db,
+            fixture.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({"title": "arbitrary widths"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        for width in [7, 13] {
+            let (provider, _server) = fixed_width_provider(width).await;
+            let outcome =
+                entity_embeddings::reindex_workspace(&ctx.db, fixture.workspace_id, &provider)
+                    .await
+                    .unwrap();
+            assert!(outcome.failures.is_empty());
+            assert_eq!(outcome.reindexed, 1);
+            let workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(workspace.embedding_dimensions, Some(width as i32));
+            let hits = search::search_by_vector(
+                &ctx.db,
+                fixture.workspace_id,
+                vec![1.0; width],
+                "arbitrary",
+                search::SearchQuery::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(hits[0].entity.id, entity.id);
+        }
     })
     .await;
 }

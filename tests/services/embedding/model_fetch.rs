@@ -205,6 +205,39 @@ async fn cache_hit_skips_transport_and_wrong_length_cache_is_replaced() {
 }
 
 #[tokio::test]
+async fn missing_tokenizer_is_fetched_without_redownloading_model() {
+    let dir = tempdir().unwrap();
+    let model = Artifact {
+        local_name: "model.safetensors",
+        ..artifact(b"weights")
+    };
+    let tokenizer = Artifact {
+        local_name: "tokenizer.json",
+        ..artifact(b"tokens")
+    };
+    fs::write(dir.path().join(model.local_name), b"weights").unwrap();
+    ensure_file_with_client(dir.path(), "not a URL", &model, &client())
+        .await
+        .unwrap();
+    let (url, _stub, request) =
+        loopback_server(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ntokens")
+            .await;
+    ensure_file_with_client(dir.path(), &url, &tokenizer, &client())
+        .await
+        .unwrap();
+    request.await.unwrap();
+    assert_eq!(
+        fs::read(dir.path().join(model.local_name)).unwrap(),
+        b"weights"
+    );
+    assert_eq!(
+        fs::read(dir.path().join(tokenizer.local_name)).unwrap(),
+        b"tokens"
+    );
+    assert_no_partials(dir.path());
+}
+
+#[tokio::test]
 async fn concurrent_fetches_use_distinct_staging_paths_and_rename_only_verified_bytes() {
     let dir = tempdir().unwrap();
     let partial_dir = dir.path().to_path_buf();

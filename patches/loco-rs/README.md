@@ -1,8 +1,7 @@
 # Loco 1.2.0 upstream bug fixes
 
-This directory contains queue bug fixes for the published Loco 1.2.0 crate and integration extensions for CLI parsing and connection configuration.
-The extensions are documented separately from upstream bug fixes, with their own removal conditions.
-These are not application-specific features.
+This directory contains upstream queue defect corrections for the published Loco 1.2.0 crate.
+Application CLI routing, pool options and queue configuration live outside this patch.
 
 ## Provenance and application
 
@@ -41,28 +40,6 @@ The force-quit signal intentionally still bypasses graceful draining.
 These fixes do not make job effects exactly-once: application transactions and idempotence remain necessary.
 They do not prove or fix the separate, unexplained PostgreSQL authentication/cleanup delays seen in previous tests.
 Do not mix patched and unpatched Redis workers during rollout: drain and replace the worker fleet because unpatched workers do not participate in attempt fencing.
-
-## CLI integration extension
-
-`cli::start_mode_from_args` exposes start-mode parsing through Loco's existing command definition.
-This is an integration extension, not an upstream bug fix.
-It removes the application's duplicate Clap command tree while leaving application-specific worker-target validation outside Loco.
-The existing `integration::process_roles` tests exercise accepted CLI spellings and rejected targets through the real binary.
-Remove this extension when upstream exposes equivalent parsed start-mode information to application configuration hooks.
-
-## Connection configuration integration
-
-`Config::from_folder` fills missing SQL queue connection settings from the database configuration after base/local merging and before typed deserialization.
-Explicit queue settings take precedence, and Redis does not inherit SQL pool settings.
-This is framework configuration resolution rather than an application callback API.
-`db::connection_options` builds SeaORM pool options from the same database configuration used by `db::connect` without opening a pool or replaying startup statements.
-Application identity and tenant pools reuse these options and retain their own timezone, role and release hooks.
-Redis queue configuration exposes millisecond `connect_timeout` and `response_timeout` values, retaining the existing worker defaults of 10000 and 5000.
-Its provider keeps these settings with the client so producers, administration and workers use the same transport policy instead of silently using different library defaults.
-Provider creation and `Queue::setup` do not flush jobs; only boot's explicit `converge` applies `dangerously_flush`.
-These are integration extensions, not claims of upstream bug fixes.
-Remove them when upstream supplies equivalent merged-config resolution and consistent producer/worker connection configuration.
-Existing configuration/topology cases cover SQL inheritance, explicit queue overrides and Redis defaults; all queue topologies must still pass in CI.
 
 ## Removal condition
 

@@ -55,7 +55,7 @@ async fn delete_embedding_key(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_embedding_keys::clear(&ctx.db, auth_ctx.workspace_id).await?;
+    workspace_embedding_keys::remove(&ctx, auth_ctx.workspace_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

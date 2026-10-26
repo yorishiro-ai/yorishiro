@@ -239,8 +239,6 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
             }
             ("redis", QueueConfig::Redis(actual)) => {
                 assert_eq!(actual.uri, queue);
-                assert_eq!(actual.connect_timeout, 10_000);
-                assert_eq!(actual.response_timeout, 5_000);
             }
             (provider, actual) => panic!("{topology} resolved to {provider}: {actual:?}"),
         }
@@ -315,7 +313,7 @@ async fn production_example_is_used_when_local_config_is_absent() {
     .unwrap();
     let overridden =
         loco_rs::config::Config::from_folder(&Environment::Production, directory.path())
-            .expect("framework resolves SQL defaults after local overrides");
+            .expect("explicit SQL settings preserve local overrides");
     let Some(QueueConfig::Sqlite(queue)) = overridden.queue else {
         panic!("the local override must preserve the selected SQL provider");
     };

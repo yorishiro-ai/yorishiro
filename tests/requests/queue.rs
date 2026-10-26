@@ -403,9 +403,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
             QueueConfig::Redis(config) => config.num_workers = 1,
             _ => panic!("unsupported queue"),
         }
-        let queue = super::query_worker::shared_target_queue(&worker_ctx).await;
-        worker_ctx.queue_provider = Some(queue.clone());
-        App::connect_workers(&worker_ctx, &queue).await.unwrap();
+        let queue = super::query_worker::shared_target_queue(&mut worker_ctx).await;
         let mut ids = Vec::new();
         // Fault-inject competing provider deliveries with explicit priorities; request creation and execution use production models and workers.
         for (text, priority) in [("low", 100), ("high", 300)] {

@@ -53,10 +53,8 @@ async fn a_target_drains_its_own_jobs_behind_a_backlog_of_another_target() {
             .collect();
         {
             let target = WorkerTarget::Shared;
-            let queue = crate::requests::query_worker::target_queue(&ctx, target).await;
             let mut worker_ctx = ctx.clone();
-            worker_ctx.queue_provider = Some(queue.clone());
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            let queue = crate::requests::query_worker::target_queue(&mut worker_ctx, target).await;
             let running = queue.clone();
             let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
             let outcome = std::panic::AssertUnwindSafe(async {

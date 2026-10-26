@@ -78,9 +78,14 @@ pub enum EmbeddingProviderAvailability {
 }
 
 /// Provider that generates embedding vectors.
-/// All vectors written by a deployment must use one of the pre-created supported widths.
+/// Storage accepts any nonempty finite vector with the workspace's effective width.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    /// Generation captured when resolving a mutable workspace assignment.
+    fn workspace_revision(&self) -> Option<i64> {
+        None
+    }
+
     fn availability(&self) -> EmbeddingProviderAvailability {
         EmbeddingProviderAvailability::Enabled
     }
@@ -130,7 +135,7 @@ pub struct UnconfiguredEmbeddingProvider {
     dimensions: usize,
     /// What this particular deployment should set to get a working provider.
     ///
-    /// Carried per instance rather than hardcoded in [`Self::embed_batch`], because the two ways of arriving here need opposite advice: an unset `YORISHIRO_EMBEDDING_BASE_URL` wants the OpenAI-compatible variables, while `YORISHIRO_EMBEDDING_PROVIDER=local` with nowhere to fetch to wants the default `models/<short_id>/` files to be in place.
+    /// Describes the provider configuration needed to enable embedding.
     /// The boot log says the same thing, but it scrolls away, and this error is what an operator keeps hitting afterwards.
     remedy: &'static str,
 }
@@ -233,11 +238,11 @@ fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
 /// `YORISHIRO_LOCAL_MODEL` selects which [`model_fetch::LocalModelDef`] to load (default: [`model_fetch::DEFAULT_MODEL`]); see [`resolve_local_model`].
-/// The model and tokenizer files live at `models/<short_id>/model.safetensors` and `models/<short_id>/tokenizer.json` for the selected model, or are fetched into `$HOME/.cache/yorishiro/models/<short_id>/` on first use when absent.
+/// The model and tokenizer files are fetched into `models/<short_id>/` on first use when absent.
 ///
 /// There is no pooling variable: every model this provider can load is mean-pooled (see `local::LocalEmbeddingProvider`'s own doc comment for why that stays a fact rather than a config surface).
 ///
-/// The model files are fetched on first use when, and only when, neither the default path nor the cache path holds both files.
+/// Missing model files are downloaded and verified before loading.
 async fn build_local_provider(
     config: &crate::data::settings::Embedding,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
@@ -253,13 +258,7 @@ async fn build_local_provider(
         );
     }
     let max_sequence_length = config.local_max_sequence_length;
-    let Some((model_path, tokenizer_path)) = resolve_model_paths(def).await? else {
-        return Ok(std::sync::Arc::new(UnconfiguredEmbeddingProvider {
-            dimensions,
-            remedy: "YORISHIRO_EMBEDDING_PROVIDER=local, but the model files could not be \
-                     located or fetched",
-        }));
-    };
+    let (model_path, tokenizer_path) = model_fetch::ensure_model_files(def).await?;
     let model_path = model_path.display().to_string();
     let tokenizer_path = tokenizer_path.display().to_string();
 
@@ -282,70 +281,4 @@ async fn build_local_provider(
             })?;
     tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");
     Ok(std::sync::Arc::new(provider))
-}
-
-/// What the default `models/` path's contents mean for [`resolve_model_paths`].
-#[derive(PartialEq, Eq)]
-enum DefaultPathOutcome {
-    /// Both files are there: load them, fetch nothing.
-    UseBoth,
-    /// Exactly one is there, which is an error rather than something to fetch around.
-    Incomplete { model_is_present: bool },
-    /// Neither is there, so this deployment has not placed anything and the fetch is what it wants.
-    Fetch,
-}
-
-/// Split out from [`resolve_model_paths`] so the rule can be tested without a filesystem: it is the one decision here where the wrong answer is silent rather than loud.
-///
-/// Exactly one file present is a half-executed intent, not an empty default path: someone put that file there on purpose and the other is missing.
-/// Fetching around it would quietly ignore the file they chose and embed with a different model, which can disagree with the vectors already in the index while every status stays green.
-/// A lone file here is a hard error rather than a partial load: an incomplete model directory cannot serve embeddings, so it is reported at boot instead of at first use.
-fn default_path_outcome(model_exists: bool, tokenizer_exists: bool) -> DefaultPathOutcome {
-    match (model_exists, tokenizer_exists) {
-        (true, true) => DefaultPathOutcome::UseBoth,
-        (false, false) => DefaultPathOutcome::Fetch,
-        (model_is_present, _) => DefaultPathOutcome::Incomplete { model_is_present },
-    }
-}
-
-/// The repo-local path a model's files live at, scoped by `def.short_id` so two models' default files can never collide or be silently substituted for one another.
-/// A deployment that flips `YORISHIRO_LOCAL_MODEL` finds nothing at its new model's default path rather than finding the previous model's files and loading them under the new model's name, which would pass every check this provider runs, since the mismatch is between which weights loaded and what the deployment now believes it configured, not anything visible from the files themselves.
-fn default_paths(def: &model_fetch::LocalModelDef) -> (std::path::PathBuf, std::path::PathBuf) {
-    let dir = std::path::PathBuf::from("models").join(def.short_id);
-    (dir.join("model.safetensors"), dir.join("tokenizer.json"))
-}
-
-async fn resolve_model_paths(
-    def: &model_fetch::LocalModelDef,
-) -> anyhow::Result<Option<(std::path::PathBuf, std::path::PathBuf)>> {
-    let (default_model, default_tokenizer) = default_paths(def);
-
-    match default_path_outcome(default_model.exists(), default_tokenizer.exists()) {
-        DefaultPathOutcome::UseBoth => return Ok(Some((default_model, default_tokenizer))),
-        DefaultPathOutcome::Incomplete { model_is_present } => {
-            let (present, missing) = if model_is_present {
-                (&default_model, &default_tokenizer)
-            } else {
-                (&default_tokenizer, &default_model)
-            };
-            anyhow::bail!(
-                "'{}' is present but '{}' is missing: the local embedding provider needs both. \
-                 Add the missing file, or remove '{}' to have both fetched automatically",
-                present.display(),
-                missing.display(),
-                present.display()
-            );
-        }
-        DefaultPathOutcome::Fetch => {}
-    }
-
-    match model_fetch::ensure_model_files(def).await? {
-        Some(paths) => Ok(Some(paths)),
-        None => {
-            tracing::warn!(
-                "YORISHIRO_EMBEDDING_PROVIDER=local, but the model files are missing and HOME does not resolve, so there is nowhere to fetch them to. Continuing with no embedding provider; search and recall will error."
-            );
-            Ok(None)
-        }
-    }
 }

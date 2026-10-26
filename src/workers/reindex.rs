@@ -63,20 +63,17 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
             "embedding provider disabled".into(),
         ));
     }
-    // Fetch all entity IDs for this workspace.
-    let candidate_ids =
-        crate::models::entity_entities::ids_for_workspace(&ctx.db, args.workspace_id)
-            .await
-            .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
-
-    let outcome = crate::db::reindex_workspace_with_lock(
-        ctx,
-        args.workspace_id,
-        &candidate_ids,
-        provider.as_ref(),
-    )
-    .await
-    .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+    let concurrency = ctx
+        .shared_store
+        .get::<std::sync::Arc<tokio::sync::Semaphore>>()
+        .ok_or_else(|| loco_rs::Error::Message("embedding concurrency missing".into()))?;
+    let _permit = concurrency
+        .acquire_owned()
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let outcome = crate::db::reindex_workspace_with_lock(ctx, args.workspace_id, provider.as_ref())
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
     if !outcome.failures.is_empty() {
         return Err(loco_rs::Error::Message(format!(

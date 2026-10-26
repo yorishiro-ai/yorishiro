@@ -44,9 +44,8 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
         let workspace_id = fixture.workspace_id;
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
-        let queue = crate::requests::query_worker::target_queue(&ctx, target).await;
-        let ctx = ctx.into_builder().queue_provider(queue.clone()).build();
-        yorishiro::App::connect_workers(&ctx, &queue).await.unwrap();
+        let mut ctx = ctx;
+        let queue = crate::requests::query_worker::job_target_queue(&mut ctx, target).await;
         let job_id = enqueue_infer_fill(&ctx, workspace_id, "note".into())
             .await
             .unwrap();
@@ -70,9 +69,9 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
         .expect("production relay publishes this lifecycle");
         assert_eq!(relayed.name, InferFillWorker::class_name());
         assert_eq!(relayed.status, JobStatus::Queued);
-        assert_eq!(relayed.tags, Some(vec![target.tag()]));
+        assert_eq!(relayed.tags, Some(vec![target.job_tag()]));
         let provider = queue.clone();
-        let runner = tokio::spawn(async move { provider.run(vec![target.tag()]).await });
+        let runner = tokio::spawn(async move { provider.run(vec![target.job_tag()]).await });
         let result =
             std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
                 loop {
@@ -226,17 +225,10 @@ async fn deliver_lifecycle(ctx: &loco_rs::app::AppContext, lifecycle_id: Uuid) {
     use yorishiro::workers::target::WorkerTarget;
 
     let target = WorkerTarget::Shared;
-    let queue = crate::requests::query_worker::target_queue(ctx, target).await;
-    let worker_ctx = ctx
-        .clone()
-        .into_builder()
-        .queue_provider(queue.clone())
-        .build();
-    yorishiro::App::connect_workers(&worker_ctx, &queue)
-        .await
-        .unwrap();
+    let mut worker_ctx = ctx.clone();
+    let queue = crate::requests::query_worker::job_target_queue(&mut worker_ctx, target).await;
     let running = queue.clone();
-    let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
+    let worker = tokio::spawn(async move { running.run(vec![target.job_tag()]).await });
     let directory = tempfile::tempdir().unwrap();
     let outcome =
         std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
@@ -561,14 +553,12 @@ async fn two_jobs_for_one_workspace_never_run_together() {
             loco_rs::config::QueueConfig::Redis(queue) => queue.num_workers = 2,
             _ => unreachable!("supported queue topology"),
         }
-        let queue = crate::requests::query_worker::shared_target_queue(&worker_ctx).await;
-        worker_ctx.queue_provider = Some(queue.clone());
-        yorishiro::App::connect_workers(&worker_ctx, &queue)
-            .await
-            .unwrap();
+        let queue =
+            crate::requests::query_worker::job_target_queue(&mut worker_ctx, WorkerTarget::Shared)
+                .await;
         let running = queue.clone();
         let runner =
-            tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
+            tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.job_tag()]).await });
         let directory = tempfile::tempdir().unwrap();
         let result =
             std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {

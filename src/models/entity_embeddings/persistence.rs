@@ -14,10 +14,9 @@ pub(super) struct VectorWriteInput {
     /// rejecting any write against an entity that was modified between capture and persist.
     pub(super) embedding_sync_token: String,
     pub(super) vector: Vec<f32>,
-    pub(super) dimension: usize,
 }
 
-/// Writes a vector to the width-specific table and guards it with the entity snapshot.
+/// Writes a vector and guards it with the entity snapshot.
 ///
 /// Both insert and conflict-update branches check the current entity token in one SeaQuery statement.
 ///
@@ -28,7 +27,9 @@ pub(super) async fn embed_and_write(
     conn: &impl ConnectionTrait,
     input: VectorWriteInput,
 ) -> Result<bool, YorishiroError> {
+    super::validate_vector(&input.vector, input.vector.len())?;
     let backend = conn.get_database_backend();
+    let table = super::TABLE;
 
     use crate::models::_entities::entity_entities::{Column, Entity};
     use sea_orm::sea_query::{Alias, Expr, OnConflict, Query};
@@ -42,7 +43,7 @@ pub(super) async fn embed_and_write(
             });
         }
     };
-    let table = Alias::new(super::embedding_table(input.dimension)?);
+    let table = Alias::new(table);
     let id = Alias::new("entity_id");
     let embedding = Alias::new("embedding");
     let current = Query::select()

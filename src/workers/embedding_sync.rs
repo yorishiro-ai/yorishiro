@@ -5,7 +5,7 @@
 //!
 //! Every job this module enqueues carries exactly one tag, the `worker-target:<name>` of the target it is for (see [`crate::workers::target`]).
 //! An empty tag list makes loco's dequeue query `AND (tags IS NULL)` (confirmed against the pinned `loco-rs` 1.2.0 `bgworker/pg.rs`, and the matching logic in `sqlt.rs`/`redis.rs`), so a worker that names no target would take none of them.
-//! `App::boot` therefore reads a bare `--worker` as the shared target, and refuses any tag that names no target.
+//! `App::boot` therefore refuses a bare `--worker` and any tag that names no target.
 
 use std::sync::Arc;
 

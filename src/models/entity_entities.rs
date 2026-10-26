@@ -119,13 +119,17 @@ pub(crate) struct EmbeddingSnapshot {
 
 /// Finds every entity in a workspace that has no corresponding embedding row.
 ///
-/// An anti-subquery per embedding table excludes embedded entities without backend-specific SQL.
+/// An anti-subquery excludes entities with stored embeddings.
 pub(crate) async fn missing_embeddings(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<EmbeddingSnapshot>, DbErr> {
     use sea_orm::sea_query::{Alias, Query};
-    let mut select = Entity::find()
+    let embedded = Query::select()
+        .column(Alias::new("entity_id"))
+        .from(Alias::new(crate::models::entity_embeddings::TABLE))
+        .to_owned();
+    Entity::find()
         .select_only()
         .columns([
             Column::Id,
@@ -134,15 +138,11 @@ pub(crate) async fn missing_embeddings(
             Column::Data,
             Column::EmbeddingSyncToken,
         ])
-        .filter(Column::WorkspaceId.eq(workspace_id));
-    for table in crate::models::entity_embeddings::embedding_tables() {
-        let embedded = Query::select()
-            .column(Alias::new("entity_id"))
-            .from(Alias::new(table))
-            .to_owned();
-        select = select.filter(Expr::col(Column::Id).not_in_subquery(embedded));
-    }
-    select.into_model::<EmbeddingSnapshot>().all(db).await
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Expr::col(Column::Id).not_in_subquery(embedded))
+        .into_model::<EmbeddingSnapshot>()
+        .all(db)
+        .await
 }
 
 #[loco_rs::prelude::async_trait]

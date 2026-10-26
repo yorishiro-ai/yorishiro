@@ -215,21 +215,22 @@ async fn entity_list_filter_returns_backend_unsupported_on_sqlite() {
 
 /// The database holds one entity, so every FTS row belongs to it.
 async fn fts_rows(db: &sea_orm::DatabaseConnection) -> i64 {
-    use sea_orm::{FromQueryResult, Statement};
+    use sea_orm::FromQueryResult;
+    use sea_orm::sea_query::{Alias, Asterisk, Expr, Func, Query};
     #[derive(FromQueryResult)]
     struct Count {
         n: i64,
     }
-    Count::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Sqlite,
-        "SELECT COUNT(*) AS n FROM entity_fts",
-        [],
-    ))
-    .one(db)
-    .await
-    .expect("count FTS rows")
-    .expect("count row")
-    .n
+    let query = Query::select()
+        .expr_as(Func::count(Expr::col(Asterisk)), Alias::new("n"))
+        .from(Alias::new("entity_fts"))
+        .to_owned();
+    Count::find_by_statement(db.get_database_backend().build(&query))
+        .one(db)
+        .await
+        .expect("count FTS rows")
+        .expect("count row")
+        .n
 }
 
 /// The token triggers update the row they just wrote.
