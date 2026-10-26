@@ -255,9 +255,9 @@ pub(crate) async fn dispatch_job(
     } else {
         None
     };
-    let txn = caller_txn
-        .or(owned_txn.as_ref())
-        .expect("one transaction exists");
+    let txn = caller_txn.or(owned_txn.as_ref()).ok_or_else(|| {
+        loco_rs::Error::Message("dispatch requires a recording transaction".into())
+    })?;
     let tag = if super::registry::is_embedding_worker(&spec.worker_name) {
         target.tag()
     } else {

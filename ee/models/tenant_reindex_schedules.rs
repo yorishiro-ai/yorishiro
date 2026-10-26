@@ -183,13 +183,13 @@ pub(crate) async fn tick(
     use crate::workers::reindex::ReindexArgs;
 
     // Ownership serializes ticks; the transaction records schedules and outbox rows together.
-    let mut ownership = match crate::edition::ee::db::acquire_scheduler_ownership(
+    let ownership = match crate::edition::ee::db::acquire_scheduler_ownership(
         app_context,
         "yorishiro:tenant-reindex-scheduler",
     )
     .await
     {
-        Ok(Some(ownership)) => Some(ownership),
+        Ok(Some(ownership)) => ownership,
         Ok(None) => {
             tracing::info!(
                 ownership_key = "yorishiro:tenant-reindex-scheduler",
@@ -211,8 +211,7 @@ pub(crate) async fn tick(
             "sqlite"
         },
         ownership_lock_path = ownership
-            .as_ref()
-            .and_then(crate::edition::ee::db::SchedulerOwnership::sqlite_path)
+            .sqlite_path()
             .map(|path| path.display().to_string()),
         "reindex scheduler tick ownership acquired"
     );
@@ -220,7 +219,7 @@ pub(crate) async fn tick(
     let txn = match crate::db::begin_write(&app_context.db).await {
         Ok(txn) => txn,
         Err(err) => {
-            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let _ = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(format!(
                 "scheduler ownership transaction: {err}"
             )));
@@ -230,7 +229,7 @@ pub(crate) async fn tick(
         Ok(schedules) => schedules,
         Err(err) => {
             let _ = txn.rollback().await;
-            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let _ = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(err.to_string()));
         }
     };
@@ -250,7 +249,7 @@ pub(crate) async fn tick(
             .and_then(|every| tick.checked_add_signed(every));
         let Some(next) = next else {
             let _ = txn.rollback().await;
-            let release = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let release = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(format!(
                 "invalid stored reindex interval for tenant {}: {:?}; ownership release: {release:?}",
                 schedule.tenant_id, schedule.interval
@@ -266,7 +265,7 @@ pub(crate) async fn tick(
             Ok(workspaces) => workspaces,
             Err(err) => {
                 let _ = txn.rollback().await;
-                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+                let _ = release_scheduler_ownership(ownership).await;
                 return Err(Error::Message(err.to_string()));
             }
         };
@@ -281,7 +280,7 @@ pub(crate) async fn tick(
                 Ok(worker_class) => worker_class,
                 Err(err) => {
                     let _ = txn.rollback().await;
-                    let release = release_scheduler_ownership(ownership.take().unwrap()).await;
+                    let release = release_scheduler_ownership(ownership).await;
                     return Err(Error::Message(format!(
                         "reindex scheduler: workspace {} target resolution failed: {}; ownership release: {release:?}",
                         ws.id, err.0
@@ -303,7 +302,7 @@ pub(crate) async fn tick(
         active.updated_at = ActiveValue::Set(tick.into());
         if let Err(err) = active.update(&txn).await {
             let _ = txn.rollback().await;
-            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+            let _ = release_scheduler_ownership(ownership).await;
             return Err(Error::Message(err.to_string()));
         }
     }
@@ -311,21 +310,21 @@ pub(crate) async fn tick(
     let dispatch_errors = dispatch_reindex_batch(app_context, dispatches, Some(&txn)).await;
     if !dispatch_errors.is_empty() {
         let _ = txn.rollback().await;
-        let release_error = release_scheduler_ownership(ownership.take().unwrap()).await;
+        let release_error = release_scheduler_ownership(ownership).await;
         return Err(Error::Message(
             scheduler_failure_message(
                 &dispatch_errors,
                 release_error.as_ref().err().map(String::as_str),
             )
-            .expect("dispatch failed"),
+            .unwrap_or_else(|| "reindex scheduler durable dispatch failed".into()),
         ));
     }
     if let Err(err) = txn.commit().await {
-        let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+        let _ = release_scheduler_ownership(ownership).await;
         return Err(Error::Message(format!("scheduler ownership commit: {err}")));
     }
 
-    let release_error = release_scheduler_ownership(ownership.take().unwrap()).await;
+    let release_error = release_scheduler_ownership(ownership).await;
     if let Some(message) = scheduler_failure_message(
         &dispatch_errors,
         release_error.as_ref().err().map(String::as_str),

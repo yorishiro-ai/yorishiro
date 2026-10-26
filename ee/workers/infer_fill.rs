@@ -273,7 +273,9 @@ impl InferFillWorker {
         let claim = if already_reconciled {
             Ok(true)
         } else if has_lifecycle {
-            let attempt = attempt.expect("lifecycle admission has an attempt");
+            let attempt = attempt.ok_or_else(|| {
+                loco_rs::Error::Message("lifecycle admission is missing its attempt".into())
+            })?;
             inference_jobs::reconcile_attempt(&self.ctx.db, job_id, attempt).await
         } else {
             inference_jobs::claim(&self.ctx.db, job_id).await
