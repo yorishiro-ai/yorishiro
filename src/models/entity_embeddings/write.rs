@@ -59,17 +59,7 @@ async fn sync_embedding(
             i32::try_from(chain.deployment_dimensions)
                 .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32),
         );
-    if vector.len() != expected_dimensions as usize {
-        return Err(YorishiroError::ValidationFailed {
-            message: format!(
-                "this workspace holds {expected_dimensions}-dimensional vectors, but the configured embedding \
-                 provider produced {}",
-                vector.len()
-            ),
-            details: vec![],
-            hint: "point the deployment at the workspace's model, or re-embed the workspace".into(),
-        });
-    }
+    super::validate_vector(&vector, expected_dimensions as usize)?;
 
     let effective_model = chain
         .workspace_model
@@ -98,7 +88,6 @@ async fn sync_embedding(
             entity_id: record.id,
             embedding_sync_token: record.embedding_sync_token.clone(),
             vector,
-            dimension: expected_dimensions as usize,
         },
     )
     .await?;

@@ -30,7 +30,6 @@ use crate::models::_entities::entity_entities::Column as EntityColumn;
 use crate::models::entity_entities;
 use crate::models::search::SearchHit;
 use crate::models::search::SearchRow;
-use crate::models::search::resolve_search_table;
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use sea_orm::FromQueryResult;
@@ -81,10 +80,7 @@ impl Task for SqliteAnnBenchmark {
             Err(_) => 200,
         };
 
-        // Resolve the correct width-partitioned table for this workspace.
-        let (_dimension, table_name) = resolve_search_table(&ctx.db, workspace_id)
-            .await
-            .map_err(|e| Error::Message(e.to_string()))?;
+        let table_name = crate::models::entity_embeddings::TABLE.to_owned();
 
         // Count entities with embeddings in this workspace.
         let count = Query::select()

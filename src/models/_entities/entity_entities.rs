@@ -26,12 +26,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_one = "super::entity_embeddings_1024::Entity")]
-    EntityEmbeddings1024,
-    #[sea_orm(has_one = "super::entity_embeddings_1536::Entity")]
-    EntityEmbeddings1536,
-    #[sea_orm(has_one = "super::entity_embeddings_768::Entity")]
-    EntityEmbeddings768,
+    #[sea_orm(has_one = "super::entity_embeddings::Entity")]
+    EntityEmbeddings,
     #[sea_orm(
         belongs_to = "super::schema_schemas::Entity",
         from = "Column::SchemaId",
@@ -66,21 +62,9 @@ pub enum Relation {
     WorkspaceWorkspaces,
 }
 
-impl Related<super::entity_embeddings_1024::Entity> for Entity {
+impl Related<super::entity_embeddings::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::EntityEmbeddings1024.def()
-    }
-}
-
-impl Related<super::entity_embeddings_1536::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::EntityEmbeddings1536.def()
-    }
-}
-
-impl Related<super::entity_embeddings_768::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::EntityEmbeddings768.def()
+        Relation::EntityEmbeddings.def()
     }
 }
 

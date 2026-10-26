@@ -148,8 +148,6 @@ pub async fn set(
         SetOutcome::Stored
     };
 
-    crate::models::entity_embeddings::embedding_table(dimensions as usize)?;
-
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
         base_url: ActiveValue::Set(base_url.to_string()),

@@ -4,7 +4,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "entity_embeddings_1024")]
+#[sea_orm(table_name = "entity_embeddings")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub entity_id: Uuid,

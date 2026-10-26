@@ -49,6 +49,7 @@ async fn reindex_embedding_for_record(
         return Ok(true);
     };
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
+    super::validate_vector(&vector, provider.dimensions())?;
     embed_and_write(
         conn,
         VectorWriteInput {
@@ -56,25 +57,26 @@ async fn reindex_embedding_for_record(
             entity_id: record.id,
             embedding_sync_token: record.embedding_sync_token.clone(),
             vector,
-            dimension: provider.dimensions(),
         },
     )
     .await
 }
 
-/// Re-embeds every candidate entity and restamps the workspace after full success.
+/// Re-embeds every entity in the workspace and restamps it after full success.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn reindex_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    candidate_ids: &[Uuid],
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
     crate::models::workspace_workspaces::set_embedding_reindexing(conn, workspace_id, true).await?;
+    let candidate_ids = crate::models::entity_entities::ids_for_workspace(conn, workspace_id)
+        .await
+        .internal()?;
     let records =
-        crate::models::entity_entities::get_batch_with_tokens(conn, workspace_id, candidate_ids)
+        crate::models::entity_entities::get_batch_with_tokens(conn, workspace_id, &candidate_ids)
             .await
             .internal()?;
 
@@ -83,7 +85,7 @@ pub async fn reindex_workspace(
     let mut reindexed = 0;
     let mut failures = Vec::new();
     let mut schemas = std::collections::HashMap::new();
-    for &entity_id in candidate_ids {
+    for &entity_id in &candidate_ids {
         let Some(record) = records.get(&entity_id) else {
             failures.push(ReindexFailure {
                 entity_id,
@@ -118,8 +120,6 @@ pub async fn reindex_workspace(
             dimensions,
         )
         .await?;
-        crate::models::workspace_workspaces::set_embedding_reindexing(conn, workspace_id, false)
-            .await?;
     }
 
     Ok(ReindexOutcome {

@@ -660,7 +660,6 @@ pub async fn acquire_workspace_reindex_lock(
 pub async fn reindex_workspace_with_lock(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
-    candidate_ids: &[Uuid],
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
     let lock = if ctx.is_sqlite() {
@@ -681,13 +680,8 @@ pub async fn reindex_workspace_with_lock(
                 })?,
         )
     };
-    let outcome = crate::models::entity_embeddings::reindex_workspace(
-        &ctx.db,
-        workspace_id,
-        candidate_ids,
-        provider,
-    )
-    .await;
+    let outcome =
+        crate::models::entity_embeddings::reindex_workspace(&ctx.db, workspace_id, provider).await;
     if let Some(lock) = lock {
         let _ = lock.release().await;
     }

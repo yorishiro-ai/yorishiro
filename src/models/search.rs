@@ -68,10 +68,9 @@ pub(crate) async fn search_text(
     // Wait for the worker without holding a workspace connection.
     let vector =
         crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await?;
-    // The embedding chain joins tenant_tenants, which only the identity pool can read.
-    let table = resolve_query_table(&ctx.db, workspace_id, vector.len()).await?;
+    check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id).await?;
-    search_in_table(&txn, workspace_id, vector, text, query, table).await
+    search_by_vector(&txn, workspace_id, vector, text, query).await
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,100 +153,46 @@ fn join_embedding(select: &mut SelectStatement, table: &str, join: JoinType) {
     );
 }
 
-/// Returns entities ordered by cosine distance between the given embedding vector and the
-/// stored embedding, closest first.
-/// As an auxiliary path, entities with no embedding are also included when `query_text` is
-/// a pg_trgm fuzzy match (PostgreSQL) or FTS5 match (SQLite) against their data.
-/// Vector matches are always ranked ahead of trigram-only matches; trigram-only matches are
-/// ordered by similarity.
-/// Resolves the workspace's effective embedding width for selecting the correct
-/// width-specific table. Returns the width and the table name.
-///
-/// Falls back to the deployment default (YORISHIRO_EMBEDDING_DIMENSIONS, default 768).
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn resolve_search_table(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<(usize, String), YorishiroError> {
-    resolve_search_table_with_dimensions(
-        conn,
-        workspace_id,
-        crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS,
-    )
-    .await
-    .map(|(dimension, table)| (dimension, table.to_string()))
-}
-
-/// Resolves the embedding table a query vector of `vector_len` components is searched in.
-///
-/// Reads `tenant_tenants` for the tenant default, which the tenant-scoped role may not touch.
-/// Call it on the identity connection (`ctx.db`) before opening the request's tenant transaction, then pass the result to [`search_in_table`].
-///
-/// # Errors
-/// Returns an error if the workspace is missing or no table exists for the resolved width.
-/// Checks that a freshly embedded query vector has the width the workspace's vectors have, and returns that width's table.
-///
-/// The worker calls this before it stores a result, so a model that disagrees with the workspace fails as a diagnostic on the request instead of as a database error in the search that would have used the vector.
-/// A width with no table is refused by the same registry the writes use.
-///
-/// # Errors
-/// Returns `ValidationFailed` when the width differs from the workspace's or has no table.
+/// Validates a query against the workspace embedding dimensions.
 pub(crate) async fn check_query_width(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     vector_len: usize,
-) -> Result<&'static str, YorishiroError> {
-    let (dimension, table) =
-        resolve_search_table_with_dimensions(conn, workspace_id, vector_len).await?;
-    if dimension != vector_len {
+) -> Result<(), YorishiroError> {
+    use super::_entities::workspace_workspaces::{Column, Entity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+    let dimensions = Entity::find()
+        .select_only()
+        .column(Column::EmbeddingDimensions)
+        .filter(Column::Id.eq(workspace_id))
+        .into_tuple::<Option<i32>>()
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+    if let Some(expected) = dimensions
+        && usize::try_from(expected).ok() != Some(vector_len)
+    {
         return Err(YorishiroError::ValidationFailed {
-            message: format!(
-                "this workspace holds {dimension}-dimensional vectors, but the configured embedding provider produced a {vector_len}-dimensional query vector"
-            ),
+            message: format!("workspace expects {expected} dimensions, query has {vector_len}"),
             details: vec![],
-            hint: "point the deployment at the workspace's model, or re-embed the workspace".into(),
+            hint: "reindex the workspace with the selected embedding provider".into(),
         });
     }
-    Ok(table)
+    if vector_len == 0 {
+        return Err(YorishiroError::ValidationFailed {
+            message: "query embedding must not be empty".into(),
+            details: vec![],
+            hint: "configure a provider that returns a nonempty vector".into(),
+        });
+    }
+    Ok(())
 }
 
-pub(crate) async fn resolve_query_table(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    vector_len: usize,
-) -> Result<&'static str, YorishiroError> {
-    resolve_search_table_with_dimensions(conn, workspace_id, vector_len)
-        .await
-        .map(|(_, table)| table)
-}
-
-async fn resolve_search_table_with_dimensions(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    deployment_dimensions: usize,
-) -> Result<(usize, &'static str), YorishiroError> {
-    use crate::models::entity_embeddings::resolve_embedding_chain;
-
-    let chain = resolve_embedding_chain(conn, workspace_id, deployment_dimensions).await?;
-    let dimension = chain
-        .workspace_dimensions
-        .or(chain.tenant_dimensions)
-        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(
-            crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32,
-        )))
-        .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32)
-        as usize;
-    Ok((
-        dimension,
-        crate::models::entity_embeddings::embedding_table(dimension)?,
-    ))
-}
-
+/// Searches workspace vectors by cosine distance.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error when the query or workspace embedding state is invalid.
 pub async fn search_by_vector(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -255,35 +200,10 @@ pub async fn search_by_vector(
     query_text: &str,
     query: SearchQuery,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
-    let embed_table = resolve_query_table(conn, workspace_id, vector.len()).await?;
-    search_in_table(conn, workspace_id, vector, query_text, query, embed_table).await
-}
-
-/// [`search_by_vector`] against an `embed_table` already resolved by [`resolve_query_table`].
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub(crate) async fn search_in_table(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    vector: Vec<f32>,
-    query_text: &str,
-    query: SearchQuery,
-    embed_table: &str,
-) -> Result<Vec<SearchHit>, YorishiroError> {
-    if crate::models::workspace_workspaces::embedding_reindexing(conn, workspace_id).await? {
-        return Err(YorishiroError::BackendUnavailable {
-            message: "semantic search is temporarily unavailable while workspace embeddings are being reindexed".into(),
-        });
-    }
-    // The table name is interpolated into SQL, so only a known embedding table is accepted.
-    if !crate::models::entity_embeddings::embedding_tables().any(|table| table == embed_table) {
-        return Err(YorishiroError::ValidationFailed {
-            message: format!("{embed_table:?} is not an embedding table"),
-            details: vec![],
-            hint: "use the table returned by resolve_query_table".into(),
-        });
-    }
+    super::entity_embeddings::validate_vector(&vector, vector.len())?;
+    check_query_width(conn, workspace_id, vector.len()).await?;
+    ensure_available(conn, workspace_id).await?;
+    let embed_table = super::entity_embeddings::TABLE;
     let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
 
     // SQLite has no JSONB containment operator to replace `data @> filter`.
