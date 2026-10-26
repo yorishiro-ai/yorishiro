@@ -38,6 +38,7 @@ runs:
           -e DATABASE_URL="$db" \
           -e QUEUE_URL="$db" \
           -e HOST=http://127.0.0.1:5150 \
+          -e BINDING=127.0.0.1 \
           -e YORISHIRO_EMBEDDING_PROVIDER=none \
           "${IMAGE}:${TAG}-${EDITION}"
 
