@@ -191,9 +191,9 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://embed.example.com/v1",
-                "model": "embed-1024",
+                "model": "embed-3072",
                 "api_key": "sk-secret-value",
-                // Deliberately not 768, the workspace's own stamp, but a width with an embedding table.
+                // Deliberately differs from the workspace's stamped width.
                 "dimensions": 1024
             }))
             .await;
@@ -204,7 +204,7 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
             put.text()
         );
 
-        // Stored with WidthChanged: GET now returns the new assignment.
+        // GET returns the new assignment while durable reindex work is queued.
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, SelectExt};
         use yorishiro::models::_entities::queue_job_lifecycles::{Column, Entity};
         assert!(
@@ -229,10 +229,9 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
     .await;
 }
 
-/// `set` takes the width list from the community edition's embedding tables instead of keeping its own.
-/// A width with no table is refused up front and stores nothing, and a supported width stores the key without the old request-path DDL creating a stray `content_entity_embeddings_*` table.
+/// Positive arbitrary widths are accepted without request-time schema changes.
 #[tokio::test]
-async fn set_checks_the_width_against_the_community_embedding_tables() {
+async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
     use sea_orm::{ConnectionTrait, Statement};
 
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -245,7 +244,7 @@ async fn set_checks_the_width_against_the_community_embedding_tables() {
                 "base_url": "https://embed.example.com/v1",
                 "model": "text-embedding-3-large",
                 "api_key": "sk-secret-value",
-                "dimensions": 3072
+                "dimensions": 0
             }))
             .await;
         assert_eq!(refused.status_code(), StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.text());
@@ -263,9 +262,9 @@ async fn set_checks_the_width_against_the_community_embedding_tables() {
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": "https://embed.example.com/v1",
-                "model": "embed-1024",
+                "model": "embed-3072",
                 "api_key": "sk-secret-value",
-                "dimensions": 1024
+                "dimensions": 3072
             }))
             .await;
         assert_eq!(stored.status_code(), StatusCode::NO_CONTENT, "{}", stored.text());

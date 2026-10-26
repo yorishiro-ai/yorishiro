@@ -78,9 +78,14 @@ pub enum EmbeddingProviderAvailability {
 }
 
 /// Provider that generates embedding vectors.
-/// All vectors written by a deployment must use one of the pre-created supported widths.
+/// Storage accepts any nonempty finite vector with the workspace's effective width.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    /// Generation captured when resolving a mutable workspace assignment.
+    fn workspace_revision(&self) -> Option<i64> {
+        None
+    }
+
     fn availability(&self) -> EmbeddingProviderAvailability {
         EmbeddingProviderAvailability::Enabled
     }

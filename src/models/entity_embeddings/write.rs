@@ -1,4 +1,4 @@
-use sea_orm::{ConnectionTrait, DbErr};
+use sea_orm::{DatabaseConnection, DbErr};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -38,7 +38,7 @@ pub(super) fn compose_embedding_text(
 
 /// Generates and stores one entity's embedding, checking it against what the workspace already holds.
 async fn sync_embedding(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseConnection,
     workspace_id: Uuid,
     record: &EmbeddingSnapshot,
     entity_type_def: &EntityTypeDef,
@@ -48,7 +48,21 @@ async fn sync_embedding(
         return Ok(EmbeddingWriteOutcome::Noop);
     };
 
+    let revision =
+        crate::models::workspace_workspaces::embedding_revision(conn, workspace_id).await?;
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
+    let txn = crate::db::begin_write(conn)
+        .await
+        .map_err(|error| YorishiroError::Internal(error.into()))?;
+    crate::models::workspace_workspaces::fence_embedding(&txn, workspace_id, revision).await?;
+    crate::models::workspace_workspaces::check_embedding_assignment(&txn, workspace_id, provider)
+        .await?;
+    if crate::models::workspace_workspaces::embedding_reindexing(&txn, workspace_id).await? {
+        return Err(YorishiroError::Conflict {
+            message: "workspace reindex is in progress".into(),
+        });
+    }
+    let conn = &txn;
     let chain =
         super::resolution::resolve_embedding_chain(conn, workspace_id, provider.dimensions())
             .await?;
@@ -108,6 +122,9 @@ async fn sync_embedding(
         .await?;
     }
 
+    txn.commit()
+        .await
+        .map_err(|error| YorishiroError::Internal(error.into()))?;
     Ok(if written {
         EmbeddingWriteOutcome::Persisted
     } else {
@@ -117,15 +134,12 @@ async fn sync_embedding(
 
 /// Resolves the schema definition for an entity record and synchronizes its embedding.
 ///
-/// Accepts an `EntityRecord` (the original public type) so the public API shape is preserved
-/// and the concurrency token never leaks into `EntityRecord`.  Behind the scenes this re-reads
-/// the current `EmbeddingSnapshot` to pick up the latest concurrency token, then delegates to
-/// the private `sync_embedding_for_snapshot`.
+/// Re-reads the current snapshot so neither stale record data nor a concurrency token travels through the transport record.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn sync_embedding_for_record(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseConnection,
     workspace_id: Uuid,
     record: &EntityRecord,
     provider: &dyn EmbeddingProvider,
@@ -155,7 +169,7 @@ pub async fn sync_embedding_for_record(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub(crate) async fn sync_embedding_for_snapshot(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseConnection,
     workspace_id: Uuid,
     record: &EmbeddingSnapshot,
     provider: &dyn EmbeddingProvider,

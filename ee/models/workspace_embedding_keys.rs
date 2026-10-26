@@ -22,8 +22,7 @@ pub(crate) async fn configure(
     request: crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    let workspace = crate::models::workspace_workspaces::get_workspace(&txn, workspace_id).await?;
-    let outcome = set(
+    set(
         &txn,
         workspace_id,
         &request.base_url,
@@ -31,14 +30,11 @@ pub(crate) async fn configure(
         &request.api_key,
         request.dimensions,
         request.send_dimensions_param,
-        workspace.embedding_dimensions,
     )
     .await?;
-    if matches!(outcome, SetOutcome::WidthChanged { .. }) {
-        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
-            .await
-            .internal()?;
-    }
+    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+        .await
+        .internal()?;
     txn.commit().await.internal()?;
     Ok(())
 }
@@ -86,38 +82,12 @@ pub(crate) struct EmbeddingKeyConfig {
     pub(crate) send_dimensions_param: bool,
 }
 
-/// Outcome of storing an embedding key assignment.
-///
-/// `WidthChanged` is returned when the new provider's width differs from the
-/// workspace's existing vectors: the key is stored successfully, but the caller
-/// must trigger a reindex so the workspace's entities are re-embedded with the new width.
-#[derive(Clone)]
-pub enum SetOutcome {
-    /// The key was stored and the workspace's width matches the new provider.
-    Stored,
-    /// The key was stored, but the workspace's existing vectors are at a different width.
-    /// The caller should enqueue a reindex for this workspace.
-    WidthChanged {
-        expected_dimensions: i32,
-        new_dimensions: i32,
-    },
-}
-
-/// Stores or replaces a workspace's own embedding provider assignment.
-///
-/// `expected_dimensions` is the workspace's own stamped `workspace_workspaces.embedding_dimensions`,
-/// or the deployment default's width for a workspace carrying no stamp.
-/// When the new provider's width differs, the key is stored and `SetOutcome::WidthChanged` is
-/// returned so the caller can enqueue a reindex (the same `reindex_scheduler` enqueue path that
-/// `#307` uses). This is preferable to rejecting outright: the operator's intent is to switch
-/// widths, and reindexing is the mechanism that makes the switch consistent.
-///
-/// **Supported widths**: the width must have an embedding table, which the community edition's migrations create.
-/// `dimensions` is checked against the community edition's own list, so a width no table exists for is refused here instead of failing on the first entity write.
-#[allow(clippy::too_many_arguments)]
+/// Stores a provider assignment and invalidates the workspace embedding generation.
+/// Callers enqueue a full reindex in the same transaction.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error when credentials, dimensions, or persistence are invalid.
+#[allow(clippy::too_many_arguments)]
 pub async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -126,8 +96,7 @@ pub async fn set(
     api_key: &str,
     dimensions: i32,
     send_dimensions_param: bool,
-    expected_dimensions: Option<i32>,
-) -> Result<SetOutcome, YorishiroError> {
+) -> Result<(), YorishiroError> {
     let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
 
     if dimensions <= 0 {
@@ -137,17 +106,6 @@ pub async fn set(
             hint: "set it to the embedding model's own output width".into(),
         });
     }
-    let outcome = if let Some(expected) = expected_dimensions
-        && expected != dimensions
-    {
-        SetOutcome::WidthChanged {
-            expected_dimensions: expected,
-            new_dimensions: dimensions,
-        }
-    } else {
-        SetOutcome::Stored
-    };
-
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
         base_url: ActiveValue::Set(base_url.to_string()),
@@ -174,7 +132,7 @@ pub async fn set(
         .exec(conn)
         .await
         .internal()?;
-    Ok(outcome)
+    Ok(())
 }
 
 /// Removes a workspace's own assignment.
@@ -188,6 +146,19 @@ pub(crate) async fn clear(
         .exec(conn)
         .await
         .internal()?;
+    Ok(())
+}
+
+pub(crate) async fn remove(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+    clear(&txn, workspace_id).await?;
+    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+        .await
+        .internal()?;
+    txn.commit().await.internal()?;
     Ok(())
 }
 

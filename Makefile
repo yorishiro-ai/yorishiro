@@ -50,7 +50,7 @@ python-lint:
 	uv run scripts/test_ci_matrix.py
 	uv run scripts/test_classify_ci_changes.py
 	uv run scripts/test_topology_self.py
-	bash -n .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh
+	@for script in .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh; do bash -n "$$script" || exit; done
 
 edition-boundary-check:
 	uv run scripts/test_edition_boundary.py

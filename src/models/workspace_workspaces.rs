@@ -8,20 +8,147 @@ pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Mo
 
 mod tenancy;
 
+struct AssignedEmbeddingProvider {
+    provider: std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>,
+    revision: i64,
+}
+
+#[loco_rs::prelude::async_trait]
+impl crate::services::embedding::EmbeddingProvider for AssignedEmbeddingProvider {
+    fn workspace_revision(&self) -> Option<i64> {
+        Some(self.revision)
+    }
+    fn dimensions(&self) -> usize {
+        self.provider.dimensions()
+    }
+    fn model_name(&self) -> String {
+        self.provider.model_name()
+    }
+    fn availability(&self) -> crate::services::embedding::EmbeddingProviderAvailability {
+        self.provider.availability()
+    }
+    fn count_tokens(&self, text: &str) -> u32 {
+        self.provider.count_tokens(text)
+    }
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+        self.provider.embed_batch(texts).await
+    }
+    async fn embed_as(
+        &self,
+        kind: crate::services::embedding::EmbedKind,
+        text: &str,
+    ) -> Result<Vec<f32>, YorishiroError> {
+        self.provider.embed_as(kind, text).await
+    }
+}
+
+pub(crate) async fn check_embedding_assignment(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    provider: &dyn crate::services::embedding::EmbeddingProvider,
+) -> Result<(), YorishiroError> {
+    if let Some(expected) = provider.workspace_revision()
+        && embedding_revision(conn, workspace_id).await? != expected
+    {
+        return Err(YorishiroError::Conflict {
+            message: "workspace changed since provider resolution".into(),
+        });
+    }
+    if let Some(assignment) =
+        crate::models::workspace_embedding_keys::Entity::find_by_id(workspace_id)
+            .one(conn)
+            .await
+            .internal()?
+        && (assignment.model != provider.model_name()
+            || usize::try_from(assignment.dimensions).ok() != Some(provider.dimensions()))
+    {
+        return Err(YorishiroError::Conflict {
+            message: "embedding provider assignment changed; resolve the provider again".into(),
+        });
+    }
+    Ok(())
+}
+
+/// Reads the generation fencing embedding computation and publication.
+pub(crate) async fn embedding_revision(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<i64, YorishiroError> {
+    Entity::find()
+        .select_only()
+        .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingRevision)
+        .filter(crate::models::_entities::workspace_workspaces::Column::Id.eq(workspace_id))
+        .into_tuple::<i64>()
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))
+}
+
+pub(crate) async fn embedding_content_revision(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<i64, YorishiroError> {
+    Entity::find()
+        .select_only()
+        .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingContentRevision)
+        .filter(crate::models::_entities::workspace_workspaces::Column::Id.eq(workspace_id))
+        .into_tuple::<i64>()
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))
+}
+
+/// Locks the workspace generation for a short publication transaction.
+pub(crate) async fn fence_embedding(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    revision: i64,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::workspace_workspaces::Column;
+    use sea_orm::sea_query::Expr;
+    let result = Entity::update_many()
+        .col_expr(
+            Column::EmbeddingRevision,
+            Expr::col(Column::EmbeddingRevision),
+        )
+        .filter(crate::models::_entities::workspace_workspaces::Column::Id.eq(workspace_id))
+        .filter(Column::EmbeddingRevision.eq(revision))
+        .exec(conn)
+        .await
+        .internal()?;
+    if result.rows_affected != 1 {
+        return Err(YorishiroError::Conflict {
+            message: "workspace changed while embeddings were being computed; retry the operation"
+                .into(),
+        });
+    }
+    Ok(())
+}
+
 /// Resolves the workspace override on each delivery, falling back to the process's deployment provider.
 pub(crate) async fn embedding_provider(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
 ) -> Result<Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError>
 {
-    Ok(
-        match crate::workspace_embedding_provider(&ctx.db, workspace_id).await? {
-            Some(provider) => Some(provider),
-            None => ctx
-                .shared_store
-                .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
-        },
-    )
+    let revision = embedding_revision(&ctx.db, workspace_id).await?;
+    let provider = match crate::workspace_embedding_provider(&ctx.db, workspace_id).await? {
+        Some(provider) => Some(provider),
+        None => ctx
+            .shared_store
+            .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
+    };
+    if embedding_revision(&ctx.db, workspace_id).await? != revision {
+        return Err(YorishiroError::Conflict {
+            message: "workspace changed during provider resolution".into(),
+        });
+    }
+    Ok(provider.map(|provider| {
+        std::sync::Arc::new(AssignedEmbeddingProvider { provider, revision })
+            as std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>
+    }))
 }
 
 /// Resolves effective workspace/deployment embedding identity without constructing a provider.

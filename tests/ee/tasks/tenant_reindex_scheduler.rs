@@ -104,7 +104,6 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
         yorishiro::models::entity_embeddings::reindex_workspace(
             &ctx.db,
             fixture.workspace_id,
-            &[],
             &old,
         )
         .await
@@ -170,7 +169,6 @@ async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider
             "test-key",
             768,
             false,
-            Some(768),
         )
         .await
         .unwrap();

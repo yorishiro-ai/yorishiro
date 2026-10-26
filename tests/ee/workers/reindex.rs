@@ -115,9 +115,9 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     assert_eq!(*default_calls.lock().unwrap(), 0);
     let backend = ctx.db.get_database_backend();
     let sql = if backend == sea_orm::DatabaseBackend::Sqlite {
-        "SELECT length(embedding) FROM entity_embeddings_1024 WHERE entity_id = $1"
+        "SELECT length(embedding) FROM entity_embeddings WHERE entity_id = $1"
     } else {
-        "SELECT vector_dims(embedding) * 4 FROM entity_embeddings_1024 WHERE entity_id = $1"
+        "SELECT vector_dims(embedding) * 4 FROM entity_embeddings WHERE entity_id = $1"
     };
     let bytes: i32 = ctx
         .db

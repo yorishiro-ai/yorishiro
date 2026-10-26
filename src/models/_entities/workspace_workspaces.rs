@@ -21,6 +21,8 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<i32>,
+    pub embedding_content_revision: i64,
+    pub embedding_revision: i64,
     pub schema_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub embedding_reindexing: bool,

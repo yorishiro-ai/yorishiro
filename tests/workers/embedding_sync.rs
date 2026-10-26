@@ -591,7 +591,7 @@ mod conflict {
     }
 
     async fn vector_rows(ctx: &AppContext, entity_id: Uuid) -> i64 {
-        use yorishiro::models::_entities::entity_embeddings_768::{Column, Entity};
+        use yorishiro::models::_entities::entity_embeddings::{Column, Entity};
         Entity::find()
             .filter(Column::EntityId.eq(entity_id))
             .count(&ctx.db)

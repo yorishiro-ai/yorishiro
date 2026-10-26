@@ -40,7 +40,7 @@ async fn scenario(
         dimensions: 768,
         send_dimensions_param: true,
     });
-    yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &[], &previous)
+    yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &previous)
         .await
         .expect("stamp the previous deployed model through reindex");
     ctx.shared_store.insert(
@@ -116,7 +116,7 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
             dimensions: 1536,
             send_dimensions_param: false,
         });
-        yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &[], &old)
+        yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &old)
             .await
             .unwrap();
         let current: Arc<dyn EmbeddingProvider> =
@@ -138,7 +138,6 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
         yorishiro::models::entity_embeddings::reindex_workspace(
             &ctx.db,
             matching_workspace,
-            &[],
             &matching,
         )
         .await
