@@ -75,7 +75,7 @@ async fn recover_pending_on_while(
     };
     // Bound provider pressure while letting unrelated deliveries pass a slow publish.
     let keep_running = &keep_running;
-    stream::iter(pending).for_each_concurrent(4, |row| async move {
+    stream::iter(pending).for_each_concurrent(timing.publish_concurrency, |row| async move {
         if !keep_running() {
             return;
         }

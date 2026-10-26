@@ -99,17 +99,20 @@ pub fn configure(config: &mut loco_rs::config::Config, mode: &StartMode) -> loco
 }
 
 pub(crate) fn configure_start(config: &mut loco_rs::config::Config, start: WorkerStart) {
-    let (queues, jobs): (Vec<String>, bool) = match start {
+    use crate::data::settings::ConsumerRole;
+
+    let (queues, role): (Vec<String>, ConsumerRole) = match start {
         WorkerStart::NoWorkers => return,
         WorkerStart::Jobs(targets) => (
             targets.iter().map(|target| target.job_tag()).collect(),
-            true,
+            ConsumerRole::Jobs,
         ),
-        WorkerStart::Targets(targets) => {
-            (targets.iter().map(|target| target.queue()).collect(), false)
-        }
+        WorkerStart::Targets(targets) => (
+            targets.iter().map(|target| target.queue()).collect(),
+            ConsumerRole::Embedding,
+        ),
     };
     crate::data::config::serve_worker_queues(config, &queues);
-    config.settings.get_or_insert_with(|| serde_json::json!({}))["job_consumer"] =
-        serde_json::json!(jobs);
+    config.settings.get_or_insert_with(|| serde_json::json!({}))["consumer_role"] =
+        serde_json::json!(role);
 }

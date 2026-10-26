@@ -83,23 +83,12 @@ pub async fn set(
         });
     }
 
-    // Validate timezone if provided.
     if let Some(tz) = timezone {
-        if tz.trim().is_empty() {
-            return Err(YorishiroError::ValidationFailed {
-                message: "timezone must not be empty if provided".into(),
-                details: vec![],
-                hint: "IANA time zone name, e.g. Asia/Tokyo or UTC. Omit to use UTC.".into(),
-            });
-        }
-        // Basic check: IANA tz names contain at least one "/".
-        if !tz.contains('/') && tz != "UTC" && tz != "Etc/UTC" {
-            return Err(YorishiroError::ValidationFailed {
-                message: format!("timezone {tz:?} does not look like a valid IANA time zone name"),
-                details: vec![],
-                hint: "Use names like Asia/Tokyo, America/New_York, or UTC.".into(),
-            });
-        }
+        crate::time::parse_timezone(tz.trim()).map_err(|_| YorishiroError::ValidationFailed {
+            message: format!("timezone {tz:?} is not a recognized IANA time zone"),
+            details: vec![],
+            hint: "Use an IANA time zone name recognized by the application.".into(),
+        })?;
     }
 
     let Some(every) = parse_interval(interval) else {

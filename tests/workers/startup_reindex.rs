@@ -152,32 +152,37 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
     .await;
 }
 
-/// An already-admitted startup scan wins the atomic admission without another queue delivery.
+/// Startup repair must not duplicate an explicit reindex that is already queued.
 #[tokio::test]
 async fn a_workspace_with_a_reindex_already_active_is_skipped() {
     boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
-        yorishiro::workers::reindex::enqueue_for_class(
-            &worker,
-            yorishiro::workers::reindex::ReindexArgs {
-                lifecycle_id: None,
-                worker_class: WorkerClass::Shared,
-                workspace_id: workspace,
-                startup: true,
-            },
-        )
-        .await
-        .expect("record an active reindex");
+        for startup in [false, true] {
+            let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
+            yorishiro::workers::reindex::enqueue_for_class(
+                &worker,
+                yorishiro::workers::reindex::ReindexArgs {
+                    lifecycle_id: None,
+                    worker_class: WorkerClass::Shared,
+                    workspace_id: workspace,
+                    startup,
+                },
+            )
+            .await
+            .expect("record an active reindex");
 
-        startup_reindex::run(&worker).await;
-        assert_eq!(
-            Lifecycles::find()
-                .filter(yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(workspace))
-                .count(&ctx.db)
-                .await
-                .unwrap(),
-            1
-        );
+            startup_reindex::run(&worker).await;
+            startup_reindex::run_metadata_scan(&worker).await.unwrap();
+            assert_eq!(
+                Lifecycles::find()
+                    .filter(
+                        yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(workspace)
+                    )
+                    .count(&ctx.db)
+                    .await
+                    .unwrap(),
+                1
+            );
+        }
     })
     .await;
 }

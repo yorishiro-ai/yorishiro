@@ -196,7 +196,10 @@ fn production_start_configuration_selects_roles_and_rejects_mixed_targets() {
     use yorishiro::workers::start::configure;
 
     let mut config = crate::sqlite_fixture_config("sqlite::memory:");
-    for (tag, jobs) in [("job-target:shared", true), ("worker-target:shared", false)] {
+    for (tag, role) in [
+        ("job-target:shared", "jobs"),
+        ("worker-target:shared", "embedding"),
+    ] {
         configure(
             &mut config,
             &StartMode::WorkerOnly {
@@ -204,7 +207,7 @@ fn production_start_configuration_selects_roles_and_rejects_mixed_targets() {
             },
         )
         .unwrap();
-        assert_eq!(config.settings.as_ref().unwrap()["job_consumer"], jobs);
+        assert_eq!(config.settings.as_ref().unwrap()["consumer_role"], role);
     }
     let before = config.settings.clone();
     assert!(

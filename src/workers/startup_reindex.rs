@@ -149,25 +149,7 @@ async fn resolve_workspace_metadata(
 }
 
 async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
-    let worker_class =
-        match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id).await {
-            Ok(class) => class,
-            Err(err) => {
-                tracing::warn!(
-                    %workspace_id,
-                    error = %err.0,
-                    "startup reindex: failed to resolve worker class, skipping workspace"
-                );
-                return;
-            }
-        };
-    let args = crate::workers::reindex::ReindexArgs {
-        lifecycle_id: None,
-        workspace_id,
-        worker_class,
-        startup: true,
-    };
-    match crate::workers::reindex::enqueue_for_class(ctx, args).await {
+    match enqueue_metadata_reindex(ctx, workspace_id).await {
         Ok(()) => tracing::info!(%workspace_id, "startup reindex: enqueue success"),
         Err(err) => {
             tracing::error!(%workspace_id, error = %err, "startup reindex: failed to enqueue reindex");
@@ -179,7 +161,7 @@ async fn enqueue_metadata_reindex(
     ctx: &AppContext,
     workspace_id: uuid::Uuid,
 ) -> loco_rs::Result<()> {
-    if active_startup_reindex_exists(ctx, workspace_id).await? {
+    if active_reindex_exists(ctx, workspace_id).await? {
         return Ok(());
     }
     let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
@@ -199,7 +181,7 @@ async fn enqueue_metadata_reindex(
         .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))
 }
 
-async fn active_startup_reindex_exists(
+async fn active_reindex_exists(
     ctx: &AppContext,
     workspace_id: uuid::Uuid,
 ) -> loco_rs::Result<bool> {
@@ -209,13 +191,12 @@ async fn active_startup_reindex_exists(
     let txn = crate::db::begin_workspace(ctx, tenant, workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
-    let exists = crate::models::queue_job_lifecycles::Entity::has_active(
-        &txn,
-        crate::workers::reindex::ReindexArgs::STARTUP_JOB_NAME,
-        workspace_id,
-    )
-    .await
-    .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
+    let exists =
+        crate::models::queue_job_lifecycles::Entity::has_active_reindex(&txn, workspace_id)
+            .await
+            .map_err(|error| {
+                loco_rs::Error::Message(format!("workspace {workspace_id}: {error}"))
+            })?;
     txn.commit()
         .await
         .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;

@@ -172,6 +172,29 @@ impl Entity {
             > 0)
     }
 
+    /// Whether a workspace already has queued or running full embedding repair work.
+    ///
+    /// # Errors
+    /// Returns an error if the lifecycle lookup fails.
+    pub async fn has_active_reindex(
+        db: &impl ConnectionTrait,
+        workspace_id: Uuid,
+    ) -> Result<bool, DbErr> {
+        use crate::workers::reindex::ReindexArgs;
+
+        Ok(Entity::find()
+            .filter(Column::JobName.is_in([ReindexArgs::JOB_NAME, ReindexArgs::STARTUP_JOB_NAME]))
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Status.is_in([
+                LifecycleStatus::Queued.as_db_str(),
+                LifecycleStatus::Running.as_db_str(),
+                LifecycleStatus::Retrying.as_db_str(),
+            ]))
+            .count(db)
+            .await?
+            > 0)
+    }
+
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.

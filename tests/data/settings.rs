@@ -38,6 +38,10 @@ fn provider_is_typed_and_unknown_settings_are_rejected() {
     let mut unknown_key = settings();
     unknown_key["rate_limit"]["obsolete"] = 1.into();
     assert!(serde_json::from_value::<Settings>(unknown_key).is_err());
+
+    let mut unknown_role = settings();
+    unknown_role["consumer_role"] = "typo".into();
+    assert!(serde_json::from_value::<Settings>(unknown_role).is_err());
 }
 
 #[test]
@@ -125,6 +129,7 @@ fn dispatch_timing_is_validated_before_workers_start() {
     for timing in [
         serde_json::json!({"poll_interval_ms": 0}),
         serde_json::json!({"enqueue_timeout_ms": 0}),
+        serde_json::json!({"publish_concurrency": 0}),
         serde_json::json!({"claim_lease_seconds": 0}),
         serde_json::json!({"claim_lease_seconds": 5}),
         serde_json::json!({"claim_lease_seconds": 1, "enqueue_timeout_ms": 1001}),

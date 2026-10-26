@@ -9,6 +9,37 @@ use yorishiro::edition::ee::models::tenant_reindex_schedules::{
 
 const TICK: i64 = 1_700_000_000;
 
+#[tokio::test]
+async fn schedules_validate_timezones_with_the_application_parser() {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+
+        let tenant =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        for invalid in ["", "Not/AZone"] {
+            assert!(
+                set(&ctx.db, tenant.tenant_id, "P1D", Some(invalid))
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(get(&ctx.db, tenant.tenant_id).await.unwrap().is_none());
+        set(&ctx.db, tenant.tenant_id, "P1D", Some(" Europe/London "))
+            .await
+            .unwrap();
+        assert_eq!(
+            get(&ctx.db, tenant.tenant_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .timezone
+                .as_deref(),
+            Some("Europe/London")
+        );
+    })
+    .await;
+}
+
 fn at(offset: i64) -> chrono::DateTime<Utc> {
     Utc.timestamp_opt(TICK + offset, 0).single().unwrap()
 }

@@ -89,12 +89,17 @@ impl WorkerRegistry {
     /// # Errors
     /// Returns the first registration error Loco reports.
     pub(crate) async fn connect(&self, ctx: &AppContext, queue: &Queue) -> Result<()> {
-        let jobs = ctx
+        let role = ctx
             .config
             .settings::<crate::data::settings::Settings>()?
-            .job_consumer;
+            .consumer_role;
         for registration in &self.registrations {
-            if is_embedding_worker(&registration.class_name) == jobs {
+            let worker_role = if is_embedding_worker(&registration.class_name) {
+                crate::data::settings::ConsumerRole::Embedding
+            } else {
+                crate::data::settings::ConsumerRole::Jobs
+            };
+            if worker_role != role {
                 continue;
             }
             (registration.connect)(ctx, queue).await?;

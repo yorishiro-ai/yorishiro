@@ -330,16 +330,16 @@ pub(crate) async fn connect_workers(
     queue: &loco_rs::bgworker::Queue,
     workers: &WorkerRegistry,
 ) -> Result<()> {
-    let jobs = ctx
+    let role = ctx
         .config
         .settings::<crate::data::settings::Settings>()?
-        .job_consumer;
-    if !jobs {
+        .consumer_role;
+    if role == crate::data::settings::ConsumerRole::Embedding {
         initializers::embedding::install_provider(ctx).await?;
     }
     workers.connect(ctx, queue).await?;
     initializers::queue::start_relay(ctx)?;
-    if !jobs {
+    if role == crate::data::settings::ConsumerRole::Embedding {
         crate::workers::startup_reindex::run(ctx).await;
     }
     Ok(())
