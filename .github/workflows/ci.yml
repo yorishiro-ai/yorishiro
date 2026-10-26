@@ -543,6 +543,7 @@ jobs:
           if-no-files-found: error
 
       - name: Run tests
+        id: topology-tests
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
@@ -559,7 +560,7 @@ jobs:
           RUSTC_BOOTSTRAP=1 uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- -Z unstable-options --report-time
 
       - name: Upload request phase timings
-        if: always()
+        if: always() && (steps.topology-tests.outcome == 'success' || steps.topology-tests.outcome == 'failure')
         uses: actions/upload-artifact@v7
         with:
           name: request-timings-${{ matrix.edition }}-${{ matrix.backend }}-${{ matrix.queue_key }}
