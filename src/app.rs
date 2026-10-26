@@ -49,7 +49,16 @@ pub(crate) async fn load_config(env: &Environment) -> Result<Config> {
 
 /// Makes a Redis queue poll the queue of each target a start serves.
 fn serve_start(start: crate::workers::start::WorkerStart, config: &mut Config) {
+    if let crate::workers::start::WorkerStart::Jobs(targets) = start {
+        let queues: Vec<String> = targets.iter().map(|target| target.job_tag()).collect();
+        crate::data::config::serve_worker_queues(config, &queues);
+        config.settings.get_or_insert_with(|| serde_json::json!({}))["job_consumer"] =
+            serde_json::json!(true);
+        return;
+    }
     if let crate::workers::start::WorkerStart::Targets(targets) = start {
+        config.settings.get_or_insert_with(|| serde_json::json!({}))["job_consumer"] =
+            serde_json::json!(false);
         let queues: Vec<String> = targets.iter().map(|target| target.queue()).collect();
         crate::data::config::serve_worker_queues(config, &queues);
     }
@@ -340,10 +349,18 @@ pub(crate) async fn connect_workers(
     queue: &loco_rs::bgworker::Queue,
     workers: &WorkerRegistry,
 ) -> Result<()> {
-    initializers::embedding::install_provider(ctx).await?;
+    let jobs = ctx
+        .config
+        .settings::<crate::data::settings::Settings>()?
+        .job_consumer;
+    if !jobs {
+        initializers::embedding::install_provider(ctx).await?;
+    }
     workers.connect(ctx, queue).await?;
     initializers::queue::start_relay(ctx)?;
-    crate::workers::startup_reindex::run(ctx).await;
+    if !jobs {
+        crate::workers::startup_reindex::run(ctx).await;
+    }
     Ok(())
 }
 

@@ -47,9 +47,15 @@ scheduler:
 #
 # This environment fixes the queue provider to PostgreSQL.
 # QUEUE_URL overrides the application DATABASE_URL for queue storage.
-# Missing SQL pool settings inherit the resolved database settings.
+# SQL pool settings are declared explicitly alongside database settings.
 queue:
   kind: Postgres
+
+  enable_logging: true
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
 
   # Postgres connection URI. Commonly the same value as DATABASE_URL.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>

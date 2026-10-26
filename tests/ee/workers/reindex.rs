@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use sea_orm::{ConnectionTrait, EntityTrait, Statement};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Statement};
 use uuid::Uuid;
 
 use yorishiro::models::_entities::workspace_workspaces;
@@ -98,7 +98,10 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     assert!(!described.json::<serde_json::Value>().to_string().contains("secret-workspace-key"));
     ctx.shared_store
         .insert(default as Arc<dyn EmbeddingProvider>);
-    let lifecycle_id = record_delivery(&ctx, workspace_id).await;
+    let lifecycle_id = yorishiro::models::queue_job_lifecycles::Entity::find()
+        .filter(yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(workspace_id))
+        .filter(yorishiro::models::queue_job_lifecycles::Column::JobName.eq("reindex"))
+        .one(&ctx.db).await.unwrap().expect("configuration queues reindex").id;
     let outbox = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(lifecycle_id)
         .one(&ctx.db).await.expect("read durable payload").expect("outbox exists");
     let encoded = outbox.payload.to_string();

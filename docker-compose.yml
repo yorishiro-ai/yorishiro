@@ -132,6 +132,23 @@ services:
       redis:
         condition: service_healthy
 
+  jobs:
+    <<: *yorishiro
+    container_name: jobs
+    # The worker serves the shared target. To serve others, list them after `--worker=`, separated by
+    # commas (`job-target:official`, `job-target:tenant:<tenant-id>`), or add a service for them.
+    command: ["start", "--worker=job-target:shared"]
+    # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
+    # reported unhealthy forever.
+    healthcheck:
+      disable: true
+    # After the server is healthy, which is after it has applied the migrations the worker needs.
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   scheduler:
     <<: *yorishiro
     container_name: scheduler

@@ -66,15 +66,36 @@ async fn finish_job(
         .unwrap()
         .unwrap();
     let tag = outbox.tags.unwrap()[0].as_str().unwrap().to_owned();
-    let target = WorkerTarget::parse_tag(&tag).unwrap();
-    let queue = super::query_worker::target_queue(ctx, target).await;
+    let jobs = tag.starts_with("job-target:");
+    let target = if jobs {
+        WorkerTarget::parse_job_tag(&tag)
+    } else {
+        WorkerTarget::parse_tag(&tag)
+    }
+    .unwrap();
+    let queue = if jobs {
+        let mut config = ctx.config.clone();
+        yorishiro::data::config::serve_worker_queues(&mut config, std::slice::from_ref(&tag));
+        let queue = loco_rs::bgworker::create_queue_provider(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        queue.setup().await.unwrap();
+        queue
+    } else {
+        super::query_worker::target_queue(ctx, target).await
+    };
     let mut worker_ctx = ctx.clone();
     worker_ctx.queue_provider = Some(queue.clone());
+    worker_ctx
+        .config
+        .settings
+        .get_or_insert_with(|| serde_json::json!({}))["job_consumer"] = serde_json::json!(jobs);
     yorishiro::App::connect_workers(&worker_ctx, &queue)
         .await
         .expect("register production workers");
     let running = queue.clone();
-    let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
+    let worker = tokio::spawn(async move { running.run(vec![tag]).await });
     let result =
         std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(20), async {
             loop {
@@ -98,7 +119,20 @@ async fn finish_job(
                 };
                 if matches!(status.as_str(), "completed" | "failed") {
                     assert_eq!(status, expected, "worker outcome");
-                    break;
+                    let directory = tempfile::tempdir().expect("queue result directory");
+                    let path = queue.dump(directory.path(), None, None).await.unwrap();
+                    let jobs: Vec<loco_rs::bgworker::Job> =
+                        serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+                    let expected_status = if expected == "failed" {
+                        loco_rs::bgworker::JobStatus::Failed
+                    } else {
+                        loco_rs::bgworker::JobStatus::Completed
+                    };
+                    if jobs.iter().any(|job| {
+                        job.data["lifecycle_id"] == id.to_string() && job.status == expected_status
+                    }) {
+                        break;
+                    }
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }

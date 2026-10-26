@@ -206,13 +206,6 @@ pub fn validate_queue_policy(config: &Config) -> Result<()> {
             "BackgroundQueue requires a configured queue provider".into(),
         ));
     };
-    if let QueueConfig::Redis(redis) = queue
-        && (redis.connect_timeout == 0 || redis.response_timeout == 0)
-    {
-        return Err(Error::Message(
-            "Redis queue connect_timeout and response_timeout must be greater than zero".into(),
-        ));
-    }
     // Restrict the existing SQL providers only; future providers validate their own backend requirements.
     let sqlite_database = is_sqlite_uri(&config.database.uri);
     let mismatch = match queue {

@@ -11,6 +11,24 @@ fn tenant(id: &str) -> WorkerTarget {
 }
 
 #[test]
+fn job_targets_are_separate_and_preserve_tenant_validation() {
+    for target in [
+        WorkerTarget::Shared,
+        WorkerTarget::Official,
+        tenant(TENANT_A),
+    ] {
+        assert_ne!(target.tag(), target.job_tag());
+        assert_eq!(WorkerTarget::parse_job_tag(&target.job_tag()), Ok(target));
+        assert!(WorkerTarget::parse_tag(&target.job_tag()).is_err());
+        assert!(WorkerTarget::parse_job_tag(&target.tag()).is_err());
+    }
+    assert!(
+        WorkerTarget::parse_job_tag("job-target:tenant:0198F3A0-0000-7000-8000-00000000000A")
+            .is_err()
+    );
+}
+
+#[test]
 fn each_target_has_one_tag_class_and_concurrency_key() {
     assert_eq!(WorkerTarget::Shared.tag(), "worker-target:shared");
     assert_eq!(WorkerTarget::Shared.class(), WorkerClass::Shared);
@@ -160,8 +178,6 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
     let mut config = crate::sqlite_fixture_config("sqlite::memory:");
     config.queue = Some(QueueConfig::Redis(RedisQueueConfig {
         uri: "redis://localhost:6379/15".into(),
-        connect_timeout: 10_000,
-        response_timeout: 5_000,
         dangerously_flush: false,
         queues: None,
         num_workers: 1,

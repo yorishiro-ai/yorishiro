@@ -95,6 +95,27 @@ impl WorkerTarget {
         self.tag()
     }
 
+    /// Routing tag for durable non-embedding jobs on separate Loco consumers.
+    #[must_use]
+    pub fn job_tag(self) -> String {
+        self.tag().replacen("worker-target:", "job-target:", 1)
+    }
+
+    /// Parses a non-embedding execution target with the same tenant validation.
+    ///
+    /// # Errors
+    /// Returns an error for an unknown target or noncanonical tenant ID.
+    pub fn parse_job_tag(tag: &str) -> Result<Self, InvalidWorkerTarget> {
+        if let Some(name) = tag.strip_prefix("job-target:") {
+            Self::parse_tag(&format!("worker-target:{name}"))
+        } else {
+            Err(InvalidWorkerTarget {
+                tag: tag.into(),
+                reason: "a job tag must start with `job-target:`",
+            })
+        }
+    }
+
     /// The key the concurrency limit counts running jobs under.
     #[must_use]
     pub fn concurrency_key(self) -> String {

@@ -57,7 +57,7 @@ async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
             .map(|(_, args)| args.workspace_id)
             .collect();
         // Missing workspaces exercise the real enqueue failure path without replacing dispatch.
-        let errors = dispatch_reindex_batch(&ctx, dispatches).await;
+        let errors = dispatch_reindex_batch(&ctx, dispatches, None).await;
         assert_eq!(errors.len(), 3);
         for workspace in workspaces {
             assert!(
@@ -82,13 +82,13 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
     .unwrap();
 
     assert!(message.starts_with("reindex scheduler dispatch failed for 2 workspace(s)"));
-    assert!(message.contains("interval is not retried"));
+    assert!(message.contains("schedule advancement rolled back"));
     assert!(message.contains("workspace one: enqueue failed"));
     assert!(message.contains("scheduler ownership release also failed: unlock failed"));
 }
 
 #[tokio::test]
-async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
+async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
     install_active_licence(&ctx);
     if !crate::require_sqlite_backend() { return; }
@@ -104,7 +104,7 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
             .unwrap();
     }
     transaction.commit().await.unwrap();
-    // Database fault injection: real enqueue must fail after schedule advancement.
+    // A failed outbox insert must roll back both schedule advancement and all jobs.
     ctx.db.execute_unprepared(
         "CREATE TRIGGER refuse_test_dispatch BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'test outbox unavailable'); END"
     ).await.unwrap();
@@ -130,13 +130,15 @@ async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
     );
 
     let schedule = get(&ctx.db, tenant_id).await.unwrap().unwrap();
-    let expected: chrono::DateTime<chrono::FixedOffset> = (tick + chrono::Duration::days(1)).into();
+    let expected: chrono::DateTime<chrono::FixedOffset> = tick.into();
     assert_eq!(schedule.scheduled_for.unwrap(), expected);
 
+    ctx.db.execute_unprepared("DROP TRIGGER refuse_test_dispatch").await.unwrap();
     let second = task
         .run_at(&ctx, &loco_rs::task::Vars::default(), tick)
         .await;
     assert!(second.is_ok());
+    assert_eq!(get(&ctx.db, tenant_id).await.unwrap().unwrap().scheduled_for.unwrap().to_utc(), tick + chrono::Duration::days(1));
 
     let ownership = yorishiro::edition::ee::db::acquire_scheduler_ownership(
         &ctx,

@@ -35,6 +35,39 @@ fn a_cli_command_runs_without_building_the_embedding_provider() {
     );
 }
 
+/// Durable application jobs must start without loading an embedding model.
+#[test]
+#[serial_test::serial(process_environment)]
+fn a_job_consumer_does_not_build_the_embedding_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let uri = |name: &str| format!("sqlite://{}?mode=rwc", dir.path().join(name).display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_yorishiro"))
+        .args(["start", "--worker=job-target:shared"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("LOCO_ENV", "test_sqlite")
+        .env("DATABASE_URL", uri("app.sqlite3"))
+        .env("QUEUE_URL", uri("queue.sqlite3"))
+        .env("YORISHIRO_EMBEDDING_PROVIDER", "local")
+        .env(
+            "YORISHIRO_LOCAL_MODEL",
+            "nonexistent-model-that-does-not-exist",
+        )
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    let exited = child.try_wait().unwrap();
+    if exited.is_none() {
+        child.kill().unwrap();
+    }
+    child.wait().unwrap();
+    assert!(
+        exited.is_none(),
+        "job consumer unexpectedly exited: {exited:?}"
+    );
+}
+
 /// The same environment stops a worker at start, which shows the environment really would have failed the command above if it had built a provider.
 #[test]
 #[serial_test::serial(process_environment)]

@@ -41,7 +41,7 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 # The container's PID 1 is systemd, so `docker logs` never carries the service's output.
-dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -u yorishiro-scheduler -n 40 --no-pager >&2; }
+dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -u yorishiro-jobs -u yorishiro-scheduler -n 40 --no-pager >&2; }
 
 DEB="$(basename "$PKG_FILE")"
 NET="ysr-sd-$$" APP="ysr-sd-app-$$" PG="ysr-sd-pg-$$"
@@ -90,6 +90,10 @@ execstart=$(docker exec "$APP" bash -c '
 [ "$execstart" = "ExecStart=/usr/bin/yorishiro start --worker=worker-target:shared" ] \
   && ok "yorishiro-worker.service serves the shared target" \
   || bad "yorishiro-worker.service has an unexpected ExecStart: $execstart"
+jobs_execstart=$(docker exec "$APP" grep -m1 "^ExecStart=" /lib/systemd/system/yorishiro-jobs.service 2>/dev/null)
+[ "$jobs_execstart" = "ExecStart=/usr/bin/yorishiro start --worker=job-target:shared" ] \
+  && ok "application jobs use a separate consumer" \
+  || bad "unexpected application job consumer: $jobs_execstart"
 docker exec "$APP" test ! -e /var/lib/yorishiro/worker-wrapper.sh \
   && ok "no worker wrapper is installed" \
   || bad "a worker wrapper is still installed at /var/lib/yorishiro/worker-wrapper.sh"

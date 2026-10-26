@@ -258,6 +258,11 @@ pub(crate) async fn dispatch_job(
     let txn = caller_txn
         .or(owned_txn.as_ref())
         .expect("one transaction exists");
+    let tag = if super::registry::is_embedding_worker(&spec.worker_name) {
+        target.tag()
+    } else {
+        target.job_tag()
+    };
     crate::models::queue_job_dispatch_outbox::record_in_transaction(
         txn,
         Enqueue {
@@ -271,8 +276,8 @@ pub(crate) async fn dispatch_job(
         },
         payload,
         spec.worker_name,
-        Some(target.queue()),
-        Some(vec![target.tag()]),
+        Some(tag.clone()),
+        Some(vec![tag]),
     )
     .await
     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;

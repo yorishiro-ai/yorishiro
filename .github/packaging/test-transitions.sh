@@ -44,6 +44,7 @@ run_deb_transition() {
     chown -R yorishiro:yorishiro /var/lib/yorishiro
     systemctl --root=/ enable yorishiro.service
     systemctl --root=/ enable yorishiro-worker.service
+    systemctl --root=/ enable yorishiro-jobs.service
     systemctl --root=/ enable yorishiro-scheduler.service
     apt-get install -y -qq /pkg/${to_package}-${VERSION}-amd64.deb
     test \"\$(dpkg-query -W -f='\${Status}' ${to_package})\" = 'install ok installed'
@@ -66,6 +67,7 @@ run_deb_transition() {
     test \"\$(stat -c '%a' /var/lib/yorishiro)\" = 1770
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro-worker.service
+    test -L /etc/systemd/system/multi-user.target.wants/yorishiro-jobs.service
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro-scheduler.service
     test -x /usr/bin/yorishiro
   "
@@ -129,6 +131,7 @@ run_rpm_transition() {
     chown -R yorishiro:yorishiro /var/lib/yorishiro
     systemctl --root=/ enable yorishiro.service
     systemctl --root=/ enable yorishiro-worker.service
+    systemctl --root=/ enable yorishiro-jobs.service
     systemctl --root=/ enable yorishiro-scheduler.service
     set +e
     dnf install -y -q /pkg/${to_package}-${VERSION}-amd64.rpm
@@ -157,6 +160,7 @@ run_rpm_transition() {
     test \"\$(stat -c '%a' /var/lib/yorishiro)\" = 1770
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro-worker.service
+    test -L /etc/systemd/system/multi-user.target.wants/yorishiro-jobs.service
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro-scheduler.service
     test -x /usr/bin/yorishiro
   "

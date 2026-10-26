@@ -30,8 +30,20 @@ pub(crate) async fn target_queue(
     ctx: &AppContext,
     target: WorkerTarget,
 ) -> Arc<loco_rs::bgworker::Queue> {
+    queue_for_tag(ctx, target.queue()).await
+}
+
+#[cfg(feature = "enterprise")]
+pub(crate) async fn job_target_queue(
+    ctx: &AppContext,
+    target: WorkerTarget,
+) -> Arc<loco_rs::bgworker::Queue> {
+    queue_for_tag(ctx, target.job_tag()).await
+}
+
+async fn queue_for_tag(ctx: &AppContext, tag: String) -> Arc<loco_rs::bgworker::Queue> {
     let mut config = ctx.config.clone();
-    yorishiro::data::config::serve_worker_queues(&mut config, &[target.queue()]);
+    yorishiro::data::config::serve_worker_queues(&mut config, &[tag]);
     let queue = loco_rs::bgworker::create_queue_provider(&config)
         .await
         .expect("create worker queue")

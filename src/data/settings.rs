@@ -3,6 +3,9 @@ use serde::Deserialize;
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    /// Internal process role selected from the CLI worker target.
+    #[serde(default)]
+    pub(crate) job_consumer: bool,
     /// Deployment-declared worker target tags, not a live worker inventory.
     #[serde(default = "default_worker_targets")]
     pub worker_targets: Vec<String>,

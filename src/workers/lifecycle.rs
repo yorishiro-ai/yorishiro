@@ -15,13 +15,11 @@ use crate::workers::target::WorkerTarget;
 
 const SATURATED: &str = "worker capacity saturated";
 
-/// Runs a job whose failures are deterministic and must not be immediately requeued.
-///
-/// Reindex provider and validation failures are terminal for this queued attempt;
-/// operators can correct the provider or explicitly request another reindex.
+/// Records application lifecycle state without hiding handler failures from Loco.
+/// Failed attempts remain eligible for Loco's explicit failed-job retry.
 ///
 /// # Errors
-/// Returns an error if lifecycle persistence fails.
+/// Returns the handler error or a lifecycle persistence error.
 pub(crate) async fn perform_with_terminal_lifecycle<W, A, F, Fut>(
     ctx: &AppContext,
     lifecycle_id: Option<Uuid>,
@@ -81,7 +79,7 @@ where
             .await
             .map_err(message)?;
             tracing::error!(lifecycle_id = %id, worker_class = class.as_db_str(), error = %error, "terminal worker failure");
-            Ok(())
+            Err(error)
         }
     }
 }
@@ -119,13 +117,18 @@ where
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let tag = if super::registry::is_embedding_worker(&W::class_name()) {
+        target.tag()
+    } else {
+        target.job_tag()
+    };
     crate::models::queue_job_dispatch_outbox::record_lifecycle_payload(
         &txn,
         lifecycle_id,
         payload,
         W::class_name(),
-        Some(target.queue()),
-        Some(vec![target.tag()]),
+        Some(tag.clone()),
+        Some(vec![tag]),
     )
     .await
     .map_err(message)?;

@@ -410,8 +410,8 @@ async fn defer_and_enqueue(
         lifecycle_id,
         payload,
         InferFillWorker::class_name(),
-        Some(target.queue()),
-        Some(vec![target.tag()]),
+        Some(target.job_tag()),
+        Some(vec![target.job_tag()]),
     )
     .await
     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
