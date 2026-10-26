@@ -118,21 +118,21 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
             .await
             .unwrap();
         assert!(
-            yorishiro::models::queue_job_lifecycles::Entity::has_active(
+            yorishiro::models::queue_job_lifecycles::Entity::has_active_reindex(
                 &ctx.db,
-                "startup_reindex",
                 fixture.workspace_id
             )
             .await
             .unwrap()
         );
-        assert_eq!(lifecycle_count().count(&ctx.db).await.unwrap(), 1);
-        assert_eq!(outbox_count().count(&ctx.db).await.unwrap(), 1);
+        // The licensed tick already queued a full reindex; metadata repair must reuse it.
+        assert_eq!(lifecycle_count().count(&ctx.db).await.unwrap(), 0);
+        assert_eq!(outbox_count().count(&ctx.db).await.unwrap(), 0);
         task.run_at(&ctx, &loco_rs::task::Vars::default(), due)
             .await
             .unwrap();
-        assert_eq!(lifecycle_count().count(&ctx.db).await.unwrap(), 1);
-        assert_eq!(outbox_count().count(&ctx.db).await.unwrap(), 1);
+        assert_eq!(lifecycle_count().count(&ctx.db).await.unwrap(), 0);
+        assert_eq!(outbox_count().count(&ctx.db).await.unwrap(), 0);
         assert_eq!(
             get(&ctx.db, fixture.tenant_id)
                 .await

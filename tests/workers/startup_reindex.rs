@@ -155,8 +155,8 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
 /// Startup repair must not duplicate an explicit reindex that is already queued.
 #[tokio::test]
 async fn a_workspace_with_a_reindex_already_active_is_skipped() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        for startup in [false, true] {
+    for startup in [false, true] {
+        boot_request_isolated::<App, _, _>(|request, ctx| async move {
             let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
             yorishiro::workers::reindex::enqueue_for_class(
                 &worker,
@@ -182,9 +182,9 @@ async fn a_workspace_with_a_reindex_already_active_is_skipped() {
                     .unwrap(),
                 1
             );
-        }
-    })
-    .await;
+        })
+        .await;
+    }
 }
 
 /// On PostgreSQL one replica scans at a time: while another holds the scan lock a starting worker skips, and once it is released the next start scans.
