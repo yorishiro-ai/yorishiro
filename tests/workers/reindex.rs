@@ -3,14 +3,9 @@ use yorishiro::workers::reindex::ReindexWorker;
 
 /// The worker declares neither tags nor a queue: a job's target is chosen when the job is enqueued.
 #[test]
-fn the_reindex_worker_declares_no_routing_of_its_own() {
+fn the_reindex_worker_keeps_its_loco_registration_contract() {
     assert!(ReindexWorker::tags().is_empty());
     assert!(ReindexWorker::queue().is_none());
-}
-
-/// Loco persists the class name, so renaming the worker strands queued jobs.
-#[test]
-fn the_reindex_worker_keeps_its_queue_class_name() {
     assert_eq!(ReindexWorker::class_name(), "ReindexWorker");
 }
 

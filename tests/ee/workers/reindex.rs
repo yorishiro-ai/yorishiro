@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Statement};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use uuid::Uuid;
 
 use yorishiro::models::_entities::workspace_workspaces;
@@ -117,23 +117,19 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     assert_eq!(*workspace_calls.lock().unwrap(), 1);
     assert_eq!(*default_calls.lock().unwrap(), 0);
     let backend = ctx.db.get_database_backend();
-    let sql = if backend == sea_orm::DatabaseBackend::Sqlite {
-        "SELECT length(embedding) FROM entity_embeddings WHERE entity_id = $1"
+    use sea_orm::sea_query::{Alias, Expr, Func};
+    use yorishiro::models::_entities::entity_embeddings;
+    let length = Func::cust(Alias::new(if backend == sea_orm::DatabaseBackend::Sqlite {
+        "length"
     } else {
-        "SELECT vector_dims(embedding) * 4 FROM entity_embeddings WHERE entity_id = $1"
-    };
-    let bytes: i32 = ctx
-        .db
-        .query_one_raw(Statement::from_sql_and_values(
-            backend,
-            sql,
-            [entity.id.into()],
-        ))
-        .await
-        .expect("embedding row")
-        .expect("embedding exists")
-        .try_get_by_index(0)
-        .expect("embedding length");
+        "vector_dims"
+    })).arg(Expr::col(entity_embeddings::Column::Embedding));
+    let stored_length = entity_embeddings::Entity::find_by_id(entity.id)
+        .select_only()
+        .expr(length)
+        .into_tuple::<i32>()
+        .one(&ctx.db).await.expect("embedding row").expect("embedding exists");
+    let bytes = if backend == sea_orm::DatabaseBackend::Sqlite { stored_length } else { stored_length * 4 };
     assert_eq!(bytes, 1024 * 4);
     }).await;
 }

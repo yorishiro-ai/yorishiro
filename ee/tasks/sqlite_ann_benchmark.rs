@@ -83,25 +83,19 @@ impl Task for SqliteAnnBenchmark {
         let table_name = crate::models::entity_embeddings::TABLE.to_owned();
 
         // Count entities with embeddings in this workspace.
-        let count = Query::select()
-            .expr(sea_orm::sea_query::Func::count(Expr::col(Asterisk)))
-            .from_as(Alias::new(&table_name), Alias::new("ee"))
-            .join_as(
+        use crate::models::_entities::entity_embeddings;
+        use sea_orm::{
+            ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+        };
+        let entity_count = entity_embeddings::Entity::find()
+            .join(
                 JoinType::InnerJoin,
-                entity_entities::Entity,
-                Alias::new("e"),
-                Expr::col((Alias::new("e"), EntityColumn::Id))
-                    .equals((Alias::new("ee"), Alias::new("entity_id"))),
+                entity_embeddings::Relation::EntityEntities.def(),
             )
-            .and_where(Expr::col((Alias::new("e"), EntityColumn::WorkspaceId)).eq(workspace_id))
-            .and_where(Expr::col((Alias::new("ee"), Alias::new("embedding"))).is_not_null())
-            .to_owned();
-        let entity_count: i64 = ctx
-            .db
-            .query_one_raw(ctx.db.get_database_backend().build(&count))
-            .await?
-            .ok_or_else(|| Error::Message("embedding count returned no row".into()))?
-            .try_get_by_index(0)?;
+            .filter(EntityColumn::WorkspaceId.eq(workspace_id))
+            .filter(entity_embeddings::Column::Embedding.is_not_null())
+            .count(&ctx.db)
+            .await?;
         let entity_count = usize::try_from(entity_count)
             .map_err(|_| Error::Message("embedding count exceeds platform limits".into()))?;
 

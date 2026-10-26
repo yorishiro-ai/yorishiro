@@ -50,18 +50,6 @@ fn each_target_has_one_tag_class_and_concurrency_key() {
     );
 }
 
-/// Redis keeps one queue per target so that a backlog for one target cannot hide the jobs of another from the first 1000 entries a worker scans.
-#[test]
-fn a_targets_queue_is_its_tag() {
-    for target in [
-        WorkerTarget::Shared,
-        WorkerTarget::Official,
-        tenant(TENANT_A),
-    ] {
-        assert_eq!(target.queue(), target.tag());
-    }
-}
-
 #[test]
 fn a_tag_reads_back_into_the_target_that_wrote_it() {
     for target in [
@@ -71,6 +59,7 @@ fn a_tag_reads_back_into_the_target_that_wrote_it() {
         WorkerTarget::Tenant(Uuid::now_v7()),
     ] {
         assert_eq!(WorkerTarget::parse_tag(&target.tag()), Ok(target));
+        assert_eq!(target.queue(), target.tag());
     }
 }
 
