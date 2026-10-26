@@ -228,14 +228,15 @@ pub struct EntityDrift {
     pub schema_version: i32,
     /// The newest active version of the same schema.
     pub active_schema_version: i32,
-    /// Fields the active version defines that this entity's version did not.
-    /// Empty when the entity is current, and empty as well when the newer version only changed fields the entity already carries.
+    /// Active-version fields absent from the stored data, independent of the entity's schema version.
+    /// Present nulls and invalid types are not classified as absent.
     pub missing_fields: Vec<DriftField>,
 }
 
-/// A field an entity predates.
+/// An active-version field absent from stored data.
 #[derive(Debug, Clone, Serialize)]
 pub struct DriftField {
+    /// Top-level field name, or an RFC 6901 JSON Pointer for a nested field.
     pub name: String,
     /// The field's type in the active version, so a caller can tell what would go there.
     pub r#type: metaschema::FieldTypeName,
@@ -254,7 +255,8 @@ pub struct MigrationDryRun {
     /// Already on the active version.
     /// Nothing to do for these.
     pub current: i64,
-    /// On an older version, but missing no field the active version requires: they validate as they stand and only their version marker is behind.
+    /// On an older version, but missing no required field in existing objects.
+    /// This is a presence check, not full active-schema validation of types or constraints.
     pub behind_but_valid: i64,
     /// On an older version and missing at least one field the active version requires.
     /// These are what a batch migration has to fill in.

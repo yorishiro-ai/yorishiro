@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::requests::boot_request;
-use sea_orm::{ColumnTrait, EntityTrait, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder, QuerySelect};
 use yorishiro::App;
 use yorishiro::models::_entities::workspace_workspaces;
 use yorishiro::models::entity_embeddings;
@@ -131,6 +131,33 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
         entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &previous)
             .await
             .expect("populate previous vectors");
+        let stored_vectors = || {
+            entity_embeddings::Entity::find()
+                .select_only()
+                .column(yorishiro::models::_entities::entity_embeddings::Column::EntityId)
+                .column_as(
+                    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                        sea_orm::sea_query::Func::cust(sea_orm::sea_query::Alias::new("hex"))
+                            .arg(sea_orm::sea_query::Expr::col(
+                                yorishiro::models::_entities::entity_embeddings::Column::Embedding,
+                            ))
+                            .into()
+                    } else {
+                        sea_orm::sea_query::Expr::col(
+                            yorishiro::models::_entities::entity_embeddings::Column::Embedding,
+                        )
+                        .cast_as(sea_orm::sea_query::Alias::new("TEXT"))
+                    },
+                    "vector",
+                )
+                .filter(
+                    yorishiro::models::_entities::entity_embeddings::Column::EntityId
+                        .is_in([first.id, second.id]),
+                )
+                .order_by_asc(yorishiro::models::_entities::entity_embeddings::Column::EntityId)
+                .into_tuple::<(uuid::Uuid, String)>()
+        };
+        let before_vectors = stored_vectors().all(&ctx.db).await.unwrap();
 
         let (provider, _server) = http_provider("intfloat/multilingual-e5-base", 1).await;
         let outcome = yorishiro::db::reindex_workspace_with_lock(&ctx, workspace_id, &provider)
@@ -145,6 +172,7 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
         assert_eq!(outcome.failures.len(), 1);
         assert!(embedding_is_set(&ctx, first.id).await);
         assert!(embedding_is_set(&ctx, second.id).await);
+        assert_eq!(stored_vectors().all(&ctx.db).await.unwrap(), before_vectors);
 
         assert_eq!(
             stamped_model(&ctx, workspace_id).await,

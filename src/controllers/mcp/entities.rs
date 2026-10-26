@@ -245,9 +245,9 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Report how an entity stands against the active version of its schema \
                            (requires read scope). Entities are migrated lazily, so one written \
-                           against an older version simply lacks fields added since. Use this to \
-                           tell an absent field apart from an unfilled one before answering from \
-                           the entity's data."
+                           against an older version can still contain newer fields. Reports active \
+                           fields absent from stored data, including nested fields in existing \
+                           objects. Present nulls and type errors are not missing-value diagnostics."
     )]
     pub(crate) async fn get_entity_drift(
         &self,
@@ -271,9 +271,10 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Count what migrating a schema's entities to its active version would \
                            face, without doing it (requires read scope). Reports how many are \
-                           current, how many are behind but still valid, and how many lack a \
+                           current, how many are behind without missing required fields, and how many lack a \
                            field the active version requires: the last being the work a \
-                           migration would have to fill in."
+                           migration would have to fill in. Inspects stored data, not only schema \
+                           definitions; this is not full active-schema validation."
     )]
     pub async fn migration_dry_run(
         &self,

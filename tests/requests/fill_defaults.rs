@@ -204,8 +204,23 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         let entity_id = entity_id.unwrap();
         let before = entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap();
         assert_eq!(before.data, json!({"title": "before"}));
+        assert_eq!(entity_entities::migration_dry_run(&ctx.db, workspace, "note").await.unwrap().needs_values, 1);
         finish_via_api(&request, &ctx, id, &key, &format!("/api/migration-jobs/{id}")).await;
         let after = entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap();
         assert_eq!(after.data, json!({"title": "before", "rank": 7}));
+        assert_eq!(after.schema_version, before.schema_version);
+        assert!(entity_entities::drift(&ctx.db, workspace, entity_id).await.unwrap().missing_fields.is_empty());
+        let report = entity_entities::migration_dry_run(&ctx.db, workspace, "note").await.unwrap();
+        assert_eq!(report.needs_values, 0);
+        assert_eq!(report.behind_but_valid, 1);
+        let response = request.post(&format!("/api/migration-jobs/{id}/undo"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let undo_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        finish_via_api(&request, &ctx, undo_id, &key, &format!("/api/migration-jobs/{undo_id}")).await;
+        assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
+        assert_eq!(entity_entities::migration_dry_run(&ctx.db, workspace, "note").await.unwrap().needs_values, 1);
+        assert_eq!(entity_entities::drift(&ctx.db, workspace, entity_id).await.unwrap().missing_fields[0].name, "rank");
     }).await;
 }

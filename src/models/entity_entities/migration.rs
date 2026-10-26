@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QuerySelect};
+use sea_orm::{ActiveValue, PaginatorTrait, QueryOrder, QuerySelect};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -27,29 +27,15 @@ pub async fn drift(
 
     // The entity's own type definition may be absent from the active version: the type was dropped.
     // Nothing is "missing" in that case; the whole type is, which the version numbers already say.
-    let own_fields = own
-        .definition
-        .entity_types
-        .get(&entity.entity_type)
-        .map(|def| &def.fields);
     let active_fields = active
         .definition
         .entity_types
         .get(&entity.entity_type)
         .map(|def| &def.fields);
 
-    let missing_fields = match (own_fields, active_fields) {
-        (Some(own_fields), Some(active_fields)) => active_fields
-            .iter()
-            .filter(|(name, _)| !own_fields.contains_key(*name))
-            .map(|(name, def)| DriftField {
-                name: name.clone(),
-                r#type: def.r#type,
-                required: def.required,
-            })
-            .collect(),
-        _ => Vec::new(),
-    };
+    let missing_fields = active_fields
+        .map(|fields| missing_fields_in_value(&entity.data, fields, ""))
+        .unwrap_or_default();
 
     Ok(EntityDrift {
         entity_id: entity.id,
@@ -63,7 +49,7 @@ pub async fn drift(
 /// Counts what a batch migration to `schema_name`'s active version would face.
 /// Reads only.
 ///
-/// The counting is done in one query per (entity_type, schema_id) group rather than one per entity: a workspace can hold far more entities than it holds distinct old versions, and the answer is the same either way.
+/// Reads stored data in bounded pages because entities on the same schema version can have different missing values.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -77,31 +63,15 @@ pub async fn migration_dry_run(
     let active =
         crate::models::schema_schemas::get_active_schema(conn, workspace_id, schema_name).await?;
 
-    // (entity_type, schema_id, count) for everything under this schema name, whatever version.
-    #[derive(sea_orm::FromQueryResult)]
-    struct GroupedCount {
-        entity_type: String,
-        schema_id: Uuid,
-        count: i64,
-    }
-
-    let rows: Vec<GroupedCount> = Entity::find()
-        .select_only()
-        .column(Column::EntityType)
-        .column(Column::SchemaId)
-        .column_as(Column::Id.count(), "count")
+    let mut rows = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .join(
             sea_orm::JoinType::InnerJoin,
             crate::models::_entities::entity_entities::Relation::SchemaSchemas.def(),
         )
         .filter(crate::models::_entities::schema_schemas::Column::Name.eq(schema_name))
-        .group_by(Column::EntityType)
-        .group_by(Column::SchemaId)
-        .into_model::<GroupedCount>()
-        .all(conn)
-        .await
-        .internal()?;
+        .order_by_asc(Column::Id)
+        .paginate(conn, crate::models::pagination::MAX_LIST_LIMIT as u64);
 
     let mut total = 0i64;
     let mut current = 0i64;
@@ -110,64 +80,50 @@ pub async fn migration_dry_run(
     let mut by_type: std::collections::BTreeMap<String, DryRunByType> =
         std::collections::BTreeMap::new();
 
-    // Each distinct old version is fetched once, not once per entity.
-    let mut definitions: std::collections::HashMap<Uuid, metaschema::MetaSchemaDefinition> =
-        std::collections::HashMap::new();
-
-    for row in rows {
-        total += row.count;
-
-        if row.schema_id == active.id {
-            current += row.count;
-            continue;
-        }
-
-        let old = match definitions.get(&row.schema_id) {
-            Some(def) => def.clone(),
-            None => {
-                let record =
-                    crate::models::schema_schemas::get_by_id(conn, workspace_id, row.schema_id)
-                        .await?;
-                definitions.insert(row.schema_id, record.definition.clone());
-                record.definition
+    while let Some(page) = rows.fetch_and_next().await.internal()? {
+        for row in page {
+            total += 1;
+            if row.schema_id == active.id {
+                current += 1;
+                continue;
             }
-        };
+            let missing: Vec<String> = active
+                .definition
+                .entity_types
+                .get(&row.entity_type)
+                .map(|definition| missing_fields_in_value(&row.data, &definition.fields, ""))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|field| field.required)
+                .map(|field| field.name)
+                .collect();
 
-        // Required in the active version, absent from the version these were written with.
-        let missing: Vec<String> = match (
-            active.definition.entity_types.get(&row.entity_type),
-            old.entity_types.get(&row.entity_type),
-        ) {
-            (Some(active_type), Some(old_type)) => active_type
-                .fields
-                .iter()
-                .filter(|(name, def)| def.required && !old_type.fields.contains_key(*name))
-                .map(|(name, _)| name.clone())
-                .collect(),
-            _ => Vec::new(),
-        };
+            let entry = by_type
+                .entry(row.entity_type.clone())
+                .or_insert_with(|| DryRunByType {
+                    entity_type: row.entity_type,
+                    behind: 0,
+                    needs_values: 0,
+                    missing_required: Vec::new(),
+                });
+            entry.behind += 1;
 
-        let entry = by_type
-            .entry(row.entity_type.clone())
-            .or_insert_with(|| DryRunByType {
-                entity_type: row.entity_type,
-                behind: 0,
-                needs_values: 0,
-                missing_required: Vec::new(),
-            });
-        entry.behind += row.count;
-
-        if missing.is_empty() {
-            behind_valid += row.count;
-        } else {
-            needs_values += row.count;
-            entry.needs_values += row.count;
-            for name in missing {
-                if !entry.missing_required.contains(&name) {
-                    entry.missing_required.push(name);
+            if missing.is_empty() {
+                behind_valid += 1;
+            } else {
+                needs_values += 1;
+                entry.needs_values += 1;
+                for name in missing {
+                    if !entry.missing_required.contains(&name) {
+                        entry.missing_required.push(name);
+                    }
                 }
             }
         }
+    }
+
+    for entry in by_type.values_mut() {
+        entry.missing_required.sort();
     }
 
     Ok(MigrationDryRun {
@@ -179,6 +135,39 @@ pub async fn migration_dry_run(
         needs_values,
         by_entity_type: by_type.into_values().collect(),
     })
+}
+
+/// Lists absent fields, descending only into existing objects as fill-defaults does.
+/// A present null or a value of the wrong type is not an absent field.
+fn missing_fields_in_value(
+    data: &Value,
+    fields: &std::collections::BTreeMap<String, metaschema::FieldDef>,
+    parent: &str,
+) -> Vec<DriftField> {
+    let Some(object) = data.as_object() else {
+        return Vec::new();
+    };
+    let mut missing = Vec::new();
+    for (name, definition) in fields {
+        let pointer = format!("{parent}/{}", name.replace('~', "~0").replace('/', "~1"));
+        match object.get(name) {
+            None => missing.push(DriftField {
+                name: if parent.is_empty() {
+                    name.clone()
+                } else {
+                    pointer.clone()
+                },
+                r#type: definition.r#type,
+                required: definition.required,
+            }),
+            Some(value) => {
+                if let Some(properties) = &definition.properties {
+                    missing.extend(missing_fields_in_value(value, properties, &pointer));
+                }
+            }
+        }
+    }
+    missing
 }
 
 /// Fills absent required fields in entities that fall behind a schema version.
