@@ -22,12 +22,8 @@ async fn sql_queue_close_releases_pool_and_retained_worker_context() {
         ) {
             return;
         }
-        let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
         let mut worker_ctx = ctx.clone();
-        worker_ctx.queue_provider = Some(queue.clone());
-        yorishiro::App::connect_workers(&worker_ctx, &queue)
-            .await
-            .unwrap();
+        let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
         queue.ping().await.unwrap();
         yorishiro::App::on_shutdown(&worker_ctx).await;
         drop(worker_ctx);
@@ -115,18 +111,10 @@ async fn redis_claim_refreshes_age_and_fences_reaped_completion_and_failure() {
                         send_dimensions_param: false,
                     })) as Arc<dyn EmbeddingProvider>,
                 );
-            let first = crate::requests::query_worker::shared_target_queue(&ctx).await;
-            let second = crate::requests::query_worker::shared_target_queue(&ctx).await;
             let mut worker_ctx = ctx.clone();
-            worker_ctx.queue_provider = Some(first.clone());
-            yorishiro::App::connect_workers(&worker_ctx, &first)
-                .await
-                .unwrap();
+            let first = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             let mut second_ctx = ctx.clone();
-            second_ctx.queue_provider = Some(second.clone());
-            yorishiro::App::connect_workers(&second_ctx, &second)
-                .await
-                .unwrap();
+            let second = crate::requests::query_worker::shared_target_queue(&mut second_ctx).await;
             let request_id = Requests::open(
                 &ctx.db,
                 fixture.workspace_id,

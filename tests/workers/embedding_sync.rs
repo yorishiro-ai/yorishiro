@@ -124,16 +124,13 @@ mod conflict {
 
     impl QueueHarness {
         async fn lane(mut ctx: AppContext, workers: u32) -> Self {
-            use loco_rs::app::Hooks;
             match ctx.config.queue.as_mut().expect("configured queue") {
                 loco_rs::config::QueueConfig::Sqlite(config) => config.num_workers = workers,
                 loco_rs::config::QueueConfig::Postgres(config) => config.num_workers = workers,
                 loco_rs::config::QueueConfig::Redis(config) => config.num_workers = workers,
                 _ => unreachable!(),
             }
-            let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
-            ctx.queue_provider = Some(queue.clone());
-            App::connect_workers(&ctx, &queue).await.unwrap();
+            let queue = crate::requests::query_worker::shared_target_queue(&mut ctx).await;
             let running = queue.clone();
             let runner =
                 tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
@@ -609,10 +606,8 @@ mod conflict {
                 let (workspace_id, entity_id) = seed(&request, &ctx).await;
                 let (provider, _server) = failing_provider(kind).await;
                 ctx.shared_store.insert(provider);
-                let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
                 let mut worker_ctx = ctx.clone();
-                worker_ctx.queue_provider = Some(queue.clone());
-                App::connect_workers(&worker_ctx, &queue).await.unwrap();
+                let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
                 yorishiro::workers::embedding_sync::enqueue_for_class(
                     &ctx,
                     EmbeddingSyncArgs {
@@ -797,8 +792,7 @@ mod conflict {
                 loco_rs::config::QueueConfig::Redis(config) => config.num_workers = 2,
                 _ => unreachable!(),
             }
-            let queue = crate::requests::query_worker::shared_target_queue(&worker_ctx).await;
-            worker_ctx.queue_provider = Some(queue.clone());
+            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {
@@ -810,7 +804,6 @@ mod conflict {
             )
             .await
             .unwrap();
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
             let directory = tempfile::tempdir().unwrap();
             let outcome = std::panic::AssertUnwindSafe(async {
                 tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -969,8 +962,7 @@ mod conflict {
                 loco_rs::config::QueueConfig::Redis(config) => config.num_workers = 2,
                 _ => unreachable!(),
             }
-            let queue = crate::requests::query_worker::shared_target_queue(&worker_ctx).await;
-            worker_ctx.queue_provider = Some(queue.clone());
+            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {
@@ -982,7 +974,6 @@ mod conflict {
             )
             .await
             .unwrap();
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
             let directory = tempfile::tempdir().unwrap();
             let published = tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 loop {
@@ -1382,10 +1373,9 @@ mod conflict {
                 } else {
                     provider
                 });
-                let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
                 let mut worker_ctx = ctx.clone();
-                worker_ctx.queue_provider = Some(queue.clone());
-                App::connect_workers(&worker_ctx, &queue).await.unwrap();
+                let queue =
+                    crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
                 yorishiro::workers::embedding_sync::enqueue_for_class(
                     &ctx,
                     EmbeddingSyncArgs {
@@ -1495,10 +1485,8 @@ mod conflict {
             .await
             .expect("create write key")
             .plaintext;
-            let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
             let mut worker_ctx = ctx.clone();
-            worker_ctx.queue_provider = Some(queue.clone());
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {
@@ -1607,10 +1595,8 @@ mod conflict {
     async fn a_malformed_payload_fails_the_provider_job_without_requeue() {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
         boot_request::<App, _, _>(|_request, ctx| async move {
-            let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
             let mut worker_ctx = ctx.clone();
-            worker_ctx.queue_provider = Some(queue.clone());
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             let mut owned = Vec::new();
             let mut payloads = Vec::new();
             // Inject invalid persisted deliveries at the queue boundary, bypassing typed enqueue validation.
@@ -1676,10 +1662,8 @@ mod conflict {
             let (provider, _server, entered, release) = vector_provider(768, true).await;
             ctx.shared_store.insert(provider);
 
-            let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
             let mut worker_ctx = ctx.clone();
-            worker_ctx.queue_provider = Some(queue.clone());
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {
@@ -1773,10 +1757,8 @@ mod conflict {
             let (provider, _server, _, _) = vector_provider(1024, false).await;
             ctx.shared_store.insert(original_provider.clone());
 
-            let queue = crate::requests::query_worker::shared_target_queue(&ctx).await;
             let mut worker_ctx = ctx.clone();
-            worker_ctx.queue_provider = Some(queue.clone());
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             assert!(
                 !Entity::has_active(&ctx.db, "startup_reindex", workspace_id)
                     .await

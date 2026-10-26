@@ -11,16 +11,70 @@ use yorishiro::App;
 use yorishiro::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
 use yorishiro::workers::target::WorkerTarget;
 
-#[test]
-fn the_tags_are_the_tags_a_dispatch_writes() {
-    assert_eq!("worker-target:shared", WorkerTarget::Shared.tag());
-    assert_eq!("worker-target:official", WorkerTarget::Official.tag());
-    let tenant = format!("worker-target:tenant:{}", Uuid::now_v7());
-    assert_eq!(tenant, WorkerTarget::parse_tag(&tenant).unwrap().tag());
+#[tokio::test]
+async fn production_dispatch_records_each_resolved_target() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::workers::embedding_sync::WorkerClass;
+    use yorishiro::workers::reindex::{ReindexArgs, enqueue_for_class};
+
+    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        for class in [
+            WorkerClass::Shared,
+            WorkerClass::Official,
+            WorkerClass::TenantPrivate,
+        ] {
+            enqueue_for_class(
+                &ctx,
+                ReindexArgs {
+                    lifecycle_id: None,
+                    workspace_id: fixture.workspace_id,
+                    worker_class: class,
+                    startup: false,
+                },
+            )
+            .await
+            .unwrap();
+            let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find()
+                .filter(
+                    yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
+                        .eq(fixture.workspace_id),
+                )
+                .filter(
+                    yorishiro::models::queue_job_lifecycles::Column::WorkerClass
+                        .eq(class.as_db_str()),
+                )
+                .filter(yorishiro::models::queue_job_lifecycles::Column::JobName.eq("reindex"))
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("production dispatch records the lifecycle");
+            let row = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(
+                lifecycle.id,
+            )
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("production dispatch records the delivery");
+            let expected = match class {
+                WorkerClass::Shared => "worker-target:shared".to_owned(),
+                WorkerClass::Official => "worker-target:official".to_owned(),
+                WorkerClass::TenantPrivate => format!("worker-target:tenant:{}", fixture.tenant_id),
+            };
+            assert_eq!(row.queue_name.as_deref(), Some(expected.as_str()));
+            assert_eq!(row.tags, Some(serde_json::json!([expected])));
+            assert_eq!(
+                row.payload["workspace_id"],
+                fixture.workspace_id.to_string()
+            );
+        }
+    })
+    .await;
 }
 
 #[tokio::test]
-async fn the_configured_queue_delivers_each_target_only_to_its_worker() {
+async fn injected_deliveries_are_consumed_only_by_their_target() {
     crate::requests::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
         let targets = [
             WorkerTarget::Shared,
@@ -70,10 +124,8 @@ async fn the_configured_queue_delivers_each_target_only_to_its_worker() {
         );
         let directory = tempfile::tempdir().unwrap();
         for (index, target) in targets.into_iter().enumerate() {
-            let queue = crate::requests::query_worker::target_queue(&ctx, target).await;
             let mut worker_ctx = ctx.clone();
-            worker_ctx.queue_provider = Some(queue.clone());
-            App::connect_workers(&worker_ctx, &queue).await.unwrap();
+            let queue = crate::requests::query_worker::target_queue(&mut worker_ctx, target).await;
             let running = Arc::clone(&queue);
             let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
             let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(

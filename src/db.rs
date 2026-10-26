@@ -628,6 +628,12 @@ impl Drop for WorkspaceReindexLockGuard {
     }
 }
 
+/// The advisory lock namespace for reindexes, separate from entity quota locks.
+#[must_use]
+pub fn workspace_reindex_lock_key(workspace_id: Uuid) -> String {
+    format!("embedding-reindex:{workspace_id}")
+}
+
 /// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
 ///
 /// Acquires `pg_advisory_lock` on a bare pooled connection and detaches it. The lock is held
@@ -648,7 +654,7 @@ pub async fn acquire_workspace_reindex_lock(
     let mut conn = pool.acquire().await?;
 
     // Reindexes serialize with each other, not with entity quota locks during provider calls.
-    let key = format!("embedding-reindex:{workspace_id}");
+    let key = workspace_reindex_lock_key(workspace_id);
     tracing::info!(%key, "waiting for workspace reindex lock");
 
     sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")

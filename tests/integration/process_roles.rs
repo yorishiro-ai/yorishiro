@@ -36,36 +36,99 @@ fn a_cli_command_runs_without_building_the_embedding_provider() {
 }
 
 /// Durable application jobs must start without loading an embedding model.
-#[test]
-#[serial_test::serial(process_environment)]
-fn a_job_consumer_does_not_build_the_embedding_provider() {
-    let dir = tempfile::tempdir().unwrap();
-    let uri = |name: &str| format!("sqlite://{}?mode=rwc", dir.path().join(name).display());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_yorishiro"))
-        .args(["start", "--worker=job-target:shared"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .env("LOCO_ENV", "test_sqlite")
-        .env("DATABASE_URL", uri("app.sqlite3"))
-        .env("QUEUE_URL", uri("queue.sqlite3"))
-        .env("YORISHIRO_EMBEDDING_PROVIDER", "local")
-        .env(
-            "YORISHIRO_LOCAL_MODEL",
-            "nonexistent-model-that-does-not-exist",
+#[tokio::test]
+async fn a_job_consumer_does_not_build_the_embedding_provider() {
+    use futures::FutureExt;
+    use yorishiro::models::api_keys::ApiKeyScope;
+
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
         )
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+        .await;
+        let accepted = request
+            .post("/api/import.jsonl")
+            .add_header("Authorization", format!("Bearer {}", fixture.api_key))
+            .text("")
+            .await;
+        accepted.assert_status(axum::http::StatusCode::ACCEPTED);
+        let id = accepted.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = ctx.config.clone();
+        config.database.auto_migrate = false;
+        config.database.dangerously_truncate = false;
+        config.database.dangerously_recreate = false;
+        let settings = config.settings.as_mut().unwrap();
+        settings["embedding"]["provider"] = serde_json::json!("local");
+        settings["embedding"]["base_url"] = serde_json::Value::Null;
+        settings["embedding"]["local_model"] =
+            serde_json::json!("nonexistent-model-that-does-not-exist");
+        std::fs::write(
+            dir.path().join("development.yaml"),
+            serde_yaml::to_string(&config).unwrap(),
+        )
         .unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    let exited = child.try_wait().unwrap();
-    if exited.is_none() {
-        child.kill().unwrap();
-    }
-    child.wait().unwrap();
-    assert!(
-        exited.is_none(),
-        "job consumer unexpectedly exited: {exited:?}"
-    );
+        let log_path = dir.path().join("jobs.log");
+        let log = std::fs::File::create(&log_path).unwrap();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_yorishiro"))
+            .args(["start", "--worker=job-target:shared"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env("LOCO_ENV", "development")
+            .env("LOCO_CONFIG_FOLDER", dir.path())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .unwrap();
+        let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            async {
+                loop {
+                    assert!(
+                        child.try_wait().unwrap().is_none(),
+                        "job consumer exited before completing import"
+                    );
+                    let response = request
+                        .get(&format!("/api/import-jobs/{id}"))
+                        .add_header("Authorization", format!("Bearer {}", fixture.api_key))
+                        .await;
+                    response.assert_status(axum::http::StatusCode::OK);
+                    let status = response.json::<serde_json::Value>();
+                    assert_ne!(status["status"], "failed", "{status}");
+                    if status["status"] == "completed" {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            },
+        ))
+        .catch_unwind()
+        .await;
+        if child.try_wait().unwrap().is_none() {
+            child.kill().unwrap();
+        }
+        child.wait().unwrap();
+        if !matches!(&outcome, Ok(Ok(()))) {
+            eprintln!(
+                "job consumer log: {}",
+                std::fs::read_to_string(log_path).unwrap()
+            );
+        }
+        match outcome {
+            Ok(result) => {
+                result.expect("CLI job consumer completes a production import without a model")
+            }
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    })
+    .await;
 }
 
 /// The same environment stops a worker at start, which shows the environment really would have failed the command above if it had built a provider.

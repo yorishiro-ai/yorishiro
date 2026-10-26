@@ -86,3 +86,30 @@ pub(crate) fn worker_start_from_mode(mode: &StartMode) -> Result<WorkerStart, St
         StartMode::ServerOnly | StartMode::ServerAndScheduler => Ok(WorkerStart::NoWorkers),
     }
 }
+
+/// Validates a process role and configures its queues and handler selection before boot.
+///
+/// # Errors
+/// Returns an error if the start mode does not select valid worker targets.
+pub fn configure(config: &mut loco_rs::config::Config, mode: &StartMode) -> loco_rs::Result<()> {
+    let start =
+        worker_start_from_mode(mode).map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    configure_start(config, start);
+    Ok(())
+}
+
+pub(crate) fn configure_start(config: &mut loco_rs::config::Config, start: WorkerStart) {
+    let (queues, jobs): (Vec<String>, bool) = match start {
+        WorkerStart::NoWorkers => return,
+        WorkerStart::Jobs(targets) => (
+            targets.iter().map(|target| target.job_tag()).collect(),
+            true,
+        ),
+        WorkerStart::Targets(targets) => {
+            (targets.iter().map(|target| target.queue()).collect(), false)
+        }
+    };
+    crate::data::config::serve_worker_queues(config, &queues);
+    config.settings.get_or_insert_with(|| serde_json::json!({}))["job_consumer"] =
+        serde_json::json!(jobs);
+}

@@ -44,10 +44,8 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
         let workspace_id = fixture.workspace_id;
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
-        let queue = crate::requests::query_worker::job_target_queue(&ctx, target).await;
-        let mut ctx = ctx.into_builder().queue_provider(queue.clone()).build();
-        ctx.config.settings.as_mut().unwrap()["job_consumer"] = serde_json::json!(true);
-        yorishiro::App::connect_workers(&ctx, &queue).await.unwrap();
+        let mut ctx = ctx;
+        let queue = crate::requests::query_worker::job_target_queue(&mut ctx, target).await;
         let job_id = enqueue_infer_fill(&ctx, workspace_id, "note".into())
             .await
             .unwrap();
@@ -227,16 +225,8 @@ async fn deliver_lifecycle(ctx: &loco_rs::app::AppContext, lifecycle_id: Uuid) {
     use yorishiro::workers::target::WorkerTarget;
 
     let target = WorkerTarget::Shared;
-    let queue = crate::requests::query_worker::job_target_queue(ctx, target).await;
-    let mut worker_ctx = ctx
-        .clone()
-        .into_builder()
-        .queue_provider(queue.clone())
-        .build();
-    worker_ctx.config.settings.as_mut().unwrap()["job_consumer"] = serde_json::json!(true);
-    yorishiro::App::connect_workers(&worker_ctx, &queue)
-        .await
-        .unwrap();
+    let mut worker_ctx = ctx.clone();
+    let queue = crate::requests::query_worker::job_target_queue(&mut worker_ctx, target).await;
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![target.job_tag()]).await });
     let directory = tempfile::tempdir().unwrap();
@@ -564,13 +554,8 @@ async fn two_jobs_for_one_workspace_never_run_together() {
             _ => unreachable!("supported queue topology"),
         }
         let queue =
-            crate::requests::query_worker::job_target_queue(&worker_ctx, WorkerTarget::Shared)
+            crate::requests::query_worker::job_target_queue(&mut worker_ctx, WorkerTarget::Shared)
                 .await;
-        worker_ctx.queue_provider = Some(queue.clone());
-        worker_ctx.config.settings.as_mut().unwrap()["job_consumer"] = serde_json::json!(true);
-        yorishiro::App::connect_workers(&worker_ctx, &queue)
-            .await
-            .unwrap();
         let running = queue.clone();
         let runner =
             tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.job_tag()]).await });

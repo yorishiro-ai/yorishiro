@@ -672,7 +672,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 let waiting = LockWait::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
                     "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS waiting",
-                    [workspace_id.to_string().into()],
+                    [yorishiro::db::workspace_reindex_lock_key(workspace_id).into()],
                 )).one(&ctx.db).await.expect("observe workspace advisory lock")
                     .expect("lock observation row").waiting;
                 if waiting { break; }

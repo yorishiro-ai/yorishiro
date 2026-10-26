@@ -4,11 +4,13 @@
 #   docker compose up --build
 #   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
 #
-# The default command serves HTTP only. Queued jobs run in a second container from this same
-# image, started with the target it serves (see `docker-compose.yml`'s `worker`), and with the
-# HEALTHCHECK below disabled because a worker answers on no port:
+# The default command serves HTTP only.
+# Compose runs embedding compute in `worker`, durable application jobs in `jobs`, and scheduled tasks in `scheduler` from this same image.
+# Disable the HTTP HEALTHCHECK for these non-HTTP roles:
 #
-#   docker run --rm yorishiro start --worker=worker-target:shared
+#   docker run --rm --no-healthcheck yorishiro start --worker=worker-target:shared
+#   docker run --rm --no-healthcheck yorishiro start --worker=job-target:shared
+#   docker run --rm --no-healthcheck yorishiro scheduler
 #
 # Local embedding inference uses Candle and safetensors without a separate native runtime.
 

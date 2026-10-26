@@ -4,7 +4,6 @@ use futures::FutureExt;
 use loco_rs::app::{AppContext, Hooks};
 use sea_orm::{ConnectionTrait, EntityTrait};
 use uuid::Uuid;
-use yorishiro::workers::target::WorkerTarget;
 
 pub(crate) use super::boot_request_isolated as boot_request;
 
@@ -66,34 +65,8 @@ async fn finish_job(
         .unwrap()
         .unwrap();
     let tag = outbox.tags.unwrap()[0].as_str().unwrap().to_owned();
-    let jobs = tag.starts_with("job-target:");
-    let target = if jobs {
-        WorkerTarget::parse_job_tag(&tag)
-    } else {
-        WorkerTarget::parse_tag(&tag)
-    }
-    .unwrap();
-    let queue = if jobs {
-        let mut config = ctx.config.clone();
-        yorishiro::data::config::serve_worker_queues(&mut config, std::slice::from_ref(&tag));
-        let queue = loco_rs::bgworker::create_queue_provider(&config)
-            .await
-            .unwrap()
-            .unwrap();
-        queue.setup().await.unwrap();
-        queue
-    } else {
-        super::query_worker::target_queue(ctx, target).await
-    };
     let mut worker_ctx = ctx.clone();
-    worker_ctx.queue_provider = Some(queue.clone());
-    worker_ctx
-        .config
-        .settings
-        .get_or_insert_with(|| serde_json::json!({}))["job_consumer"] = serde_json::json!(jobs);
-    yorishiro::App::connect_workers(&worker_ctx, &queue)
-        .await
-        .expect("register production workers");
+    let queue = super::query_worker::queue_for_tag(&mut worker_ctx, tag.clone()).await;
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![tag]).await });
     let result =

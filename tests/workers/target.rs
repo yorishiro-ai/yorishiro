@@ -201,6 +201,36 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
     );
 }
 
+#[test]
+fn production_start_configuration_selects_roles_and_rejects_mixed_targets() {
+    use loco_rs::boot::StartMode;
+    use yorishiro::workers::start::configure;
+
+    let mut config = crate::sqlite_fixture_config("sqlite::memory:");
+    for (tag, jobs) in [("job-target:shared", true), ("worker-target:shared", false)] {
+        configure(
+            &mut config,
+            &StartMode::WorkerOnly {
+                tags: vec![tag.into()],
+            },
+        )
+        .unwrap();
+        assert_eq!(config.settings.as_ref().unwrap()["job_consumer"], jobs);
+    }
+    let before = config.settings.clone();
+    assert!(
+        configure(
+            &mut config,
+            &StartMode::WorkerOnly {
+                tags: vec!["job-target:shared".into(), "worker-target:shared".into()],
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(config.settings, before);
+    assert!(configure(&mut config, &StartMode::WorkerOnly { tags: vec![] }).is_err());
+}
+
 /// Target keys group a tenant's workspaces, while shared and official keys span the deployment; limits are opt-in.
 mod concurrency {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};

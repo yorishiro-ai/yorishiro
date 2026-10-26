@@ -3,15 +3,14 @@
 #
 #   docker compose up --build
 #
-# The queue uses the Redis protocol and jobs run in a separate `worker` container from the
-# same image: `start` serves HTTP only and consumes nothing, so without the worker every queued
-# job (embedding sync, reindex, infer-fill) would sit in the queue.
+# The queue uses the Redis protocol.
+# `app` serves HTTP, `worker` consumes embedding sync/query/reindex, `jobs` consumes import/maintenance/inference, and `scheduler` runs scheduled tasks.
+# Both consumers are required; the HTTP server consumes no queued jobs.
 #
 # The database credentials here are development ones. A deployment sets its own through the
 # environment.
 
-# One image and one configuration for the server and the worker, so they cannot disagree about
-# the database, the queue, or the embedding provider.
+# One image and shared configuration keep all four roles on the same database and queue.
 x-yorishiro: &yorishiro
   image: ${IMAGE:-yorishiro}:${TAG:-local}
   build:
@@ -96,17 +95,7 @@ services:
   app:
     <<: *yorishiro
     container_name: app
-    # Allow first-start model download; set YORISHIRO_EMBEDDING_PROVIDER=none to skip local inference.
-    healthcheck:
-      start_period: 15m
-    # To use a model this machine already has, put `model.safetensors` and `tokenizer.json` in
-    # `models/<short_id>/` and add:
-    #
-    #   volumes:
-    #     - ./models:/app/models:ro
-    #
-    # Without a mount, the provider downloads verified files into /app/models on first use.
-    # A read-only mount must contain both files.
+    # The HTTP server does not load an embedding model.
     ports:
       - "5150:5150"
     depends_on:
@@ -121,6 +110,9 @@ services:
     # The worker serves the shared target. To serve others, list them after `--worker=`, separated by
     # commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
     command: ["start", "--worker=worker-target:shared"]
+    # Only this role loads the embedding model.
+    # To reuse local files, mount ./models:/app/models:ro containing both model.safetensors and tokenizer.json under models/<short_id>/.
+    # Without a mount, verified model files are downloaded into /app/models at worker startup.
     # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
     # reported unhealthy forever.
     healthcheck:
@@ -135,8 +127,8 @@ services:
   jobs:
     <<: *yorishiro
     container_name: jobs
-    # The worker serves the shared target. To serve others, list them after `--worker=`, separated by
-    # commas (`job-target:official`, `job-target:tenant:<tenant-id>`), or add a service for them.
+    # Durable application jobs run without loading an embedding model.
+    # To serve other targets, list job-target:official or job-target:tenant:<tenant-id> after --worker=, separated by commas.
     command: ["start", "--worker=job-target:shared"]
     # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
     # reported unhealthy forever.

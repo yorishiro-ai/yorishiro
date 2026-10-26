@@ -964,8 +964,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
 /// The worker runs outside any request and the queued job names only the workspace, so it finds the tenant itself; the two ids differ here.
 #[tokio::test]
 async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
-    let (provider, _server, _) = crate::http_stub::keyword_provider(768).await;
-    super::query_worker::boot_with_query_worker(provider, |request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
@@ -991,23 +990,25 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
             .as_str()
             .unwrap()
             .to_owned();
-        let completed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                let response = request
-                    .get(&format!("/api/inference-jobs/{job_id}"))
-                    .add_header("Authorization", format!("Bearer {}", setup.api_key))
-                    .await;
-                response.assert_status(StatusCode::OK);
-                let job = response.json::<serde_json::Value>();
-                if job["status"] == "completed" {
-                    break job;
-                }
-                assert_ne!(job["status"], "failed", "{job}");
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("real worker resolves the workspace's tenant and completes");
+        let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find()
+            .filter(
+                yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(setup.workspace_id),
+            )
+            .filter(yorishiro::models::queue_job_lifecycles::Column::JobName.eq("infer_fill"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("infer-fill dispatch records a lifecycle");
+        let path = format!("/api/inference-jobs/{job_id}");
+        super::fill_defaults::finish_via_api(&request, &ctx, lifecycle.id, &setup.api_key, &path)
+            .await;
+        let response = request
+            .get(&path)
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        response.assert_status(StatusCode::OK);
+        let completed = response.json::<serde_json::Value>();
+        assert_eq!(completed["status"], "completed", "{completed}");
         assert!(completed["error"].is_null(), "{completed}");
     })
     .await;
