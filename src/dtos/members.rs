@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PreviewRoleRequest {
+    pub role: MembershipRole,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TransferOwnershipRequest {
     pub successor_user_id: uuid::Uuid,
 }

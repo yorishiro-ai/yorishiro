@@ -8,6 +8,7 @@ use crate::models::api_keys::ApiKeyScope;
 mod operations;
 
 pub use operations::preview_removal;
+pub use operations::preview_role_change;
 pub use operations::transfer_ownership;
 pub use operations::{add_member, remove_member, remove_member_as, update_member_access};
 pub(crate) use operations::{add_member_in_transaction, get_membership_role, list_members};
@@ -66,6 +67,16 @@ pub struct MembershipRemovalPreview {
     pub blocked_by_last_owner: bool,
     pub revoked_api_key_ids: Vec<Uuid>,
     pub lost_workspace_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MembershipRolePreview {
+    pub user_id: Uuid,
+    pub current_role: MembershipRole,
+    pub requested_role: MembershipRole,
+    pub blocked_by_last_owner: bool,
+    pub keys: Vec<MembershipKeyAccess>,
 }
 
 #[loco_rs::prelude::async_trait]

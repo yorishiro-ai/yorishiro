@@ -315,6 +315,14 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
             (MembershipRole::Member, "write"),
             (MembershipRole::Owner, "migration"),
         ] {
+            let preview = request
+                .post(&format!("/api/members/{}/role-preview", user.id))
+                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .json(&serde_json::json!({"role":role}))
+                .await;
+            assert_eq!(preview.status_code(), StatusCode::OK);
+            let preview = preview.json::<serde_json::Value>();
+            assert_eq!(preview["blocked_by_last_owner"], false);
             let response = request
                 .post("/api/members")
                 .add_header("Authorization", format!("Bearer {}", tenant.api_key))
@@ -322,6 +330,7 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
                 .await;
             assert_eq!(response.status_code(), StatusCode::CREATED);
             let access = response.json::<serde_json::Value>();
+            assert_eq!(preview["keys"], access["keys"]);
             let keys = access["keys"].as_array().unwrap();
             assert_eq!(keys.len(), 2);
             assert!(keys.iter().any(
@@ -581,6 +590,16 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
         assert_eq!(preview.status_code(), StatusCode::OK);
         assert_eq!(
             preview.json::<serde_json::Value>()["blocked_by_last_owner"],
+            true
+        );
+        let role_preview = request
+            .post(&format!("/api/members/{}/role-preview", tenant.owner_id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"role":"admin"}))
+            .await;
+        assert_eq!(role_preview.status_code(), StatusCode::OK);
+        assert_eq!(
+            role_preview.json::<serde_json::Value>()["blocked_by_last_owner"],
             true
         );
         let demoted = request

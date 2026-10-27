@@ -187,20 +187,65 @@ pub async fn update_member_access(
     user_id: Uuid,
     role: MembershipRole,
 ) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
-    use crate::models::_entities::api_keys;
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
     let tenant_id = actor.tenant_id;
     add_member_in_transaction(&txn, tenant_id, user_id, role).await?;
+    let access = key_access(&txn, tenant_id, user_id, role).await?;
+    txn.commit().await.internal()?;
+    Ok(access)
+}
+
+/// Previews a role change without updating membership or stored grants.
+///
+/// # Errors
+/// Rejects stale administrator credentials, missing membership or persistence failures.
+pub async fn preview_role_change(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    user_id: Uuid,
+    role: MembershipRole,
+) -> Result<super::MembershipRolePreview, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let current_role = get_membership_role(&txn, actor.tenant_id, user_id)
+        .await?
+        .ok_or_else(|| YorishiroError::not_found("tenant membership not found"))?;
+    let blocked_by_last_owner = if role != MembershipRole::Owner {
+        match protect_owner(&txn, actor.tenant_id, user_id, Some(role)).await {
+            Ok(()) => false,
+            Err(YorishiroError::Conflict { .. }) => true,
+            Err(error) => return Err(error),
+        }
+    } else {
+        false
+    };
+    let keys = key_access(&txn, actor.tenant_id, user_id, role).await?;
+    txn.rollback().await.internal()?;
+    Ok(super::MembershipRolePreview {
+        user_id,
+        current_role,
+        requested_role: role,
+        blocked_by_last_owner,
+        keys,
+    })
+}
+
+async fn key_access(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    role: MembershipRole,
+) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
+    use crate::models::_entities::api_keys;
     let keys = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
         .filter(api_keys::Column::UserId.eq(user_id))
         .order_by_asc(api_keys::Column::Id)
-        .all(&txn)
+        .all(txn)
         .await
         .internal()?;
-    let access = keys
-        .into_iter()
+    keys.into_iter()
         .map(|key| {
             let stored_scope = crate::models::api_keys::ApiKeyScope::from_db_str(&key.scope)
                 .ok_or_else(|| {
@@ -213,9 +258,7 @@ pub async fn update_member_access(
                 audit: key.audit,
             })
         })
-        .collect::<Result<Vec<_>, YorishiroError>>()?;
-    txn.commit().await.internal()?;
-    Ok(access)
+        .collect::<Result<Vec<_>, YorishiroError>>()
 }
 
 /// Removes membership; subsequent authentication rejects all attributed keys in this tenant.
