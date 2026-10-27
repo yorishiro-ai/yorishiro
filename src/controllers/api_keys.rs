@@ -94,7 +94,7 @@ pub(crate) async fn revoke(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-    IdentityApiKeys::revoke_for_tenant(&ctx.db, auth.tenant_id, id).await?;
+    IdentityApiKeys::revoke_for_tenant(&ctx.db, &auth, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

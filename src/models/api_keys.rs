@@ -507,31 +507,45 @@ impl Entity {
     /// # Errors
     /// Returns an error if the operation cannot be completed.
     pub async fn revoke(
-        conn: &impl ConnectionTrait,
+        db: &sea_orm::DatabaseConnection,
         key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
-        use crate::models::_entities::api_keys::Column;
-
-        let result = Entity::delete_many()
-            .filter(Column::Id.eq(key_id))
-            .exec(conn)
+        let txn = crate::db::begin_write(db).await.internal()?;
+        let key = Self::find_by_id(key_id)
+            .one(&txn)
+            .await
+            .internal()?
+            .ok_or_else(|| {
+                YorishiroError::not_found(format!("api key '{key_id}' was not found"))
+            })?;
+        crate::db::lock_for_update(&txn, &format!("tenant-membership:{}", key.tenant_id))
             .await
             .internal()?;
-
-        if result.rows_affected == 0 {
-            Err(YorishiroError::not_found(format!(
-                "api key '{key_id}' was not found"
-            )))
-        } else {
-            Ok(())
-        }
+        Self::delete_for_tenant(&txn, key.tenant_id, key_id).await?;
+        txn.commit().await.internal()?;
+        Ok(())
     }
 
     /// Revokes one of a tenant's keys without allowing an id from another tenant to match.
-    pub(crate) async fn revoke_for_tenant(
-        conn: &impl ConnectionTrait,
-        tenant_id: uuid::Uuid,
+    ///
+    /// # Errors
+    /// Rejects stale administrator credentials, missing keys and persistence failures.
+    pub async fn revoke_for_tenant(
+        db: &sea_orm::DatabaseConnection,
+        actor: &AuthContext,
         key_id: uuid::Uuid,
+    ) -> Result<(), YorishiroError> {
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+        Self::delete_for_tenant(&txn, actor.tenant_id, key_id).await?;
+        txn.commit().await.internal()?;
+        Ok(())
+    }
+
+    async fn delete_for_tenant(
+        conn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+        key_id: Uuid,
     ) -> Result<(), YorishiroError> {
         use crate::models::_entities::api_keys::Column;
 

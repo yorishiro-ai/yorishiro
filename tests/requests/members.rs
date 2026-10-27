@@ -40,10 +40,24 @@ async fn membership_mutations_reject_stale_admin_contexts() {
             scope: ApiKeyScope::Read,
             audit: false,
         };
+        let target = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Member)
             .await
             .unwrap();
         let result = tenant_memberships::remove_member_as(&ctx.db, &actor, admin.id).await;
+        assert!(matches!(
+            result,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+        ));
+        let result = api_keys::Entity::revoke_for_tenant(&ctx.db, &actor, target.id).await;
         assert!(matches!(
             result,
             Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
@@ -62,10 +76,19 @@ async fn membership_mutations_reject_stale_admin_contexts() {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
             .await
             .unwrap();
-        api_keys::Entity::delete_by_id(key.id)
-            .exec(&ctx.db)
-            .await
-            .unwrap();
+        api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+        let result = api_keys::Entity::revoke_for_tenant(&ctx.db, &actor, target.id).await;
+        assert!(matches!(
+            result,
+            Err(yorishiro::YorishiroError::Unauthenticated)
+        ));
+        assert!(
+            api_keys::Entity::find_by_id(target.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
         let result = tenant_memberships::remove_member_as(&ctx.db, &actor, admin.id).await;
         assert!(matches!(
             result,
