@@ -109,6 +109,43 @@ fn tool_result_json(response: &Value) -> Value {
 }
 
 #[tokio::test]
+async fn mcp_whoami_matches_rest_identity_without_secrets() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            tenant.owner_id,
+            ApiKeyScope::Read,
+            true,
+        )
+        .await;
+        let session = initialize(&request).await;
+        let rest = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(rest.status_code(), StatusCode::OK);
+        let result = mcp_call(
+            &request,
+            &session,
+            &key,
+            2,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        let identity = tool_result_json(&result);
+        assert_eq!(identity, rest.json::<Value>());
+        assert_eq!(identity["scope"], "read");
+        assert_eq!(identity["audit"], true);
+        assert!(!result.to_string().contains(&key));
+        assert!(!result.to_string().contains("key_hash"));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn mcp_authentication_database_failure_is_redacted() {
     if !crate::require_sqlite_backend() {
         return;

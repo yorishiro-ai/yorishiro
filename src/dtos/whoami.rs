@@ -13,3 +13,15 @@ pub struct WhoAmIResponse {
     /// Independent of `scope`: whether this key additionally holds the audit grant, checked separately by `GET /api/audit-log`.
     pub audit: bool,
 }
+
+impl From<crate::models::api_keys::AuthContext> for WhoAmIResponse {
+    fn from(ctx: crate::models::api_keys::AuthContext) -> Self {
+        Self {
+            workspace_id: ctx.workspace_id,
+            tenant_id: ctx.tenant_id,
+            scope: ctx.scope,
+            user_id: ctx.user_id,
+            audit: ctx.audit,
+        }
+    }
+}

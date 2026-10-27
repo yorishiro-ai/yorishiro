@@ -712,6 +712,19 @@ Input schema:
 }
 ```
 
+### `whoami`
+
+Inspect the current identity, tenant, selected workspace, effective scope and independent audit grant without exposing credentials (requires read scope)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ## Enterprise-only tools
 
 ### `list_upstream_changes`

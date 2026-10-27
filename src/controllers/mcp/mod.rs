@@ -5,6 +5,7 @@ pub mod relations;
 mod schemas;
 mod search;
 mod template_library;
+mod whoami;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -117,6 +118,7 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_schemas(),
         YorishiroMcpServer::tool_router_search(),
         YorishiroMcpServer::tool_router_template_library(),
+        YorishiroMcpServer::tool_router_whoami(),
     ])
 }
 

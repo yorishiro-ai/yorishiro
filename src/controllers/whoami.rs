@@ -7,13 +7,7 @@ use crate::dtos::whoami::WhoAmIResponse;
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = crate::dtos::whoami::WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub async fn whoami(AuthContext(ctx): AuthContext) -> Json<WhoAmIResponse> {
-    Json(WhoAmIResponse {
-        workspace_id: ctx.workspace_id,
-        tenant_id: ctx.tenant_id,
-        scope: ctx.scope,
-        user_id: ctx.user_id,
-        audit: ctx.audit,
-    })
+    Json(ctx.into())
 }
 
 #[cfg(feature = "openapi")]
