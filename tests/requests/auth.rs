@@ -195,6 +195,25 @@ async fn signup_without_invite_creates_its_own_tenant() {
             "response: {:?}",
             login_response.text()
         );
+        let recovery = login_response.json::<serde_json::Value>();
+        assert_eq!(recovery["error"]["code"], "workspace_provisioning_required");
+        assert_eq!(recovery["error"]["memberships"][0]["role"], "owner");
+        assert_eq!(
+            recovery["error"]["memberships"][0]["tenant_id"],
+            signup_body["tenant_id"]
+        );
+        assert!(
+            recovery["error"]["workspaces"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            recovery["error"]["hint"]
+                .as_str()
+                .unwrap()
+                .contains("create_workspace")
+        );
     })
     .await;
 }
@@ -368,6 +387,85 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
             txn.commit().await.unwrap();
         })
         .await;
+    })
+    .await;
+}
+#[tokio::test]
+async fn login_selection_has_typed_candidates_only_after_credentials_are_verified() {
+    use sea_orm::TransactionTrait;
+    super::boot_request::<App, _, _>(|request, ctx| async move {
+        let args = super::fixtures::TenantArgs::default();
+        let email = args.owner_email.clone();
+        let password = args.owner_password.clone();
+        let tenant = super::fixtures::TestTenant::create(&request, &ctx, args).await;
+        let transaction = ctx.db.begin().await.unwrap();
+        let other = yorishiro::models::tenancy::create_workspace(
+            &transaction,
+            tenant.tenant_id,
+            &format!("login-selection-{}", uuid::Uuid::new_v4()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+        let response = request
+            .post("/auth/login")
+            .json(&serde_json::json!({"email":email,"password":"wrong-password"}))
+            .await;
+        assert_eq!(response.status_code(), 401);
+        let denied = response.json::<serde_json::Value>();
+        assert!(denied["error"]["workspaces"].is_null());
+        assert!(denied["error"]["memberships"].is_null());
+        let response = request
+            .post("/auth/login")
+            .json(&serde_json::json!({"email":email,"password":password}))
+            .await;
+        assert_eq!(response.status_code(), 422, "{}", response.text());
+        let body = response.json::<serde_json::Value>();
+        assert_eq!(body["error"]["code"], "workspace_selection_required");
+        assert!(body["error"]["details"].is_null());
+        let candidates = body["error"]["workspaces"].as_array().unwrap();
+        assert!(candidates.len() >= 2);
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate["workspace_id"] == tenant.workspace_id.to_string())
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate["workspace_id"] == other.id.to_string())
+        );
+        for candidate in candidates {
+            assert_eq!(candidate["tenant_id"], tenant.tenant_id.to_string());
+            assert!(!candidate["tenant_name"].as_str().unwrap().is_empty());
+            assert!(!candidate["workspace_name"].as_str().unwrap().is_empty());
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn login_without_membership_is_distinct_from_workspace_provisioning() {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
+        let user = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("no-membership"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        let response = request
+            .post("/auth/login")
+            .json(&serde_json::json!({"email":user.email,"password":"hunter2-hunter2"}))
+            .await;
+        assert_eq!(response.status_code(), 403);
+        let body = response.json::<serde_json::Value>();
+        assert_eq!(body["error"]["code"], "tenant_membership_required");
+        assert!(body["error"]["memberships"].as_array().unwrap().is_empty());
+        assert!(body["error"]["workspaces"].as_array().unwrap().is_empty());
     })
     .await;
 }

@@ -35,7 +35,7 @@ pub struct LoginRequest {
     pub password: String,
     /// Which of the account's workspaces to issue an API key for.
     /// Omit this when the account can only reach one workspace; it resolves automatically.
-    /// An account reaching more than one must specify explicitly (422 otherwise), and the refusal lists the candidates.
+    /// An account reaching more than one receives `workspace_selection_required` (422) with typed candidates.
     pub workspace_id: Option<Uuid>,
 }
 
@@ -49,4 +49,52 @@ pub struct LoginResponse {
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
     pub user_id: Uuid,
+}
+
+pub use crate::models::tenancy::LoginRecoveryReason as LoginRecoveryCode;
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginRecoveryResponse {
+    pub error: LoginRecovery,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginRecovery {
+    pub code: LoginRecoveryCode,
+    pub message: String,
+    pub hint: String,
+    pub memberships: Vec<crate::models::tenancy::LoginMembership>,
+    pub workspaces: Vec<crate::models::tenancy::LoginWorkspace>,
+}
+
+impl LoginRecovery {
+    pub(crate) fn new(
+        code: LoginRecoveryCode,
+        memberships: Vec<crate::models::tenancy::LoginMembership>,
+        workspaces: Vec<crate::models::tenancy::LoginWorkspace>,
+    ) -> Self {
+        let (message, hint) = match code {
+            LoginRecoveryCode::TenantMembershipRequired => (
+                "this account is not a member of any tenant",
+                "ask a tenant admin to add you as a member first",
+            ),
+            LoginRecoveryCode::WorkspaceProvisioningRequired => (
+                "this account has tenant membership but no accessible workspace",
+                "ask an operator to run cargo loco task create_workspace tenant_id:<tenant_id> name:<workspace_name>, then retry /auth/login; tenant capacity, licence and backend restrictions still apply",
+            ),
+            LoginRecoveryCode::WorkspaceSelectionRequired => (
+                "this account has access to more than one workspace",
+                "specify workspace_id explicitly",
+            ),
+        };
+        Self {
+            code,
+            message: message.into(),
+            hint: hint.into(),
+            memberships,
+            workspaces,
+        }
+    }
 }

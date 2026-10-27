@@ -45,6 +45,27 @@ pub struct AuthContext {
     pub audit: bool,
 }
 
+impl AuthContext {
+    /// Applies current membership without widening the key's stored grant.
+    /// Requests already authenticated may finish; later authentications read the committed membership.
+    pub(crate) async fn with_current_membership(
+        mut self,
+        conn: &impl ConnectionTrait,
+    ) -> Result<Self, YorishiroError> {
+        if let Some(user_id) = self.user_id {
+            let role = crate::models::tenant_memberships::get_membership_role(
+                conn,
+                self.tenant_id,
+                user_id,
+            )
+            .await?
+            .ok_or(YorishiroError::Unauthenticated)?;
+            self.scope = self.scope.min(role.max_scope());
+        }
+        Ok(self)
+    }
+}
+
 pub struct CreatedApiKey {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -60,6 +81,14 @@ pub struct CreatedApiKey {
 /// Hashes a presented key into the form stored in `api_keys.key_hash`.
 pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
+}
+
+/// Generates the shared credential format; only the hash is persisted.
+pub(crate) fn generate_key() -> (String, String) {
+    let prefix = format!("ysr_{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
+    let secret = loco_rs::hash::random_string(KEY_SECRET_LENGTH);
+    let plaintext = format!("{prefix}_{secret}");
+    (prefix, plaintext)
 }
 
 pub use crate::models::_entities::api_keys::{ActiveModel, Entity, Model};
@@ -126,14 +155,16 @@ impl Entity {
             .internal()?;
 
         let row = row.ok_or(YorishiroError::Unauthenticated)?;
-        Ok(AuthContext {
+        AuthContext {
             api_key_id: row.id,
             workspace_id: row.workspace_id,
             tenant_id: row.tenant_id,
             scope: stored_scope(&row.scope)?,
             user_id: row.user_id,
             audit: row.audit,
-        })
+        }
+        .with_current_membership(&db.identity_connection())
+        .await
     }
 
     /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
@@ -153,14 +184,16 @@ impl Entity {
             .await?
             .ok_or(YorishiroError::Unauthenticated)?;
         let workspace_id = key.workspace_id.ok_or(YorishiroError::Unauthenticated)?;
-        Ok(AuthContext {
+        AuthContext {
             api_key_id: key.id,
             workspace_id,
             tenant_id,
             scope: stored_scope(&key.scope)?,
             user_id: key.user_id,
             audit: key.audit,
-        })
+        }
+        .with_current_membership(conn)
+        .await
     }
 
     /// Records authenticated usage outside the request transaction, preserving read-only requests' timestamps.
@@ -302,9 +335,7 @@ impl Entity {
             .internal()?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-        let prefix = format!("ysr_{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
-        let secret = loco_rs::hash::random_string(KEY_SECRET_LENGTH);
-        let plaintext = format!("{prefix}_{secret}");
+        let (prefix, plaintext) = generate_key();
         let key_hash = hash_key(&plaintext);
 
         let active = ActiveModel {

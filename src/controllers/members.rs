@@ -8,7 +8,7 @@ use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
-use crate::dtos::members::AddMemberRequest;
+use crate::dtos::members::{AddMemberRequest, MemberAccessResponse};
 use crate::error::YorishiroError;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
@@ -46,7 +46,7 @@ pub async fn list_members(
     Ok(Json(members))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::models::tenant_memberships::MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::dtos::members::MemberAccessResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -66,15 +66,20 @@ pub async fn add_member(
             ))
         })?;
 
-    tenant_memberships::add_member(&ctx.db, auth.tenant_id, user.id, body.role).await?;
+    let keys =
+        tenant_memberships::update_member_access(&ctx.db, auth.tenant_id, user.id, body.role)
+            .await?;
 
     Ok((
         StatusCode::CREATED,
-        Json(MembershipRecord {
-            user_id: user.id,
-            email: user.email,
-            display_name: user.display_name,
-            role: body.role,
+        Json(MemberAccessResponse {
+            member: MembershipRecord {
+                user_id: user.id,
+                email: user.email,
+                display_name: user.display_name,
+                role: body.role,
+            },
+            keys,
         }),
     ))
 }

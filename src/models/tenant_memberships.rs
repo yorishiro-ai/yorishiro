@@ -7,8 +7,8 @@ use crate::models::api_keys::ApiKeyScope;
 
 mod operations;
 
-pub use operations::add_member;
-pub(crate) use operations::{get_membership_role, list_members};
+pub use operations::{add_member, remove_member};
+pub(crate) use operations::{get_membership_role, list_members, update_member_access};
 
 db_enum! {
     /// Mirrors the `tenant_memberships.role` check constraint.
@@ -42,6 +42,17 @@ pub struct MembershipRecord {
     pub email: String,
     pub display_name: Option<String>,
     pub role: MembershipRole,
+}
+
+/// Key access observed while updating a membership, excluding secret material.
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MembershipKeyAccess {
+    pub api_key_id: Uuid,
+    pub stored_scope: ApiKeyScope,
+    pub effective_scope: ApiKeyScope,
+    /// Explicit operator grant, independent of the membership's ordered scope cap.
+    pub audit: bool,
 }
 
 #[loco_rs::prelude::async_trait]
