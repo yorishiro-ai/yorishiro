@@ -7,6 +7,7 @@ use crate::models::api_keys::ApiKeyScope;
 
 mod operations;
 
+pub use operations::preview_removal;
 pub use operations::transfer_ownership;
 pub use operations::{add_member, remove_member, remove_member_as, update_member_access};
 pub(crate) use operations::{add_member_in_transaction, get_membership_role, list_members};
@@ -54,6 +55,17 @@ pub struct MembershipKeyAccess {
     pub effective_scope: ApiKeyScope,
     /// Explicit operator grant, independent of the membership's ordered scope cap.
     pub audit: bool,
+}
+
+/// A point-in-time snapshot, not authorization for a later mutation.
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MembershipRemovalPreview {
+    pub user_id: Uuid,
+    pub role: Option<MembershipRole>,
+    pub blocked_by_last_owner: bool,
+    pub revoked_api_key_ids: Vec<Uuid>,
+    pub lost_workspace_ids: Vec<Uuid>,
 }
 
 #[loco_rs::prelude::async_trait]

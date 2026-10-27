@@ -374,11 +374,39 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
                 .await;
             assert_eq!(revoked.status_code(), StatusCode::UNAUTHORIZED);
         }
+        let preview = request
+            .get(&format!("/api/members/{}/removal-preview", user.id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        assert_eq!(preview.status_code(), StatusCode::OK);
+        let preview = preview.json::<serde_json::Value>();
+        assert_eq!(preview["blocked_by_last_owner"], false);
+        assert!(
+            preview["lost_workspace_ids"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(tenant.workspace_id))
+        );
+        assert_eq!(preview["revoked_api_key_ids"].as_array().unwrap().len(), 2);
+        let still_valid = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {broad}"))
+            .await;
+        assert_eq!(still_valid.status_code(), StatusCode::OK);
         let removed = request
             .delete(&format!("/api/members/{}", user.id))
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await;
         assert_eq!(removed.status_code(), StatusCode::NO_CONTENT);
+        let preview = request
+            .get(&format!("/api/members/{}/removal-preview", user.id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        assert_eq!(preview.status_code(), StatusCode::OK);
+        let preview = preview.json::<serde_json::Value>();
+        assert!(preview["role"].is_null());
+        assert_eq!(preview["revoked_api_key_ids"], serde_json::json!([]));
+        assert_eq!(preview["lost_workspace_ids"], serde_json::json!([]));
         let repeated = request
             .delete(&format!("/api/members/{}", user.id))
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
@@ -546,6 +574,15 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
         let args = TenantArgs::default();
         let email = args.owner_email.clone();
         let tenant = TestTenant::create(&request, &ctx, args).await;
+        let preview = request
+            .get(&format!("/api/members/{}/removal-preview", tenant.owner_id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        assert_eq!(preview.status_code(), StatusCode::OK);
+        assert_eq!(
+            preview.json::<serde_json::Value>()["blocked_by_last_owner"],
+            true
+        );
         let demoted = request
             .post("/api/members")
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))

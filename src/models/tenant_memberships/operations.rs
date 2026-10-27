@@ -11,6 +11,63 @@ use crate::models::_entities::{tenant_memberships::Column, user_users};
 
 use super::{ActiveModel, Entity, MembershipRecord, MembershipRole};
 
+/// Reports membership removal effects without changing membership or credentials.
+///
+/// # Errors
+/// Rejects stale administrator credentials or persistence failures.
+pub async fn preview_removal(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    user_id: Uuid,
+) -> Result<super::MembershipRemovalPreview, YorishiroError> {
+    use crate::models::_entities::{api_keys, workspace_workspaces};
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let role = get_membership_role(&txn, actor.tenant_id, user_id).await?;
+    let blocked_by_last_owner = if role == Some(MembershipRole::Owner) {
+        Entity::find()
+            .filter(Column::TenantId.eq(actor.tenant_id))
+            .filter(Column::Role.eq(MembershipRole::Owner.as_db_str()))
+            .count(&txn)
+            .await
+            .internal()?
+            <= 1
+    } else {
+        false
+    };
+    let revoked_api_key_ids = api_keys::Entity::find()
+        .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
+        .filter(api_keys::Column::UserId.eq(user_id))
+        .select_only()
+        .column(api_keys::Column::Id)
+        .order_by_asc(api_keys::Column::Id)
+        .into_tuple::<Uuid>()
+        .all(&txn)
+        .await
+        .internal()?;
+    let lost_workspace_ids = if role.is_some() {
+        workspace_workspaces::Entity::find()
+            .filter(workspace_workspaces::Column::TenantId.eq(actor.tenant_id))
+            .select_only()
+            .column(workspace_workspaces::Column::Id)
+            .order_by_asc(workspace_workspaces::Column::Id)
+            .into_tuple::<Uuid>()
+            .all(&txn)
+            .await
+            .internal()?
+    } else {
+        Vec::new()
+    };
+    txn.rollback().await.internal()?;
+    Ok(super::MembershipRemovalPreview {
+        user_id,
+        role,
+        blocked_by_last_owner,
+        revoked_api_key_ids,
+        lost_workspace_ids,
+    })
+}
+
 /// Transfers ownership to an existing member without leaving the tenant ownerless.
 ///
 /// # Errors
