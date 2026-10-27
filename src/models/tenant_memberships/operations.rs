@@ -73,7 +73,7 @@ pub(crate) async fn update_member_access(
             Ok(super::MembershipKeyAccess {
                 api_key_id: key.id,
                 stored_scope,
-                effective_scope: stored_scope.min(role.max_scope()),
+                effective_scope: crate::models::access::effective_scope(stored_scope, role),
                 audit: key.audit,
             })
         })

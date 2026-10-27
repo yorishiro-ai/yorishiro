@@ -60,7 +60,7 @@ impl AuthContext {
             )
             .await?
             .ok_or(YorishiroError::Unauthenticated)?;
-            self.scope = self.scope.min(role.max_scope());
+            self.scope = crate::models::access::effective_scope(self.scope, role);
         }
         Ok(self)
     }

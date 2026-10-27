@@ -20,15 +20,7 @@ pub(crate) async fn require_tenant_admin(
     tenant_id: uuid::Uuid,
     user_id: Option<uuid::Uuid>,
 ) -> Result<(), YorishiroError> {
-    let user_id = user_id.ok_or(YorishiroError::Unauthenticated)?;
-    tenant_memberships::get_membership_role(&ctx.db, tenant_id, user_id)
-        .await?
-        .filter(|role| role.administers_tenant())
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this operation is restricted to tenant owners/admins".into(),
-            hint: "ask a tenant owner to grant you the admin role".into(),
-        })?;
-    Ok(())
+    crate::models::access::require_tenant_admin(&ctx.db, tenant_id, user_id).await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::tenant_memberships::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]

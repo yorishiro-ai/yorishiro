@@ -96,41 +96,7 @@ pub fn default_authenticator() -> Arc<dyn Authenticator> {
     Arc::new(DefaultAuthenticator)
 }
 
-/// Enforces that an authenticated context satisfies the required scope, returning
-/// `YorishiroError::ScopeInsufficient` when it doesn't.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), YorishiroError> {
-    if ctx.scope.satisfies(required) {
-        Ok(())
-    } else {
-        Err(YorishiroError::ScopeInsufficient {
-            message: format!(
-                "this operation requires {required:?} scope but the API key has {:?} scope",
-                ctx.scope
-            ),
-            hint: "Reissue an API key with sufficient scope".into(),
-        })
-    }
-}
-
-/// Enforces that an authenticated context holds the independent `audit` grant.
-/// Deliberately not folded into `require_scope`/`ApiKeyScope::satisfies`: `audit` is not one more rung above `Migration` on the read/write/schema/migration ladder, so it is never compared with `Ord`, only checked for `true`/`false`.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub fn require_audit(ctx: &AuthContext) -> Result<(), YorishiroError> {
-    if ctx.audit {
-        Ok(())
-    } else {
-        Err(YorishiroError::ScopeInsufficient {
-            message: "this operation requires the audit grant, which this API key does not hold"
-                .into(),
-            hint: "reissue an API key with audit:true".into(),
-        })
-    }
-}
+pub use crate::models::access::{require_audit, require_scope};
 
 /// Request authentication shared by transport adapters through the installed policy.
 pub(crate) struct RequestAuth<'a> {

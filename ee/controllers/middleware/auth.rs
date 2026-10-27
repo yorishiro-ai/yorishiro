@@ -220,13 +220,7 @@ pub(crate) async fn authenticate_tenant_admin(
     headers: &HeaderMap,
 ) -> Result<Uuid, YorishiroError> {
     let auth_ctx = authenticate(ctx, headers).await?;
-    let user_id = auth_ctx.user_id.ok_or(YorishiroError::Unauthenticated)?;
-    crate::models::tenant_memberships::get_membership_role(&ctx.db, auth_ctx.tenant_id, user_id)
-        .await?
-        .filter(|role| role.administers_tenant())
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "the hosted dashboard is restricted to tenant owners/admins".into(),
-            hint: "ask a tenant owner to grant you the admin role".into(),
-        })?;
+    crate::models::access::require_tenant_admin(&ctx.db, auth_ctx.tenant_id, auth_ctx.user_id)
+        .await?;
     Ok(auth_ctx.tenant_id)
 }

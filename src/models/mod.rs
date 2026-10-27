@@ -4,6 +4,7 @@
 //! So a table gets its module here even when only an overlay's code reads and writes it: the schema is one set of migrations, one set of entities, and the behaviour that overlay owns stays in that overlay's own module for the table.
 
 pub mod _entities;
+pub mod access;
 pub mod api_key_audit_log;
 pub mod api_keys;
 pub mod compute_credit_ledger;

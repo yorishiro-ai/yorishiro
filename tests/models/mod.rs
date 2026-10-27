@@ -4,6 +4,7 @@ mod queue_job_lifecycles;
 mod startup_reindex_metadata;
 mod workspace_workspaces;
 
+mod access;
 mod api_keys;
 #[cfg(feature = "enterprise")]
 mod compute_credit_ledger;
