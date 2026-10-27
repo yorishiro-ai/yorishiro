@@ -341,11 +341,16 @@ async fn config_folder_preserves_non_utf8_paths() {
         "LOCO_CONFIG_FOLDER",
         "DATABASE_URL",
         "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
         "YORISHIRO_EMBEDDING_PROVIDER",
     ]);
     guard.set("LOCO_CONFIG_FOLDER", &folder);
     guard.set("DATABASE_URL", "sqlite::memory:");
-    guard.set("QUEUE_URL", "sqlite::memory:");
+    guard.set(
+        "QUEUE_URL",
+        "sqlite:///tmp/non-utf8-config-queue.sqlite3?mode=rwc",
+    );
+    guard.set("YORISHIRO_QUEUE_KIND", "Sqlite");
     guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
     let config = load(&Environment::Production).await.unwrap();
