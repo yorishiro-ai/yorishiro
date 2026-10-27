@@ -6,6 +6,52 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
+async fn invite_cancellation_and_acceptance_have_one_committed_outcome() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::_entities::tenant_memberships::Column;
+    use yorishiro::models::{tenant_memberships, user_users, workspace_invites};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(
+            &ctx.db, &super::fixtures::unique_email("cancel-accept-race"), "test-password", None,
+        ).await.unwrap();
+        let (invite, token) = workspace_invites::create_invite(
+            &ctx.db, tenant.tenant_id, &user.email, MembershipRole::Viewer, chrono::Duration::hours(1),
+        ).await.unwrap();
+        let barrier = tokio::sync::Barrier::new(2);
+        let cancel = async {
+            barrier.wait().await;
+            request.delete(&format!("/api/members/invites/{}", invite.id))
+                .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await
+        };
+        let accept = async {
+            barrier.wait().await;
+            request.post("/auth/invites/accept")
+                .json(&serde_json::json!({"invite_token":token,"email":user.email,"password":"test-password"})).await
+        };
+        let (cancelled, accepted) = tokio::join!(cancel, accept);
+        let membership = tenant_memberships::Entity::find()
+            .filter(Column::TenantId.eq(tenant.tenant_id)).filter(Column::UserId.eq(user.id))
+            .one(&ctx.db).await.unwrap();
+        let stored = workspace_invites::Entity::find_by_id(invite.id).one(&ctx.db).await.unwrap().unwrap();
+        match (cancelled.status_code(), accepted.status_code()) {
+            (StatusCode::NO_CONTENT, StatusCode::UNPROCESSABLE_ENTITY) => {
+                assert!(membership.is_none());
+                assert!(stored.used_at.is_none());
+                assert!(stored.expires_at <= chrono::Utc::now());
+            }
+            (StatusCode::CONFLICT, StatusCode::OK) => {
+                assert_eq!(membership.unwrap().role, MembershipRole::Viewer.as_db_str());
+                assert!(stored.used_at.is_some());
+            }
+            _ => panic!("unexpected cancellation/acceptance: {} {} / {} {}",
+                cancelled.status_code(), cancelled.text(), accepted.status_code(), accepted.text()),
+        }
+    }).await;
+}
+
+#[tokio::test]
 async fn non_administrative_credentials_cannot_manage_invites_or_preview_members() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::_entities::tenant_memberships::Column;
