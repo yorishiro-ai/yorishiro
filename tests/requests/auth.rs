@@ -306,8 +306,8 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
     if !crate::require_postgres_backend() {
         return;
     }
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     super::with_max_tenants("100", async move {
         boot_request_isolated::<App, _, _>(|request, _ctx| async move {
             for email in ["first@example.com", "second@example.com"] {
@@ -332,8 +332,8 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
 
 /// Widens `DB_MAX_CONNECTIONS` past `config/test_postgres.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
 async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);
-    guard.set("DB_MAX_CONNECTIONS", value);
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::DbMaxConnections.name()]);
+    guard.set(crate::env::TestEnv::DbMaxConnections.name(), value);
     fut.await
 }
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.

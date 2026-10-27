@@ -299,11 +299,14 @@ mod concurrency {
             return;
         }
         let guard = crate::EnvGuard::capture(&[
-            "YORISHIRO_PLAN_POLICY_ENABLED",
-            "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
+            crate::env::TestEnv::PlanPolicyEnabled.name(),
+            crate::env::TestEnv::WorkerClassTenantPrivateLimit.name(),
         ]);
-        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-        guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "1");
+        guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
+        guard.set(
+            crate::env::TestEnv::WorkerClassTenantPrivateLimit.name(),
+            "1",
+        );
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
             let a_second = workspace_of(&ctx, tenant_a).await;
@@ -336,13 +339,13 @@ mod concurrency {
     #[serial_test::serial(process_environment)]
     async fn shared_and_official_jobs_keep_their_keys_without_default_caps() {
         let guard = crate::EnvGuard::capture(&[
-            "YORISHIRO_PLAN_POLICY_ENABLED",
-            "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
-            "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+            crate::env::TestEnv::PlanPolicyEnabled.name(),
+            crate::env::TestEnv::WorkerClassSharedLimit.name(),
+            crate::env::TestEnv::WorkerOfficialLimit.name(),
         ]);
-        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-        guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "1");
-        guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "1");
+        guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
+        guard.set(crate::env::TestEnv::WorkerClassSharedLimit.name(), "1");
+        guard.set(crate::env::TestEnv::WorkerOfficialLimit.name(), "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
             for (class, key) in [

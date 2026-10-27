@@ -53,8 +53,8 @@ pub(crate) async fn with_max_tenants<T>(
     value: &str,
     fut: impl std::future::Future<Output = T>,
 ) -> T {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
-    guard.set("YORISHIRO_MAX_TENANTS", value);
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::MaxTenants.name()]);
+    guard.set(crate::env::TestEnv::MaxTenants.name(), value);
     fut.await
 }
 
@@ -381,8 +381,8 @@ pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_TIMEZONE"]);
-    guard.set("YORISHIRO_TIMEZONE", timezone);
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::Timezone.name()]);
+    guard.set(crate::env::TestEnv::Timezone.name(), timezone);
     boot_request_isolated::<H, _, _>(callback).await;
 }
 

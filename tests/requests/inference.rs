@@ -168,8 +168,8 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 

@@ -156,8 +156,11 @@ async fn mcp_transport_rejects_unconfigured_host_by_default() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn mcp_transport_requires_protocol_accept_headers() {
-    let guard = EnvGuard::capture(&["YORISHIRO_MCP_ALLOWED_HOSTS"]);
-    guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "mcp.remote.test");
+    let guard = EnvGuard::capture(&[crate::env::TestEnv::McpAllowedHosts.name()]);
+    guard.set(
+        crate::env::TestEnv::McpAllowedHosts.name(),
+        "mcp.remote.test",
+    );
     boot_request::<App, _, _>(|request, _ctx| async move {
         let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
         for accept in [None, Some("*/*"), Some("application/json")] {

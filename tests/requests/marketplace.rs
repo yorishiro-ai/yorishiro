@@ -49,8 +49,8 @@ async fn listings(request: &loco_rs::TestServer, key: &str) -> Vec<serde_json::V
 #[tokio::test]
 #[serial(process_environment)]
 async fn without_a_licence_the_marketplace_is_not_served() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
@@ -72,8 +72,8 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .get("/api/marketplace")

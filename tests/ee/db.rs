@@ -185,7 +185,7 @@ fn sqlite_scheduler_lock_subprocess_aliases_contend_and_release() {
             ])
             .current_dir(dir.path())
             .env(
-                "YORISHIRO_SQLITE_LOCK_CHILD_URI",
+                crate::env::TestEnv::SqliteLockChildUri.name(),
                 "sqlite://app.sqlite?mode=rwc",
             )
             .stdin(Stdio::piped())

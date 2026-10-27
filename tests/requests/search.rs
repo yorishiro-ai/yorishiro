@@ -149,11 +149,14 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
 #[serial(process_environment)]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
     let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS",
-        "YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS",
+        crate::env::TestEnv::QueryEmbeddingTimeoutMs.name(),
+        crate::env::TestEnv::QueryEmbeddingPollIntervalMs.name(),
     ]);
-    guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", "300");
-    guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", "50");
+    guard.set(crate::env::TestEnv::QueryEmbeddingTimeoutMs.name(), "300");
+    guard.set(
+        crate::env::TestEnv::QueryEmbeddingPollIntervalMs.name(),
+        "50",
+    );
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(
             &request,

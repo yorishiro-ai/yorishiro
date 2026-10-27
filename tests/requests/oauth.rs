@@ -27,18 +27,18 @@ const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
 
 const OAUTH_VARS: [&str; 3] = [
-    "YORISHIRO_OAUTH_ISSUER_URL",
-    "YORISHIRO_OAUTH_CLIENT_ID",
-    "YORISHIRO_OAUTH_CLIENT_SECRET",
+    crate::env::TestEnv::OauthIssuerUrl.name(),
+    crate::env::TestEnv::OauthClientId.name(),
+    crate::env::TestEnv::OauthClientSecret.name(),
 ];
 
 /// The shipped Loco configuration interpolates these values before each app boots.
 /// Callers that change these variables take `serial(process_environment)`.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
-    guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
-    guard.set("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
-    guard.set("YORISHIRO_OAUTH_CLIENT_SECRET", CLIENT_SECRET);
+    guard.set(crate::env::TestEnv::OauthIssuerUrl.name(), ISSUER_URL);
+    guard.set(crate::env::TestEnv::OauthClientId.name(), CLIENT_ID);
+    guard.set(crate::env::TestEnv::OauthClientSecret.name(), CLIENT_SECRET);
     fut.await
 }
 /// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
@@ -86,9 +86,12 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 #[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
-    guard.remove("YORISHIRO_OAUTH_CLIENT_ID");
-    guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
-    guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
+    guard.remove(crate::env::TestEnv::OauthClientId.name());
+    guard.remove(crate::env::TestEnv::OauthClientSecret.name());
+    guard.set(
+        crate::env::TestEnv::OauthIssuerUrl.name(),
+        "https://idp.example.com",
+    );
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
         let response = request.get("/auth/oauth/status").await;
@@ -360,13 +363,13 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 #[tokio::test]
 #[serial(process_environment)]
 async fn oauth_provisioning_policy_controls_new_caps() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::PlanPolicyEnabled.name()]);
     for (index, value, expected_tenant, expected_entities) in
         [(0, None, None, None), (1, Some("true"), Some(1), Some(500))]
     {
         match value {
-            Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
-            None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
+            Some(v) => guard.set(crate::env::TestEnv::PlanPolicyEnabled.name(), v),
+            None => guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name()),
         }
         super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
             let policy_enabled =

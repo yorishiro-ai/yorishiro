@@ -389,8 +389,11 @@ async fn sqlite_timestamp_fixture_is_independent_of_redis_queue_url() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    let queue_guard = crate::EnvGuard::capture(&["QUEUE_URL"]);
-    queue_guard.set("QUEUE_URL", "redis://127.0.0.1:6379/15");
+    let queue_guard = crate::EnvGuard::capture(&[crate::env::TestEnv::QueueUrl.name()]);
+    queue_guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "redis://127.0.0.1:6379/15",
+    );
     let directory = tempfile::tempdir().unwrap();
     let env = loco_rs::environment::Environment::Any("test_sqlite".into());
     let mut config = yorishiro::App::load_config(&env).await.unwrap();
