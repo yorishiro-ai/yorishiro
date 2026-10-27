@@ -1,7 +1,8 @@
 //! Tenant membership and role operations.
 
 use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use uuid::Uuid;
 
@@ -10,19 +11,60 @@ use crate::models::_entities::{tenant_memberships::Column, user_users};
 
 use super::{ActiveModel, Entity, MembershipRecord, MembershipRole};
 
+/// Serializes membership changes and refuses losing the last owner.
+async fn protect_owner(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    next_role: Option<MembershipRole>,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    if next_role == Some(MembershipRole::Owner)
+        || get_membership_role(txn, tenant_id, user_id).await? != Some(MembershipRole::Owner)
+    {
+        return Ok(());
+    }
+    let owners = Entity::find()
+        .filter(Column::TenantId.eq(tenant_id))
+        .filter(Column::Role.eq(MembershipRole::Owner.as_db_str()))
+        .count(txn)
+        .await
+        .internal()?;
+    if owners <= 1 {
+        return Err(YorishiroError::Conflict {
+            message: "cannot remove or demote the tenant's last owner".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Adds (or updates the role of) a user's membership in a tenant.
 ///
-/// Takes `&impl ConnectionTrait` so a caller can compose this with `create_user` in one transaction, same reasoning as `create_user`'s doc comment.
-///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Rejects last-owner demotion or persistence failures.
 pub async fn add_member(
-    conn: &impl ConnectionTrait,
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    role: MembershipRole,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    add_member_in_transaction(&txn, tenant_id, user_id, role).await?;
+    txn.commit().await.internal()?;
+    Ok(())
+}
+
+pub(crate) async fn add_member_in_transaction(
+    conn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
     role: MembershipRole,
 ) -> Result<(), YorishiroError> {
     use sea_orm::sea_query::OnConflict;
+
+    protect_owner(conn, tenant_id, user_id, Some(role)).await?;
 
     // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
     let active = ActiveModel {
@@ -55,7 +97,7 @@ pub(crate) async fn update_member_access(
 ) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
     use crate::models::_entities::api_keys;
     let txn = crate::db::begin_write(db).await.internal()?;
-    add_member(&txn, tenant_id, user_id, role).await?;
+    add_member_in_transaction(&txn, tenant_id, user_id, role).await?;
     let keys = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
         .filter(api_keys::Column::UserId.eq(user_id))
@@ -94,6 +136,7 @@ pub async fn remove_member(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::api_keys;
     let txn = crate::db::begin_write(db).await.internal()?;
+    protect_owner(&txn, tenant_id, user_id, None).await?;
     let result = Entity::delete_many()
         .filter(Column::TenantId.eq(tenant_id))
         .filter(Column::UserId.eq(user_id))

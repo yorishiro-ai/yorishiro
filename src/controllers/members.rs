@@ -1,8 +1,8 @@
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
@@ -38,7 +38,7 @@ pub async fn list_members(
     Ok(Json(members))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::dtos::members::MemberAccessResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::dtos::members::MemberAccessResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -76,11 +76,23 @@ pub async fn add_member(
     ))
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/{user_id}", params(("user_id" = uuid::Uuid, Path)), responses((status = 204, description = "Member removed and attributed tenant keys revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+async fn remove_member(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Path(user_id): Path<uuid::Uuid>,
+) -> Result<StatusCode, ApiError> {
+    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    tenant_memberships::remove_member(&ctx.db, auth.tenant_id, user_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_list_members),
         super::route_inventory::path_doc(__path_add_member),
+        super::route_inventory::path_doc(__path_remove_member),
     ]
 }
 
@@ -89,4 +101,5 @@ pub fn routes() -> Routes {
         .prefix("api/members")
         .add("/", get(list_members))
         .add("/", post(add_member))
+        .add("/{user_id}", delete(remove_member))
 }

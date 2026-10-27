@@ -505,6 +505,8 @@ jobs:
             --skip requests::inference::the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant \
             --skip requests::marketplace::without_a_licence_the_marketplace_is_not_served \
             --skip requests::members::owner_can_list_and_add_members \
+            --skip requests::members::last_owner_cannot_be_demoted_or_removed_through_any_membership_operation \
+            --skip requests::members::competing_owner_demotion_and_removal_preserve_an_owner \
             --skip requests::mcp::fill_defaults_mcp_executes_and_enforces_migration_scope \
             --skip requests::mcp::mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid \
             --skip requests::mcp::mcp_search_asks_a_worker_to_embed_the_query \

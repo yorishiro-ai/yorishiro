@@ -111,7 +111,8 @@ pub async fn find_or_create(
     };
     let workspace = workspace_active.update(conn).await.internal()?;
 
-    tenant_memberships::add_member(conn, tenant.id, user.id, MembershipRole::Member).await?;
+    tenant_memberships::add_member_in_transaction(conn, tenant.id, user.id, MembershipRole::Member)
+        .await?;
 
     Ok(ProvisionedLogin {
         user_id: user.id,

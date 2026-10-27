@@ -31,7 +31,8 @@ pub async fn register_member(
     role: crate::models::tenant_memberships::MembershipRole,
 ) -> Result<crate::models::user_users::Model, YorishiroError> {
     let user = crate::models::user_users::create_user(txn, email, password, display_name).await?;
-    crate::models::tenant_memberships::add_member(txn, tenant_id, user.id, role).await?;
+    crate::models::tenant_memberships::add_member_in_transaction(txn, tenant_id, user.id, role)
+        .await?;
     Ok(user)
 }
 

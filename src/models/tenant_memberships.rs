@@ -8,7 +8,9 @@ use crate::models::api_keys::ApiKeyScope;
 mod operations;
 
 pub use operations::{add_member, remove_member};
-pub(crate) use operations::{get_membership_role, list_members, update_member_access};
+pub(crate) use operations::{
+    add_member_in_transaction, get_membership_role, list_members, update_member_access,
+};
 
 db_enum! {
     /// Mirrors the `tenant_memberships.role` check constraint.
