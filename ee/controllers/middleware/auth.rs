@@ -139,14 +139,16 @@ impl Authenticator for TenantScopedAuthenticator {
             ))
         })?;
 
-        Ok(AuthContext {
+        AuthContext {
             api_key_id,
             workspace_id,
             tenant_id,
             scope,
             user_id,
             audit,
-        })
+        }
+        .with_current_membership(&db.identity_connection())
+        .await
     }
 }
 

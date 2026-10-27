@@ -46,6 +46,73 @@ pub async fn add_member(
     Ok(())
 }
 
+/// Updates membership and reports existing key grants in the same transaction.
+pub(crate) async fn update_member_access(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    role: MembershipRole,
+) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
+    use crate::models::_entities::api_keys;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    add_member(&txn, tenant_id, user_id, role).await?;
+    let keys = api_keys::Entity::find()
+        .filter(api_keys::Column::TenantId.eq(tenant_id))
+        .filter(api_keys::Column::UserId.eq(user_id))
+        .order_by_asc(api_keys::Column::Id)
+        .all(&txn)
+        .await
+        .internal()?;
+    let access = keys
+        .into_iter()
+        .map(|key| {
+            let stored_scope = crate::models::api_keys::ApiKeyScope::from_db_str(&key.scope)
+                .ok_or_else(|| {
+                    YorishiroError::Internal(anyhow::anyhow!("unknown api key scope"))
+                })?;
+            Ok(super::MembershipKeyAccess {
+                api_key_id: key.id,
+                stored_scope,
+                effective_scope: stored_scope.min(role.max_scope()),
+                audit: key.audit,
+            })
+        })
+        .collect::<Result<Vec<_>, YorishiroError>>()?;
+    txn.commit().await.internal()?;
+    Ok(access)
+}
+
+/// Removes membership; subsequent authentication rejects all attributed keys in this tenant.
+/// Revokes attributed keys atomically so restoring membership cannot resurrect old credentials.
+///
+/// # Errors
+/// Returns an error when the membership is missing or persistence fails.
+pub async fn remove_member(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::api_keys;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let result = Entity::delete_many()
+        .filter(Column::TenantId.eq(tenant_id))
+        .filter(Column::UserId.eq(user_id))
+        .exec(&txn)
+        .await
+        .internal()?;
+    if result.rows_affected == 0 {
+        return Err(YorishiroError::not_found("tenant membership not found"));
+    }
+    api_keys::Entity::delete_many()
+        .filter(api_keys::Column::TenantId.eq(tenant_id))
+        .filter(api_keys::Column::UserId.eq(user_id))
+        .exec(&txn)
+        .await
+        .internal()?;
+    txn.commit().await.internal()?;
+    Ok(())
+}
+
 /// Every member of a tenant, joined against their user row.
 pub(crate) async fn list_members(
     conn: &impl ConnectionTrait,

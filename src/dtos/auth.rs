@@ -35,7 +35,7 @@ pub struct LoginRequest {
     pub password: String,
     /// Which of the account's workspaces to issue an API key for.
     /// Omit this when the account can only reach one workspace; it resolves automatically.
-    /// An account reaching more than one must specify explicitly (422 otherwise), and the refusal lists the candidates.
+    /// An account reaching more than one receives `workspace_selection_required` (422) with typed candidates.
     pub workspace_id: Option<Uuid>,
 }
 
@@ -49,4 +49,29 @@ pub struct LoginResponse {
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
     pub user_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum LoginRecoveryCode {
+    TenantMembershipRequired,
+    WorkspaceProvisioningRequired,
+    WorkspaceSelectionRequired,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginRecoveryResponse {
+    pub error: LoginRecovery,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginRecovery {
+    pub code: LoginRecoveryCode,
+    pub message: String,
+    pub hint: String,
+    pub memberships: Vec<crate::models::tenancy::LoginMembership>,
+    pub workspaces: Vec<crate::models::tenancy::LoginWorkspace>,
 }

@@ -5,13 +5,17 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
-use crate::dtos::auth::{LoginRequest, LoginResponse, SignupRequest, SignupResponse};
-use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::dtos::auth::{
+    LoginRecovery, LoginRecoveryCode, LoginRecoveryResponse, LoginRequest, LoginResponse,
+    SignupRequest, SignupResponse,
+};
+use crate::error::YorishiroError;
 use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRole;
@@ -81,7 +85,7 @@ async fn signup_with_invite(
 
 /// No invite: creates a brand-new tenant and joins the caller as `Owner`, but no workspace.
 ///
-/// This account cannot obtain an API key on its own: an operator must run `cargo loco task create_workspace tenant_id:<id> name:...` followed by `create_api_key`.
+/// An operator must run `cargo loco task create_workspace tenant_id:<id> name:...`, after which `/auth/login` can issue a user key.
 async fn signup_without_invite(
     ctx: &AppContext,
     body: &SignupRequest,
@@ -125,7 +129,7 @@ async fn signup_without_invite(
     post,
     path = "/auth/login",
     request_body = crate::dtos::auth::LoginRequest,
-    responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)),
+    responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = crate::dtos::auth::LoginRecoveryResponse), (status = 422, body = crate::dtos::auth::LoginRecoveryResponse)),
     security(()),
     tag = "community"
 ))]
@@ -138,7 +142,7 @@ async fn signup_without_invite(
 pub async fn login(
     State(ctx): State<AppContext>,
     Json(body): Json<LoginRequest>,
-) -> Result<Json<LoginResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     // Credentials are checked before the workspace is looked up, so a request with a bad password never reveals whether workspace_id exists.
     let user = user_users::verify_login(&ctx.db, &body.email, &body.password)
         .await?
@@ -151,32 +155,57 @@ pub async fn login(
             workspace_id
         }
         None => {
-            let mut workspaces = tenancy::list_workspaces_for_user(&ctx.db, user.id).await?;
+            let (memberships, mut workspaces) = tenancy::login_options(&ctx.db, user.id).await?;
             match workspaces.len() {
-                1 => workspaces.pop().expect("len() == 1 checked above").id,
+                1 => {
+                    workspaces
+                        .pop()
+                        .expect("len() == 1 checked above")
+                        .workspace_id
+                }
                 0 => {
-                    return Err(YorishiroError::ScopeInsufficient {
-                        message: "this account is not a member of any tenant".into(),
-                        hint: "ask a tenant admin to add you as a member first".into(),
-                    }
-                    .into());
+                    let (code, message, hint) = if memberships.is_empty() {
+                        (
+                            LoginRecoveryCode::TenantMembershipRequired,
+                            "this account is not a member of any tenant",
+                            "ask a tenant admin to add you as a member first",
+                        )
+                    } else {
+                        (
+                            LoginRecoveryCode::WorkspaceProvisioningRequired,
+                            "this account has tenant membership but no accessible workspace",
+                            "ask an operator to run cargo loco task create_workspace tenant_id:<tenant_id> name:<workspace_name>, then retry /auth/login; tenant capacity, licence and backend restrictions still apply",
+                        )
+                    };
+                    return Ok((
+                        StatusCode::FORBIDDEN,
+                        Json(LoginRecoveryResponse {
+                            error: LoginRecovery {
+                                code,
+                                message: message.into(),
+                                hint: hint.into(),
+                                memberships,
+                                workspaces,
+                            },
+                        }),
+                    )
+                        .into_response());
                 }
                 _ => {
-                    return Err(YorishiroError::ValidationFailed {
-                        message: "this account has access to more than one workspace".into(),
-                        details: workspaces
-                            .into_iter()
-                            .map(|w| ValidationDetail {
-                                field: w.id.to_string(),
-                                problem: w.name,
-                                code: ValidationErrorCode::EmptyRequired,
-                                expected: Some("single workspace".into()),
-                                actual: None,
-                            })
-                            .collect(),
-                        hint: "specify workspace_id explicitly".into(),
-                    }
-                    .into());
+                    return Ok((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Json(LoginRecoveryResponse {
+                            error: LoginRecovery {
+                                code: LoginRecoveryCode::WorkspaceSelectionRequired,
+                                message: "this account has access to more than one workspace"
+                                    .into(),
+                                hint: "specify workspace_id explicitly".into(),
+                                memberships,
+                                workspaces,
+                            },
+                        }),
+                    )
+                        .into_response());
                 }
             }
         }
@@ -205,7 +234,8 @@ pub async fn login(
         workspace_id: created.workspace_id,
         scope: created.scope,
         user_id: user.id,
-    }))
+    })
+    .into_response())
 }
 
 pub fn routes() -> Routes {

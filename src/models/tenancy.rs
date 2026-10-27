@@ -132,6 +132,83 @@ pub async fn list_workspaces_for_user(
         .await
         .internal()
 }
+
+/// A login candidate carries tenant labels because workspace names are tenant-local.
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginWorkspace {
+    pub workspace_id: Uuid,
+    pub workspace_name: String,
+    pub tenant_id: Uuid,
+    pub tenant_name: String,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoginMembership {
+    pub tenant_id: Uuid,
+    pub tenant_name: String,
+    pub role: crate::models::tenant_memberships::MembershipRole,
+}
+
+/// Discovers recovery options only after the caller has verified credentials.
+///
+/// # Errors
+/// Returns an error when membership or workspace discovery fails.
+pub async fn login_options(
+    conn: &impl ConnectionTrait,
+    user_id: Uuid,
+) -> Result<(Vec<LoginMembership>, Vec<LoginWorkspace>), YorishiroError> {
+    use crate::models::_entities::tenant_tenants;
+    let rows = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::UserId.eq(user_id))
+        .find_also_related(tenant_tenants::Entity)
+        .all(conn)
+        .await
+        .internal()?;
+    let mut memberships = Vec::with_capacity(rows.len());
+    for (membership, tenant) in rows {
+        let tenant = tenant.ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!("membership tenant missing"))
+        })?;
+        let role = crate::models::tenant_memberships::MembershipRole::from_db_str(&membership.role)
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown membership role")))?;
+        memberships.push(LoginMembership {
+            tenant_id: tenant.id,
+            tenant_name: tenant.name,
+            role,
+        });
+    }
+    memberships.sort_by_key(|membership| membership.tenant_id);
+    let mut candidates = Vec::new();
+    if !memberships.is_empty() {
+        let workspaces = workspace_workspaces::Entity::find()
+            .filter(
+                workspace_workspaces::Column::TenantId
+                    .is_in(memberships.iter().map(|membership| membership.tenant_id)),
+            )
+            .all(conn)
+            .await
+            .internal()?;
+        let names: std::collections::BTreeMap<_, _> = memberships
+            .iter()
+            .map(|membership| (membership.tenant_id, &membership.tenant_name))
+            .collect();
+        for workspace in workspaces {
+            let tenant_name = names.get(&workspace.tenant_id).ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("workspace membership missing"))
+            })?;
+            candidates.push(LoginWorkspace {
+                workspace_id: workspace.id,
+                workspace_name: workspace.name,
+                tenant_id: workspace.tenant_id,
+                tenant_name: (*tenant_name).clone(),
+            });
+        }
+    }
+    candidates.sort_by_key(|candidate| (candidate.tenant_id, candidate.workspace_id));
+    Ok((memberships, candidates))
+}
 /// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
 /// `None` means unlimited.
 ///
