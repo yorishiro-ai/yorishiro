@@ -6,6 +6,71 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
+async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let email = super::fixtures::unique_email("rotated-invite");
+        let (invite, old_token) = yorishiro::models::workspace_invites::create_invite(
+            &ctx.db,
+            tenant.tenant_id,
+            &email,
+            MembershipRole::Member,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        let path = format!("/api/members/invites/{}", invite.id);
+        for _ in 0..2 {
+            let cancelled = request
+                .delete(&path)
+                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .await;
+            assert_eq!(cancelled.status_code(), StatusCode::NO_CONTENT);
+        }
+        let rejected = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":old_token,"password":"test-password"}))
+            .await;
+        assert_eq!(rejected.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        let rotated = request
+            .post(&format!("{path}/reissue"))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(
+                &serde_json::json!({"expires_at":chrono::Utc::now() + chrono::Duration::hours(1)}),
+            )
+            .await;
+        assert_eq!(rotated.status_code(), StatusCode::OK, "{}", rotated.text());
+        let rotated = rotated.json::<serde_json::Value>();
+        let token = rotated["token"].as_str().unwrap();
+        assert_ne!(token, old_token);
+        let stale = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":old_token,"password":"test-password"}))
+            .await;
+        assert_eq!(stale.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        let accepted = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":token,"password":"test-password"}))
+            .await;
+        assert_eq!(
+            accepted.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            accepted.text()
+        );
+        let used = request
+            .post(&format!("{path}/reissue"))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(
+                &serde_json::json!({"expires_at":chrono::Utc::now() + chrono::Duration::hours(1)}),
+            )
+            .await;
+        assert_eq!(used.status_code(), StatusCode::CONFLICT);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn administrator_can_issue_and_list_secret_free_invites() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

@@ -16,6 +16,72 @@ use super::{ActiveModel, Entity, Model, RedeemedInvite};
 
 const INVITE_TOKEN_LENGTH: usize = 48;
 
+pub(crate) async fn revoke_invite_as(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    invite_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let invite = managed_invite(&txn, actor.tenant_id, invite_id).await?;
+    if invite.used_at.is_some() {
+        return Err(YorishiroError::Conflict {
+            message: "a used invite cannot be revoked".into(),
+        });
+    }
+    let now = crate::time::now();
+    if invite.expires_at > now {
+        let mut active: ActiveModel = invite.into();
+        active.expires_at = ActiveValue::Set(now.into());
+        active.update(&txn).await.internal()?;
+    }
+    txn.commit().await.internal()?;
+    Ok(())
+}
+
+pub(crate) async fn reissue_invite_as(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    invite_id: Uuid,
+    expires_at: DateTime<Utc>,
+) -> Result<(Model, String), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let invite = managed_invite(&txn, actor.tenant_id, invite_id).await?;
+    if invite.used_at.is_some() {
+        return Err(YorishiroError::Conflict {
+            message: "a used invite cannot be reissued".into(),
+        });
+    }
+    if expires_at <= crate::time::now() {
+        return Err(YorishiroError::ValidationFailed {
+            message: "expires_at must be in the future".into(),
+            details: vec![],
+            hint: "provide a future expiry".into(),
+        });
+    }
+    let token = loco_rs::hash::random_string(INVITE_TOKEN_LENGTH);
+    let mut active: ActiveModel = invite.into();
+    active.token_hash = ActiveValue::Set(hash_key(&token));
+    active.expires_at = ActiveValue::Set(expires_at.into());
+    let invite = active.update(&txn).await.internal()?;
+    txn.commit().await.internal()?;
+    Ok((invite, token))
+}
+
+async fn managed_invite(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    invite_id: Uuid,
+) -> Result<Model, YorishiroError> {
+    Entity::find_by_id(invite_id)
+        .filter(Column::TenantId.eq(tenant_id))
+        .one(txn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("invite not found"))
+}
+
 pub(crate) async fn create_invite_as(
     db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,

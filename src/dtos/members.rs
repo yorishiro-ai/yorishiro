@@ -19,6 +19,13 @@ pub struct CreateInviteRequest {
     pub expires_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ReissueInviteRequest {
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct InviteRecord {

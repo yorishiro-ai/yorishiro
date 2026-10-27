@@ -14,6 +14,36 @@ use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
 use crate::models::user_users;
 
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/invites/{invite_id}", params(("invite_id" = uuid::Uuid, Path)), responses((status = 204, description = "Invite expired; repeated cancellation is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+async fn revoke_invite(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Path(invite_id): Path<uuid::Uuid>,
+) -> Result<StatusCode, ApiError> {
+    crate::models::workspace_invites::revoke_invite_as(&ctx.db, &auth, invite_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/invites/{invite_id}/reissue", params(("invite_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::ReissueInviteRequest, responses((status = 200, body = crate::dtos::members::CreateInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+async fn reissue_invite(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Path(invite_id): Path<uuid::Uuid>,
+    Json(body): Json<crate::dtos::members::ReissueInviteRequest>,
+) -> Result<Json<crate::dtos::members::CreateInviteResponse>, ApiError> {
+    let (invite, token) = crate::models::workspace_invites::reissue_invite_as(
+        &ctx.db,
+        &auth,
+        invite_id,
+        body.expires_at,
+    )
+    .await?;
+    Ok(Json(crate::dtos::members::CreateInviteResponse {
+        invite: crate::dtos::members::InviteRecord::render(&ctx, invite),
+        token,
+    }))
+}
+
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/invites", request_body = crate::dtos::members::CreateInviteRequest, responses((status = 201, body = crate::dtos::members::CreateInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 async fn create_invite(
     State(ctx): State<AppContext>,
@@ -132,6 +162,8 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_remove_member),
         super::route_inventory::path_doc(__path_create_invite),
         super::route_inventory::path_doc(__path_list_invites),
+        super::route_inventory::path_doc(__path_revoke_invite),
+        super::route_inventory::path_doc(__path_reissue_invite),
     ]
 }
 
@@ -143,4 +175,6 @@ pub fn routes() -> Routes {
         .add("/{user_id}", delete(remove_member))
         .add("/invites", post(create_invite))
         .add("/invites", get(list_invites))
+        .add("/invites/{invite_id}", delete(revoke_invite))
+        .add("/invites/{invite_id}/reissue", post(reissue_invite))
 }
