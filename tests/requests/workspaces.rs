@@ -3,7 +3,6 @@ use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::{self, MembershipRole};
 use yorishiro::models::user_users;
 
@@ -21,7 +20,7 @@ async fn member_key(
     tenant_memberships::add_member(&ctx.db, tenant_id, member.id, role)
         .await
         .expect("add member");
-    issue_api_key(ctx, workspace_id, member.id, ApiKeyScope::Migration, false).await
+    issue_api_key(ctx, workspace_id, member.id, role.max_scope(), false).await
 }
 
 #[tokio::test]

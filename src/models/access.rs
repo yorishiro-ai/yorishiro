@@ -1,16 +1,43 @@
 //! Cross-table authorization decisions shared by every transport.
 //! Credential verification and table mutations remain in their owning models.
 
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, DatabaseTransaction};
 use uuid::Uuid;
 
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::tenant_memberships::{self, MembershipRole};
 
 /// A role can restrict a stored grant, never widen it.
 pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope {
     stored.min(role.max_scope())
+}
+
+/// Serializes credential issuance with membership updates and checks attribution.
+pub(crate) async fn require_attributed_key_grant(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Option<Uuid>,
+    scope: ApiKeyScope,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    if let Some(user_id) = user_id {
+        let role = tenant_memberships::get_membership_role(txn, tenant_id, user_id)
+            .await?
+            .ok_or(YorishiroError::Unauthenticated)?;
+        if effective_scope(scope, role) != scope {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: format!(
+                    "this user's tenant role permits at most {:?} scope keys",
+                    role.max_scope()
+                ),
+                hint: "issue a lower-scoped key, or raise the user's tenant role".into(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Delegated credentials cannot exceed either the issuer's grant or current role.

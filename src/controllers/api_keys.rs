@@ -46,15 +46,8 @@ pub(crate) async fn create(
     let scope = body.scope.unwrap_or(ApiKeyScope::Read);
     crate::models::access::require_key_grant(&ctx.db, &auth, scope, body.audit).await?;
     let name = validate_name(&body.name)?;
-    let created = IdentityApiKeys::create_named_api_key(
-        &ctx.db,
-        auth.workspace_id,
-        scope,
-        auth.user_id,
-        body.audit,
-        &name,
-    )
-    .await?;
+    let created =
+        IdentityApiKeys::create_delegated_api_key(&ctx.db, &auth, scope, body.audit, &name).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateApiKeyResponse {

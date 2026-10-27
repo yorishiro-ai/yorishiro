@@ -37,8 +37,10 @@ pub async fn create_tenant_api_key(
             hint: "use one of: read, write, schema, migration".into(),
         })?;
 
+    let txn = crate::db::begin_write(conn).await.internal()?;
+
     let exists = tenant_tenants::Entity::find_by_id(tenant_id)
-        .count(conn)
+        .count(&txn)
         .await
         .internal()?
         > 0;
@@ -48,24 +50,7 @@ pub async fn create_tenant_api_key(
         )));
     }
 
-    if let Some(user_id) = user_id {
-        let role = crate::models::tenant_memberships::get_membership_role(conn, tenant_id, user_id)
-            .await?
-            .ok_or_else(|| {
-                YorishiroError::not_found(format!(
-                    "user '{user_id}' is not a member of tenant '{tenant_id}'"
-                ))
-            })?;
-        if scope > role.max_scope() {
-            return Err(YorishiroError::ScopeInsufficient {
-                message: format!(
-                    "this user's tenant role permits at most {:?} scope keys",
-                    role.max_scope()
-                ),
-                hint: "issue a lower-scoped key, or raise the user's tenant role".into(),
-            });
-        }
-    }
+    crate::models::access::require_attributed_key_grant(&txn, tenant_id, user_id, scope).await?;
 
     let (prefix, plaintext) = generate_key();
 
@@ -79,9 +64,10 @@ pub async fn create_tenant_api_key(
         ..Default::default()
     };
     let inserted = api_keys::Entity::insert(active)
-        .exec_with_returning(conn)
+        .exec_with_returning(&txn)
         .await
         .internal()?;
+    txn.commit().await.internal()?;
 
     Ok(CreatedTenantApiKey {
         id: inserted.id,

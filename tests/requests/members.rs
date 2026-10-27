@@ -17,6 +17,14 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         )
         .await
         .unwrap();
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            user.id,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
         let broad = issue_api_key(
             &ctx,
             tenant.workspace_id,
@@ -27,11 +35,6 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         .await;
         let narrow =
             issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
-        let response = request
-            .get("/api/whoami")
-            .add_header("Authorization", format!("Bearer {broad}"))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
         for (role, expected) in [
             (MembershipRole::Admin, "migration"),
             (MembershipRole::Viewer, "read"),
@@ -224,7 +227,7 @@ async fn member_role_cannot_manage_members() {
         .await
         .expect("add member");
         let member_key =
-            issue_api_key(&ctx, workspace_id, member.id, ApiKeyScope::Migration, false).await;
+            issue_api_key(&ctx, workspace_id, member.id, ApiKeyScope::Write, false).await;
 
         let response = request
             .get("/api/members")
@@ -344,4 +347,118 @@ async fn competing_owner_demotion_and_removal_preserve_an_owner() {
         assert_eq!(owners, 1);
     })
     .await;
+}
+
+async fn issuance_and_removal_are_serialized(tenant_key: bool) {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::_entities::api_keys::Column;
+    use yorishiro::models::{api_keys, tenant_memberships};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("issuance-race"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Viewer)
+            .await
+            .unwrap();
+        assert!(
+            api_keys::Entity::create_api_key(
+                &ctx.db,
+                tenant.workspace_id,
+                ApiKeyScope::Write,
+                Some(user.id),
+                false
+            )
+            .await
+            .is_err()
+        );
+        let barrier = tokio::sync::Barrier::new(2);
+        let issue = async {
+            barrier.wait().await;
+            if tenant_key {
+                #[cfg(feature = "enterprise")]
+                {
+                    return yorishiro::edition::ee::models::api_keys::create_tenant_api_key(
+                        &ctx.db,
+                        tenant.tenant_id,
+                        "read",
+                        Some(user.id),
+                    )
+                    .await
+                    .map(|key| key.plaintext);
+                }
+                #[cfg(not(feature = "enterprise"))]
+                unreachable!("tenant keys require the overlay");
+            }
+            api_keys::Entity::create_api_key(
+                &ctx.db,
+                tenant.workspace_id,
+                ApiKeyScope::Read,
+                Some(user.id),
+                false,
+            )
+            .await
+            .map(|key| key.plaintext)
+        };
+        let remove = async {
+            barrier.wait().await;
+            tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, user.id).await
+        };
+        let (issued, removed) = tokio::join!(issue, remove);
+        removed.unwrap();
+        let keys = api_keys::Entity::find()
+            .filter(Column::TenantId.eq(tenant.tenant_id))
+            .filter(Column::UserId.eq(user.id))
+            .count(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            keys, 0,
+            "removal must delete a racing issuance or prevent its insertion"
+        );
+        assert!(
+            api_keys::Entity::create_api_key(
+                &ctx.db,
+                tenant.workspace_id,
+                ApiKeyScope::Read,
+                Some(user.id),
+                false
+            )
+            .await
+            .is_err()
+        );
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Viewer)
+            .await
+            .unwrap();
+        if let Ok(key) = issued {
+            let response = request
+                .get("/api/whoami")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await;
+            assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
+        } else {
+            assert!(matches!(
+                issued,
+                Err(yorishiro::YorishiroError::Unauthenticated)
+            ));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn workspace_key_issuance_cannot_survive_concurrent_membership_removal() {
+    issuance_and_removal_are_serialized(false).await;
+}
+
+#[cfg(feature = "enterprise")]
+#[tokio::test]
+async fn tenant_key_issuance_cannot_survive_concurrent_membership_removal() {
+    issuance_and_removal_are_serialized(true).await;
 }

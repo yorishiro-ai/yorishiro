@@ -353,17 +353,37 @@ impl Entity {
         user_id: Option<uuid::Uuid>,
         audit: bool,
     ) -> Result<CreatedApiKey, YorishiroError> {
-        Self::create_named_api_key(db, workspace_id, scope, user_id, audit, "unnamed").await
+        Self::create_named_api_key(db, workspace_id, scope, user_id, audit, "unnamed", None).await
     }
 
-    /// Issues a key with a caller-visible name.
-    pub(crate) async fn create_named_api_key(
+    pub(crate) async fn create_delegated_api_key(
+        db: &sea_orm::DatabaseConnection,
+        issuer: &AuthContext,
+        scope: ApiKeyScope,
+        audit: bool,
+        name: &str,
+    ) -> Result<CreatedApiKey, YorishiroError> {
+        Self::create_named_api_key(
+            db,
+            issuer.workspace_id,
+            scope,
+            issuer.user_id,
+            audit,
+            name,
+            Some(issuer),
+        )
+        .await
+    }
+
+    /// Issues a key and validates attribution while holding the membership fence.
+    async fn create_named_api_key(
         db: &sea_orm::DatabaseConnection,
         workspace_id: uuid::Uuid,
         scope: ApiKeyScope,
         user_id: Option<uuid::Uuid>,
         audit: bool,
         name: &str,
+        issuer: Option<&AuthContext>,
     ) -> Result<CreatedApiKey, YorishiroError> {
         use crate::models::_entities::workspace_workspaces;
 
@@ -374,6 +394,38 @@ impl Entity {
             .await
             .internal()?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
+
+        crate::models::access::require_attributed_key_grant(
+            &txn,
+            workspace.tenant_id,
+            user_id,
+            scope,
+        )
+        .await?;
+
+        if let Some(issuer) = issuer {
+            let key = Self::find_by_id(issuer.api_key_id)
+                .one(&txn)
+                .await
+                .internal()?
+                .filter(|key| {
+                    key.tenant_id == workspace.tenant_id
+                        && key.user_id == issuer.user_id
+                        && key.workspace_id.is_none_or(|id| id == workspace_id)
+                })
+                .ok_or(YorishiroError::Unauthenticated)?;
+            let current = AuthContext {
+                api_key_id: key.id,
+                workspace_id,
+                tenant_id: key.tenant_id,
+                user_id: key.user_id,
+                scope: stored_scope(&key.scope)?,
+                audit: key.audit,
+            }
+            .with_current_membership(&txn)
+            .await?;
+            crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
+        }
 
         let (prefix, plaintext) = generate_key();
         let key_hash = hash_key(&plaintext);
