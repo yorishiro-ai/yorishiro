@@ -165,7 +165,7 @@ pub async fn update_member_access(
 /// Revokes attributed keys atomically so restoring membership cannot resurrect old credentials.
 ///
 /// # Errors
-/// Returns an error when the membership is missing or persistence fails.
+/// Rejects last-owner removal or persistence failures.
 pub async fn remove_member(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -200,15 +200,12 @@ async fn remove_member_in_transaction(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::api_keys;
     protect_owner(txn, tenant_id, user_id, None).await?;
-    let result = Entity::delete_many()
+    Entity::delete_many()
         .filter(Column::TenantId.eq(tenant_id))
         .filter(Column::UserId.eq(user_id))
         .exec(txn)
         .await
         .internal()?;
-    if result.rows_affected == 0 {
-        return Err(YorishiroError::not_found("tenant membership not found"));
-    }
     api_keys::Entity::delete_many()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
         .filter(api_keys::Column::UserId.eq(user_id))

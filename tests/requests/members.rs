@@ -379,6 +379,16 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await;
         assert_eq!(removed.status_code(), StatusCode::NO_CONTENT);
+        let repeated = request
+            .delete(&format!("/api/members/{}", user.id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        assert_eq!(repeated.status_code(), StatusCode::NO_CONTENT);
+        let missing = request
+            .delete(&format!("/api/members/{}", uuid::Uuid::new_v4()))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        assert_eq!(missing.status_code(), StatusCode::NO_CONTENT);
         for key in [&broad, &narrow] {
             let response = request
                 .get("/api/whoami")
