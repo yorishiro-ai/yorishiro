@@ -30,7 +30,9 @@ impl TestTenant {
             .to_owned();
         #[cfg(not(feature = "enterprise"))]
         if ctx.config.database.uri.starts_with("postgres:")
-            && std::env::var("DATABASE_URL").is_ok_and(|url| url == ctx.config.database.uri)
+            && crate::env::TestEnv::DatabaseUrl
+                .read()
+                .is_ok_and(|url| url == ctx.config.database.uri)
         {
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
             use yorishiro::models::{tenant_memberships, tenant_tenants};

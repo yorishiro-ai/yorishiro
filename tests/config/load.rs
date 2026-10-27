@@ -322,6 +322,36 @@ async fn production_example_is_used_when_local_config_is_absent() {
     assert_eq!(queue.idle_timeout, overridden.database.idle_timeout);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+#[serial(process_environment)]
+async fn config_folder_preserves_non_utf8_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join(OsStr::from_bytes(b"config-\xff"));
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/config/production.yaml"),
+        folder.join("production.yaml"),
+    )
+    .unwrap();
+    let guard = EnvGuard::capture(&[
+        "LOCO_CONFIG_FOLDER",
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    ]);
+    guard.set("LOCO_CONFIG_FOLDER", &folder);
+    guard.set("DATABASE_URL", "sqlite::memory:");
+    guard.set("QUEUE_URL", "sqlite::memory:");
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+
+    let config = load(&Environment::Production).await.unwrap();
+    assert_eq!(config.database.uri, "sqlite::memory:");
+}
+
 #[tokio::test]
 #[serial(process_environment)]
 async fn production_selects_queue_provider_independently_from_database() {

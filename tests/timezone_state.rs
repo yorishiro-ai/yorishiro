@@ -852,7 +852,9 @@ static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 ///
 /// A `DATABASE_URL` that is present but unusable panics rather than skipping.
 pub(crate) async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String, String) {
-    let base = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
+    let base = crate::env::TestEnv::DatabaseUrl
+        .read()
+        .expect("PostgreSQL DATABASE_URL");
 
     // Split the path from the query, so `?sslmode=require` and friends survive onto both derived
     // URLs. Dropping them silently produced a connection failure that the old `.ok()?` turned into
@@ -903,7 +905,8 @@ pub(crate) async fn close_scratch_db(
     if let Err(error) = db.close().await {
         errors.push(format!("close scratch database pool: {error}"));
     }
-    let base = std::env::var("DATABASE_URL")
+    let base = crate::env::TestEnv::DatabaseUrl
+        .read()
         .map_err(|error| format!("read DATABASE_URL for scratch cleanup: {error}"))?;
     let (without_query, query) = match base.split_once('?') {
         Some((head, q)) => (head, format!("?{q}")),

@@ -4,6 +4,7 @@ mod db;
 mod db_enum;
 #[cfg(feature = "enterprise")]
 mod ee;
+mod env;
 mod error;
 mod http_stub;
 mod initializers;
@@ -43,7 +44,7 @@ pub(crate) fn record_configured_topology(ctx: &loco_rs::app::AppContext) {
         Some(loco_rs::config::QueueConfig::Redis(_)) => "redis",
         _ => "unknown",
     };
-    let Some(root) = std::env::var_os("YORISHIRO_TOPOLOGY_MARKER_DIR") else {
+    let Some(root) = crate::env::TestEnv::TopologyMarkerDir.read_os() else {
         return;
     };
     let path = std::path::Path::new(&root)
@@ -74,7 +75,7 @@ pub(crate) fn sqlite_fixture_config(uri: &str) -> loco_rs::config::Config {
     config
 }
 
-use std::env;
+use std::env as process_env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -184,7 +185,7 @@ impl EnvGuard {
             _scope: scope,
             values: variables
                 .iter()
-                .map(|variable| (*variable, env::var_os(variable)))
+                .map(|variable| (*variable, process_env::var_os(variable)))
                 .collect(),
         }
     }
@@ -195,7 +196,7 @@ impl EnvGuard {
             "environment variable {variable} was not captured"
         );
         // SAFETY: callers hold the `process_environment` serial_test lock while this guard is live.
-        unsafe { env::set_var(variable, value) };
+        unsafe { process_env::set_var(variable, value) };
     }
 
     pub(crate) fn remove(&self, variable: &'static str) {
@@ -204,7 +205,7 @@ impl EnvGuard {
             "environment variable {variable} was not captured"
         );
         // SAFETY: callers hold the `process_environment` serial_test lock while this guard is live.
-        unsafe { env::remove_var(variable) };
+        unsafe { process_env::remove_var(variable) };
     }
 }
 
@@ -214,8 +215,8 @@ impl Drop for EnvGuard {
         unsafe {
             for (variable, original) in &self.values {
                 match original {
-                    Some(value) => env::set_var(variable, value),
-                    None => env::remove_var(variable),
+                    Some(value) => process_env::set_var(variable, value),
+                    None => process_env::remove_var(variable),
                 }
             }
         }
@@ -235,7 +236,7 @@ fn env_guard_restores_original_value_on_normal_drop() {
         guard.set(VARIABLE, "temporary-value");
     }
 
-    assert_eq!(env::var_os(VARIABLE), Some(original));
+    assert_eq!(process_env::var_os(VARIABLE), Some(original));
 }
 
 #[test]
@@ -253,12 +254,12 @@ fn env_guard_restores_original_value_during_unwind() {
     });
 
     assert!(result.is_err());
-    assert_eq!(env::var_os(VARIABLE), Some(original));
+    assert_eq!(process_env::var_os(VARIABLE), Some(original));
 }
 
 /// Records whether a backend-specific test was selected for this test job.
 fn require_backend(expected: &str) -> bool {
-    let url = std::env::var("DATABASE_URL").unwrap_or_default();
+    let url = crate::env::TestEnv::DatabaseUrl.read().unwrap_or_default();
     let actual = if url.starts_with("sqlite:") {
         "sqlite"
     } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
@@ -279,7 +280,7 @@ fn require_backend(expected: &str) -> bool {
     };
 
     eprintln!("{reason}");
-    if let Ok(root) = std::env::var("YORISHIRO_BACKEND_MARKER_DIR") {
+    if let Ok(root) = crate::env::TestEnv::BackendMarkerDir.read() {
         let directory = std::path::Path::new(&root).join(expected).join(outcome);
         fs::create_dir_all(&directory).expect("create backend test marker directory");
         let sequence = BACKEND_MARKER_SEQUENCE.fetch_add(1, Ordering::Relaxed);
