@@ -10,6 +10,52 @@ pub struct AddMemberRequest {
     pub role: MembershipRole,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateInviteRequest {
+    pub email: String,
+    pub role: MembershipRole,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct InviteRecord {
+    pub id: uuid::Uuid,
+    pub tenant_id: uuid::Uuid,
+    pub email: String,
+    pub role: String,
+    pub expires_at: chrono::DateTime<crate::time::Timezone>,
+    pub used_at: Option<chrono::DateTime<crate::time::Timezone>>,
+    pub created_at: chrono::DateTime<crate::time::Timezone>,
+}
+
+impl InviteRecord {
+    pub(crate) fn render(
+        ctx: &loco_rs::app::AppContext,
+        model: crate::models::workspace_invites::Model,
+    ) -> Self {
+        Self {
+            id: model.id,
+            tenant_id: model.tenant_id,
+            email: model.email,
+            role: model.role,
+            expires_at: crate::time::render(ctx, model.expires_at),
+            used_at: model.used_at.map(|time| crate::time::render(ctx, time)),
+            created_at: crate::time::render(ctx, model.created_at),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateInviteResponse {
+    #[serde(flatten)]
+    pub invite: InviteRecord,
+    pub token: String,
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MemberAccessResponse {

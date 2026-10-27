@@ -14,6 +14,45 @@ use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
 use crate::models::user_users;
 
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/invites", request_body = crate::dtos::members::CreateInviteRequest, responses((status = 201, body = crate::dtos::members::CreateInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+async fn create_invite(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Json(body): Json<crate::dtos::members::CreateInviteRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (invite, token) = crate::models::workspace_invites::create_invite_as(
+        &ctx.db,
+        &auth,
+        &body.email,
+        body.role,
+        body.expires_at,
+    )
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(crate::dtos::members::CreateInviteResponse {
+            invite: crate::dtos::members::InviteRecord::render(&ctx, invite),
+            token,
+        }),
+    ))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members/invites", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::dtos::members::InviteRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+async fn list_invites(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Query(page): Query<crate::dtos::common::PageParams>,
+) -> Result<Json<Vec<crate::dtos::members::InviteRecord>>, ApiError> {
+    let invites =
+        crate::models::workspace_invites::list_invites(&ctx.db, &auth, page.try_into()?).await?;
+    Ok(Json(
+        invites
+            .into_iter()
+            .map(|invite| crate::dtos::members::InviteRecord::render(&ctx, invite))
+            .collect(),
+    ))
+}
+
 /// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope.
 pub(crate) async fn require_tenant_admin(
     ctx: &AppContext,
@@ -91,6 +130,8 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_list_members),
         super::route_inventory::path_doc(__path_add_member),
         super::route_inventory::path_doc(__path_remove_member),
+        super::route_inventory::path_doc(__path_create_invite),
+        super::route_inventory::path_doc(__path_list_invites),
     ]
 }
 
@@ -100,4 +141,6 @@ pub fn routes() -> Routes {
         .add("/", get(list_members))
         .add("/", post(add_member))
         .add("/{user_id}", delete(remove_member))
+        .add("/invites", post(create_invite))
+        .add("/invites", get(list_invites))
 }

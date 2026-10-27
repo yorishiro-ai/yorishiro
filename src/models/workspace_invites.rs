@@ -7,6 +7,7 @@ mod operations;
 
 pub(crate) use operations::{accept_authenticated_user, accept_existing_user, register_user};
 pub use operations::{create_invite, create_invite_at, redeem_invite_at};
+pub(crate) use operations::{create_invite_as, list_invites};
 
 pub struct RedeemedInvite {
     pub tenant_id: Uuid,

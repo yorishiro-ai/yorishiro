@@ -6,6 +6,36 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
+async fn administrator_can_issue_and_list_secret_free_invites() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let email = super::fixtures::unique_email("managed-invite");
+        let body = serde_json::json!({"email":email,"role":"member","expires_at":chrono::Utc::now() + chrono::Duration::hours(1)});
+        let anonymous = request.post("/api/members/invites").json(&body).await;
+        assert_eq!(anonymous.status_code(), StatusCode::UNAUTHORIZED);
+        let created = request.post("/api/members/invites")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&body).await;
+        assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
+        let created = created.json::<serde_json::Value>();
+        let token = created["token"].as_str().unwrap();
+        assert!(!token.is_empty());
+        assert!(created.get("token_hash").is_none());
+        let listed = request.get("/api/members/invites")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        assert_eq!(listed.status_code(), StatusCode::OK);
+        let records = listed.json::<serde_json::Value>();
+        let record = records.as_array().unwrap().iter().find(|record| record["id"] == created["id"]).unwrap();
+        assert_eq!(record["email"], email);
+        assert!(record.get("token").is_none());
+        assert!(!records.to_string().contains(token));
+        assert!(!records.to_string().contains("token_hash"));
+        let accepted = request.post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":token,"password":"test-password"})).await;
+        assert_eq!(accepted.status_code(), StatusCode::CREATED, "{}", accepted.text());
+    }).await;
+}
+
+#[tokio::test]
 async fn membership_mutations_reject_stale_admin_contexts() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::{api_keys, tenant_memberships};

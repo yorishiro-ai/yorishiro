@@ -3,7 +3,7 @@
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    DatabaseTransaction, EntityTrait, QueryFilter,
+    DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 use uuid::Uuid;
 
@@ -15,6 +15,53 @@ use crate::models::tenant_memberships::MembershipRole;
 use super::{ActiveModel, Entity, Model, RedeemedInvite};
 
 const INVITE_TOKEN_LENGTH: usize = 48;
+
+pub(crate) async fn create_invite_as(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    email: &str,
+    role: MembershipRole,
+    expires_at: DateTime<Utc>,
+) -> Result<(Model, String), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let now = crate::time::now();
+    if expires_at <= now || email.trim().is_empty() || !email.contains('@') {
+        return Err(YorishiroError::ValidationFailed {
+            message: "a future expires_at and an email address are required".into(),
+            details: vec![],
+            hint: "provide the recipient email and a future expiry".into(),
+        });
+    }
+    let result = create_invite_at(
+        &txn,
+        actor.tenant_id,
+        email.trim(),
+        role,
+        expires_at - now,
+        now,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok(result)
+}
+
+pub(crate) async fn list_invites(
+    conn: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<Model>, YorishiroError> {
+    crate::models::access::require_tenant_admin(conn, actor.tenant_id, actor.user_id).await?;
+    Entity::find()
+        .filter(Column::TenantId.eq(actor.tenant_id))
+        .order_by_desc(Column::CreatedAt)
+        .order_by_desc(Column::Id)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .all(conn)
+        .await
+        .internal()
+}
 
 async fn invite_tenant(txn: &DatabaseTransaction, raw_token: &str) -> Result<Uuid, YorishiroError> {
     Entity::find()
