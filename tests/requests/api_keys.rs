@@ -88,6 +88,8 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         assert_eq!(created.status_code(), StatusCode::CREATED);
         let created_body: Value = created.json();
         assert_eq!(created_body["name"], "my-client");
+        assert_eq!(created_body["scope"], "read");
+        assert_eq!(created_body["audit"], false);
         assert!(created_body["full_key"].as_str().is_some());
         assert!(created_body["prefix"].as_str().unwrap().starts_with("ysr_"));
         assert!(created_body["id"].as_str().is_some());
@@ -104,6 +106,24 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         );
 
         let full_key = created_body["full_key"].as_str().unwrap().to_owned();
+        let identity = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {full_key}"))
+            .await;
+        assert_eq!(identity.status_code(), StatusCode::OK);
+        assert_eq!(identity.json::<Value>()["scope"], created_body["scope"]);
+        let escalation = request
+            .post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {full_key}"))
+            .json(&serde_json::json!({"name":"escalation", "scope":"migration"}))
+            .await;
+        assert_eq!(escalation.status_code(), StatusCode::FORBIDDEN);
+        let unsupported = request
+            .post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {owner_key}"))
+            .json(&serde_json::json!({"name":"unsupported", "binding":"tenant"}))
+            .await;
+        assert_eq!(unsupported.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
         let parts: Vec<_> = full_key.split('_').collect();
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[0], "ysr");
@@ -124,6 +144,18 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         assert!(listed_body.to_string().contains("my-client"));
         assert!(!listed_body.to_string().contains(&full_key));
         assert!(!listed_body.to_string().contains("key_hash"));
+        let record = listed_body["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["id"] == created_body["id"])
+            .unwrap();
+        assert_eq!(record["scope"], "read");
+        assert_eq!(record["effective_scope"], "read");
+        assert_eq!(record["audit"], created_body["audit"]);
+        assert_eq!(record["workspace_id"], created_body["workspace_id"]);
+        assert_eq!(record["tenant_id"], created_body["tenant_id"]);
+        assert_eq!(record["user_id"], created_body["user_id"]);
         for created_at in listed_body["keys"]
             .as_array()
             .unwrap()

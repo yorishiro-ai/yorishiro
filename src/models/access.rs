@@ -13,6 +13,24 @@ pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope
     stored.min(role.max_scope())
 }
 
+/// Delegated credentials cannot exceed either the issuer's grant or current role.
+///
+/// # Errors
+/// Rejects non-administrators and grants the issuer does not hold.
+pub async fn require_key_grant(
+    conn: &impl ConnectionTrait,
+    issuer: &AuthContext,
+    scope: ApiKeyScope,
+    audit: bool,
+) -> Result<(), YorishiroError> {
+    require_tenant_admin(conn, issuer.tenant_id, issuer.user_id).await?;
+    require_scope(issuer, scope)?;
+    if audit {
+        require_audit(issuer)?;
+    }
+    Ok(())
+}
+
 /// Requires current tenant administration authority, independently of content scope.
 ///
 /// # Errors

@@ -43,14 +43,15 @@ pub(crate) async fn create(
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateApiKeyRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    let scope = body.scope.unwrap_or(ApiKeyScope::Read);
+    crate::models::access::require_key_grant(&ctx.db, &auth, scope, body.audit).await?;
     let name = validate_name(&body.name)?;
     let created = IdentityApiKeys::create_named_api_key(
         &ctx.db,
         auth.workspace_id,
-        ApiKeyScope::Migration,
+        scope,
         auth.user_id,
-        false,
+        body.audit,
         &name,
     )
     .await?;
@@ -62,6 +63,11 @@ pub(crate) async fn create(
             full_key: created.plaintext,
             name: created.name,
             created_at: crate::time::render(&ctx, created.created_at),
+            scope: created.scope,
+            audit: body.audit,
+            workspace_id: created.workspace_id,
+            tenant_id: auth.tenant_id,
+            user_id: auth.user_id,
         }),
     ))
 }
@@ -73,17 +79,19 @@ pub(crate) async fn list(
 ) -> Result<Json<ListApiKeysResponse>, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
     let keys = IdentityApiKeys::list_for_tenant(&ctx.db, auth.tenant_id).await?;
-    Ok(Json(ListApiKeysResponse {
-        keys: keys
-            .into_iter()
-            .map(|key| ApiKeyRecord {
-                id: key.id,
-                prefix: key.key_prefix,
-                name: key.name,
-                created_at: crate::time::render(&ctx, key.created_at),
-            })
-            .collect(),
-    }))
+    let mut records = Vec::with_capacity(keys.len());
+    for key in keys {
+        let grant = key.grant_metadata(&ctx.db).await?;
+        records.push(ApiKeyRecord {
+            id: key.id,
+            prefix: key.key_prefix,
+            name: key.name,
+            created_at: crate::time::render(&ctx, key.created_at),
+            last_used_at: key.last_used_at.map(|time| crate::time::render(&ctx, time)),
+            grant,
+        });
+    }
+    Ok(Json(ListApiKeysResponse { keys: records }))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/api-keys/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "API key revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]

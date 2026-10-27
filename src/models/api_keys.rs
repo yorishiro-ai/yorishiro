@@ -9,6 +9,46 @@ use crate::error::{ResultExt, YorishiroError};
 const KEY_PREFIX_LENGTH: usize = 12;
 const KEY_SECRET_LENGTH: usize = 48;
 
+/// Secret-free grant metadata for credential administration.
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct KeyGrant {
+    pub scope: ApiKeyScope,
+    /// None when the attributed user no longer belongs to the tenant.
+    pub effective_scope: Option<ApiKeyScope>,
+    pub audit: bool,
+    pub workspace_id: Option<Uuid>,
+    pub tenant_id: Uuid,
+    pub user_id: Option<Uuid>,
+}
+
+impl Model {
+    pub(crate) async fn grant_metadata(
+        &self,
+        conn: &impl ConnectionTrait,
+    ) -> Result<KeyGrant, YorishiroError> {
+        let scope = stored_scope(&self.scope)?;
+        let effective_scope = match self.user_id {
+            None => Some(scope),
+            Some(user_id) => crate::models::tenant_memberships::get_membership_role(
+                conn,
+                self.tenant_id,
+                user_id,
+            )
+            .await?
+            .map(|role| crate::models::access::effective_scope(scope, role)),
+        };
+        Ok(KeyGrant {
+            scope,
+            effective_scope,
+            audit: self.audit,
+            workspace_id: self.workspace_id,
+            tenant_id: self.tenant_id,
+            user_id: self.user_id,
+        })
+    }
+}
+
 db_enum! {
     /// Permission level held by an API key.
     /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
