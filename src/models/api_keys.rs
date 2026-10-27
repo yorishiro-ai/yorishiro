@@ -83,6 +83,14 @@ pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }
 
+/// Generates the shared credential format; only the hash is persisted.
+pub(crate) fn generate_key() -> (String, String) {
+    let prefix = format!("ysr_{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
+    let secret = loco_rs::hash::random_string(KEY_SECRET_LENGTH);
+    let plaintext = format!("{prefix}_{secret}");
+    (prefix, plaintext)
+}
+
 pub use crate::models::_entities::api_keys::{ActiveModel, Entity, Model};
 pub(crate) type IdentityApiKeys = Entity;
 
@@ -327,9 +335,7 @@ impl Entity {
             .internal()?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-        let prefix = format!("ysr_{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
-        let secret = loco_rs::hash::random_string(KEY_SECRET_LENGTH);
-        let plaintext = format!("{prefix}_{secret}");
+        let (prefix, plaintext) = generate_key();
         let key_hash = hash_key(&plaintext);
 
         let active = ActiveModel {

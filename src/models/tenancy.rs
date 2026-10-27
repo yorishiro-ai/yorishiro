@@ -151,11 +151,61 @@ pub struct LoginMembership {
     pub role: crate::models::tenant_memberships::MembershipRole,
 }
 
+/// Workspace discovery is a domain state, not a malformed request field.
+pub enum LoginWorkspaceState {
+    Selected(Uuid),
+    Recovery {
+        reason: LoginRecoveryReason,
+        memberships: Vec<LoginMembership>,
+        workspaces: Vec<LoginWorkspace>,
+    },
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum LoginRecoveryReason {
+    TenantMembershipRequired,
+    WorkspaceProvisioningRequired,
+    WorkspaceSelectionRequired,
+}
+
+/// Resolves explicit selection or discovers the authenticated user's next action.
+///
+/// # Errors
+/// Returns an error when workspace or membership discovery fails.
+pub async fn resolve_login_workspace(
+    conn: &impl ConnectionTrait,
+    user_id: Uuid,
+    requested: Option<Uuid>,
+) -> Result<LoginWorkspaceState, YorishiroError> {
+    if let Some(workspace_id) = requested {
+        crate::models::workspace_workspaces::get_workspace_tenant(conn, workspace_id).await?;
+        return Ok(LoginWorkspaceState::Selected(workspace_id));
+    }
+    let (memberships, workspaces) = login_options(conn, user_id).await?;
+    if let [workspace] = workspaces.as_slice() {
+        return Ok(LoginWorkspaceState::Selected(workspace.workspace_id));
+    }
+    let reason = if memberships.is_empty() {
+        LoginRecoveryReason::TenantMembershipRequired
+    } else if workspaces.is_empty() {
+        LoginRecoveryReason::WorkspaceProvisioningRequired
+    } else {
+        LoginRecoveryReason::WorkspaceSelectionRequired
+    };
+    Ok(LoginWorkspaceState::Recovery {
+        reason,
+        memberships,
+        workspaces,
+    })
+}
+
 /// Discovers recovery options only after the caller has verified credentials.
 ///
 /// # Errors
 /// Returns an error when membership or workspace discovery fails.
-pub async fn login_options(
+async fn login_options(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
 ) -> Result<(Vec<LoginMembership>, Vec<LoginWorkspace>), YorishiroError> {

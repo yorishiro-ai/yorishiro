@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::YorishiroError;
 use crate::error::ResultExt;
 use crate::models::_entities::{api_keys, tenant_tenants};
-use crate::models::api_keys::{ApiKeyScope, hash_key};
+use crate::models::api_keys::{ApiKeyScope, generate_key, hash_key};
 
 /// A freshly issued tenant-scoped key.
 /// The plaintext exists only here: only its hash is stored.
@@ -34,7 +34,7 @@ pub async fn create_tenant_api_key(
         ApiKeyScope::from_db_str(scope).ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("unknown scope '{scope}'"),
             details: Vec::new(),
-            hint: "use one of: read, write, schema".into(),
+            hint: "use one of: read, write, schema, migration".into(),
         })?;
 
     let exists = tenant_tenants::Entity::find_by_id(tenant_id)
@@ -67,9 +67,7 @@ pub async fn create_tenant_api_key(
         }
     }
 
-    let prefix = format!("ysr_{}", loco_rs::hash::random_string(12));
-    let secret = loco_rs::hash::random_string(48);
-    let plaintext = format!("{prefix}_{secret}");
+    let (prefix, plaintext) = generate_key();
 
     let active = api_keys::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),

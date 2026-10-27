@@ -51,14 +51,7 @@ pub struct LoginResponse {
     pub user_id: Uuid,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum LoginRecoveryCode {
-    TenantMembershipRequired,
-    WorkspaceProvisioningRequired,
-    WorkspaceSelectionRequired,
-}
+pub use crate::models::tenancy::LoginRecoveryReason as LoginRecoveryCode;
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -74,4 +67,34 @@ pub struct LoginRecovery {
     pub hint: String,
     pub memberships: Vec<crate::models::tenancy::LoginMembership>,
     pub workspaces: Vec<crate::models::tenancy::LoginWorkspace>,
+}
+
+impl LoginRecovery {
+    pub(crate) fn new(
+        code: LoginRecoveryCode,
+        memberships: Vec<crate::models::tenancy::LoginMembership>,
+        workspaces: Vec<crate::models::tenancy::LoginWorkspace>,
+    ) -> Self {
+        let (message, hint) = match code {
+            LoginRecoveryCode::TenantMembershipRequired => (
+                "this account is not a member of any tenant",
+                "ask a tenant admin to add you as a member first",
+            ),
+            LoginRecoveryCode::WorkspaceProvisioningRequired => (
+                "this account has tenant membership but no accessible workspace",
+                "ask an operator to run cargo loco task create_workspace tenant_id:<tenant_id> name:<workspace_name>, then retry /auth/login; tenant capacity, licence and backend restrictions still apply",
+            ),
+            LoginRecoveryCode::WorkspaceSelectionRequired => (
+                "this account has access to more than one workspace",
+                "specify workspace_id explicitly",
+            ),
+        };
+        Self {
+            code,
+            message: message.into(),
+            hint: hint.into(),
+            memberships,
+            workspaces,
+        }
+    }
 }

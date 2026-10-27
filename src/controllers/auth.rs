@@ -137,8 +137,6 @@ async fn signup_without_invite(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 ///
-/// # Panics
-/// Panics if an internal invariant required by this operation is violated.
 pub async fn login(
     State(ctx): State<AppContext>,
     Json(body): Json<LoginRequest>,
@@ -148,66 +146,27 @@ pub async fn login(
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
 
-    let workspace_id = match body.workspace_id {
-        Some(workspace_id) => {
-            // Confirms the workspace exists before the membership check below, matching the NotFound this call would surface anyway.
-            workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id).await?;
-            workspace_id
-        }
-        None => {
-            let (memberships, mut workspaces) = tenancy::login_options(&ctx.db, user.id).await?;
-            match workspaces.len() {
-                1 => {
-                    workspaces
-                        .pop()
-                        .expect("len() == 1 checked above")
-                        .workspace_id
-                }
-                0 => {
-                    let (code, message, hint) = if memberships.is_empty() {
-                        (
-                            LoginRecoveryCode::TenantMembershipRequired,
-                            "this account is not a member of any tenant",
-                            "ask a tenant admin to add you as a member first",
-                        )
-                    } else {
-                        (
-                            LoginRecoveryCode::WorkspaceProvisioningRequired,
-                            "this account has tenant membership but no accessible workspace",
-                            "ask an operator to run cargo loco task create_workspace tenant_id:<tenant_id> name:<workspace_name>, then retry /auth/login; tenant capacity, licence and backend restrictions still apply",
-                        )
-                    };
-                    return Ok((
-                        StatusCode::FORBIDDEN,
-                        Json(LoginRecoveryResponse {
-                            error: LoginRecovery {
-                                code,
-                                message: message.into(),
-                                hint: hint.into(),
-                                memberships,
-                                workspaces,
-                            },
-                        }),
-                    )
-                        .into_response());
-                }
-                _ => {
-                    return Ok((
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        Json(LoginRecoveryResponse {
-                            error: LoginRecovery {
-                                code: LoginRecoveryCode::WorkspaceSelectionRequired,
-                                message: "this account has access to more than one workspace"
-                                    .into(),
-                                hint: "specify workspace_id explicitly".into(),
-                                memberships,
-                                workspaces,
-                            },
-                        }),
-                    )
-                        .into_response());
-                }
-            }
+    let workspace_id = match tenancy::resolve_login_workspace(&ctx.db, user.id, body.workspace_id)
+        .await?
+    {
+        tenancy::LoginWorkspaceState::Selected(workspace_id) => workspace_id,
+        tenancy::LoginWorkspaceState::Recovery {
+            reason,
+            memberships,
+            workspaces,
+        } => {
+            let status = match reason {
+                LoginRecoveryCode::WorkspaceSelectionRequired => StatusCode::UNPROCESSABLE_ENTITY,
+                LoginRecoveryCode::TenantMembershipRequired
+                | LoginRecoveryCode::WorkspaceProvisioningRequired => StatusCode::FORBIDDEN,
+            };
+            return Ok((
+                status,
+                Json(LoginRecoveryResponse {
+                    error: LoginRecovery::new(reason, memberships, workspaces),
+                }),
+            )
+                .into_response());
         }
     };
 
