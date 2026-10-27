@@ -7,6 +7,7 @@ use crate::models::api_keys::ApiKeyScope;
 
 mod operations;
 
+pub use operations::transfer_ownership;
 pub use operations::{add_member, remove_member, remove_member_as, update_member_access};
 pub(crate) use operations::{add_member_in_transaction, get_membership_role, list_members};
 

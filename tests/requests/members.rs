@@ -6,6 +6,67 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
+async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::_entities::tenant_memberships::Column;
+    use yorishiro::models::{tenant_memberships, user_users};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let successor = user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("successor"),
+            "test-password",
+            None,
+        )
+        .await
+        .unwrap();
+        tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            successor.id,
+            MembershipRole::Viewer,
+        )
+        .await
+        .unwrap();
+        let path = "/api/members/transfer-ownership";
+        let missing = request
+            .post(path)
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"successor_user_id":uuid::Uuid::new_v4()}))
+            .await;
+        assert_eq!(missing.status_code(), StatusCode::NOT_FOUND);
+        let response = request
+            .post(path)
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"successor_user_id":successor.id}))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::NO_CONTENT,
+            "{}",
+            response.text()
+        );
+        for (user_id, role) in [(tenant.owner_id, "admin"), (successor.id, "owner")] {
+            let membership = tenant_memberships::Entity::find()
+                .filter(Column::TenantId.eq(tenant.tenant_id))
+                .filter(Column::UserId.eq(user_id))
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(membership.role, role);
+        }
+        let forbidden = request
+            .post(path)
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"successor_user_id":successor.id}))
+            .await;
+        assert_eq!(forbidden.status_code(), StatusCode::FORBIDDEN);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

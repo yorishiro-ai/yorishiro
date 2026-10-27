@@ -14,6 +14,16 @@ use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
 use crate::models::user_users;
 
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/transfer-ownership", request_body = crate::dtos::members::TransferOwnershipRequest, responses((status = 204, description = "Successor promoted to owner and actor demoted to admin atomically"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_owner"]))), tag = "community"))]
+async fn transfer_ownership(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Json(body): Json<crate::dtos::members::TransferOwnershipRequest>,
+) -> Result<StatusCode, ApiError> {
+    tenant_memberships::transfer_ownership(&ctx.db, &actor, body.successor_user_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/invites/{invite_id}", params(("invite_id" = uuid::Uuid, Path)), responses((status = 204, description = "Invite expired; repeated cancellation is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 async fn revoke_invite(
     State(ctx): State<AppContext>,
@@ -158,6 +168,7 @@ async fn remove_member(
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_list_members),
+        super::route_inventory::path_doc(__path_transfer_ownership),
         super::route_inventory::path_doc(__path_add_member),
         super::route_inventory::path_doc(__path_remove_member),
         super::route_inventory::path_doc(__path_create_invite),
@@ -171,6 +182,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/members")
         .add("/", get(list_members))
+        .add("/transfer-ownership", post(transfer_ownership))
         .add("/", post(add_member))
         .add("/{user_id}", delete(remove_member))
         .add("/invites", post(create_invite))

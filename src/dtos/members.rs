@@ -2,6 +2,13 @@ use crate::models::tenant_memberships::MembershipRole;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TransferOwnershipRequest {
+    pub successor_user_id: uuid::Uuid,
+}
+
+#[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AddMemberRequest {
     /// Must already have an account (created via `/auth/signup`): this endpoint attaches an *existing* user to the caller's tenant, it never creates one.

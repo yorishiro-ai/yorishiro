@@ -11,6 +11,38 @@ use crate::models::_entities::{tenant_memberships::Column, user_users};
 
 use super::{ActiveModel, Entity, MembershipRecord, MembershipRole};
 
+/// Transfers ownership to an existing member without leaving the tenant ownerless.
+///
+/// # Errors
+/// Rejects stale credentials, non-owner actors, self-transfer and missing recipients.
+pub async fn transfer_ownership(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    successor_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let user_id = actor.user_id.ok_or(YorishiroError::Unauthenticated)?;
+    if get_membership_role(&txn, actor.tenant_id, user_id).await? != Some(MembershipRole::Owner) {
+        return Err(YorishiroError::ScopeInsufficient {
+            message: "only a tenant owner can transfer ownership".into(),
+            hint: "ask a current tenant owner to perform the transfer".into(),
+        });
+    }
+    if user_id == successor_id {
+        return Err(YorishiroError::Conflict {
+            message: "ownership must be transferred to another member".into(),
+        });
+    }
+    get_membership_role(&txn, actor.tenant_id, successor_id)
+        .await?
+        .ok_or_else(|| YorishiroError::not_found("successor tenant membership not found"))?;
+    add_member_in_transaction(&txn, actor.tenant_id, successor_id, MembershipRole::Owner).await?;
+    add_member_in_transaction(&txn, actor.tenant_id, user_id, MembershipRole::Admin).await?;
+    txn.commit().await.internal()?;
+    Ok(())
+}
+
 /// Serializes membership changes and refuses losing the last owner.
 async fn protect_owner(
     txn: &DatabaseTransaction,
