@@ -8,7 +8,7 @@ use yorishiro::models::tenant_memberships::MembershipRole;
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn attributed_key_can_accept_invite_for_passwordless_account() {
-    use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, TransactionTrait};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
     use yorishiro::models::{
         api_keys, tenant_memberships, tenant_tenants, user_users, workspace_invites,
     };
@@ -18,17 +18,29 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let user = user_users::create_user(
-            &ctx.db,
-            &super::fixtures::unique_email("passwordless-invite"),
-            "test-password",
+        let email = super::fixtures::unique_email("passwordless-invite");
+        let txn = ctx.db.begin().await.unwrap();
+        yorishiro::edition::ee::models::user_users::find_or_create(
+            &txn,
+            "invite-test-provider",
+            &uuid::Uuid::new_v4().to_string(),
+            Some(&email),
             None,
+            None,
+            false,
         )
         .await
-        .unwrap();
-        let mut active: user_users::ActiveModel = user.clone().into();
-        active.password_hash = ActiveValue::Set(None);
-        active.update(&ctx.db).await.unwrap();
+        .expect("provision a valid OAuth identity");
+        txn.commit().await.unwrap();
+        let user = user_users::Entity::find()
+            .filter(yorishiro::models::_entities::user_users::Column::Email.eq(&email))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(user.password_hash.is_none());
+        assert!(user.oauth_provider.is_some());
+        assert!(user.oauth_subject_id.is_some());
         tenant_memberships::add_member(&ctx.db, source.tenant_id, user.id, MembershipRole::Viewer)
             .await
             .unwrap();
