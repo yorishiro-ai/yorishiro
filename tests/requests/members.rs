@@ -7,7 +7,7 @@ use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
 async fn existing_keys_follow_current_role_without_widening_their_grant() {
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,

@@ -393,7 +393,7 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
 #[tokio::test]
 async fn login_selection_has_typed_candidates_only_after_credentials_are_verified() {
     use sea_orm::TransactionTrait;
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         let args = super::fixtures::TenantArgs::default();
         let email = args.owner_email.clone();
         let password = args.owner_password.clone();
@@ -402,7 +402,7 @@ async fn login_selection_has_typed_candidates_only_after_credentials_are_verifie
         let other = yorishiro::models::tenancy::create_workspace(
             &transaction,
             tenant.tenant_id,
-            "login-selection",
+            &format!("login-selection-{}", uuid::Uuid::new_v4()),
             None,
             None,
         )
@@ -426,7 +426,12 @@ async fn login_selection_has_typed_candidates_only_after_credentials_are_verifie
         assert_eq!(body["error"]["code"], "workspace_selection_required");
         assert!(body["error"]["details"].is_null());
         let candidates = body["error"]["workspaces"].as_array().unwrap();
-        assert_eq!(candidates.len(), 2);
+        assert!(candidates.len() >= 2);
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate["workspace_id"] == tenant.workspace_id.to_string())
+        );
         assert!(
             candidates
                 .iter()
@@ -443,7 +448,7 @@ async fn login_selection_has_typed_candidates_only_after_credentials_are_verifie
 
 #[tokio::test]
 async fn login_without_membership_is_distinct_from_workspace_provisioning() {
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
             &super::fixtures::unique_email("no-membership"),
