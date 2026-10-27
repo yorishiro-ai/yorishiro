@@ -89,14 +89,19 @@ pub(crate) async fn add_member_in_transaction(
 }
 
 /// Updates membership and reports existing key grants in the same transaction.
-pub(crate) async fn update_member_access(
+///
+/// # Errors
+/// Rejects stale administrator credentials, last-owner demotion and persistence failures.
+pub async fn update_member_access(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
+    actor: &crate::models::api_keys::AuthContext,
     user_id: Uuid,
     role: MembershipRole,
 ) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
     use crate::models::_entities::api_keys;
     let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let tenant_id = actor.tenant_id;
     add_member_in_transaction(&txn, tenant_id, user_id, role).await?;
     let keys = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
@@ -134,13 +139,39 @@ pub async fn remove_member(
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::api_keys;
     let txn = crate::db::begin_write(db).await.internal()?;
-    protect_owner(&txn, tenant_id, user_id, None).await?;
+    remove_member_in_transaction(&txn, tenant_id, user_id).await?;
+    txn.commit().await.internal()?;
+    Ok(())
+}
+
+/// Removes a member only if the presented administrator is still authorized.
+///
+/// # Errors
+/// Rejects revoked credentials, non-administrators, last-owner removal and persistence failures.
+pub async fn remove_member_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    user_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    remove_member_in_transaction(&txn, actor.tenant_id, user_id).await?;
+    txn.commit().await.internal()?;
+    Ok(())
+}
+
+async fn remove_member_in_transaction(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::api_keys;
+    protect_owner(txn, tenant_id, user_id, None).await?;
     let result = Entity::delete_many()
         .filter(Column::TenantId.eq(tenant_id))
         .filter(Column::UserId.eq(user_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     if result.rows_affected == 0 {
@@ -149,10 +180,9 @@ pub async fn remove_member(
     api_keys::Entity::delete_many()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
         .filter(api_keys::Column::UserId.eq(user_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
-    txn.commit().await.internal()?;
     Ok(())
 }
 

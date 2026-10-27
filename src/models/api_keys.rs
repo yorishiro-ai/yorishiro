@@ -23,6 +23,34 @@ pub struct KeyGrant {
 }
 
 impl Model {
+    pub(crate) async fn current_context(
+        conn: &impl ConnectionTrait,
+        presented: &AuthContext,
+    ) -> Result<AuthContext, YorishiroError> {
+        let key = Entity::find_by_id(presented.api_key_id)
+            .one(conn)
+            .await
+            .internal()?
+            .filter(|key| {
+                key.tenant_id == presented.tenant_id
+                    && key.user_id == presented.user_id
+                    && key
+                        .workspace_id
+                        .is_none_or(|id| id == presented.workspace_id)
+            })
+            .ok_or(YorishiroError::Unauthenticated)?;
+        AuthContext {
+            api_key_id: key.id,
+            workspace_id: presented.workspace_id,
+            tenant_id: key.tenant_id,
+            user_id: key.user_id,
+            scope: stored_scope(&key.scope)?,
+            audit: key.audit,
+        }
+        .with_current_membership(conn)
+        .await
+    }
+
     pub(crate) async fn grant_metadata(
         &self,
         conn: &impl ConnectionTrait,
@@ -404,26 +432,7 @@ impl Entity {
         .await?;
 
         if let Some(issuer) = issuer {
-            let key = Self::find_by_id(issuer.api_key_id)
-                .one(&txn)
-                .await
-                .internal()?
-                .filter(|key| {
-                    key.tenant_id == workspace.tenant_id
-                        && key.user_id == issuer.user_id
-                        && key.workspace_id.is_none_or(|id| id == workspace_id)
-                })
-                .ok_or(YorishiroError::Unauthenticated)?;
-            let current = AuthContext {
-                api_key_id: key.id,
-                workspace_id,
-                tenant_id: key.tenant_id,
-                user_id: key.user_id,
-                scope: stored_scope(&key.scope)?,
-                audit: key.audit,
-            }
-            .with_current_membership(&txn)
-            .await?;
+            let current = Model::current_context(&txn, issuer).await?;
             crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
         }
 

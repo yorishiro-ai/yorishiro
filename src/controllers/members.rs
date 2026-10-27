@@ -58,9 +58,7 @@ pub async fn add_member(
             ))
         })?;
 
-    let keys =
-        tenant_memberships::update_member_access(&ctx.db, auth.tenant_id, user.id, body.role)
-            .await?;
+    let keys = tenant_memberships::update_member_access(&ctx.db, &auth, user.id, body.role).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -83,7 +81,7 @@ async fn remove_member(
     Path(user_id): Path<uuid::Uuid>,
 ) -> Result<StatusCode, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-    tenant_memberships::remove_member(&ctx.db, auth.tenant_id, user_id).await?;
+    tenant_memberships::remove_member_as(&ctx.db, &auth, user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

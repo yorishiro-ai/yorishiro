@@ -6,6 +6,101 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
+async fn membership_mutations_reject_stale_admin_contexts() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::{api_keys, tenant_memberships};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let admin = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("stale-admin"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
+            .await
+            .unwrap();
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            Some(admin.id),
+            false,
+        )
+        .await
+        .unwrap();
+        let actor = api_keys::AuthContext {
+            api_key_id: key.id,
+            workspace_id: tenant.workspace_id,
+            tenant_id: tenant.tenant_id,
+            user_id: Some(admin.id),
+            scope: ApiKeyScope::Read,
+            audit: false,
+        };
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Member)
+            .await
+            .unwrap();
+        let result = tenant_memberships::remove_member_as(&ctx.db, &actor, admin.id).await;
+        assert!(matches!(
+            result,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+        ));
+        let result = tenant_memberships::update_member_access(
+            &ctx.db,
+            &actor,
+            admin.id,
+            MembershipRole::Admin,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+        ));
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
+            .await
+            .unwrap();
+        api_keys::Entity::delete_by_id(key.id)
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        let result = tenant_memberships::remove_member_as(&ctx.db, &actor, admin.id).await;
+        assert!(matches!(
+            result,
+            Err(yorishiro::YorishiroError::Unauthenticated)
+        ));
+        let result = tenant_memberships::update_member_access(
+            &ctx.db,
+            &actor,
+            admin.id,
+            MembershipRole::Owner,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(yorishiro::YorishiroError::Unauthenticated)
+        ));
+        assert!(
+            tenant_memberships::Entity::find()
+                .filter(
+                    yorishiro::models::_entities::tenant_memberships::Column::TenantId
+                        .eq(tenant.tenant_id)
+                )
+                .filter(
+                    yorishiro::models::_entities::tenant_memberships::Column::UserId.eq(admin.id)
+                )
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn existing_keys_follow_current_role_without_widening_their_grant() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

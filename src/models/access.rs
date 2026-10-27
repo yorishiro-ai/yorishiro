@@ -13,6 +13,18 @@ pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope
     stored.min(role.max_scope())
 }
 
+/// Revalidates the actor after acquiring the membership mutation fence.
+pub(crate) async fn require_current_tenant_admin(
+    txn: &DatabaseTransaction,
+    actor: &AuthContext,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
+        .await
+        .internal()?;
+    let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
+    require_tenant_admin(txn, current.tenant_id, current.user_id).await
+}
+
 /// Serializes credential issuance with membership updates and checks attribution.
 pub(crate) async fn require_attributed_key_grant(
     txn: &DatabaseTransaction,
