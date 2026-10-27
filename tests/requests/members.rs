@@ -7,7 +7,8 @@ use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
 async fn non_administrative_credentials_cannot_manage_invites_or_preview_members() {
-    use sea_orm::EntityTrait;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::_entities::tenant_memberships::Column;
     use yorishiro::models::{api_keys, tenant_memberships, user_users, workspace_invites};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -45,9 +46,11 @@ async fn non_administrative_credentials_cannot_manage_invites_or_preview_members
             assert_eq!(response.status_code(), expected);
         }
         assert_eq!(workspace_invites::Entity::find_by_id(invite.id).one(&ctx.db).await.unwrap().unwrap(), invite);
-        let members = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
-        let members = members.json::<serde_json::Value>();
-        assert!(members.as_array().unwrap().iter().any(|member| member["user_id"] == tenant.owner_id.to_string() && member["role"] == "owner"));
+        let owner = tenant_memberships::Entity::find()
+            .filter(Column::TenantId.eq(tenant.tenant_id))
+            .filter(Column::UserId.eq(tenant.owner_id))
+            .one(&ctx.db).await.unwrap().expect("owner membership must remain");
+        assert_eq!(owner.role, MembershipRole::Owner.as_db_str());
     }).await;
 }
 
