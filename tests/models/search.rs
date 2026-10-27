@@ -3,7 +3,8 @@ use crate::requests::boot_request;
 use sea_orm::ConnectionTrait;
 use sea_orm::sea_query::ExprTrait;
 use sea_orm::{
-    ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect, SelectExt, Statement,
+    ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QuerySelect, SelectExt,
+    Statement,
 };
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
@@ -1303,7 +1304,44 @@ async fn reindex_switches_between_arbitrary_widths() {
         )
         .await
         .unwrap();
-        for width in [7, 13] {
+        let transaction = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+        let other_workspace = yorishiro::models::tenancy::create_workspace(
+            &transaction,
+            fixture.tenant_id,
+            &format!("other-width-{}", uuid::Uuid::new_v4()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            other_workspace.id,
+            serde_json::from_value(note_definition()).unwrap(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let other = entity_entities::create(
+            &ctx.db,
+            other_workspace.id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({"title":"other workspace"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let (other_provider, _other_server) = fixed_width_provider(11).await;
+        entity_embeddings::reindex_workspace(&ctx.db, other_workspace.id, &other_provider)
+            .await
+            .unwrap();
+        for width in [7, 13, 7] {
             let (provider, _server) = fixed_width_provider(width).await;
             let outcome =
                 entity_embeddings::reindex_workspace(&ctx.db, fixture.workspace_id, &provider)
@@ -1317,6 +1355,62 @@ async fn reindex_switches_between_arbitrary_widths() {
                 .unwrap()
                 .unwrap();
             assert_eq!(workspace.embedding_dimensions, Some(width as i32));
+            use sea_orm::sea_query::{Alias, Expr, Func};
+            use yorishiro::models::_entities::entity_embeddings as embeddings;
+            let length = Func::cust(Alias::new(
+                if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                    "length"
+                } else {
+                    "vector_dims"
+                },
+            ))
+            .arg(Expr::col(embeddings::Column::Embedding));
+            let stored = embeddings::Entity::find_by_id(entity.id)
+                .select_only()
+                .expr(length)
+                .into_tuple::<i32>()
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let expected = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                width * std::mem::size_of::<f32>()
+            } else {
+                width
+            };
+            assert_eq!(stored, expected as i32);
+            assert_eq!(
+                embeddings::Entity::find()
+                    .filter(embeddings::Column::EntityId.is_in([entity.id, other.id]))
+                    .count(&ctx.db)
+                    .await
+                    .unwrap(),
+                2
+            );
+            let other_length = Func::cust(Alias::new(
+                if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                    "length"
+                } else {
+                    "vector_dims"
+                },
+            ))
+            .arg(Expr::col(embeddings::Column::Embedding));
+            let retained = embeddings::Entity::find_by_id(other.id)
+                .select_only()
+                .expr(other_length)
+                .into_tuple::<i32>()
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                retained,
+                if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                    11 * std::mem::size_of::<f32>() as i32
+                } else {
+                    11
+                }
+            );
             let hits = search::search_by_vector(
                 &ctx.db,
                 fixture.workspace_id,
