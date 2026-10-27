@@ -6,6 +6,98 @@ use yorishiro::App;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
+#[cfg(feature = "enterprise")]
+async fn attributed_key_can_accept_invite_for_passwordless_account() {
+    use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, TransactionTrait};
+    use yorishiro::models::{
+        api_keys, tenant_memberships, tenant_tenants, user_users, workspace_invites,
+    };
+    // A credential in one tenant accepting an invite to another requires multi-tenancy.
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("passwordless-invite"),
+            "test-password",
+            None,
+        )
+        .await
+        .unwrap();
+        let mut active: user_users::ActiveModel = user.clone().into();
+        active.password_hash = ActiveValue::Set(None);
+        active.update(&ctx.db).await.unwrap();
+        tenant_memberships::add_member(&ctx.db, source.tenant_id, user.id, MembershipRole::Viewer)
+            .await
+            .unwrap();
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            source.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Read,
+            Some(user.id),
+            false,
+        )
+        .await
+        .unwrap();
+        let txn = ctx.db.begin().await.unwrap();
+        let target = tenant_tenants::create_tenant(&txn, "invite-target", None)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        let (_, token) = workspace_invites::create_invite(
+            &ctx.db,
+            target.id,
+            &user.email,
+            MembershipRole::Member,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        let body = serde_json::json!({"invite_token":token});
+        let anonymous = request
+            .post("/auth/invites/accept-authenticated")
+            .json(&body)
+            .await;
+        assert_eq!(anonymous.status_code(), StatusCode::UNAUTHORIZED);
+        let wrong = request
+            .post("/auth/invites/accept-authenticated")
+            .add_header("Authorization", format!("Bearer {}", source.api_key))
+            .json(&body)
+            .await;
+        assert_eq!(wrong.status_code(), StatusCode::UNAUTHORIZED);
+        let accepted = request
+            .post("/auth/invites/accept-authenticated")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&body)
+            .await;
+        assert_eq!(
+            accepted.status_code(),
+            StatusCode::OK,
+            "{}",
+            accepted.text()
+        );
+        let replay = request
+            .post("/auth/invites/accept-authenticated")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&body)
+            .await;
+        assert_eq!(replay.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            user_users::Entity::find_by_id(user.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .password_hash
+                .is_none()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn existing_account_invite_acceptance_requires_credentials_and_consumes_once() {
     use sea_orm::EntityTrait;
     use yorishiro::models::{user_users, workspace_invites};

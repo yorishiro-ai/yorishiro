@@ -13,6 +13,13 @@ pub struct AcceptInviteRequest {
     pub password: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AcceptAuthenticatedInviteRequest {
+    pub invite_token: String,
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AcceptInviteResponse {

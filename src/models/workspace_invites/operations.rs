@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    QueryFilter,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    DatabaseTransaction, EntityTrait, QueryFilter,
 };
 use uuid::Uuid;
 
@@ -16,6 +16,20 @@ use super::{ActiveModel, Entity, Model, RedeemedInvite};
 
 const INVITE_TOKEN_LENGTH: usize = 48;
 
+async fn invite_tenant(txn: &DatabaseTransaction, raw_token: &str) -> Result<Uuid, YorishiroError> {
+    Entity::find()
+        .filter(Column::TokenHash.eq(hash_key(raw_token)))
+        .one(txn)
+        .await
+        .internal()?
+        .map(|invite| invite.tenant_id)
+        .ok_or_else(|| YorishiroError::ValidationFailed {
+            message: "invite token is invalid, expired, or already used".into(),
+            details: vec![],
+            hint: "ask a tenant admin for a fresh invite".into(),
+        })
+}
+
 /// Accepts an invitation with proof of ownership of the existing account.
 pub(crate) async fn accept_existing_user(
     db: &DatabaseConnection,
@@ -27,7 +41,49 @@ pub(crate) async fn accept_existing_user(
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
     let txn = crate::db::begin_write(db).await.internal()?;
-    let invite = redeem_invite_at(&txn, raw_token, crate::time::now())
+    let invite = accept_in_transaction(&txn, raw_token, &user).await?;
+    txn.commit().await.internal()?;
+    Ok((user, invite))
+}
+
+/// Accepts an invite using an existing attributed credential, including passwordless accounts.
+pub(crate) async fn accept_authenticated_user(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    raw_token: &str,
+) -> Result<(crate::models::user_users::Model, RedeemedInvite), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let target_tenant = invite_tenant(&txn, raw_token).await?;
+    // Stable ordering prevents cross-tenant invite acceptances from deadlocking.
+    let mut tenants = [actor.tenant_id, target_tenant];
+    tenants.sort_unstable();
+    for tenant_id in tenants {
+        crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
+            .await
+            .internal()?;
+    }
+    let current = crate::models::api_keys::Model::current_context(&txn, actor).await?;
+    let user_id = current.user_id.ok_or(YorishiroError::Unauthenticated)?;
+    let user = crate::models::user_users::Entity::find_by_id(user_id)
+        .one(&txn)
+        .await
+        .internal()?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let invite = accept_in_transaction(&txn, raw_token, &user).await?;
+    txn.commit().await.internal()?;
+    Ok((user, invite))
+}
+
+async fn accept_in_transaction(
+    txn: &DatabaseTransaction,
+    raw_token: &str,
+    user: &crate::models::user_users::Model,
+) -> Result<RedeemedInvite, YorishiroError> {
+    let tenant_id = invite_tenant(txn, raw_token).await?;
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    let invite = redeem_invite_at(txn, raw_token, crate::time::now())
         .await?
         .ok_or_else(|| YorishiroError::ValidationFailed {
             message: "invite token is invalid, expired, or already used".into(),
@@ -37,10 +93,7 @@ pub(crate) async fn accept_existing_user(
     if invite.email != user.email {
         return Err(YorishiroError::Unauthenticated);
     }
-    crate::db::lock_for_update(&txn, &format!("tenant-membership:{}", invite.tenant_id))
-        .await
-        .internal()?;
-    if crate::models::tenant_memberships::get_membership_role(&txn, invite.tenant_id, user.id)
+    if crate::models::tenant_memberships::get_membership_role(txn, invite.tenant_id, user.id)
         .await?
         .is_some()
     {
@@ -49,14 +102,13 @@ pub(crate) async fn accept_existing_user(
         });
     }
     crate::models::tenant_memberships::add_member_in_transaction(
-        &txn,
+        txn,
         invite.tenant_id,
         user.id,
         invite.role,
     )
     .await?;
-    txn.commit().await.internal()?;
-    Ok((user, invite))
+    Ok(invite)
 }
 
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
@@ -112,6 +164,10 @@ pub(crate) async fn register_user(
     display_name: Option<&str>,
 ) -> Result<(crate::models::user_users::Model, RedeemedInvite), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
+    let tenant_id = invite_tenant(&txn, raw_token).await?;
+    crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
     let invite = redeem_invite_at(&txn, raw_token, crate::time::now())
         .await?
         .ok_or_else(|| YorishiroError::ValidationFailed {

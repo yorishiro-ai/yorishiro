@@ -11,6 +11,7 @@ use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
+use crate::controllers::extractors::AuthContext;
 use crate::dtos::auth::{
     AcceptInviteRequest, AcceptInviteResponse, LoginRecovery, LoginRecoveryCode,
     LoginRecoveryResponse, LoginRequest, LoginResponse, SignupRequest, SignupResponse,
@@ -20,6 +21,21 @@ use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRole;
 use crate::models::{tenancy, user_users, workspace_invites, workspace_workspaces};
+
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/invites/accept-authenticated", request_body = crate::dtos::auth::AcceptAuthenticatedInviteRequest, responses((status = 200, body = crate::dtos::auth::AcceptInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+async fn accept_authenticated_invite(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Json(body): Json<crate::dtos::auth::AcceptAuthenticatedInviteRequest>,
+) -> Result<Json<AcceptInviteResponse>, ApiError> {
+    let (user, invite) =
+        workspace_invites::accept_authenticated_user(&ctx.db, &actor, &body.invite_token).await?;
+    Ok(Json(AcceptInviteResponse {
+        user_id: user.id,
+        tenant_id: invite.tenant_id,
+        role: invite.role,
+    }))
+}
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/invites/accept", request_body = crate::dtos::auth::AcceptInviteRequest, responses((status = 200, body = crate::dtos::auth::AcceptInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 async fn accept_invite(
@@ -222,6 +238,10 @@ pub fn routes() -> Routes {
         .add("/signup", post(signup))
         .add("/login", post(login))
         .add("/invites/accept", post(accept_invite))
+        .add(
+            "/invites/accept-authenticated",
+            post(accept_authenticated_invite),
+        )
 }
 
 #[cfg(feature = "openapi")]
@@ -230,5 +250,6 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_signup),
         super::route_inventory::path_doc(__path_login),
         super::route_inventory::path_doc(__path_accept_invite),
+        super::route_inventory::path_doc(__path_accept_authenticated_invite),
     ]
 }
