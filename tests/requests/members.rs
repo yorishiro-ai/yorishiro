@@ -485,6 +485,26 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Viewer)
             .await
             .unwrap();
+        #[cfg(feature = "enterprise")]
+        if tenant_key {
+            let created = yorishiro::edition::ee::models::api_keys::create_tenant_api_key(
+                &ctx.db,
+                tenant.tenant_id,
+                "read",
+                Some(user.id),
+            )
+            .await
+            .expect("tenant issuance must succeed before removal, including SQLite ID generation");
+            let stored = api_keys::Entity::find_by_id(created.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("issued tenant key must be persisted");
+            assert!(!stored.id.is_nil());
+            assert_eq!(stored.user_id, Some(user.id));
+            assert_eq!(stored.workspace_id, None);
+            api_keys::Entity::revoke(&ctx.db, created.id).await.unwrap();
+        }
         assert!(
             api_keys::Entity::create_api_key(
                 &ctx.db,
@@ -561,10 +581,10 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
                 .await;
             assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
         } else {
-            assert!(matches!(
-                issued,
-                Err(yorishiro::YorishiroError::Unauthenticated)
-            ));
+            assert!(
+                matches!(issued, Err(yorishiro::YorishiroError::Unauthenticated)),
+                "unexpected issuance result: {issued:?}"
+            );
         }
     })
     .await;

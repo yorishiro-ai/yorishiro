@@ -1,6 +1,6 @@
 //! Enterprise API-key persistence for keys bound to a tenant rather than one workspace.
 
-use sea_orm::{ActiveValue, EntityTrait, PaginatorTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, PaginatorTrait};
 use uuid::Uuid;
 
 use crate::YorishiroError;
@@ -63,10 +63,7 @@ pub async fn create_tenant_api_key(
         user_id: ActiveValue::Set(user_id),
         ..Default::default()
     };
-    let inserted = api_keys::Entity::insert(active)
-        .exec_with_returning(&txn)
-        .await
-        .internal()?;
+    let inserted = active.insert(&txn).await.internal()?;
     txn.commit().await.internal()?;
 
     Ok(CreatedTenantApiKey {
