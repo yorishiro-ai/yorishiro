@@ -16,6 +16,49 @@ use super::{ActiveModel, Entity, Model, RedeemedInvite};
 
 const INVITE_TOKEN_LENGTH: usize = 48;
 
+/// Accepts an invitation with proof of ownership of the existing account.
+pub(crate) async fn accept_existing_user(
+    db: &DatabaseConnection,
+    raw_token: &str,
+    email: &str,
+    password: &str,
+) -> Result<(crate::models::user_users::Model, RedeemedInvite), YorishiroError> {
+    let user = crate::models::user_users::verify_login(db, email, password)
+        .await?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let invite = redeem_invite_at(&txn, raw_token, crate::time::now())
+        .await?
+        .ok_or_else(|| YorishiroError::ValidationFailed {
+            message: "invite token is invalid, expired, or already used".into(),
+            details: vec![],
+            hint: "ask a tenant admin for a fresh invite".into(),
+        })?;
+    if invite.email != user.email {
+        return Err(YorishiroError::Unauthenticated);
+    }
+    crate::db::lock_for_update(&txn, &format!("tenant-membership:{}", invite.tenant_id))
+        .await
+        .internal()?;
+    if crate::models::tenant_memberships::get_membership_role(&txn, invite.tenant_id, user.id)
+        .await?
+        .is_some()
+    {
+        return Err(YorishiroError::Conflict {
+            message: "this account already belongs to the invited tenant".into(),
+        });
+    }
+    crate::models::tenant_memberships::add_member_in_transaction(
+        &txn,
+        invite.tenant_id,
+        user.id,
+        invite.role,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok((user, invite))
+}
+
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
 /// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
 /// Callers must surface it themselves (printed by the admin CLI today; a transactional-email integration is not provided).

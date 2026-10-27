@@ -12,14 +12,33 @@ use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::dtos::auth::{
-    LoginRecovery, LoginRecoveryCode, LoginRecoveryResponse, LoginRequest, LoginResponse,
-    SignupRequest, SignupResponse,
+    AcceptInviteRequest, AcceptInviteResponse, LoginRecovery, LoginRecoveryCode,
+    LoginRecoveryResponse, LoginRequest, LoginResponse, SignupRequest, SignupResponse,
 };
 use crate::error::YorishiroError;
 use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRole;
 use crate::models::{tenancy, user_users, workspace_invites, workspace_workspaces};
+
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/invites/accept", request_body = crate::dtos::auth::AcceptInviteRequest, responses((status = 200, body = crate::dtos::auth::AcceptInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+async fn accept_invite(
+    State(ctx): State<AppContext>,
+    Json(body): Json<AcceptInviteRequest>,
+) -> Result<Json<AcceptInviteResponse>, ApiError> {
+    let (user, invite) = workspace_invites::accept_existing_user(
+        &ctx.db,
+        &body.invite_token,
+        &body.email,
+        &body.password,
+    )
+    .await?;
+    Ok(Json(AcceptInviteResponse {
+        user_id: user.id,
+        tenant_id: invite.tenant_id,
+        role: invite.role,
+    }))
+}
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -202,6 +221,7 @@ pub fn routes() -> Routes {
         .prefix("auth")
         .add("/signup", post(signup))
         .add("/login", post(login))
+        .add("/invites/accept", post(accept_invite))
 }
 
 #[cfg(feature = "openapi")]
@@ -209,5 +229,6 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_signup),
         super::route_inventory::path_doc(__path_login),
+        super::route_inventory::path_doc(__path_accept_invite),
     ]
 }

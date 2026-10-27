@@ -5,6 +5,32 @@ use serial_test::serial;
 use yorishiro::App;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
+#[tokio::test]
+async fn existing_account_invite_acceptance_requires_credentials_and_consumes_once() {
+    use sea_orm::EntityTrait;
+    use yorishiro::models::{user_users, workspace_invites};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("accept-invite"), "test-password", None).await.unwrap();
+        let (_, token) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, &user.email, MembershipRole::Member, chrono::Duration::hours(1)).await.unwrap();
+        let wrong = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":token,"email":user.email,"password":"wrong"})).await;
+        assert_eq!(wrong.status_code(), StatusCode::UNAUTHORIZED);
+        let other = user_users::create_user(&ctx.db, &super::fixtures::unique_email("other-invite"), "test-password", None).await.unwrap();
+        let mismatch = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":token,"email":other.email,"password":"test-password"})).await;
+        assert_eq!(mismatch.status_code(), StatusCode::UNAUTHORIZED);
+        let body = serde_json::json!({"invite_token":token,"email":user.email,"password":"test-password"});
+        let accepted = request.post("/auth/invites/accept").json(&body).await;
+        assert_eq!(accepted.status_code(), StatusCode::OK);
+        assert_eq!(accepted.json::<serde_json::Value>()["user_id"], user.id.to_string());
+        let replay = request.post("/auth/invites/accept").json(&body).await;
+        assert_eq!(replay.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        let (_, duplicate) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, &user.email, MembershipRole::Viewer, chrono::Duration::hours(1)).await.unwrap();
+        let conflict = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":duplicate,"email":user.email,"password":"test-password"})).await;
+        assert_eq!(conflict.status_code(), StatusCode::CONFLICT);
+        assert_eq!(user_users::Entity::find_by_id(user.id).one(&ctx.db).await.unwrap().unwrap().password_hash, user.password_hash);
+    }).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_invited_signups_consume_the_token_once_without_internal_errors() {
     let race_invite_email = super::fixtures::unique_email("race-invite");

@@ -5,6 +5,23 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AcceptInviteRequest {
+    pub invite_token: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AcceptInviteResponse {
+    pub user_id: Uuid,
+    pub tenant_id: Uuid,
+    pub role: MembershipRole,
+}
+
+#[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignupRequest {
     /// The plaintext token from an `admin create-invite`-issued invitation.
