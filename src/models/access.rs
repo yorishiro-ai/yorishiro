@@ -124,6 +124,53 @@ pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope
     stored.min(role.max_scope())
 }
 
+/// Workspace authority and its provenance, independently of any credential's stored scope.
+#[derive(serde::Serialize)]
+pub struct WorkspaceAccess {
+    pub max_scope: ApiKeyScope,
+    pub source: &'static str,
+    pub workspace_admin: bool,
+}
+
+/// Resolves inherited tenant authority or an explicit workspace grant.
+///
+/// # Errors
+/// Propagates workspace and membership lookup failures or rejects invalid stored roles.
+pub async fn workspace_access(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<WorkspaceAccess>, YorishiroError> {
+    let workspace_tenant =
+        crate::models::workspace_workspaces::get_workspace_tenant(conn, workspace_id).await?;
+    if workspace_tenant != tenant_id {
+        return Ok(None);
+    }
+    let Some(tenant_role) =
+        tenant_memberships::get_membership_role(conn, tenant_id, user_id).await?
+    else {
+        return Ok(None);
+    };
+    if tenant_role.administers_tenant() {
+        return Ok(Some(WorkspaceAccess {
+            max_scope: tenant_role.max_scope(),
+            source: "tenant_role",
+            workspace_admin: true,
+        }));
+    }
+    let Some(role) =
+        crate::models::workspace_memberships::Model::role(conn, workspace_id, user_id).await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(WorkspaceAccess {
+        max_scope: tenant_role.max_scope().min(role.max_scope()),
+        source: "workspace_membership",
+        workspace_admin: role == crate::models::workspace_memberships::WorkspaceRole::Admin,
+    }))
+}
+
 /// Revalidates the actor after acquiring the membership mutation fence.
 pub(crate) async fn require_current_tenant_admin(
     txn: &DatabaseTransaction,
