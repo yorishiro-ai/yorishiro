@@ -691,6 +691,52 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
     .await;
 }
 
+#[tokio::test]
+async fn revocation_during_llm_call_rejects_the_late_proposal() {
+    use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
+
+    let (llm, entered, release) = gated_llm().await;
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        let setup = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let entity_id = crate::requests::inference::create_entity(&request, &setup).await;
+        let response = request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({"name":"note", "entity_types":{"note":{"fields":{
+                "title":{"type":"string","required":true}, "summary":{"type":"string"}, "extra":{"type":"string"}
+            }}}})).await;
+        assert_eq!(response.status_code(), 201, "{}", response.text());
+        let response = request.put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({"base_url":llm.url,"model":"test-model","api_key":"sk-test"})).await;
+        assert_eq!(response.status_code(), 204, "{}", response.text());
+        let key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema, None, false,
+        ).await.unwrap();
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
+            .await.unwrap().parse::<Uuid>().unwrap();
+        let lifecycle = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+            .all(&ctx.db).await.unwrap().into_iter()
+            .find(|row| row.payload["job_id"] == job_id.to_string()).unwrap().id;
+        let revoke = async {
+            tokio::time::timeout(Duration::from_secs(5), entered.notified())
+                .await.expect("worker reached the LLM");
+            let revoked = tokio::time::timeout(Duration::from_secs(5),
+                yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id)).await;
+            release.add_permits(1);
+            revoked.expect("revocation must not wait for the LLM reply").unwrap();
+        };
+        tokio::join!(
+            crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed"),
+            revoke,
+        );
+        let job = inference_jobs::get(&ctx.db, job_id).await.unwrap().unwrap();
+        assert_eq!(job.status, inference_jobs::InferenceJobStatus::Failed);
+        assert!(inference_proposals::for_job(&ctx.db, setup.workspace_id, job_id).await.unwrap().is_empty());
+        let entity = yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity_id).await.unwrap();
+        assert_eq!(entity.data, serde_json::json!({"title":"original"}));
+    }).await;
+}
+
 async fn actor(
     ctx: &loco_rs::app::AppContext,
     key: &str,
