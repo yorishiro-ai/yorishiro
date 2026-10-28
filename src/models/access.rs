@@ -46,6 +46,35 @@ pub async fn capabilities(
     })
 }
 
+/// Fences a queued mutation against credential revocation and membership changes.
+pub(crate) async fn require_job_actor(
+    txn: &DatabaseTransaction,
+    actor: &crate::models::api_key_audit_log::AuditActor,
+    required: ApiKeyScope,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
+        .await
+        .internal()?;
+    let tenant =
+        crate::models::workspace_workspaces::get_workspace_tenant(txn, actor.workspace_id).await?;
+    if tenant != actor.tenant_id {
+        return Err(YorishiroError::Unauthenticated);
+    }
+    let current = crate::models::api_keys::Model::current_context(
+        txn,
+        &AuthContext {
+            api_key_id: actor.api_key_id,
+            tenant_id: actor.tenant_id,
+            workspace_id: actor.workspace_id,
+            user_id: actor.user_id,
+            scope: required,
+            audit: false,
+        },
+    )
+    .await?;
+    require_scope(&current, required)
+}
+
 /// A role can restrict a stored grant, never widen it.
 pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope {
     stored.min(role.max_scope())

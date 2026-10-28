@@ -71,6 +71,17 @@ impl ImportWorker {
         )
         .await?
         {
+            crate::models::access::require_job_actor(
+                &txn,
+                &AuditActor {
+                    tenant_id: args.tenant_id,
+                    workspace_id: args.workspace_id,
+                    api_key_id: args.api_key_id,
+                    user_id: args.user_id,
+                },
+                crate::models::api_keys::ApiKeyScope::Schema,
+            )
+            .await?;
             let result = crate::models::import::import_jsonl(
                 &txn,
                 args.tenant_id,
