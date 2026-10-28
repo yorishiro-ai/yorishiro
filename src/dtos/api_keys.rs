@@ -34,11 +34,8 @@ pub(crate) struct CreateApiKeyResponse {
     pub(crate) full_key: String,
     pub(crate) name: String,
     pub(crate) created_at: DateTime<Timezone>,
-    pub(crate) scope: ApiKeyScope,
-    pub(crate) audit: bool,
-    pub(crate) workspace_id: Uuid,
-    pub(crate) tenant_id: Uuid,
-    pub(crate) user_id: Option<Uuid>,
+    #[serde(flatten)]
+    pub(crate) grant: crate::models::api_keys::KeyGrant,
 }
 
 #[derive(Serialize)]

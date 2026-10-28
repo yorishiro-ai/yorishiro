@@ -20,6 +20,7 @@ pub struct KeyGrant {
     pub workspace_id: Option<Uuid>,
     pub tenant_id: Uuid,
     pub user_id: Option<Uuid>,
+    pub identity_kind: &'static str,
 }
 
 impl Model {
@@ -73,6 +74,11 @@ impl Model {
             workspace_id: self.workspace_id,
             tenant_id: self.tenant_id,
             user_id: self.user_id,
+            identity_kind: if self.user_id.is_some() {
+                "user"
+            } else {
+                "service"
+            },
         })
     }
 }
@@ -138,6 +144,7 @@ pub struct CreatedApiKey {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
+    pub(crate) grant: KeyGrant,
     pub(crate) key_prefix: String,
     pub(crate) name: String,
     pub(crate) created_at: chrono::DateTime<chrono::FixedOffset>,
@@ -451,12 +458,14 @@ impl Entity {
             ..Default::default()
         };
         let inserted = active.insert(&txn).await.internal()?;
+        let grant = inserted.grant_metadata(&txn).await?;
         txn.commit().await.internal()?;
 
         Ok(CreatedApiKey {
             id: inserted.id,
             workspace_id,
             scope,
+            grant,
             key_prefix: inserted.key_prefix,
             name: inserted.name,
             created_at: inserted.created_at,

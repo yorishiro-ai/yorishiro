@@ -89,6 +89,8 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let created_body: Value = created.json();
         assert_eq!(created_body["name"], "my-client");
         assert_eq!(created_body["scope"], "read");
+        assert_eq!(created_body["effective_scope"], "read");
+        assert_eq!(created_body["identity_kind"], "user");
         assert_eq!(created_body["audit"], false);
         assert!(created_body["full_key"].as_str().is_some());
         assert!(created_body["prefix"].as_str().unwrap().starts_with("ysr_"));
@@ -112,6 +114,12 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .await;
         assert_eq!(identity.status_code(), StatusCode::OK);
         assert_eq!(identity.json::<Value>()["scope"], created_body["scope"]);
+        let identity = identity.json::<Value>();
+        assert_eq!(identity["scope"], created_body["effective_scope"]);
+        assert_eq!(identity["stored_scope"], created_body["scope"]);
+        assert_eq!(identity["audit"], created_body["audit"]);
+        assert_eq!(identity["bound_workspace_id"], created_body["workspace_id"]);
+        assert_eq!(identity["identity_kind"], created_body["identity_kind"]);
         let escalation = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {full_key}"))
@@ -151,7 +159,8 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .find(|record| record["id"] == created_body["id"])
             .unwrap();
         assert_eq!(record["scope"], "read");
-        assert_eq!(record["effective_scope"], "read");
+        assert_eq!(record["effective_scope"], created_body["effective_scope"]);
+        assert_eq!(record["identity_kind"], created_body["identity_kind"]);
         assert_eq!(record["audit"], created_body["audit"]);
         assert_eq!(record["workspace_id"], created_body["workspace_id"]);
         assert_eq!(record["tenant_id"], created_body["tenant_id"]);

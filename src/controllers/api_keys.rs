@@ -56,11 +56,7 @@ pub(crate) async fn create(
             full_key: created.plaintext,
             name: created.name,
             created_at: crate::time::render(&ctx, created.created_at),
-            scope: created.scope,
-            audit: body.audit,
-            workspace_id: created.workspace_id,
-            tenant_id: auth.tenant_id,
-            user_id: auth.user_id,
+            grant: created.grant,
         }),
     ))
 }
