@@ -69,6 +69,7 @@ impl FillDefaultsWorker {
         }
         crate::models::access::require_job_actor(
             &txn,
+            &self.ctx.db,
             &api_key_audit_log::AuditActor {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,

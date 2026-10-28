@@ -49,6 +49,7 @@ pub async fn capabilities(
 /// Fences a queued mutation against credential revocation and membership changes.
 pub(crate) async fn require_job_actor(
     txn: &DatabaseTransaction,
+    identity: &impl ConnectionTrait,
     actor: &crate::models::api_key_audit_log::AuditActor,
     required: ApiKeyScope,
 ) -> Result<(), YorishiroError> {
@@ -60,18 +61,20 @@ pub(crate) async fn require_job_actor(
     if tenant != actor.tenant_id {
         return Err(YorishiroError::Unauthenticated);
     }
-    let current = crate::models::api_keys::Model::current_context(
-        txn,
-        &AuthContext {
-            api_key_id: actor.api_key_id,
-            tenant_id: actor.tenant_id,
-            workspace_id: actor.workspace_id,
-            user_id: actor.user_id,
-            scope: required,
-            audit: false,
-        },
-    )
-    .await?;
+    let presented = AuthContext {
+        api_key_id: actor.api_key_id,
+        tenant_id: actor.tenant_id,
+        workspace_id: actor.workspace_id,
+        user_id: actor.user_id,
+        scope: required,
+        audit: false,
+    };
+    // PostgreSQL membership is control-plane data; SQLite must read its own write transaction.
+    let current = if txn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        crate::models::api_keys::Model::current_context(txn, &presented).await?
+    } else {
+        crate::models::api_keys::Model::current_context(identity, &presented).await?
+    };
     require_scope(&current, required)
 }
 
