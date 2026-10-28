@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use loco_rs::app::{AppContext, Hooks};
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
 use uuid::Uuid;
 
 pub(crate) use super::boot_request_isolated as boot_request;
@@ -235,8 +235,35 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         finish_job(&ctx, denied_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{denied_id}")))).await;
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
 
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, tenant, &super::fixtures::unique_email("queued-member"),
+            "hunter2-hunter2", None,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin,
+        ).await.unwrap();
+        txn.commit().await.unwrap();
+        let attributed = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+        ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
-            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let downgraded_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
+            yorishiro::models::tenant_memberships::MembershipRole::Viewer).await.unwrap();
+        finish_job(&ctx, downgraded_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{downgraded_id}")))).await;
+        assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
+        assert!(yorishiro::models::api_keys::Entity::find_by_id(attributed.id).one(&ctx.db).await.unwrap().is_some());
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+        let failed = request.get(&format!("/api/migration-jobs/{downgraded_id}"))
+            .add_header("Authorization", format!("Bearer {key}")).await;
+        assert_eq!(failed.status_code(), StatusCode::OK);
+        assert_eq!(failed.json::<serde_json::Value>()["status"], "failed");
+
+        let response = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
             .json(&json!({"schema_name":"note"})).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
         let filled_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
