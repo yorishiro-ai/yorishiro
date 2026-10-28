@@ -18,7 +18,7 @@ use super::{CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_id
 pub struct ProvisionedLogin {
     pub(crate) user_id: Uuid,
     pub workspace_id: Uuid,
-    pub(crate) role: MembershipRole,
+    pub(crate) scope: crate::models::api_keys::ApiKeyScope,
 }
 
 /// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
@@ -113,11 +113,18 @@ pub async fn find_or_create(
 
     tenant_memberships::add_member_in_transaction(conn, tenant.id, user.id, MembershipRole::Member)
         .await?;
+    crate::models::workspace_memberships::Model::grant(
+        conn,
+        workspace.id,
+        user.id,
+        crate::models::workspace_memberships::WorkspaceRole::Member,
+    )
+    .await?;
 
     Ok(ProvisionedLogin {
         user_id: user.id,
         workspace_id: workspace.id,
-        role: MembershipRole::Member,
+        scope: MembershipRole::Member.max_scope(),
     })
 }
 
@@ -153,17 +160,17 @@ async fn resolve_existing_login(
     };
 
     let tenant_id = workspace_workspaces::get_workspace_tenant(conn, workspace.id).await?;
-    let role = tenant_memberships::get_membership_role(conn, tenant_id, user.id)
+    let access = crate::models::access::workspace_access(conn, tenant_id, workspace.id, user.id)
         .await?
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this account is not a member of the tenant that owns its workspace".into(),
-            hint: "ask a tenant admin to add you as a member first".into(),
+            message: "this account has no access to its workspace".into(),
+            hint: "ask a tenant admin for a workspace grant".into(),
         })?;
 
     Ok(ProvisionedLogin {
         user_id: user.id,
         workspace_id: workspace.id,
-        role,
+        scope: access.max_scope,
     })
 }
 

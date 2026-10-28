@@ -2,7 +2,7 @@
 
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
-    PaginatorTrait, QueryFilter, QuerySelect, QueryTrait,
+    PaginatorTrait, QueryFilter,
 };
 use uuid::Uuid;
 
@@ -104,7 +104,7 @@ pub(crate) async fn setup_first_account(
     })
 }
 
-/// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold a membership in.
+/// Every workspace `user_id` can log into through inherited authority or a direct grant.
 /// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
 ///
 /// Deliberately unpaginated: this drives sign-in, not a browsing UI, and its own caller (`resolve_login_workspace`) needs the true, complete set to tell "exactly one, resolve to it" from "more than one, the caller must say which."
@@ -116,22 +116,14 @@ pub async fn list_workspaces_for_user(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
 ) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    let memberships = tenant_memberships::Entity::find()
-        .select_only()
-        .column(tenant_memberships::Column::TenantId)
-        .filter(tenant_memberships::Column::UserId.eq(user_id))
-        .into_query();
-    workspace_workspaces::Entity::find()
-        .select_only()
-        .columns([
-            workspace_workspaces::Column::Id,
-            workspace_workspaces::Column::Name,
-        ])
-        .filter(workspace_workspaces::Column::TenantId.in_subquery(memberships))
-        .into_model::<WorkspaceSummary>()
-        .all(conn)
-        .await
-        .internal()
+    let (_, workspaces) = login_options(conn, user_id).await?;
+    Ok(workspaces
+        .into_iter()
+        .map(|workspace| WorkspaceSummary {
+            id: workspace.workspace_id,
+            name: workspace.workspace_name,
+        })
+        .collect())
 }
 
 /// A login candidate carries tenant labels because workspace names are tenant-local.
@@ -242,7 +234,8 @@ async fn login_options(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
 ) -> Result<(Vec<LoginMembership>, Vec<LoginWorkspace>), YorishiroError> {
-    use crate::models::_entities::tenant_tenants;
+    use crate::models::_entities::{tenant_tenants, workspace_memberships};
+    use crate::models::tenant_memberships::MembershipRole;
     let rows = tenant_memberships::Entity::find()
         .filter(tenant_memberships::Column::UserId.eq(user_id))
         .find_also_related(tenant_tenants::Entity)
@@ -277,7 +270,28 @@ async fn login_options(
             .iter()
             .map(|membership| (membership.tenant_id, &membership.tenant_name))
             .collect();
+        let inherited: std::collections::BTreeSet<_> = memberships
+            .iter()
+            .filter(|membership| {
+                matches!(
+                    membership.role,
+                    MembershipRole::Owner | MembershipRole::Admin
+                )
+            })
+            .map(|membership| membership.tenant_id)
+            .collect();
+        let grants: std::collections::BTreeSet<_> = workspace_memberships::Entity::find()
+            .filter(workspace_memberships::Column::UserId.eq(user_id))
+            .all(conn)
+            .await
+            .internal()?
+            .into_iter()
+            .map(|grant| grant.workspace_id)
+            .collect();
         for workspace in workspaces {
+            if !inherited.contains(&workspace.tenant_id) && !grants.contains(&workspace.id) {
+                continue;
+            }
             let tenant_name = names.get(&workspace.tenant_id).ok_or_else(|| {
                 YorishiroError::Internal(anyhow::anyhow!("workspace membership missing"))
             })?;

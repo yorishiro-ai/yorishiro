@@ -143,7 +143,7 @@ async fn callback(
     let created = IdentityApiKeys::create_api_key(
         &ctx.db,
         provisioned.workspace_id,
-        provisioned.role.max_scope(),
+        provisioned.scope,
         Some(provisioned.user_id),
         false,
     )

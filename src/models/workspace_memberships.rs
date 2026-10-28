@@ -27,6 +27,38 @@ impl WorkspaceRole {
 }
 
 impl Model {
+    /// Revokes a direct grant and its workspace-bound credentials under the membership fence.
+    /// Tenant-bound credentials remain stored and must recheck each selected workspace.
+    ///
+    /// # Errors
+    /// Propagates workspace lookup or persistence failures.
+    pub async fn revoke(
+        txn: &DatabaseTransaction,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), YorishiroError> {
+        use crate::models::_entities::api_keys;
+        let tenant_id =
+            crate::models::workspace_workspaces::get_workspace_tenant(txn, workspace_id).await?;
+        crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+            .await
+            .internal()?;
+        Entity::delete_many()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::UserId.eq(user_id))
+            .exec(txn)
+            .await
+            .internal()?;
+        api_keys::Entity::delete_many()
+            .filter(api_keys::Column::TenantId.eq(tenant_id))
+            .filter(api_keys::Column::WorkspaceId.eq(workspace_id))
+            .filter(api_keys::Column::UserId.eq(user_id))
+            .exec(txn)
+            .await
+            .internal()?;
+        Ok(())
+    }
+
     /// Records an explicit grant under the membership fence in the caller's transaction.
     ///
     /// # Errors

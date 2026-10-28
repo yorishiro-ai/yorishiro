@@ -356,6 +356,19 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         .expect("the linked schema must be active");
         assert_eq!(schema.id, schema_id);
         assert_eq!(schema.name, "general-notes");
+        let grants = yorishiro::models::workspace_memberships::Entity::find()
+            .all(&ctx.db)
+            .await
+            .expect("explicit OAuth workspace grant");
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].workspace_id, workspace.id);
+        assert_eq!(grants[0].role, "member");
+        let candidates =
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, grants[0].user_id)
+                .await
+                .expect("OAuth workspace discovery");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, workspace.id);
     })
     .await;
 }

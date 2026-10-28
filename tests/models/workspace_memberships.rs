@@ -86,6 +86,12 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
         .expect("register member");
         txn.commit().await.expect("commit member");
         assert!(
+            tenancy::list_workspaces_for_user(&ctx.db, member.id)
+                .await
+                .expect("discover ungranted workspaces")
+                .is_empty()
+        );
+        assert!(
             access::workspace_access(&ctx.db, tenant.tenant_id, tenant.workspace_id, member.id,)
                 .await
                 .expect("ungranted member")
@@ -109,6 +115,11 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
             assert_eq!(grant.max_scope, cap);
             assert_eq!(grant.source, "workspace_membership");
             assert_eq!(grant.workspace_admin, admin);
+            let candidates = tenancy::list_workspaces_for_user(&ctx.db, member.id)
+                .await
+                .expect("discover granted workspaces");
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0].id, tenant.workspace_id);
             assert!(
                 access::require_tenant_admin(&ctx.db, tenant.tenant_id, Some(member.id))
                     .await
@@ -125,6 +136,49 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
             .await
             .expect("cross tenant")
             .is_none()
+        );
+        let key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            Some(member.id),
+            false,
+        )
+        .await
+        .expect("issue attributed key");
+        let txn = ctx.db.begin().await.expect("begin revocation");
+        workspace_memberships::Model::revoke(&txn, tenant.workspace_id, member.id)
+            .await
+            .expect("revoke grant");
+        txn.commit().await.expect("commit revocation");
+        assert!(
+            tenancy::list_workspaces_for_user(&ctx.db, member.id)
+                .await
+                .expect("discover after revocation")
+                .is_empty()
+        );
+        assert!(
+            access::workspace_access(&ctx.db, tenant.tenant_id, tenant.workspace_id, member.id,)
+                .await
+                .expect("revoked access")
+                .is_none()
+        );
+        let txn = ctx.db.begin().await.expect("begin restoration");
+        workspace_memberships::Model::grant(
+            &txn,
+            tenant.workspace_id,
+            member.id,
+            WorkspaceRole::Member,
+        )
+        .await
+        .expect("restore grant");
+        txn.commit().await.expect("commit restoration");
+        assert!(
+            yorishiro::models::api_keys::Entity::find_by_id(key.id)
+                .one(&ctx.db)
+                .await
+                .expect("lookup revoked key")
+                .is_none()
         );
     })
     .await;
