@@ -262,6 +262,30 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(failed.status_code(), StatusCode::OK);
         assert_eq!(failed.json::<serde_json::Value>()["status"], "failed");
 
+        let removed = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+        ).await.unwrap();
+        let response = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", removed.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let removed_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        yorishiro::models::tenant_memberships::remove_member(&ctx.db, tenant, member.id).await.unwrap();
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+        for id in [attributed.id, removed.id] {
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(id).one(&ctx.db).await.unwrap().is_none());
+        }
+        let rejected = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", removed.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(rejected.status_code(), StatusCode::UNAUTHORIZED);
+        finish_job(&ctx, removed_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{removed_id}")))).await;
+        assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
+
+        let attributed = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+        ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
             .json(&json!({"schema_name":"note"})).await;
