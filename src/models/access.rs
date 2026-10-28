@@ -8,6 +8,44 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::tenant_memberships::{self, MembershipRole};
 
+/// Current grant summary, not authorization for a later request or a tool-policy decision.
+#[derive(serde::Serialize)]
+pub struct AccessCapabilities {
+    pub scopes: Vec<ApiKeyScope>,
+    pub audit: bool,
+    pub tenant_admin: bool,
+}
+
+/// Inspects current grants using the same decisions as protected operations.
+///
+/// # Errors
+/// Rejects revoked credentials or missing membership and propagates database failures.
+pub async fn capabilities(
+    conn: &impl ConnectionTrait,
+    actor: &AuthContext,
+) -> Result<AccessCapabilities, YorishiroError> {
+    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    let scopes = [
+        ApiKeyScope::Read,
+        ApiKeyScope::Write,
+        ApiKeyScope::Schema,
+        ApiKeyScope::Migration,
+    ]
+    .into_iter()
+    .filter(|scope| require_scope(&current, *scope).is_ok())
+    .collect();
+    let tenant_admin = match require_tenant_admin(conn, current.tenant_id, current.user_id).await {
+        Ok(()) => true,
+        Err(YorishiroError::Unauthenticated | YorishiroError::ScopeInsufficient { .. }) => false,
+        Err(error) => return Err(error),
+    };
+    Ok(AccessCapabilities {
+        scopes,
+        audit: require_audit(&current).is_ok(),
+        tenant_admin,
+    })
+}
+
 /// A role can restrict a stored grant, never widen it.
 pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope {
     stored.min(role.max_scope())

@@ -11,6 +11,23 @@ use crate::models::api_keys::ApiKeyScope;
 #[tool_router(vis = "pub(crate)", router = tool_router_whoami)]
 impl YorishiroMcpServer {
     #[tool(
+        description = "Inspect current scope, audit and tenant-administration grants; this snapshot does not describe per-tool policy or authorize later requests (requires read scope)"
+    )]
+    pub async fn capabilities(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(self.app_context(), &parts, ApiKeyScope::Read).await? {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::access::capabilities(&self.app_context().db, &auth).await {
+            Ok(capabilities) => ok_json(capabilities),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(
         description = "Discover workspace candidates within the current credential's tenant; service credentials list only the selected workspace, and discovery does not grant access (requires read scope)"
     )]
     pub async fn discover_workspaces(

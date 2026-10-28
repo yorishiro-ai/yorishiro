@@ -14,6 +14,19 @@ Authorization remains enforced by the existing centralized MCP authorization pat
 <!-- BEGIN GENERATED MCP INVENTORY -->
 ## Community tools
 
+### `capabilities`
+
+Inspect current scope, audit and tenant-administration grants; this snapshot does not describe per-tool policy or authorize later requests (requires read scope)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `create_entity`
 
 Create a new entity (requires write scope)

@@ -141,6 +141,19 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         assert_eq!(identity["audit"], true);
         assert!(!result.to_string().contains(&key));
         assert!(!result.to_string().contains("key_hash"));
+        let grants = mcp_call(
+            &request,
+            &session,
+            &key,
+            3,
+            "tools/call",
+            json!({"name":"capabilities","arguments":{}}),
+        )
+        .await;
+        let grants = tool_result_json(&grants);
+        assert_eq!(grants["scopes"], json!(["read"]));
+        assert_eq!(grants["audit"], true);
+        assert_eq!(grants["tenant_admin"], true);
     })
     .await;
 }
@@ -196,6 +209,19 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
             tenant.workspace_id.to_string()
         );
         assert!(!response.to_string().contains(&service.plaintext));
+        let grants = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            4,
+            "tools/call",
+            json!({"name":"capabilities","arguments":{}}),
+        )
+        .await;
+        let grants = tool_result_json(&grants);
+        assert_eq!(grants["scopes"], json!(["read"]));
+        assert_eq!(grants["audit"], false);
+        assert_eq!(grants["tenant_admin"], false);
     })
     .await;
 }
