@@ -241,6 +241,110 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
         assert_eq!(grants["scopes"], json!(["read"]));
         assert_eq!(grants["audit"], false);
         assert_eq!(grants["tenant_admin"], false);
+        let rest = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", service.plaintext))
+            .await;
+        assert_eq!(rest.status_code(), StatusCode::OK);
+        let result = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            5,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        let identity = tool_result_json(&result);
+        assert_eq!(identity, rest.json::<Value>());
+        assert_eq!(identity["identity_kind"], "service");
+        assert!(identity["user_id"].is_null());
+        assert_eq!(identity["stored_scope"], "read");
+        assert_eq!(identity["scope"], "read");
+        assert_eq!(
+            identity["bound_workspace_id"],
+            tenant.workspace_id.to_string()
+        );
+        assert!(!result.to_string().contains(&service.plaintext));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mcp_identity_distinguishes_stored_and_membership_capped_scope() {
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::tenant_memberships::{self, MembershipRole};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("identity-member"),
+            "hunter2-hunter2",
+            None,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            member.id,
+            ApiKeyScope::Migration,
+            false,
+        )
+        .await;
+        let session = initialize(&request).await;
+        for (id, role, expected) in [
+            (2, MembershipRole::Viewer, "read"),
+            (4, MembershipRole::Admin, "migration"),
+        ] {
+            tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id, role)
+                .await
+                .unwrap();
+            let rest = request
+                .get("/api/whoami")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await;
+            assert_eq!(rest.status_code(), StatusCode::OK);
+            let result = mcp_call(
+                &request,
+                &session,
+                &key,
+                id,
+                "tools/call",
+                json!({"name":"whoami","arguments":{}}),
+            )
+            .await;
+            let identity = tool_result_json(&result);
+            assert_eq!(identity, rest.json::<Value>());
+            assert_eq!(identity["stored_scope"], "migration");
+            assert_eq!(identity["scope"], expected);
+            assert_eq!(identity["identity_kind"], "user");
+            assert_eq!(
+                identity["bound_workspace_id"],
+                tenant.workspace_id.to_string()
+            );
+            assert!(!result.to_string().contains(&key));
+            let grants = mcp_call(
+                &request,
+                &session,
+                &key,
+                id + 1,
+                "tools/call",
+                json!({"name":"capabilities","arguments":{}}),
+            )
+            .await;
+            let grants = tool_result_json(&grants);
+            assert_eq!(grants["tenant_admin"], role == MembershipRole::Admin);
+            assert_eq!(
+                grants["scopes"].as_array().unwrap().len(),
+                if role == MembershipRole::Admin { 4 } else { 1 }
+            );
+        }
     })
     .await;
 }
