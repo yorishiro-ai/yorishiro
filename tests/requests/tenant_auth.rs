@@ -106,6 +106,37 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
         assert!(!response.text().contains(&tenant_key.plaintext));
         assert!(!response.text().contains("key_hash"));
+        let session = super::mcp::initialize(&request).await;
+        for (id, target) in [(2, Some(workspace_id)), (3, None)] {
+            let mut call = request
+                .post("/mcp")
+                .add_header("Accept", "application/json, text/event-stream")
+                .add_header("MCP-Session-Id", session.clone())
+                .add_header("MCP-Protocol-Version", "2025-03-26")
+                .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext));
+            if let Some(target) = target {
+                call = call.add_header(WORKSPACE_HEADER, target.to_string());
+            }
+            let response = call
+                .json(&serde_json::json!({
+                    "jsonrpc":"2.0", "id":id, "method":"tools/call",
+                    "params":{"name":"whoami","arguments":{}}
+                }))
+                .await;
+            assert_eq!(response.status_code(), 200, "{}", response.text());
+            let body = super::mcp::rpc_body(&response.text());
+            if target.is_some() {
+                assert_ne!(body["result"]["isError"], true, "{body}");
+                let mcp: serde_json::Value =
+                    serde_json::from_str(body["result"]["content"][0]["text"].as_str().unwrap())
+                        .unwrap();
+                assert_eq!(mcp, identity);
+            } else {
+                assert_eq!(body["error"]["message"], "authentication failed", "{body}");
+            }
+            assert!(!response.text().contains(&tenant_key.plaintext));
+            assert!(!response.text().contains("key_hash"));
+        }
     })
     .await;
 }

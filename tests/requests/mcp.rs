@@ -12,7 +12,7 @@ use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use crate::EnvGuard;
 
-fn rpc_body(text: &str) -> Value {
+pub(super) fn rpc_body(text: &str) -> Value {
     let payload = text
         .lines()
         .filter_map(|line| line.strip_prefix("data:").map(str::trim))
@@ -21,7 +21,7 @@ fn rpc_body(text: &str) -> Value {
     serde_json::from_str(payload).unwrap_or_else(|err| panic!("invalid MCP response {err}: {text}"))
 }
 
-async fn initialize(request: &TestServer) -> String {
+pub(super) async fn initialize(request: &TestServer) -> String {
     let response = request
         .post("/mcp")
         .add_header("Accept", "application/json, text/event-stream")
