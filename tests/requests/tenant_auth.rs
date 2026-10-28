@@ -83,6 +83,29 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             persisted.last_used_at.is_some(),
             "a read-only request must persist last_used_at outside its rolled-back transaction"
         );
+        let missing_target = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .await;
+        assert_eq!(missing_target.status_code(), 401);
+        let response = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, workspace_id.to_string())
+            .await;
+        assert_eq!(response.status_code(), 200, "{}", response.text());
+        let identity = response.json::<serde_json::Value>();
+        assert_eq!(identity["workspace_id"], workspace_id.to_string());
+        assert_eq!(identity["tenant_id"], tenant_id.to_string());
+        assert_eq!(identity["user_id"], user_id.to_string());
+        assert_eq!(identity["identity_kind"], "user");
+        assert!(identity["bound_workspace_id"].is_null());
+        assert_eq!(identity["stored_scope"], "read");
+        assert_eq!(identity["scope"], "read");
+        assert!(!identity["workspace_name"].as_str().unwrap().is_empty());
+        assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
+        assert!(!response.text().contains(&tenant_key.plaintext));
+        assert!(!response.text().contains("key_hash"));
     })
     .await;
 }
