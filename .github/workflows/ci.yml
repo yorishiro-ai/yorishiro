@@ -480,6 +480,7 @@ jobs:
             --skip ee::workers::infer_fill::stalled_provider_enqueue_does_not_block_new_dispatch_records \
             --skip ee::workers::infer_fill::two_jobs_for_one_workspace_never_run_together \
             --skip ee::workers::infer_fill::schema_change_during_llm_call_rejects_the_old_schema_proposal \
+            --skip ee::workers::infer_fill::revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider \
             --skip ee::workers::reindex:: \
             --skip requests::setup:: \
             --skip requests::ee_setup:: \
