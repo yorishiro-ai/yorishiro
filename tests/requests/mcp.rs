@@ -146,6 +146,61 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
 }
 
 #[tokio::test]
+async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let response = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"discover_workspaces","arguments":{}}),
+        )
+        .await;
+        let workspaces = tool_result_json(&response);
+        let candidates = workspaces.as_array().unwrap();
+        assert!(
+            candidates
+                .iter()
+                .any(|workspace| workspace["workspace_id"] == tenant.workspace_id.to_string())
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|workspace| workspace["tenant_id"] == tenant.tenant_id.to_string())
+        );
+        let service = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let response = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            3,
+            "tools/call",
+            json!({"name":"discover_workspaces","arguments":{}}),
+        )
+        .await;
+        let workspaces = tool_result_json(&response);
+        assert_eq!(workspaces.as_array().unwrap().len(), 1);
+        assert_eq!(
+            workspaces[0]["workspace_id"],
+            tenant.workspace_id.to_string()
+        );
+        assert!(!response.to_string().contains(&service.plaintext));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn mcp_authentication_database_failure_is_redacted() {
     if !crate::require_sqlite_backend() {
         return;

@@ -144,6 +144,38 @@ pub struct LoginWorkspace {
     pub tenant_name: String,
 }
 
+/// Discovers workspaces within the authenticated credential's tenant boundary.
+///
+/// # Errors
+/// Rejects revoked credentials or membership and propagates discovery failures.
+pub async fn discover_workspaces(
+    conn: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+) -> Result<Vec<LoginWorkspace>, YorishiroError> {
+    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    if let Some(user_id) = current.user_id {
+        let (_, workspaces) = login_options(conn, user_id).await?;
+        return Ok(workspaces
+            .into_iter()
+            .filter(|workspace| workspace.tenant_id == current.tenant_id)
+            .collect());
+    }
+    let workspace = workspace_workspaces::Entity::find_by_id(current.workspace_id)
+        .filter(workspace_workspaces::Column::TenantId.eq(current.tenant_id))
+        .find_also_related(crate::models::_entities::tenant_tenants::Entity)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let tenant = workspace.1.ok_or(YorishiroError::Unauthenticated)?;
+    Ok(vec![LoginWorkspace {
+        workspace_id: workspace.0.id,
+        workspace_name: workspace.0.name,
+        tenant_id: tenant.id,
+        tenant_name: tenant.name,
+    }])
+}
+
 #[derive(serde::Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LoginMembership {
