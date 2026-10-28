@@ -459,6 +459,14 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
         .await;
         assert_eq!(denied["result"]["isError"], true, "MCP call: {denied}");
         assert_eq!(
+            denied["result"]["structuredContent"]["error"]["code"],
+            "scope_insufficient"
+        );
+        assert_eq!(
+            denied["result"]["structuredContent"]["error"]["effective_scope"],
+            "read"
+        );
+        assert_eq!(
             schema_schemas::get_active_schema(&ctx.db, workspace_id, "library-note")
                 .await
                 .expect("active schema after denial")
@@ -574,6 +582,10 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         )
         .await;
         assert_eq!(denied["result"]["isError"], true);
+        assert_eq!(
+            denied["result"]["structuredContent"]["error"]["required_scope"],
+            "migration"
+        );
         assert!(
             denied["result"]["content"][0]["text"]
                 .as_str()

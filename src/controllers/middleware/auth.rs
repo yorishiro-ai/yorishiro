@@ -164,7 +164,7 @@ impl<'a> RequestAuth<'a> {
         self.begin(ctx, false).await
     }
 
-    async fn begin(
+    pub(crate) async fn begin(
         &self,
         ctx: AuthContext,
         write: bool,

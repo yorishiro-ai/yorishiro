@@ -252,8 +252,23 @@ pub(crate) async fn authorize(
     let presented_key = extract_bearer_key(parts)?;
     let headers = auth::header_pairs(parts);
 
-    match auth::RequestAuth::new(ctx)
-        .authorize(presented_key, required, &headers)
+    let request_auth = auth::RequestAuth::new(ctx);
+    let current = match request_auth.resolve(presented_key, &headers).await {
+        Ok(current) => current,
+        Err(YorishiroError::Unauthenticated) => {
+            return Err(ErrorData::invalid_request("authentication failed", None));
+        }
+        Err(error) => return Err(crate::error::mcp_internal(error)),
+    };
+    if let Err(error) = auth::require_scope(&current, required) {
+        return Ok(AuthzOutcome::ScopeDenied(scope_denied(
+            error,
+            required,
+            current.scope,
+        )));
+    }
+    match request_auth
+        .begin(current, required >= ApiKeyScope::Write)
         .await
     {
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
@@ -278,10 +293,22 @@ pub(super) async fn verify(
     let headers = auth::header_pairs(parts);
 
     match auth::RequestAuth::new(ctx)
-        .verify(presented_key, required, &headers)
+        .resolve(presented_key, &headers)
         .await
     {
-        Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
+        Ok(current) => {
+            if let Err(error) = auth::require_scope(&current, required) {
+                return Ok(VerifyOutcome::ScopeDenied(scope_denied(
+                    error,
+                    required,
+                    current.scope,
+                )));
+            }
+            crate::models::api_keys::Entity::touch_authenticated(ctx, &current)
+                .await
+                .map_err(crate::error::mcp_internal)?;
+            Ok(VerifyOutcome::Verified(current))
+        }
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))
         }
@@ -290,6 +317,18 @@ pub(super) async fn verify(
         }
         Err(err) => Err(crate::error::mcp_internal(err)),
     }
+}
+
+fn scope_denied(
+    error: YorishiroError,
+    required: ApiKeyScope,
+    effective: ApiKeyScope,
+) -> CallToolResult {
+    let mut result = err_to_tool_result(error);
+    result.structured_content = Some(serde_json::json!({
+        "error": { "code": "scope_insufficient", "required_scope": required, "effective_scope": effective }
+    }));
+    result
 }
 
 /// Converts a business-logic error into a tool call result (`is_error: true`).
