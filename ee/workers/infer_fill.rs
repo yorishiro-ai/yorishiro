@@ -24,6 +24,7 @@ use crate::models::schema_schemas;
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InferFillArgs {
+    actor: crate::models::api_key_audit_log::AuditActor,
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
     pub job_id: Uuid,
@@ -80,6 +81,9 @@ async fn perform_infer_fill(
     job_id: Uuid,
     attempt: Option<i32>,
 ) -> loco_rs::Result<(i64, i64)> {
+    check_actor(ctx, args)
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     let config = workspace_llm_keys::get(&ctx.db, args.workspace_id)
         .await
         .internal()?
@@ -149,6 +153,14 @@ async fn perform_infer_fill(
 
     if !batches.is_empty() {
         let proposal_txn = open_workspace_write_scope(ctx, args.workspace_id).await?;
+        crate::models::access::require_job_actor(
+            &proposal_txn,
+            &ctx.db,
+            &args.actor,
+            crate::models::api_keys::ApiKeyScope::Schema,
+        )
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
         schema_schemas::lock_version(&proposal_txn, args.workspace_id, &args.schema_name)
             .await
             .internal()?;
@@ -342,7 +354,26 @@ impl InferFillWorker {
                 if let Some(heartbeat) = heartbeat {
                     heartbeat.abort();
                 }
-                if admitted && args.lifecycle_id.is_some() {
+                if admitted && let Some(lifecycle_id) = args.lifecycle_id {
+                    if matches!(
+                        check_actor(&self.ctx, &args).await,
+                        Err(crate::YorishiroError::Unauthenticated
+                            | crate::YorishiroError::ScopeInsufficient { .. })
+                    ) {
+                        inference_jobs::fail_attempt(&self.ctx.db, job_id, attempt, &e.to_string())
+                            .await
+                            .internal()?;
+                        crate::models::queue_job_lifecycles::Entity::finish(
+                            &self.ctx.db,
+                            lifecycle_id,
+                            Some(attempt),
+                            crate::models::queue_job_lifecycles::LifecycleStatus::Failed,
+                            None,
+                        )
+                        .await
+                        .internal()?;
+                        return Err(e);
+                    }
                     defer_and_enqueue(&self.ctx, &args, Some(attempt), &e.to_string(), true)
                         .await?;
                     return Ok(());
@@ -430,9 +461,10 @@ async fn defer_and_enqueue(
 /// Returns `loco_rs::Error` when the queue is configured but the enqueue fails.
 pub async fn enqueue_infer_fill(
     ctx: &AppContext,
-    workspace_id: Uuid,
+    auth: &crate::models::api_keys::AuthContext,
     schema_name: String,
 ) -> loco_rs::Result<String> {
+    let workspace_id = auth.workspace_id;
     if ctx.queue_provider.is_none() {
         return Err(loco_rs::Error::Message(
             "infer-fill requires a queue provider (configure queue: in the server config)".into(),
@@ -453,6 +485,12 @@ pub async fn enqueue_infer_fill(
     crate::edition::ee::workers::dispatch::dispatch_infer_fill(
         ctx,
         InferFillArgs {
+            actor: crate::models::api_key_audit_log::AuditActor {
+                tenant_id: auth.tenant_id,
+                workspace_id,
+                api_key_id: auth.api_key_id,
+                user_id: auth.user_id,
+            },
             lifecycle_id: None,
             job_id,
             workspace_id,
@@ -464,4 +502,20 @@ pub async fn enqueue_infer_fill(
     txn.commit().await.internal()?;
 
     Ok(job_id.to_string())
+}
+
+async fn check_actor(ctx: &AppContext, args: &InferFillArgs) -> Result<(), crate::YorishiroError> {
+    if args.actor.workspace_id != args.workspace_id {
+        return Err(crate::YorishiroError::Unauthenticated);
+    }
+    let txn =
+        crate::db::begin_workspace_write(ctx, args.actor.tenant_id, args.workspace_id).await?;
+    crate::models::access::require_job_actor(
+        &txn,
+        &ctx.db,
+        &args.actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+    )
+    .await?;
+    txn.commit().await.internal()
 }

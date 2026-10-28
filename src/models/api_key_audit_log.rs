@@ -88,7 +88,7 @@ db_enum! {
 
 /// The acting key, for [`record`]: what an audited operation attributes itself to.
 /// A thin, owned copy of the fields of `api_keys::AuthContext`/`api_keys::CreatedApiKey` that `record` actually needs, so this module doesn't have to depend on the guard for a handful of UUIDs.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AuditActor {
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,

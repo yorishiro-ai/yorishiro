@@ -9,9 +9,12 @@ use yorishiro::edition::ee::workers::infer_fill::*;
 #[tokio::test]
 async fn rejects_a_missing_queue_before_creating_a_job() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|_request, mut ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&_request, &ctx, Default::default())
+                .await;
         ctx.queue_provider = None;
 
-        let error = enqueue_infer_fill(&ctx, Uuid::now_v7(), "note".into())
+        let error = enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
             .await
             .expect_err("missing queue must fail");
 
@@ -41,12 +44,11 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let workspace_id = fixture.workspace_id;
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
         let mut ctx = ctx;
         let queue = crate::requests::query_worker::job_target_queue(&mut ctx, target).await;
-        let job_id = enqueue_infer_fill(&ctx, workspace_id, "note".into())
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
             .await
             .unwrap();
         let job_id = Uuid::parse_str(&job_id).unwrap();
@@ -141,9 +143,10 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
             .await
             .unwrap();
 
-        let stalled_job = enqueue_infer_fill(&ctx, fixture.workspace_id, "note".into())
-            .await
-            .unwrap();
+        let stalled_job =
+            enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
+                .await
+                .unwrap();
         let stalled_id = Outbox::find()
             .all(&ctx.db)
             .await
@@ -178,7 +181,11 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
             producer_job = Some(
                 tokio::time::timeout(
                     Duration::from_secs(2),
-                    enqueue_infer_fill(&ctx, fixture.workspace_id, "next-note".into()),
+                    enqueue_infer_fill(
+                        &ctx,
+                        &actor(&ctx, &fixture.api_key).await,
+                        "next-note".into(),
+                    ),
                 )
                 .await
                 .expect("producer commits while provider enqueue remains stalled")
@@ -360,7 +367,7 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             .await;
         assert_eq!(llm_key.status_code(), 204, "{}", llm_key.text());
 
-        let job_id = enqueue_infer_fill(&ctx, setup.workspace_id, "note".into())
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
             .await
             .unwrap()
             .parse::<Uuid>()
@@ -431,11 +438,12 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             .expect("entity id")
             .parse()
             .expect("UUID entity id");
-        let reclaimed_job_id = enqueue_infer_fill(&ctx, setup.workspace_id, "note".into())
-            .await
-            .unwrap()
-            .parse::<Uuid>()
-            .unwrap();
+        let reclaimed_job_id =
+            enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
+                .await
+                .unwrap()
+                .parse::<Uuid>()
+                .unwrap();
         let reclaimed_lifecycle_id =
             yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
                 .all(&ctx.db)
@@ -537,7 +545,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
         let mut jobs = Vec::new();
         for _ in 0..2 {
             jobs.push(
-                enqueue_infer_fill(&ctx, setup.workspace_id, "note".into())
+                enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
                     .await
                     .expect("enqueue competing inference job")
                     .parse::<Uuid>()
@@ -630,4 +638,67 @@ async fn two_jobs_for_one_workspace_never_run_together() {
         }
     })
     .await;
+}
+
+#[tokio::test]
+async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider() {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            fixture.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Schema,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
+            .await
+            .unwrap()
+            .parse::<Uuid>()
+            .unwrap();
+        let lifecycle = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.payload["job_id"] == job_id.to_string())
+            .unwrap()
+            .id;
+        yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id)
+            .await
+            .unwrap();
+        crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed").await;
+        let job = yorishiro::edition::ee::models::inference_jobs::get(&ctx.db, job_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            job.status,
+            yorishiro::edition::ee::models::inference_jobs::InferenceJobStatus::Failed
+        );
+        let proposals = yorishiro::edition::ee::models::inference_proposals::for_job(
+            &ctx.db,
+            fixture.workspace_id,
+            job_id,
+        )
+        .await
+        .unwrap();
+        assert!(proposals.is_empty());
+    })
+    .await;
+}
+
+async fn actor(
+    ctx: &loco_rs::app::AppContext,
+    key: &str,
+) -> yorishiro::models::api_keys::AuthContext {
+    use yorishiro::models::api_keys::Entity;
+    if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
+        Entity::authenticate(&db, key).await.unwrap()
+    } else {
+        Entity::authenticate_sqlite(&ctx.db, key).await.unwrap()
+    }
 }
