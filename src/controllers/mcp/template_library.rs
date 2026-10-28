@@ -29,6 +29,7 @@ pub(crate) struct ListTemplateLibraryArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_template_library)]
 impl YorishiroMcpServer {
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "List the tenant's DB-backed schema template library (own templates plus \
                            any community-visible ones). Distinct from `list_templates`, which \
                            lists the built-in templates shipped with the server (requires read \
@@ -39,11 +40,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("list_template_library")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let tenant_id = authorized.auth_context().tenant_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
@@ -57,6 +63,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Get a single template from the tenant's DB-backed template library by \
                            ID (requires read scope)"
     )]
@@ -65,11 +72,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("get_template_library_item")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let tenant_id = authorized.auth_context().tenant_id;
         let template = match template_templates::get_template(

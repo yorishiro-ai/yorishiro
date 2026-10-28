@@ -26,6 +26,7 @@ pub(crate) struct ImportJobArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_import)]
 impl YorishiroMcpServer {
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
         description = "Bulk-import schemas/entities/relations from a JSON Lines document in the \
                            export format (requires schema scope, since importing schemas is itself \
                            a schema-scope-only operation). Returns a job_id; poll import_job_status. \
@@ -36,11 +37,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ImportJsonlArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Schema).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("import_jsonl")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let job_id = match crate::workers::import::enqueue(
             self.app_context(),
@@ -57,17 +63,23 @@ impl YorishiroMcpServer {
         ok_json(QueuedJobResponse { job_id })
     }
 
-    #[tool(description = "Poll a queued JSON Lines import (requires schema scope)")]
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),description = "Poll a queued JSON Lines import (requires schema scope)")]
     pub(crate) async fn import_job_status(
         &self,
         Parameters(args): Parameters<ImportJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Schema).await? {
-                AuthzOutcome::Authorized(value) => value,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("import_job_status")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(value) => value,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
         match crate::models::queue_job_lifecycles::bulk_job_status(
             authorized.txn(),
             authorized.auth_context().workspace_id,

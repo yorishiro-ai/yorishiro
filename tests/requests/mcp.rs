@@ -154,6 +154,20 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         assert_eq!(grants["scopes"], json!(["read"]));
         assert_eq!(grants["audit"], true);
         assert_eq!(grants["tenant_admin"], true);
+        let inventory = mcp_call(&request, &session, &key, 4, "tools/list", json!({})).await;
+        let tools = grants["tools"].as_array().expect("tool capabilities");
+        let inventory = tool_inventory(&inventory);
+        assert_eq!(tools.len(), inventory.len());
+        for tool in &inventory {
+            let capability = tools.iter().find(|entry| entry["name"] == tool["name"])
+                .expect("every visible tool has a capability");
+            assert_eq!(capability["required_scope"], tool["_meta"]["yorishiro/required_scope"]);
+            assert_eq!(capability["scope_satisfied"], capability["required_scope"] == "read");
+        }
+        let denied = mcp_call(&request, &session, &key, 5, "tools/call",
+            json!({"name":"create_entity","arguments":{"schema_name":"missing","entity_type":"missing","data":{}}})).await;
+        let create = tools.iter().find(|entry| entry["name"] == "create_entity").unwrap();
+        assert_eq!(create["required_scope"], denied["result"]["structuredContent"]["error"]["required_scope"]);
     })
     .await;
 }
@@ -384,8 +398,23 @@ async fn mcp_origin_tools_disappear_when_same_session_licence_state_is_missing()
         );
         let community = mcp_call(&request, &session, &key, 3, "tools/list", json!({})).await;
         let community_tools = tool_inventory(&community);
+        let grants = mcp_call(
+            &request,
+            &session,
+            &key,
+            4,
+            "tools/call",
+            json!({"name":"capabilities","arguments":{}}),
+        )
+        .await;
+        let grants = tool_result_json(&grants);
+        let capabilities = grants["tools"]
+            .as_array()
+            .expect("visible tool capabilities");
+        assert_eq!(capabilities.len(), community_tools.len());
         for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
             assert!(!community_tools.iter().any(|tool| tool["name"] == name));
+            assert!(!capabilities.iter().any(|tool| tool["name"] == name));
             let denied = mcp_call(
                 &request,
                 &session,

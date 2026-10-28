@@ -89,6 +89,7 @@ impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
 #[tool_router(vis = "pub(crate)", router = tool_router_relations)]
 impl YorishiroMcpServer {
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),
         description = "Create a relation between two entities (requires write scope). \
                            Properties cannot be edited in place; to change them, delete the \
                            relation and recreate it. To retire a relation without losing the \
@@ -99,11 +100,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("create_relation")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let input = args.into();
 
@@ -116,17 +122,23 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(description = "Get a single relation by ID (requires read scope)")]
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "Get a single relation by ID (requires read scope)")]
     pub async fn get_relation(
         &self,
         Parameters(args): Parameters<GetRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("get_relation")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.auth_context().workspace_id;
         let record = match entity_relations::get(authorized.txn(), workspace_id, args.id).await {
@@ -136,17 +148,23 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(description = "Delete a relation (requires write scope)")]
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Delete a relation (requires write scope)")]
     pub(crate) async fn delete_relation(
         &self,
         Parameters(args): Parameters<DeleteRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("delete_relation")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.auth_context().workspace_id;
         match entity_relations::delete(authorized.txn(), workspace_id, args.id).await {
@@ -157,17 +175,23 @@ impl YorishiroMcpServer {
         ok_json(serde_json::json!({ "deleted": true }))
     }
 
-    #[tool(description = "List relations (requires read scope)")]
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "List relations (requires read scope)")]
     pub async fn list_relations(
         &self,
         Parameters(args): Parameters<ListRelationsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("list_relations")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let query = match args.try_into() {
             Ok(query) => query,
@@ -183,6 +207,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),
         description = "Set a relation's status to active, deprecated or archived \
                            (requires write scope). Retiring a relation this way keeps the record \
                            that it existed, which delete_relation does not; graph traversal \
@@ -193,11 +218,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SetRelationStatusArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized =
-            match super::authorize(self.app_context(), &parts, ApiKeyScope::Write).await? {
-                AuthzOutcome::Authorized(authorized) => authorized,
-                AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("set_relation_status")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.auth_context().workspace_id;
         let status = match entity_relations::parse_relation_status(&args.status) {

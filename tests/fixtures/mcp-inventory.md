@@ -16,7 +16,7 @@ Authorization remains enforced by the existing centralized MCP authorization pat
 
 ### `capabilities`
 
-Inspect current scope, audit and tenant-administration grants; this snapshot does not describe per-tool policy or authorize later requests (requires read scope)
+Inspect current grants and visible tools' required scopes and scope satisfaction; this snapshot does not guarantee operation success or authorize later requests (requires read scope)
 
 Input schema:
 

@@ -106,6 +106,43 @@ impl YorishiroMcpServer {
     pub(crate) fn app_context(&self) -> &AppContext {
         &self.ctx
     }
+
+    pub(crate) fn required_scope(&self, name: &str) -> Result<ApiKeyScope, ErrorData> {
+        self.tool_router
+            .get(name)
+            .and_then(|tool| tool.meta.as_ref())
+            .and_then(|meta| meta.0.get("yorishiro/required_scope"))
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+            .ok_or_else(|| ErrorData::internal_error("tool scope requirement missing", None))
+    }
+
+    pub(crate) fn tool_capabilities(
+        &self,
+        scopes: &[ApiKeyScope],
+    ) -> Result<Vec<serde_json::Value>, ErrorData> {
+        self.tool_router
+            .list_all()
+            .into_iter()
+            .filter(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()))
+            .map(|tool| {
+                let required = self.required_scope(tool.name.as_ref())?;
+                Ok(serde_json::json!({
+                    "name": tool.name,
+                    "required_scope": required,
+                    "scope_satisfied": scopes.contains(&required),
+                }))
+            })
+            .collect()
+    }
+}
+
+/// Declares the scope used by both tool authorization and capability discovery.
+pub fn scope_requirement(scope: ApiKeyScope) -> rmcp::model::MetaObject {
+    let mut meta = rmcp::model::MetaObject::new();
+    meta.0
+        .insert("yorishiro/required_scope".into(), serde_json::json!(scope));
+    meta
 }
 
 /// The complete community-edition tool set.
