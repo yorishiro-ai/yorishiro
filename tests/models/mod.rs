@@ -23,3 +23,5 @@ mod search;
 mod template_templates;
 mod tenancy;
 mod tenancy_sqlite;
+
+mod workspace_memberships;
