@@ -293,6 +293,51 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             "the proposal must not be written before confirmation: {fetched:?}"
         );
 
+        let revoked = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            setup.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Schema,
+            None,
+            false,
+        )
+        .await
+        .expect("issue confirmation service key");
+        let denied = request
+            .post(&format!("/api/inference-jobs/{job_id}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", revoked.plaintext))
+            .await;
+        assert_eq!(
+            denied.status_code(),
+            StatusCode::ACCEPTED,
+            "{}",
+            denied.text()
+        );
+        let denied_id = denied.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id)
+            .await
+            .expect("revoke queued confirmation actor");
+        super::fill_defaults::fail_via_api(
+            &request,
+            &ctx,
+            denied_id,
+            &setup.api_key,
+            &format!("/api/inference-jobs/confirmations/{denied_id}"),
+        )
+        .await;
+        let unchanged = request
+            .get(&format!("/api/entities/{entity}"))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(unchanged.status_code(), StatusCode::OK);
+        assert_eq!(
+            unchanged.json::<serde_json::Value>()["data"],
+            fetched["data"]
+        );
+
         let confirm = request
             .post(&format!("/api/inference-jobs/{job_id}/confirm"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

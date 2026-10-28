@@ -70,6 +70,18 @@ impl ConfirmProposalsWorker {
         )
         .await?
         {
+            crate::models::access::require_job_actor(
+                &txn,
+                &self.ctx.db,
+                &AuditActor {
+                    tenant_id: args.tenant_id,
+                    workspace_id: args.workspace_id,
+                    api_key_id: args.api_key_id,
+                    user_id: args.user_id,
+                },
+                crate::models::api_keys::ApiKeyScope::Schema,
+            )
+            .await?;
             let report = crate::edition::ee::models::inference_proposals::confirm(
                 &txn,
                 args.workspace_id,
