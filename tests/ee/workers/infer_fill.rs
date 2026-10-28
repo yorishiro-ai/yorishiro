@@ -693,6 +693,15 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
 
 #[tokio::test]
 async fn revocation_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(false).await;
+}
+
+#[tokio::test]
+async fn downgrade_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(true).await;
+}
+
+async fn permission_change_during_llm_call(downgrade: bool) {
     use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
 
     let (llm, entered, release) = gated_llm().await;
@@ -709,8 +718,19 @@ async fn revocation_during_llm_call_rejects_the_late_proposal() {
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({"base_url":llm.url,"model":"test-model","api_key":"sk-test"})).await;
         assert_eq!(response.status_code(), 204, "{}", response.text());
+        let user_id = if downgrade {
+            let txn = ctx.db.begin().await.unwrap();
+            let user = yorishiro::models::tenancy::register_member(
+                &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
+                "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Admin,
+            ).await.unwrap();
+            txn.commit().await.unwrap();
+            Some(user.id)
+        } else {
+            None
+        };
         let key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema, None, false,
+            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema, user_id, false,
         ).await.unwrap();
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
             .await.unwrap().parse::<Uuid>().unwrap();
@@ -720,10 +740,16 @@ async fn revocation_during_llm_call_rejects_the_late_proposal() {
         let revoke = async {
             tokio::time::timeout(Duration::from_secs(5), entered.notified())
                 .await.expect("worker reached the LLM");
-            let revoked = tokio::time::timeout(Duration::from_secs(5),
-                yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id)).await;
+            let changed = tokio::time::timeout(Duration::from_secs(5), async {
+                if let Some(user_id) = user_id {
+                    yorishiro::models::tenant_memberships::add_member(&ctx.db, setup.tenant_id, user_id,
+                        yorishiro::models::tenant_memberships::MembershipRole::Viewer).await
+                } else {
+                    yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id).await
+                }
+            }).await;
             release.add_permits(1);
-            revoked.expect("revocation must not wait for the LLM reply").unwrap();
+            changed.expect("permission changes must not wait for the LLM reply").unwrap();
         };
         tokio::join!(
             crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed"),
@@ -734,6 +760,10 @@ async fn revocation_during_llm_call_rejects_the_late_proposal() {
         assert!(inference_proposals::for_job(&ctx.db, setup.workspace_id, job_id).await.unwrap().is_empty());
         let entity = yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity_id).await.unwrap();
         assert_eq!(entity.data, serde_json::json!({"title":"original"}));
+        if downgrade {
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
+            assert_eq!(actor(&ctx, &key.plaintext).await.scope, yorishiro::models::api_keys::ApiKeyScope::Read);
+        }
     }).await;
 }
 
