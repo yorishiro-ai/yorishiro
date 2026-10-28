@@ -75,7 +75,12 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         match super::verify(self.app_context(), &parts, self.required_scope("whoami")?).await? {
-            VerifyOutcome::Verified(auth) => ok_json(WhoAmIResponse::from(auth)),
+            VerifyOutcome::Verified(auth) => {
+                match crate::models::access::identity(&self.app_context().db, &auth).await {
+                    Ok(identity) => ok_json(WhoAmIResponse::from(identity)),
+                    Err(error) => Ok(err_to_tool_result(error)),
+                }
+            }
             VerifyOutcome::ScopeDenied(denied) => Ok(denied),
         }
     }

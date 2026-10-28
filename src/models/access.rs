@@ -8,6 +8,47 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::tenant_memberships::{self, MembershipRole};
 
+/// Persisted, secret-free identity and target information shared by transports.
+pub struct AccessIdentity {
+    pub current: AuthContext,
+    pub workspace_name: String,
+    pub tenant_name: String,
+    pub stored_scope: ApiKeyScope,
+    pub bound_workspace_id: Option<Uuid>,
+}
+
+/// Resolves names and binding after revalidating the credential and membership.
+///
+/// # Errors
+/// Rejects stale credentials and invalid target bindings or propagates lookup failures.
+pub async fn identity(
+    conn: &impl ConnectionTrait,
+    actor: &AuthContext,
+) -> Result<AccessIdentity, YorishiroError> {
+    use sea_orm::EntityTrait;
+    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    let workspace = crate::models::workspace_workspaces::Entity::find_by_id(current.workspace_id)
+        .one(conn)
+        .await
+        .internal()?
+        .filter(|workspace| workspace.tenant_id == current.tenant_id)
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let tenant = crate::models::tenant_tenants::Model::find_by_id(conn, current.tenant_id).await?;
+    let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let grant = key.grant_metadata(conn).await?;
+    Ok(AccessIdentity {
+        current,
+        workspace_name: workspace.name,
+        tenant_name: tenant.name,
+        stored_scope: grant.scope,
+        bound_workspace_id: grant.workspace_id,
+    })
+}
+
 /// Current grant summary, not authorization for a later request or a tool-policy decision.
 #[derive(serde::Serialize)]
 pub struct AccessCapabilities {

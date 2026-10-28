@@ -139,6 +139,11 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         assert_eq!(identity, rest.json::<Value>());
         assert_eq!(identity["scope"], "read");
         assert_eq!(identity["audit"], true);
+        assert_eq!(identity["identity_kind"], "user");
+        assert_eq!(identity["stored_scope"], "read");
+        assert_eq!(identity["bound_workspace_id"], tenant.workspace_id.to_string());
+        assert!(!identity["workspace_name"].as_str().unwrap().is_empty());
+        assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
         assert!(!result.to_string().contains(&key));
         assert!(!result.to_string().contains("key_hash"));
         let grants = mcp_call(
