@@ -187,6 +187,7 @@ pub async fn login(
             let status = match reason {
                 LoginRecoveryCode::WorkspaceSelectionRequired => StatusCode::UNPROCESSABLE_ENTITY,
                 LoginRecoveryCode::TenantMembershipRequired
+                | LoginRecoveryCode::WorkspaceAccessRequired
                 | LoginRecoveryCode::WorkspaceProvisioningRequired => StatusCode::FORBIDDEN,
             };
             return Ok((

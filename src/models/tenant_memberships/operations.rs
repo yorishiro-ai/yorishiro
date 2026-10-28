@@ -46,8 +46,13 @@ pub async fn preview_removal(
         .await
         .internal()?;
     let lost_workspace_ids = if role.is_some() {
+        let candidates = crate::models::tenancy::list_workspaces_for_user(&txn, user_id).await?;
         workspace_workspaces::Entity::find()
             .filter(workspace_workspaces::Column::TenantId.eq(actor.tenant_id))
+            .filter(
+                workspace_workspaces::Column::Id
+                    .is_in(candidates.into_iter().map(|workspace| workspace.id)),
+            )
             .select_only()
             .column(workspace_workspaces::Column::Id)
             .order_by_asc(workspace_workspaces::Column::Id)
@@ -245,20 +250,33 @@ async fn key_access(
         .all(txn)
         .await
         .internal()?;
-    keys.into_iter()
-        .map(|key| {
-            let stored_scope = crate::models::api_keys::ApiKeyScope::from_db_str(&key.scope)
-                .ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!("unknown api key scope"))
-                })?;
-            Ok(super::MembershipKeyAccess {
-                api_key_id: key.id,
-                stored_scope,
-                effective_scope: crate::models::access::effective_scope(stored_scope, role),
-                audit: key.audit,
-            })
-        })
-        .collect::<Result<Vec<_>, YorishiroError>>()
+    let mut access = Vec::with_capacity(keys.len());
+    for key in keys {
+        let stored_scope = crate::models::api_keys::ApiKeyScope::from_db_str(&key.scope)
+            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown api key scope")))?;
+        let effective_scope = if let Some(workspace_id) = key.workspace_id {
+            if role.administers_tenant() {
+                Some(crate::models::access::effective_scope(stored_scope, role))
+            } else {
+                crate::models::workspace_memberships::Model::role(txn, workspace_id, user_id)
+                    .await?
+                    .map(|workspace_role| {
+                        stored_scope
+                            .min(role.max_scope())
+                            .min(workspace_role.max_scope())
+                    })
+            }
+        } else {
+            None
+        };
+        access.push(super::MembershipKeyAccess {
+            api_key_id: key.id,
+            stored_scope,
+            effective_scope,
+            audit: key.audit,
+        });
+    }
+    Ok(access)
 }
 
 /// Removes membership; subsequent authentication rejects all attributed keys in this tenant.

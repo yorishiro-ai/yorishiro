@@ -53,7 +53,7 @@ pub struct MembershipRecord {
 pub struct MembershipKeyAccess {
     pub api_key_id: Uuid,
     pub stored_scope: ApiKeyScope,
-    pub effective_scope: ApiKeyScope,
+    pub effective_scope: Option<ApiKeyScope>,
     /// Explicit operator grant, independent of the membership's ordered scope cap.
     pub audit: bool,
 }

@@ -192,6 +192,7 @@ pub enum LoginWorkspaceState {
 pub enum LoginRecoveryReason {
     TenantMembershipRequired,
     WorkspaceProvisioningRequired,
+    WorkspaceAccessRequired,
     WorkspaceSelectionRequired,
 }
 
@@ -215,7 +216,14 @@ pub async fn resolve_login_workspace(
     let reason = if memberships.is_empty() {
         LoginRecoveryReason::TenantMembershipRequired
     } else if workspaces.is_empty() {
-        LoginRecoveryReason::WorkspaceProvisioningRequired
+        if memberships
+            .iter()
+            .any(|membership| membership.role.administers_tenant())
+        {
+            LoginRecoveryReason::WorkspaceProvisioningRequired
+        } else {
+            LoginRecoveryReason::WorkspaceAccessRequired
+        }
     } else {
         LoginRecoveryReason::WorkspaceSelectionRequired
     };

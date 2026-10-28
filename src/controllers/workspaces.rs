@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
-use crate::controllers::extractors::{Authorized, ReadScope};
+use crate::controllers::extractors::{ReadScope, Verified};
 use crate::controllers::members::require_tenant_admin;
 use crate::dtos::workspaces::{CreateWorkspaceRequest, WorkspaceDetail};
 use crate::error::{ResultExt, YorishiroError};
@@ -38,18 +38,17 @@ async fn get_workspace_in_tenant(
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
-    authorized: Authorized<ReadScope>,
+    verified: Verified<ReadScope>,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
-    let records =
-        crate::models::workspace_workspaces::list_for_tenant(&ctx.db, authorized.ctx.tenant_id)
-            .await?
-            .into_iter()
-            .map(|record| WorkspaceRecord {
-                created_at: crate::time::in_timezone(record.created_at, authorized.timezone())
-                    .fixed_offset(),
-                ..record
-            })
-            .collect();
+    let records = crate::models::workspace_workspaces::list_for_actor(&ctx.db, &verified.ctx)
+        .await?
+        .into_iter()
+        .map(|record| WorkspaceRecord {
+            created_at: crate::time::in_timezone(record.created_at, crate::time::configured(&ctx))
+                .fixed_offset(),
+            ..record
+        })
+        .collect();
     Ok(Json(records))
 }
 
@@ -84,16 +83,17 @@ pub async fn create_workspace(
 /// Returns an error if the operation cannot be completed.
 pub async fn get_workspace(
     State(ctx): State<AppContext>,
-    authorized: Authorized<ReadScope>,
+    verified: Verified<ReadScope>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<WorkspaceDetail>, ApiError> {
-    let workspace = get_workspace_in_tenant(&ctx, authorized.ctx.tenant_id, id).await?;
+    let workspace = workspace_workspaces::get_for_actor(&ctx.db, &verified.ctx, id).await?;
+    let txn = crate::db::begin_workspace(&ctx, workspace.tenant_id, workspace.id).await?;
 
-    let entity_count = entity_entities::count(authorized.txn(), workspace.id).await?;
-    let relation_count = entity_relations::count(authorized.txn(), workspace.id).await?;
-    let schema_count = schema_schemas::count_active(authorized.txn(), workspace.id).await?;
+    let entity_count = entity_entities::count(&txn, workspace.id).await?;
+    let relation_count = entity_relations::count(&txn, workspace.id).await?;
+    let schema_count = schema_schemas::count_active(&txn, workspace.id).await?;
 
-    let timezone = authorized.timezone();
+    let timezone = crate::time::configured(&ctx);
     Ok(Json(WorkspaceDetail {
         id: workspace.id,
         tenant_id: workspace.tenant_id,

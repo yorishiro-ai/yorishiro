@@ -156,6 +156,25 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
         .await
         .expect("lower grant");
         txn.commit().await.expect("commit lower grant");
+        let preview = request
+            .post(&format!("/api/members/{}/role-preview", member.id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"role":"member"}))
+            .await;
+        assert_eq!(preview.status_code(), 200);
+        assert_eq!(
+            preview.json::<serde_json::Value>()["keys"][0]["effective_scope"],
+            "read"
+        );
+        let removal = request
+            .get(&format!("/api/members/{}/removal-preview", member.id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        assert_eq!(removal.status_code(), 200);
+        assert_eq!(
+            removal.json::<serde_json::Value>()["lost_workspace_ids"],
+            serde_json::json!([tenant.workspace_id])
+        );
         let too_broad = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
@@ -241,6 +260,15 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
         )
         .await
         .expect("restore tenant membership only");
+        let login = request
+            .post("/auth/login")
+            .json(&serde_json::json!({"email":member.email,"password":"hunter2-hunter2"}))
+            .await;
+        assert_eq!(login.status_code(), 403);
+        assert_eq!(
+            login.json::<serde_json::Value>()["error"]["code"],
+            "workspace_access_required"
+        );
         assert!(
             tenancy::list_workspaces_for_user(&ctx.db, member.id)
                 .await

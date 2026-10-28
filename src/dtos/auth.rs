@@ -112,6 +112,10 @@ impl LoginRecovery {
                 "this account has access to more than one workspace",
                 "specify workspace_id explicitly",
             ),
+            LoginRecoveryCode::WorkspaceAccessRequired => (
+                "this account has tenant membership but no workspace grant",
+                "ask a tenant or workspace administrator for an explicit workspace grant, then retry /auth/login",
+            ),
         };
         Self {
             code,

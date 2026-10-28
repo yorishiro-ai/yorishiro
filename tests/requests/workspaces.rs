@@ -169,6 +169,60 @@ async fn workspaces_endpoints_require_authentication() {
 }
 
 #[tokio::test]
+async fn workspace_inventory_respects_direct_grants_and_service_binding() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let response = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"name":"private-sibling"}))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::CREATED);
+        let sibling = response.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let member = member_key(
+            &ctx,
+            tenant.tenant_id,
+            tenant.workspace_id,
+            MembershipRole::Member,
+        )
+        .await;
+        let service = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        for key in [&member, &service.plaintext] {
+            let response = request
+                .get("/api/workspaces")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await;
+            assert_eq!(response.status_code(), StatusCode::OK);
+            let workspaces = response.json::<serde_json::Value>();
+            assert_eq!(workspaces.as_array().unwrap().len(), 1);
+            assert_eq!(workspaces[0]["id"], tenant.workspace_id.to_string());
+            let response = request
+                .get(&format!("/api/workspaces/{sibling}"))
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await;
+            assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
+            let response = request
+                .get(&format!("/api/workspaces/{}", tenant.workspace_id))
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await;
+            assert_eq!(response.status_code(), StatusCode::OK);
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn workspace_endpoints_enforce_tenant_isolation() {
     if !crate::require_postgres_backend() {

@@ -298,18 +298,50 @@ pub(crate) async fn stamped_for_reindex(
         .internal()
 }
 
-pub(crate) async fn list_for_tenant(
+pub(crate) async fn list_for_actor(
     conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
+    actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
+    let candidates = crate::models::tenancy::discover_workspaces(conn, actor).await?;
     Entity::find()
-        .filter(crate::models::_entities::workspace_workspaces::Column::TenantId.eq(tenant_id))
+        .filter(
+            crate::models::_entities::workspace_workspaces::Column::TenantId.eq(actor.tenant_id),
+        )
+        .filter(
+            crate::models::_entities::workspace_workspaces::Column::Id.is_in(
+                candidates
+                    .into_iter()
+                    .map(|workspace| workspace.workspace_id),
+            ),
+        )
         .all(conn)
         .await
         .internal()?
         .into_iter()
         .map(WorkspaceRecord::try_from)
         .collect()
+}
+
+pub(crate) async fn get_for_actor(
+    conn: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    workspace_id: Uuid,
+) -> Result<Model, YorishiroError> {
+    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    let workspace = get_workspace(conn, workspace_id).await?;
+    let allowed = if workspace.tenant_id != current.tenant_id {
+        false
+    } else if let Some(user_id) = current.user_id {
+        crate::models::access::workspace_access(conn, current.tenant_id, workspace_id, user_id)
+            .await?
+            .is_some()
+    } else {
+        workspace_id == current.workspace_id
+    };
+    if !allowed {
+        return Err(YorishiroError::not_found("workspace not found"));
+    }
+    Ok(workspace)
 }
 
 pub(crate) async fn models_for_tenant(
