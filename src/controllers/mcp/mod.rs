@@ -255,6 +255,9 @@ pub(crate) async fn authorize(
     let request_auth = auth::RequestAuth::new(ctx);
     let current = match request_auth.resolve(presented_key, &headers).await {
         Ok(current) => current,
+        Err(error @ YorishiroError::ScopeInsufficient { .. }) => {
+            return Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(error)));
+        }
         Err(YorishiroError::Unauthenticated) => {
             return Err(ErrorData::invalid_request("authentication failed", None));
         }
@@ -325,15 +328,26 @@ fn scope_denied(
     effective: ApiKeyScope,
 ) -> CallToolResult {
     let mut result = err_to_tool_result(error);
-    result.structured_content = Some(serde_json::json!({
-        "error": { "code": "scope_insufficient", "required_scope": required, "effective_scope": effective }
-    }));
+    if let Some(details) = result
+        .structured_content
+        .as_mut()
+        .and_then(|value| value.get_mut("error"))
+    {
+        details["required_scope"] = serde_json::json!(required);
+        details["effective_scope"] = serde_json::json!(effective);
+    }
     result
 }
 
 /// Converts a business-logic error into a tool call result (`is_error: true`).
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
+    let structured = match &err {
+        YorishiroError::ScopeInsufficient { message, hint } => Some(serde_json::json!({
+            "error": { "code": "scope_insufficient", "message": message, "hint": hint }
+        })),
+        _ => None,
+    };
     let message = match err {
         YorishiroError::Internal(err) => crate::error::report_internal(&err).to_string(),
         YorishiroError::ValidationFailed {
@@ -356,7 +370,9 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
         }
         other => other.to_string(),
     };
-    CallToolResult::error(vec![ContentBlock::text(message)])
+    let mut result = CallToolResult::error(vec![ContentBlock::text(message)]);
+    result.structured_content = structured;
+    result
 }
 
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
