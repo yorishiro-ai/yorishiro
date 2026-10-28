@@ -2,38 +2,13 @@
 
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
 };
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces::Column;
 
-use super::{Entity, Model, WorkspaceSummary};
-
-/// Every workspace under `tenant_id`, for the signup response (which workspaces the new member can now log into).
-pub(crate) async fn list_workspaces(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    page: crate::models::pagination::ListParams,
-) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    let workspaces = Entity::find()
-        .filter(Column::TenantId.eq(tenant_id))
-        .order_by_asc(Column::CreatedAt)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
-        .all(conn)
-        .await
-        .internal()?;
-
-    Ok(workspaces
-        .into_iter()
-        .map(|w| WorkspaceSummary {
-            id: w.id,
-            name: w.name,
-        })
-        .collect())
-}
+use super::{Entity, Model};
 /// A workspace's id and owning tenant, for `/auth/login`'s explicit `workspace_id` path.
 pub(crate) async fn get_workspace_tenant(
     conn: &impl ConnectionTrait,

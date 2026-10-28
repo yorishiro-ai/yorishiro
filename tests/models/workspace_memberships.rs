@@ -146,11 +146,55 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
         )
         .await
         .expect("issue attributed key");
+        let txn = ctx.db.begin().await.expect("lower workspace grant");
+        workspace_memberships::Model::grant(
+            &txn,
+            tenant.workspace_id,
+            member.id,
+            WorkspaceRole::Viewer,
+        )
+        .await
+        .expect("lower grant");
+        txn.commit().await.expect("commit lower grant");
+        let too_broad = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Write,
+            Some(member.id),
+            false,
+        )
+        .await;
+        assert!(matches!(
+            too_broad,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+        ));
+        let identity = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .await;
+        assert_eq!(identity.status_code(), 200);
+        assert_eq!(identity.json::<serde_json::Value>()["scope"], "read");
         let txn = ctx.db.begin().await.expect("begin revocation");
         workspace_memberships::Model::revoke(&txn, tenant.workspace_id, member.id)
             .await
             .expect("revoke grant");
         txn.commit().await.expect("commit revocation");
+        let denied = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .await;
+        assert_eq!(denied.status_code(), 401);
+        assert!(
+            yorishiro::models::api_keys::Entity::create_api_key(
+                &ctx.db,
+                tenant.workspace_id,
+                ApiKeyScope::Read,
+                Some(member.id),
+                false,
+            )
+            .await
+            .is_err()
+        );
         assert!(
             tenancy::list_workspaces_for_user(&ctx.db, member.id)
                 .await
@@ -179,6 +223,29 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
                 .await
                 .expect("lookup revoked key")
                 .is_none()
+        );
+        yorishiro::models::tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, member.id)
+            .await
+            .expect("remove tenant membership and grants");
+        assert!(
+            workspace_memberships::Model::role(&ctx.db, tenant.workspace_id, member.id)
+                .await
+                .expect("removed workspace grant")
+                .is_none()
+        );
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            member.id,
+            MembershipRole::Member,
+        )
+        .await
+        .expect("restore tenant membership only");
+        assert!(
+            tenancy::list_workspaces_for_user(&ctx.db, member.id)
+                .await
+                .expect("restoration must not resurrect workspace grants")
+                .is_empty()
         );
     })
     .await;

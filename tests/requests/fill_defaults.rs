@@ -250,6 +250,8 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             .json(&json!({"schema_name":"note"})).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
         let downgraded_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        super::fixtures::grant_workspace(&ctx, workspace, member.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Admin).await;
         yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
             yorishiro::models::tenant_memberships::MembershipRole::Viewer).await.unwrap();
         finish_job(&ctx, downgraded_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{downgraded_id}")))).await;

@@ -14,7 +14,7 @@ const KEY_SECRET_LENGTH: usize = 48;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct KeyGrant {
     pub scope: ApiKeyScope,
-    /// None when the attributed user no longer belongs to the tenant.
+    /// None when no workspace target is selected or the attributed user has no access.
     pub effective_scope: Option<ApiKeyScope>,
     pub audit: bool,
     pub workspace_id: Option<Uuid>,
@@ -59,13 +59,17 @@ impl Model {
         let scope = stored_scope(&self.scope)?;
         let effective_scope = match self.user_id {
             None => Some(scope),
-            Some(user_id) => crate::models::tenant_memberships::get_membership_role(
-                conn,
-                self.tenant_id,
-                user_id,
-            )
-            .await?
-            .map(|role| crate::models::access::effective_scope(scope, role)),
+            Some(user_id) => match self.workspace_id {
+                Some(workspace_id) => crate::models::access::workspace_access(
+                    conn,
+                    self.tenant_id,
+                    workspace_id,
+                    user_id,
+                )
+                .await?
+                .map(|access| scope.min(access.max_scope)),
+                None => None,
+            },
         };
         Ok(KeyGrant {
             scope,
@@ -127,14 +131,21 @@ impl AuthContext {
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
         if let Some(user_id) = self.user_id {
-            let role = crate::models::tenant_memberships::get_membership_role(
+            crate::models::tenant_memberships::get_membership_role(conn, self.tenant_id, user_id)
+                .await?
+                .ok_or(YorishiroError::Unauthenticated)?;
+            let access = crate::models::access::workspace_access(
                 conn,
                 self.tenant_id,
+                self.workspace_id,
                 user_id,
             )
             .await?
-            .ok_or(YorishiroError::Unauthenticated)?;
-            self.scope = crate::models::access::effective_scope(self.scope, role);
+            .ok_or_else(|| YorishiroError::ScopeInsufficient {
+                message: "this account has no access to the selected workspace".into(),
+                hint: "ask a tenant administrator for a workspace grant".into(),
+            })?;
+            self.scope = self.scope.min(access.max_scope);
         }
         Ok(self)
     }
@@ -437,6 +448,26 @@ impl Entity {
             scope,
         )
         .await?;
+
+        if let Some(user_id) = user_id {
+            let access = crate::models::access::workspace_access(
+                &txn,
+                workspace.tenant_id,
+                workspace_id,
+                user_id,
+            )
+            .await?
+            .ok_or_else(|| YorishiroError::ScopeInsufficient {
+                message: "this account has no access to the selected workspace".into(),
+                hint: "grant workspace access before issuing a credential".into(),
+            })?;
+            if scope > access.max_scope {
+                return Err(YorishiroError::ScopeInsufficient {
+                    message: "requested scope exceeds this user's workspace authority".into(),
+                    hint: "issue a lower-scoped key or change the workspace grant".into(),
+                });
+            }
+        }
 
         if let Some(issuer) = issuer {
             let current = Model::current_context(&txn, issuer).await?;

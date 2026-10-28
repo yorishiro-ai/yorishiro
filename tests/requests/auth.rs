@@ -44,6 +44,13 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
         tenant_memberships::add_member(&ctx.db, source.tenant_id, user.id, MembershipRole::Viewer)
             .await
             .unwrap();
+        super::fixtures::grant_workspace(
+            &ctx,
+            source.workspace_id,
+            user.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Viewer,
+        )
+        .await;
         let key = api_keys::Entity::create_api_key(
             &ctx.db,
             source.workspace_id,
@@ -286,6 +293,30 @@ async fn signup_then_login_round_trip() {
             bad_password_response.status_code(),
             StatusCode::UNAUTHORIZED
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn invited_member_signup_does_not_discover_ungranted_workspaces() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let (_, token) = yorishiro::models::workspace_invites::create_invite(
+            &ctx.db,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("ungranted-invite"),
+            MembershipRole::Member,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .expect("invite member");
+        let response = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":token,"password":"hunter2-hunter2"}))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::CREATED);
+        let body = response.json::<serde_json::Value>();
+        assert!(body["workspaces"].as_array().unwrap().is_empty());
     })
     .await;
 }

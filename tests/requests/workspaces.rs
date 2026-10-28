@@ -20,6 +20,13 @@ async fn member_key(
     tenant_memberships::add_member(&ctx.db, tenant_id, member.id, role)
         .await
         .expect("add member");
+    super::fixtures::grant_workspace(
+        ctx,
+        workspace_id,
+        member.id,
+        yorishiro::models::workspace_memberships::WorkspaceRole::Member,
+    )
+    .await;
     issue_api_key(ctx, workspace_id, member.id, role.max_scope(), false).await
 }
 

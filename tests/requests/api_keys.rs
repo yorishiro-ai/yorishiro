@@ -253,6 +253,13 @@ async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
         )
         .await
         .expect("add member");
+        super::fixtures::grant_workspace(
+            &ctx,
+            workspace_id,
+            member.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
+        )
+        .await;
         let member_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             workspace_id,

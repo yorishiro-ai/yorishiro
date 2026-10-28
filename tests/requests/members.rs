@@ -66,6 +66,8 @@ async fn non_administrative_credentials_cannot_manage_invites_or_preview_members
         for role in [MembershipRole::Member, MembershipRole::Viewer] {
             let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("denied-member"), "test-password", None).await.unwrap();
             tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, role).await.unwrap();
+            super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id,
+                yorishiro::models::workspace_memberships::WorkspaceRole::Admin).await;
             credentials.push((issue_api_key(&ctx, tenant.workspace_id, user.id, role.max_scope(), false).await, StatusCode::FORBIDDEN));
         }
         let service = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Migration, None, false).await.unwrap();
@@ -410,6 +412,13 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
             (MembershipRole::Member, "write"),
             (MembershipRole::Owner, "migration"),
         ] {
+            super::fixtures::grant_workspace(
+                &ctx,
+                tenant.workspace_id,
+                user.id,
+                yorishiro::models::workspace_memberships::WorkspaceRole::Admin,
+            )
+            .await;
             let preview = request
                 .post(&format!("/api/members/{}/role-preview", user.id))
                 .add_header("Authorization", format!("Bearer {}", tenant.api_key))
@@ -642,6 +651,13 @@ async fn member_role_cannot_manage_members() {
         )
         .await
         .expect("add member");
+        super::fixtures::grant_workspace(
+            &ctx,
+            workspace_id,
+            member.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
+        )
+        .await;
         let member_key =
             issue_api_key(&ctx, workspace_id, member.id, ApiKeyScope::Write, false).await;
 
@@ -802,6 +818,13 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Viewer)
             .await
             .unwrap();
+        super::fixtures::grant_workspace(
+            &ctx,
+            tenant.workspace_id,
+            user.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Viewer,
+        )
+        .await;
         #[cfg(feature = "enterprise")]
         if tenant_key {
             let created = yorishiro::edition::ee::models::api_keys::create_tenant_api_key(

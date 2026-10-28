@@ -724,6 +724,8 @@ async fn permission_change_during_llm_call(downgrade: bool) {
                 &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
                 "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Admin,
             ).await.unwrap();
+            yorishiro::models::workspace_memberships::Model::grant(&txn, setup.workspace_id, user.id,
+                yorishiro::models::workspace_memberships::WorkspaceRole::Admin).await.unwrap();
             txn.commit().await.unwrap();
             Some(user.id)
         } else {

@@ -9,6 +9,19 @@ use yorishiro::models::_entities::api_keys;
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy;
 
+pub async fn grant_workspace(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+    user_id: Uuid,
+    role: yorishiro::models::workspace_memberships::WorkspaceRole,
+) {
+    let txn = ctx.db.begin().await.expect("begin workspace grant");
+    yorishiro::models::workspace_memberships::Model::grant(&txn, workspace_id, user_id, role)
+        .await
+        .expect("grant explicit workspace access");
+    txn.commit().await.expect("commit workspace grant");
+}
+
 pub struct TestTenant {
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,

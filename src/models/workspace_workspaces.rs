@@ -165,8 +165,7 @@ pub(crate) async fn effective_embedding_metadata(
 }
 
 pub(crate) use tenancy::{
-    delete_workspace, get_workspace, get_workspace_tenant, list_workspaces,
-    workspace_count_lock_key,
+    delete_workspace, get_workspace, get_workspace_tenant, workspace_count_lock_key,
 };
 
 /// A workspace summary returned by tenancy lookups and signup.

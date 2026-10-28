@@ -18,7 +18,6 @@ use crate::dtos::auth::{
 };
 use crate::error::YorishiroError;
 use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRole;
 use crate::models::{tenancy, user_users, workspace_invites, workspace_workspaces};
 
@@ -99,12 +98,7 @@ async fn signup_with_invite(
     )
     .await?;
 
-    let workspaces = workspace_workspaces::list_workspaces(
-        &ctx.db,
-        invite.tenant_id,
-        crate::models::pagination::ListParams::default(),
-    )
-    .await?;
+    let workspaces = tenancy::list_workspaces_for_user(&ctx.db, user.id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -206,17 +200,17 @@ pub async fn login(
     };
 
     let tenant_id = workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id).await?;
-    let role = tenant_memberships::get_membership_role(&ctx.db, tenant_id, user.id)
+    let access = crate::models::access::workspace_access(&ctx.db, tenant_id, workspace_id, user.id)
         .await?
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this account is not a member of the tenant that owns this workspace".into(),
-            hint: "ask a tenant admin to add you as a member first".into(),
+            message: "this account has no access to the selected workspace".into(),
+            hint: "ask a tenant admin for a workspace grant".into(),
         })?;
 
     let created = IdentityApiKeys::create_api_key(
         &ctx.db,
         workspace_id,
-        role.max_scope(),
+        access.max_scope,
         Some(user.id),
         false,
     )

@@ -302,6 +302,13 @@ async fn mcp_identity_distinguishes_stored_and_membership_capped_scope() {
             (2, MembershipRole::Viewer, "read"),
             (4, MembershipRole::Admin, "migration"),
         ] {
+            super::fixtures::grant_workspace(
+                &ctx,
+                tenant.workspace_id,
+                member.id,
+                yorishiro::models::workspace_memberships::WorkspaceRole::Admin,
+            )
+            .await;
             tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id, role)
                 .await
                 .unwrap();

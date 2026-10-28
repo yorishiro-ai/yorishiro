@@ -89,6 +89,13 @@ async fn member_role_cannot_manage_the_template_library() {
         )
         .await
         .expect("add member");
+        super::fixtures::grant_workspace(
+            &ctx,
+            tenant.workspace_id,
+            member.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
+        )
+        .await;
         let member_key = issue_api_key(
             &ctx,
             tenant.workspace_id,

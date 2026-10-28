@@ -298,8 +298,20 @@ async fn remove_member_in_transaction(
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::api_keys;
+    use crate::models::_entities::{api_keys, workspace_memberships, workspace_workspaces};
+    use sea_orm::QueryTrait;
     protect_owner(txn, tenant_id, user_id, None).await?;
+    let workspaces = workspace_workspaces::Entity::find()
+        .select_only()
+        .column(workspace_workspaces::Column::Id)
+        .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
+        .into_query();
+    workspace_memberships::Entity::delete_many()
+        .filter(workspace_memberships::Column::UserId.eq(user_id))
+        .filter(workspace_memberships::Column::WorkspaceId.in_subquery(workspaces))
+        .exec(txn)
+        .await
+        .internal()?;
     Entity::delete_many()
         .filter(Column::TenantId.eq(tenant_id))
         .filter(Column::UserId.eq(user_id))
