@@ -56,7 +56,7 @@ async fn invite_authorization_keeps_token_out_of_redirect_and_binds_cookies() {
             .post("/auth/oauth/invites/accept")
             .json(&serde_json::json!({"invite_token":token}))
             .await;
-        assert_eq!(response.status_code(), StatusCode::FOUND);
+        assert_eq!(response.status_code(), StatusCode::SEE_OTHER);
         let location = response
             .headers()
             .get(header::LOCATION)
