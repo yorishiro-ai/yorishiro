@@ -180,6 +180,107 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
 }
 
 #[tokio::test]
+async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::workspace_memberships::WorkspaceRole;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let sibling = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"name":format!("private-{}", uuid::Uuid::new_v4())}))
+            .await;
+        assert_eq!(sibling.status_code(), StatusCode::CREATED);
+        let sibling_id = sibling.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let txn = ctx.db.begin().await.unwrap();
+        let user = yorishiro::models::tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("viewer-discovery"),
+            "hunter2-hunter2",
+            None,
+            MembershipRole::Viewer,
+        )
+        .await
+        .unwrap();
+        yorishiro::models::workspace_memberships::Model::grant(
+            &txn,
+            tenant.workspace_id,
+            user.id,
+            WorkspaceRole::Viewer,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let key = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        let session = initialize(&request).await;
+        let discovered = mcp_call(
+            &request,
+            &session,
+            &key,
+            2,
+            "tools/call",
+            json!({"name":"discover_workspaces","arguments":{}}),
+        )
+        .await;
+        assert_ne!(discovered["result"]["isError"], true, "{discovered}");
+        let candidates = tool_result_json(&discovered);
+        assert_eq!(candidates.as_array().unwrap().len(), 1);
+        assert_eq!(
+            candidates[0]["workspace_id"],
+            tenant.workspace_id.to_string()
+        );
+        let listed = request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(listed.status_code(), StatusCode::OK);
+        let listed = listed.json::<Value>();
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed[0]["id"], candidates[0]["workspace_id"]);
+        request
+            .get(&format!("/api/workspaces/{sibling_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        let login = request
+            .post("/auth/login")
+            .json(&json!({"email":user.email,"password":"hunter2-hunter2"}))
+            .await;
+        assert_eq!(login.status_code(), StatusCode::OK, "{}", login.text());
+        assert_eq!(
+            login.json::<Value>()["workspace_id"],
+            candidates[0]["workspace_id"]
+        );
+        let identity = mcp_call(
+            &request,
+            &session,
+            &key,
+            3,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        let rest = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(rest.status_code(), StatusCode::OK);
+        let identity = tool_result_json(&identity);
+        assert_eq!(identity, rest.json::<Value>());
+        assert_eq!(
+            identity["workspace_access"]["source"],
+            "workspace_membership"
+        );
+        assert_eq!(identity["workspace_access"]["workspace_admin"], false);
+        assert!(!candidates.to_string().contains(&sibling_id));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
