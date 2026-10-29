@@ -3,11 +3,109 @@
 use loco_rs::task::Vars;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use yorishiro::App;
+use yorishiro::models::_entities::tenant_memberships::Column as MembershipColumn;
 use yorishiro::models::_entities::tenant_retirement_events::Column;
 use yorishiro::models::{tenant_retirement_events, tenant_tenants};
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
+
+#[tokio::test]
+async fn irreversible_cleanup_requires_disablement_and_preserves_shared_identities() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use tenant_tenants::retirement;
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{tenant_memberships, user_users, workspace_workspaces};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        tenant_memberships::add_member(
+            &ctx.db,
+            other.tenant_id,
+            target.owner_id,
+            MembershipRole::Viewer,
+        )
+        .await
+        .unwrap();
+        assert!(
+            retirement::delete_by_operator(&ctx.db, target.tenant_id, other.tenant_id)
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await,
+            Err(yorishiro::YorishiroError::Conflict { .. })
+        ));
+        retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
+            .await
+            .unwrap();
+        retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
+            .await
+            .unwrap();
+        retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
+            .await
+            .unwrap();
+        assert!(
+            tenant_tenants::Entity::find_by_id(target.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            workspace_workspaces::Entity::find_by_id(target.workspace_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            user_users::Entity::find_by_id(target.owner_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            tenant_memberships::Entity::find()
+                .filter(MembershipColumn::TenantId.eq(other.tenant_id))
+                .filter(MembershipColumn::UserId.eq(target.owner_id))
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .role,
+            "viewer"
+        );
+        let events = tenant_retirement_events::Entity::find()
+            .filter(Column::TenantId.eq(target.tenant_id))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.action == "deleted")
+                .count(),
+            1
+        );
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", other.api_key))
+            .await
+            .assert_status(axum::http::StatusCode::OK);
+        let missing = uuid::Uuid::new_v4();
+        assert!(
+            retirement::delete_by_operator(&ctx.db, missing, missing)
+                .await
+                .is_err()
+        );
+    })
+    .await;
+}
 
 #[tokio::test]
 async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
