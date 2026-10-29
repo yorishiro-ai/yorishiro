@@ -850,6 +850,15 @@ async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
                 "{path} must share the per-IP credential budget"
             );
         }
+        let mut last_status = StatusCode::OK;
+        for _ in 0..15 {
+            last_status = request
+                .post("/auth/oauth/invites/accept")
+                .json(&serde_json::json!({"invite_token":"a".repeat(48)}))
+                .await
+                .status_code();
+        }
+        assert_eq!(last_status, StatusCode::TOO_MANY_REQUESTS);
         for _ in 0..15 {
             assert_ne!(
                 request.get("/auth/oauth/status").await.status_code(),

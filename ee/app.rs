@@ -136,7 +136,8 @@ pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
         .mount(controllers::oauth::routes().layer(gate.clone()))
         .document(edition::licence_required(controllers::oauth::openapi_docs()))
         .guard_credentials("/auth/oauth/authorize")
-        .guard_credentials("/auth/oauth/callback");
+        .guard_credentials("/auth/oauth/callback")
+        .guard_credentials("/auth/oauth/invites/accept");
     mounts
         .mount(controllers::origin::routes())
         .document(controllers::origin::openapi_docs());
