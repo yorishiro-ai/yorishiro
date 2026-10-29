@@ -37,7 +37,7 @@ async fn retirement_inventory_counts_shared_accounts_without_exposing_them() {
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
-async fn retirement_inventory_detects_external_workspace_fork_dependencies() {
+async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
     if !crate::require_postgres_backend() {
         return;
     }
@@ -68,8 +68,8 @@ async fn retirement_inventory_detects_external_workspace_fork_dependencies() {
         )
         .await
         .unwrap();
-        // The API forbids cross-tenant forks, but a persisted reference must still block cleanup.
-        workspace_schema_forks::ActiveModel {
+        // Exercise the database guard independently of the API's tenant check.
+        let error = workspace_schema_forks::ActiveModel {
             tenant_id: Set(target.tenant_id),
             workspace_id: Set(target.workspace_id),
             source_workspace_id: Set(source.workspace_id),
@@ -82,11 +82,15 @@ async fn retirement_inventory_detects_external_workspace_fork_dependencies() {
         }
         .insert(&ctx.db)
         .await
-        .unwrap();
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("source workspace mismatch"),
+            "{error}"
+        );
         let inventory = retirement::inventory(&ctx.db, source.tenant_id)
             .await
             .unwrap();
-        assert_eq!(inventory.external_workspace_forks, 1);
+        assert_eq!(inventory.external_workspace_forks, 0);
         let inventory = retirement::inventory(&ctx.db, target.tenant_id)
             .await
             .unwrap();
