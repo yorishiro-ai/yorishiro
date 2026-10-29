@@ -352,6 +352,7 @@ pub(crate) async fn connect_workers(
 
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::inspect_tenant_retirement::InspectTenantRetirement);
+    tasks.register(tasks::disable_tenant::DisableTenant);
     // tasks-inject
     tasks.register(tasks::create_tenant::CreateTenant);
     tasks.register(tasks::create_workspace::CreateWorkspace);

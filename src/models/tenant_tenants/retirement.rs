@@ -62,8 +62,6 @@ pub async fn disable_as(
     actor: &crate::models::api_keys::AuthContext,
     confirmed_tenant_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-
     if confirmed_tenant_id != actor.tenant_id
         || confirmed_tenant_id == super::INFRASTRUCTURE_TENANT_ID
     {
@@ -75,30 +73,71 @@ pub async fn disable_as(
     }
     let txn = crate::db::begin_write(db).await.internal()?;
     let user_id = crate::models::access::require_current_tenant_owner(&txn, actor).await?;
-    super::ActiveModel {
-        id: Set(actor.tenant_id),
-        disabled_at: Set(Some(crate::time::now().fixed_offset())),
-        ..Default::default()
+    disable_in_transaction(&txn, actor.tenant_id, Some(user_id)).await?;
+    txn.commit().await.internal()
+}
+
+/// Disables a confirmed tenant using a trusted operator identity connection.
+/// Never expose this operator boundary through a tenant-authenticated transport.
+///
+/// # Errors
+/// Rejects mismatched or infrastructure targets and propagates database failures.
+pub async fn disable_by_operator(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    confirmed_tenant_id: Uuid,
+) -> Result<(), YorishiroError> {
+    if tenant_id != confirmed_tenant_id || tenant_id == super::INFRASTRUCTURE_TENANT_ID {
+        return Err(YorishiroError::ValidationFailed {
+            message: "tenant retirement confirmation does not match the target".into(),
+            details: vec![],
+            hint: "confirm the non-infrastructure tenant UUID explicitly".into(),
+        });
     }
-    .update(&txn)
-    .await
-    .internal()?;
-    api_keys::Entity::delete_many()
-        .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
-        .exec(&txn)
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
         .await
         .internal()?;
-    cancel_work(&txn, actor.tenant_id).await?;
-    crate::models::tenant_retirement_events::ActiveModel {
-        tenant_id: Set(actor.tenant_id),
-        actor_user_id: Set(Some(user_id)),
-        action: Set("disabled".into()),
-        ..Default::default()
-    }
-    .insert(&txn)
-    .await
-    .internal()?;
+    disable_in_transaction(&txn, tenant_id, None).await?;
     txn.commit().await.internal()
+}
+
+async fn disable_in_transaction(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    actor_user_id: Option<Uuid>,
+) -> Result<(), YorishiroError> {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    let tenant = super::Model::find_by_id(txn, tenant_id).await?;
+    let newly_disabled = tenant.disabled_at.is_none();
+    if newly_disabled {
+        super::ActiveModel {
+            id: Set(tenant_id),
+            disabled_at: Set(Some(crate::time::now().fixed_offset())),
+            ..Default::default()
+        }
+        .update(txn)
+        .await
+        .internal()?;
+    }
+    api_keys::Entity::delete_many()
+        .filter(api_keys::Column::TenantId.eq(tenant_id))
+        .exec(txn)
+        .await
+        .internal()?;
+    cancel_work(txn, tenant_id).await?;
+    if newly_disabled {
+        crate::models::tenant_retirement_events::ActiveModel {
+            tenant_id: Set(tenant_id),
+            actor_user_id: Set(actor_user_id),
+            action: Set("disabled".into()),
+            ..Default::default()
+        }
+        .insert(txn)
+        .await
+        .internal()?;
+    }
+    Ok(())
 }
 
 /// Cancels retained background work for an already-disabled tenant.

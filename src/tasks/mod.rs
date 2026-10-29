@@ -18,3 +18,5 @@ pub(crate) mod revoke_api_key;
 pub mod tenant_reindex_scheduler;
 
 pub mod inspect_tenant_retirement;
+
+pub mod disable_tenant;
