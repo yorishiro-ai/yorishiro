@@ -422,6 +422,11 @@ async fn workspace_inventory_respects_direct_grants_and_service_binding() {
             .as_str()
             .unwrap()
             .to_string();
+        request
+            .get(&format!("/api/workspaces/{sibling}"))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
         let member = member_key(
             &ctx,
             tenant.tenant_id,

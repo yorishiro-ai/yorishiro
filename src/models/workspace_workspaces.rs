@@ -334,15 +334,16 @@ pub(crate) async fn get_for_actor(
 ) -> Result<Model, YorishiroError> {
     let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
     let workspace = get_workspace(conn, workspace_id).await?;
-    let allowed = if workspace.tenant_id != current.tenant_id {
-        false
-    } else if let Some(user_id) = current.user_id {
-        crate::models::access::workspace_access(conn, current.tenant_id, workspace_id, user_id)
-            .await?
-            .is_some()
-    } else {
-        workspace_id == current.workspace_id
-    };
+    let allowed =
+        if workspace.tenant_id != current.tenant_id || workspace_id != current.workspace_id {
+            false
+        } else if let Some(user_id) = current.user_id {
+            crate::models::access::workspace_access(conn, current.tenant_id, workspace_id, user_id)
+                .await?
+                .is_some()
+        } else {
+            workspace_id == current.workspace_id
+        };
     if !allowed {
         return Err(YorishiroError::not_found("workspace not found"));
     }
