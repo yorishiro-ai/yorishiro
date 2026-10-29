@@ -336,6 +336,10 @@ pub async fn create_workspace(
     use crate::models::_entities::tenant_tenants;
     use crate::models::workspace_workspaces::WorkspaceStatus;
 
+    crate::db::lock_for_update(conn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    crate::models::tenant_tenants::Model::require_active(conn, tenant_id).await?;
     let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
         .one(conn)
         .await

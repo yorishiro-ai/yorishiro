@@ -231,13 +231,16 @@ pub(crate) async fn accept_in_transaction(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn create_invite(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseConnection,
     tenant_id: Uuid,
     email: &str,
     role: MembershipRole,
     ttl: Duration,
 ) -> Result<(Model, String), YorishiroError> {
-    create_invite_at(conn, tenant_id, email, role, ttl, crate::time::now()).await
+    let txn = crate::db::begin_write(conn).await.internal()?;
+    let invite = create_invite_at(&txn, tenant_id, email, role, ttl, crate::time::now()).await?;
+    txn.commit().await.internal()?;
+    Ok(invite)
 }
 
 /// [`create_invite`] with the issue time supplied by the caller, so expiry boundaries can be tested without a clock.
@@ -245,13 +248,17 @@ pub async fn create_invite(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn create_invite_at(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseTransaction,
     tenant_id: Uuid,
     email: &str,
     role: MembershipRole,
     ttl: Duration,
     now: DateTime<Utc>,
 ) -> Result<(Model, String), YorishiroError> {
+    crate::db::lock_for_update(conn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    crate::models::tenant_tenants::Model::require_active(conn, tenant_id).await?;
     let token = loco_rs::hash::random_string(INVITE_TOKEN_LENGTH);
     let token_hash = hash_key(&token);
     let expires_at = now + ttl;

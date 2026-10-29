@@ -15,6 +15,50 @@ async fn run(ctx: &loco_rs::app::AppContext, args: Vec<(String, String)>) -> loc
     .await
 }
 
+async fn assert_disabled_creation_rejected(ctx: &loco_rs::app::AppContext, tenant_id: uuid::Uuid) {
+    let before = tenant_tenants::retirement::inventory(&ctx.db, tenant_id)
+        .await
+        .unwrap();
+    for (task, extra) in [
+        (
+            "create_workspace",
+            vec![("name".into(), "must-not-exist".into())],
+        ),
+        (
+            "create_invite",
+            vec![
+                ("email".into(), "blocked@example.com".into()),
+                ("role".into(), "member".into()),
+            ],
+        ),
+    ] {
+        let mut args = vec![("tenant_id".into(), tenant_id.to_string())];
+        args.extend(extra);
+        assert!(
+            loco_rs::boot::run_task::<App>(ctx, Some(&task.to_owned()), &Vars::from_cli_args(args))
+                .await
+                .is_err()
+        );
+    }
+    use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::workspace_invites;
+    assert_eq!(
+        workspace_invites::Entity::find()
+            .filter(yorishiro::models::_entities::workspace_invites::Column::TenantId.eq(tenant_id))
+            .count(&ctx.db)
+            .await
+            .unwrap(),
+        0
+    );
+    let after = tenant_tenants::retirement::inventory(&ctx.db, tenant_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(before).unwrap(),
+        serde_json::to_value(after).unwrap()
+    );
+}
+
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() {
@@ -61,6 +105,7 @@ async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() 
         )
         .await
         .unwrap();
+        assert_disabled_creation_rejected(&ctx, target.tenant_id).await;
         run(&ctx, args.clone()).await.unwrap();
         run(&ctx, args).await.unwrap();
         assert!(
@@ -123,6 +168,7 @@ async fn sqlite_retirement_retains_quota_until_deletion_and_preserves_identities
         assert!(inventory.disabled_at.is_some());
         assert_eq!(inventory.api_keys, 0);
         assert!(inventory.workspace_ids.contains(&target.workspace_id));
+        assert_disabled_creation_rejected(&ctx, target.tenant_id).await;
         let txn = ctx.db.begin().await.unwrap();
         assert!(matches!(
             tenant_tenants::create_tenant(&txn, "blocked while retained", Some(1000)).await,
