@@ -129,7 +129,31 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_create_workspace),
         super::route_inventory::path_doc(__path_get_workspace),
         super::route_inventory::path_doc(__path_delete_workspace),
+        super::route_inventory::path_doc(__path_grant_member),
+        super::route_inventory::path_doc(__path_revoke_member),
     ]
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), request_body = crate::dtos::workspaces::GrantWorkspaceMemberRequest, responses((status = 204, description = "Direct workspace grant saved"), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+async fn grant_member(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Path((id, user_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<crate::dtos::workspaces::GrantWorkspaceMemberRequest>,
+) -> Result<StatusCode, ApiError> {
+    crate::models::workspace_memberships::Model::grant_as(&ctx.db, &actor, id, user_id, body.role)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), responses((status = 204, description = "Direct workspace grant and bound credentials revoked"), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+async fn revoke_member(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Path((id, user_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    crate::models::workspace_memberships::Model::revoke_as(&ctx.db, &actor, id, user_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub fn routes() -> Routes {
@@ -139,4 +163,6 @@ pub fn routes() -> Routes {
         .add("/", post(create_workspace))
         .add("/{id}", get(get_workspace))
         .add("/{id}", delete(delete_workspace))
+        .add("/{id}/members/{user_id}", axum::routing::put(grant_member))
+        .add("/{id}/members/{user_id}", delete(revoke_member))
 }

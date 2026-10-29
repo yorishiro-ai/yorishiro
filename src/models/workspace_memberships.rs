@@ -8,7 +8,7 @@ use crate::models::api_keys::ApiKeyScope;
 
 db_enum! {
     /// Workspace-local authority never grants tenant administration.
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum WorkspaceRole {
         Admin = "admin",
         Member = "member",
@@ -27,6 +27,39 @@ impl WorkspaceRole {
 }
 
 impl Model {
+    /// Grants workspace-local authority after revalidating the administrator under the fence.
+    ///
+    /// # Errors
+    /// Rejects unauthorized actors or users outside the tenant and propagates persistence errors.
+    pub async fn grant_as(
+        db: &sea_orm::DatabaseConnection,
+        actor: &crate::models::api_keys::AuthContext,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), YorishiroError> {
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        Self::grant(&txn, workspace_id, user_id, role).await?;
+        txn.commit().await.internal()
+    }
+
+    /// Revokes a direct grant after revalidating the administrator under the fence.
+    ///
+    /// # Errors
+    /// Rejects unauthorized actors and propagates persistence errors.
+    pub async fn revoke_as(
+        db: &sea_orm::DatabaseConnection,
+        actor: &crate::models::api_keys::AuthContext,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), YorishiroError> {
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        Self::revoke(&txn, workspace_id, user_id).await?;
+        txn.commit().await.internal()
+    }
+
     /// Revokes a direct grant and its workspace-bound credentials under the membership fence.
     /// Tenant-bound credentials remain stored and must recheck each selected workspace.
     ///
@@ -49,13 +82,19 @@ impl Model {
             .exec(txn)
             .await
             .internal()?;
-        api_keys::Entity::delete_many()
-            .filter(api_keys::Column::TenantId.eq(tenant_id))
-            .filter(api_keys::Column::WorkspaceId.eq(workspace_id))
-            .filter(api_keys::Column::UserId.eq(user_id))
-            .exec(txn)
-            .await
-            .internal()?;
+        let inherited =
+            crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
+                .await?
+                .is_some_and(|role| role.administers_tenant());
+        if !inherited {
+            api_keys::Entity::delete_many()
+                .filter(api_keys::Column::TenantId.eq(tenant_id))
+                .filter(api_keys::Column::WorkspaceId.eq(workspace_id))
+                .filter(api_keys::Column::UserId.eq(user_id))
+                .exec(txn)
+                .await
+                .internal()?;
+        }
         Ok(())
     }
 

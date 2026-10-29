@@ -172,6 +172,29 @@ pub async fn workspace_access(
 }
 
 /// Revalidates the actor after acquiring the membership mutation fence.
+pub(crate) async fn require_current_workspace_admin(
+    txn: &DatabaseTransaction,
+    actor: &AuthContext,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
+        .await
+        .internal()?;
+    let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
+    if let Some(user_id) = current.user_id
+        && workspace_access(txn, current.tenant_id, workspace_id, user_id)
+            .await?
+            .is_some_and(|access| access.workspace_admin)
+    {
+        return Ok(());
+    }
+    Err(YorishiroError::ScopeInsufficient {
+        message: "workspace administration required".into(),
+        hint: "request an administrator grant for this workspace".into(),
+    })
+}
+
+/// Revalidates the actor after acquiring the membership mutation fence.
 pub(crate) async fn require_current_tenant_admin(
     txn: &DatabaseTransaction,
     actor: &AuthContext,

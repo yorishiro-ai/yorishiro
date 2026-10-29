@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct GrantWorkspaceMemberRequest {
+    pub role: crate::models::workspace_memberships::WorkspaceRole,
+}
+
+#[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateWorkspaceRequest {
     pub name: String,
