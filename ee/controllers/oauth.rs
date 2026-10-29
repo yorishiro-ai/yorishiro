@@ -17,7 +17,7 @@ use crate::models::api_keys::IdentityApiKeys;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
@@ -67,13 +67,13 @@ async fn accept_invite(
         secure
     );
     Ok((
-        [
+        AppendHeaders([
             (
                 header::SET_COOKIE,
                 csrf_set_cookie(&redirect.csrf_cookie_value, config.cookies_require_secure()),
             ),
             (header::SET_COOKIE, invite_cookie),
-        ],
+        ]),
         Redirect::to(&redirect.url),
     )
         .into_response())
@@ -129,10 +129,10 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
     let set_cookie = csrf_set_cookie(&redirect.csrf_cookie_value, config.cookies_require_secure());
 
     Ok((
-        [
+        AppendHeaders([
             (header::SET_COOKIE, set_cookie),
             (header::SET_COOKIE, clear_invite_cookie()),
-        ],
+        ]),
         Redirect::to(&redirect.url),
     )
         .into_response())
@@ -183,11 +183,11 @@ async fn callback(
         crate::edition::ee::models::user_users::accept_invite(&ctx.db, &identity, token).await?;
         return Ok((
             StatusCode::FOUND,
-            [
+            AppendHeaders([
                 (header::LOCATION, "/#/login?invite=accepted".to_owned()),
                 (header::SET_COOKIE, clear_cookie),
                 (header::SET_COOKIE, clear_invite_cookie()),
-            ],
+            ]),
         )
             .into_response());
     }
@@ -248,11 +248,11 @@ fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {
     let location = format!("/#api_key={api_key}");
     (
         StatusCode::FOUND,
-        [
+        AppendHeaders([
             (header::LOCATION, location),
             (header::SET_COOKIE, clear_cookie),
             (header::SET_COOKIE, clear_invite_cookie()),
-        ],
+        ]),
     )
         .into_response()
 }
@@ -261,11 +261,11 @@ fn login_failure_redirect(clear_cookie: String) -> Response {
     let location = "/#/login?error=oauth_failed".to_string();
     (
         StatusCode::FOUND,
-        [
+        AppendHeaders([
             (header::LOCATION, location),
             (header::SET_COOKIE, clear_cookie),
             (header::SET_COOKIE, clear_invite_cookie()),
-        ],
+        ]),
     )
         .into_response()
 }
