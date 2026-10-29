@@ -23,6 +23,53 @@ async fn workspace(request: &loco_rs::TestServer, ctx: &AppContext, name: &str) 
 }
 
 #[tokio::test]
+#[cfg(feature = "enterprise")]
+async fn a_disabled_tenant_cannot_publish_a_query_embedding() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (tenant_id, ws) = workspace(&request, &ctx, "qe-disabled").await;
+        let id = Entity::open(
+            &ctx.db,
+            ws,
+            "late query",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+        yorishiro::models::tenant_tenants::ActiveModel {
+            id: Set(tenant_id),
+            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        assert!(
+            !Entity::complete(&ctx.db, ws, id, &[1.0], "m")
+                .await
+                .unwrap()
+        );
+        let row = Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(row.status, "pending");
+        assert!(row.result_vector.is_none());
+        assert!(
+            Entity::fail(&ctx.db, ws, id, "tenant disabled")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            Entity::take(&ctx.db, ws, id).await.unwrap(),
+            Some(QueryOutcome::Failed("tenant disabled".into()))
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn a_request_moves_from_pending_to_ready_and_is_consumed_once() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (_, ws) = workspace(&request, &ctx, "qe-ready").await;
