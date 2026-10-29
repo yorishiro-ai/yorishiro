@@ -117,6 +117,35 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
 }
 
 #[tokio::test]
+async fn disabled_tenant_invites_cannot_accept_or_register_accounts() {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::{tenant_tenants, user_users, workspace_invites};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("disabled-invite-existing"), "test-password", None).await.unwrap();
+        let email = super::fixtures::unique_email("disabled-invite-new");
+        let mut invites = Vec::new();
+        for recipient in [&user.email, &email] {
+            invites.push(workspace_invites::create_invite(&ctx.db, tenant.tenant_id, recipient, MembershipRole::Member, chrono::Duration::hours(1)).await.unwrap());
+        }
+        let before = tenant_tenants::retirement::inventory(&ctx.db, tenant.tenant_id).await.unwrap();
+        tenant_tenants::retirement::disable_by_operator(&ctx.db, tenant.tenant_id, tenant.tenant_id).await.unwrap();
+        request.post("/auth/invites/accept")
+            .json(&serde_json::json!({"invite_token":invites[0].1,"email":user.email,"password":"test-password"}))
+            .await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        request.post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":invites[1].1,"password":"test-password"}))
+            .await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        for (invite, _) in invites {
+            assert!(workspace_invites::Entity::find_by_id(invite.id).one(&ctx.db).await.unwrap().unwrap().used_at.is_none());
+        }
+        assert_eq!(user_users::Entity::find().filter(yorishiro::models::_entities::user_users::Column::Email.eq(email)).count(&ctx.db).await.unwrap(), 0);
+        let inventory = tenant_tenants::retirement::inventory(&ctx.db, tenant.tenant_id).await.unwrap();
+        assert_eq!(inventory.memberships, before.memberships);
+    }).await;
+}
+
+#[tokio::test]
 async fn existing_account_invite_acceptance_requires_credentials_and_consumes_once() {
     use sea_orm::EntityTrait;
     use yorishiro::models::{user_users, workspace_invites};

@@ -3,7 +3,7 @@
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait,
 };
 use uuid::Uuid;
 
@@ -311,10 +311,16 @@ pub async fn redeem_invite_at(
     now: DateTime<Utc>,
 ) -> Result<Option<RedeemedInvite>, YorishiroError> {
     let token_hash = hash_key(raw_token);
+    use crate::models::_entities::tenant_tenants;
+    let active_tenants = tenant_tenants::Entity::find()
+        .select_only()
+        .column(tenant_tenants::Column::Id)
+        .filter(tenant_tenants::Column::DisabledAt.is_null());
 
     let invite = Entity::update_many()
         .col_expr(Column::UsedAt, sea_orm::sea_query::Expr::value(now))
         .filter(Column::TokenHash.eq(token_hash))
+        .filter(Column::TenantId.in_subquery(active_tenants.into_query()))
         .filter(Column::UsedAt.is_null())
         .filter(Column::ExpiresAt.gt(now))
         .exec_with_returning(conn)
