@@ -30,11 +30,6 @@ pub struct TestTenant {
 }
 
 impl TestTenant {
-    pub fn authenticated(&self, mut request: loco_rs::TestServer) -> loco_rs::TestServer {
-        request.add_header("Authorization", format!("Bearer {}", self.api_key));
-        request
-    }
-
     pub async fn create(request: &loco_rs::TestServer, ctx: &AppContext, args: TenantArgs) -> Self {
         let started = std::time::Instant::now();
         let name = std::thread::current()

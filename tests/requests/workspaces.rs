@@ -51,10 +51,11 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
         let tenant = TestTenant::create(&request, &ctx, args).await;
         let tenant_id = tenant.tenant_id;
         let owner_id = tenant.owner_id;
-        let request = tenant.authenticated(request);
+        let owner_auth = format!("Bearer {}", tenant.api_key);
 
         let response = request
             .post("/api/workspaces")
+            .add_header("Authorization", &owner_auth)
             .json(&serde_json::json!({ "name": "staging" }))
             .await;
         assert_eq!(response.status_code(), StatusCode::CREATED);
@@ -63,7 +64,10 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
         assert_eq!(body["tenant_id"], tenant_id.to_string());
         let staging_id = body["id"].as_str().unwrap().to_string();
 
-        let response = request.get("/api/workspaces").await;
+        let response = request
+            .get("/api/workspaces")
+            .add_header("Authorization", &owner_auth)
+            .await;
         assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         let names: Vec<&str> = body
@@ -112,10 +116,14 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 
         let response = request
             .delete(&format!("/api/workspaces/{staging_id}"))
+            .add_header("Authorization", &owner_auth)
             .await;
         assert_eq!(response.status_code(), StatusCode::NO_CONTENT);
 
-        let response = request.get(&format!("/api/workspaces/{staging_id}")).await;
+        let response = request
+            .get(&format!("/api/workspaces/{staging_id}"))
+            .add_header("Authorization", &owner_auth)
+            .await;
         assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
