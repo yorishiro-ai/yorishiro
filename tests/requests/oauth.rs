@@ -81,7 +81,8 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
             assert_eq!(form["code_verifier"].len(), 43);
             let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
             header.kid = Some("invite-test".into());
-            let token = jsonwebtoken::encode(&header, &serde_json::json!({"sub":token_subject,"iss":token_issuer.lock().unwrap().clone(),"aud":CLIENT_ID,"exp":chrono::Utc::now().timestamp()+300}), &signing_key).unwrap();
+            let subject = if form["code"] == "unverified-email" { "unknown-unverified-subject" } else { &token_subject };
+            let token = jsonwebtoken::encode(&header, &serde_json::json!({"sub":subject,"email":"unverified@example.com","email_verified":false,"iss":token_issuer.lock().unwrap().clone(),"aud":CLIENT_ID,"exp":chrono::Utc::now().timestamp()+300}), &signing_key).unwrap();
             async move { axum::Json(serde_json::json!({"id_token":token})) }
         }))).await;
     *issuer.lock().unwrap() = stub.url.clone();
@@ -91,6 +92,50 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
     guard.set(crate::env::TestEnv::OauthClientSecret.name(), CLIENT_SECRET);
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
+        let start = request.get("/auth/oauth/authorize").await;
+        let url = reqwest::Url::parse(
+            start
+                .headers()
+                .get(header::LOCATION)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let csrf = start
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .find(|value| value.starts_with("ysr_oauth_csrf="))
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        request
+            .get("/auth/oauth/callback")
+            .add_query_param("code", "unverified-email")
+            .add_query_param("state", &state)
+            .add_header(header::COOKIE, csrf)
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            user_users::Entity::find()
+                .filter(
+                    yorishiro::models::_entities::user_users::Column::Email
+                        .eq("unverified@example.com")
+                )
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
         let tenant = super::fixtures::TestTenant::create(
             &request,
             &ctx,

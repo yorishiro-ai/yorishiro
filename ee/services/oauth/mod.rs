@@ -100,17 +100,9 @@ pub async fn handle_callback(
         &config.client_id,
     )?;
 
-    if claims.email.is_some() && !claims.email_verified {
-        tracing::warn!(
-            "OAuth ID token has an email claim that is not marked verified; proceeding, since \
-             some providers omit email_verified for accounts that are inherently verified \
-             (e.g. enterprise SSO)"
-        );
-    }
-
     Ok(CallbackIdentity {
         subject_id: claims.sub,
-        email: claims.email,
+        email: claims.email.filter(|_| claims.email_verified),
         display_name: claims.name,
     })
 }
