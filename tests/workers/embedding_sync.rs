@@ -599,6 +599,56 @@ mod conflict {
     }
 
     #[tokio::test]
+    #[cfg(feature = "enterprise")]
+    async fn tenant_disablement_discards_a_late_embedding() {
+        if !crate::require_postgres_backend() {
+            return;
+        }
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+        boot_request::<App, _, _>(|request, ctx| async move {
+            let (workspace_id, entity_id) = seed(&request, &ctx).await;
+            let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let record = entity_entities::get(&ctx.db, workspace_id, entity_id)
+                .await
+                .unwrap();
+            let (provider, _server, entered, release) = vector_provider(768, true).await;
+            let disable = async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+                    .await
+                    .expect("embedding reached provider");
+                let result = yorishiro::models::tenant_tenants::ActiveModel {
+                    id: Set(workspace.tenant_id),
+                    disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
+                    ..Default::default()
+                }
+                .update(&ctx.db)
+                .await;
+                release.add_permits(1);
+                result.unwrap();
+            };
+            let (result, ()) = tokio::join!(
+                yorishiro::models::entity_embeddings::sync_embedding_for_record(
+                    &ctx.db,
+                    workspace_id,
+                    &record,
+                    provider.as_ref(),
+                ),
+                disable,
+            );
+            assert!(matches!(
+                result,
+                Err(yorishiro::YorishiroError::Unauthenticated)
+            ));
+            assert_eq!(vector_rows(&ctx, entity_id).await, 0);
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn provider_failures_are_terminal_and_do_not_requeue() {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
         for kind in [FailureKind::Busy, FailureKind::Unreachable] {

@@ -108,6 +108,11 @@ pub(crate) async fn fence_embedding(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::workspace_workspaces::Column;
     use sea_orm::sea_query::Expr;
+    let tenant_id = get_workspace_tenant(conn, workspace_id).await?;
+    crate::db::lock_for_update(conn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    crate::models::tenant_tenants::Model::require_active(conn, tenant_id).await?;
     let result = Entity::update_many()
         .col_expr(
             Column::EmbeddingRevision,
