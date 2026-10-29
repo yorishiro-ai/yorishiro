@@ -1,13 +1,15 @@
 //! Read-only retirement inventory for an operator's explicitly selected tenant.
 
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
     api_keys, entity_entities, entity_relations, queue_job_dispatch_outbox, queue_job_lifecycles,
     schema_schemas, template_templates, tenant_memberships, workspace_memberships,
-    workspace_workspaces,
+    workspace_schema_forks, workspace_workspaces,
 };
 
 /// A secret-free snapshot, not approval for a later destructive operation.
@@ -17,6 +19,9 @@ pub struct RetirementInventory {
     pub tenant_name: String,
     pub workspace_ids: Vec<Uuid>,
     pub memberships: u64,
+    pub shared_user_accounts: u64,
+    /// External forks must be resolved explicitly before irreversible cleanup.
+    pub external_workspace_forks: u64,
     pub workspace_grants: u64,
     pub api_keys: u64,
     pub jobs: u64,
@@ -58,6 +63,31 @@ pub async fn inventory(
         .collect::<Vec<_>>();
     let memberships = tenant_memberships::Entity::find()
         .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
+    let user_ids = tenant_memberships::Entity::find()
+        .select_only()
+        .column(tenant_memberships::Column::UserId)
+        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
+        .into_tuple::<Uuid>()
+        .all(conn)
+        .await
+        .internal()?;
+    let shared_user_accounts = tenant_memberships::Entity::find()
+        .select_only()
+        .column(tenant_memberships::Column::UserId)
+        .filter(tenant_memberships::Column::UserId.is_in(user_ids))
+        .filter(tenant_memberships::Column::TenantId.ne(tenant_id))
+        .distinct()
+        .into_tuple::<Uuid>()
+        .all(conn)
+        .await
+        .internal()?
+        .len() as u64;
+    let external_workspace_forks = workspace_schema_forks::Entity::find()
+        .filter(workspace_schema_forks::Column::SourceWorkspaceId.is_in(workspace_ids.clone()))
+        .filter(workspace_schema_forks::Column::TenantId.ne(tenant_id))
         .count(conn)
         .await
         .internal()?;
@@ -109,6 +139,8 @@ pub async fn inventory(
         tenant_name: tenant.name,
         workspace_ids,
         memberships,
+        shared_user_accounts,
+        external_workspace_forks,
         workspace_grants,
         api_keys,
         jobs,

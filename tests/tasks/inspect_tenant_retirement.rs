@@ -5,6 +5,37 @@ use yorishiro::App;
 use yorishiro::models::tenant_tenants::retirement;
 
 #[tokio::test]
+#[cfg(feature = "enterprise")]
+async fn retirement_inventory_counts_shared_accounts_without_exposing_them() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            second.tenant_id,
+            first.owner_id,
+            yorishiro::models::tenant_memberships::MembershipRole::Viewer,
+        )
+        .await
+        .unwrap();
+        for tenant in [&first, &second] {
+            let inventory = retirement::inventory(&ctx.db, tenant.tenant_id)
+                .await
+                .unwrap();
+            assert_eq!(inventory.shared_user_accounts, 1);
+            assert_eq!(inventory.external_workspace_forks, 0);
+            let body = serde_json::to_value(inventory).unwrap();
+            assert!(!body.to_string().contains(&first.owner_id.to_string()));
+            assert!(!body.to_string().contains(&first.api_key));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn retirement_inventory_is_read_only_and_target_specific() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::_entities::{api_keys, workspace_workspaces};
