@@ -48,6 +48,8 @@ pub(crate) enum TestEnv {
     #[cfg(feature = "enterprise")]
     SqliteLockChildUri,
     RedisBaseUrl,
+    E5Model,
+    E5Tokenizer,
 }
 
 impl TestEnv {
@@ -97,6 +99,8 @@ impl TestEnv {
             #[cfg(feature = "enterprise")]
             Self::SqliteLockChildUri => "YORISHIRO_SQLITE_LOCK_CHILD_URI",
             Self::RedisBaseUrl => "YORISHIRO_TEST_REDIS_BASE_URL",
+            Self::E5Model => "YORISHIRO_TEST_E5_MODEL",
+            Self::E5Tokenizer => "YORISHIRO_TEST_E5_TOKENIZER",
         }
     }
 
