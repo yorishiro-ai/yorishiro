@@ -154,7 +154,7 @@ pub(crate) async fn accept_existing_user(
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
     let txn = crate::db::begin_write(db).await.internal()?;
-    let invite = accept_in_transaction(&txn, raw_token, &user).await?;
+    let invite = super::accept_in_transaction(&txn, raw_token, &user).await?;
     txn.commit().await.internal()?;
     Ok((user, invite))
 }
@@ -182,12 +182,12 @@ pub(crate) async fn accept_authenticated_user(
         .await
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
-    let invite = accept_in_transaction(&txn, raw_token, &user).await?;
+    let invite = super::accept_in_transaction(&txn, raw_token, &user).await?;
     txn.commit().await.internal()?;
     Ok((user, invite))
 }
 
-async fn accept_in_transaction(
+pub(crate) async fn accept_in_transaction(
     txn: &DatabaseTransaction,
     raw_token: &str,
     user: &crate::models::user_users::Model,

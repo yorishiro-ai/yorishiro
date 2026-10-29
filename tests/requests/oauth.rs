@@ -26,6 +26,82 @@ const ISSUER_URL: &str = "http://127.0.0.1:1";
 const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
 
+#[tokio::test]
+async fn verified_subject_accepts_invite_without_workspace_or_key() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use yorishiro::edition::ee::{
+        models::user_users as oauth_users, services::oauth::CallbackIdentity,
+    };
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{user_users, workspace_invites};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = super::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            super::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let subject = uuid::Uuid::new_v4().to_string();
+        let user = user_users::ActiveModel {
+            email: Set(super::fixtures::unique_email("oauth-invite-only")),
+            oauth_provider: Set(Some("oidc".into())),
+            oauth_subject_id: Set(Some(subject.clone())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let (invite, token) = workspace_invites::create_invite(
+            &ctx.db,
+            tenant.tenant_id,
+            &user.email,
+            MembershipRole::Viewer,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        let mut identity = CallbackIdentity {
+            subject_id: uuid::Uuid::new_v4().to_string(),
+            email: Some(user.email.clone()),
+            display_name: None,
+        };
+        assert!(matches!(
+            oauth_users::accept_invite(&ctx.db, &identity, &token).await,
+            Err(yorishiro::YorishiroError::Unauthenticated)
+        ));
+        assert!(
+            workspace_invites::Entity::find_by_id(invite.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .used_at
+                .is_none()
+        );
+        identity.subject_id = subject;
+        // The verified subject, not a mutable provider email claim, selects the stored account.
+        identity.email = Some("unrelated@example.com".into());
+        let (accepted, redeemed) = oauth_users::accept_invite(&ctx.db, &identity, &token)
+            .await
+            .unwrap();
+        assert_eq!(accepted.id, user.id);
+        assert_eq!(redeemed.tenant_id, tenant.tenant_id);
+        assert!(accepted.password_hash.is_none());
+        assert!(
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            oauth_users::accept_invite(&ctx.db, &identity, &token)
+                .await
+                .is_err()
+        );
+    })
+    .await;
+}
+
 const OAUTH_VARS: [&str; 3] = [
     crate::env::TestEnv::OauthIssuerUrl.name(),
     crate::env::TestEnv::OauthClientId.name(),
