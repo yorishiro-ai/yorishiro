@@ -6,6 +6,60 @@ use yorishiro::models::tenant_tenants::retirement;
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
+async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::_entities::tenant_retirement_events::Column as EventColumn;
+    use yorishiro::models::{
+        api_keys, query_embedding_requests as queries, queue_job_lifecycles as jobs,
+        tenant_retirement_events, tenant_tenants,
+    };
+
+    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db, target.workspace_id, api_keys::ApiKeyScope::Read, Some(target.owner_id), false,
+        ).await.unwrap();
+        let actor = api_keys::AuthContext {
+            api_key_id: key.id, workspace_id: target.workspace_id, tenant_id: target.tenant_id,
+            user_id: Some(target.owner_id), scope: api_keys::ApiKeyScope::Read, audit: false,
+        };
+        let job_id = uuid::Uuid::now_v7();
+        jobs::Entity::record_enqueue(&ctx.db, jobs::Enqueue {
+            id: job_id, job_name: "retirement-rollback", worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
+            workspace_id: Some(target.workspace_id), plan: None, concurrency_key: None, concurrency_limit: None,
+        }).await.unwrap();
+        let query_id = queries::Entity::open(&ctx.db, target.workspace_id, "retirement rollback", 60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1)).await.unwrap();
+        let before = retirement::inventory(&ctx.db, target.tenant_id).await.unwrap();
+        // Isolated DDL makes the final audit write fail after the earlier mutations execute.
+        ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events ADD CONSTRAINT reject_retirement_audit CHECK (false)")
+            .await.unwrap();
+        let error = retirement::disable_as(&ctx.db, &actor, target.tenant_id).await.unwrap_err();
+        assert!(error.to_string().contains("reject_retirement_audit"), "{error}");
+        assert!(tenant_tenants::Model::find_by_id(&ctx.db, target.tenant_id).await.unwrap().disabled_at.is_none());
+        assert_eq!(retirement::inventory(&ctx.db, target.tenant_id).await.unwrap().api_keys, before.api_keys);
+        assert_eq!(jobs::Entity::find_by_id(job_id).one(&ctx.db).await.unwrap().unwrap().status, "queued");
+        assert_eq!(queries::Entity::find_by_id(query_id).one(&ctx.db).await.unwrap().unwrap().status, "pending");
+        assert_eq!(tenant_retirement_events::Entity::find().filter(EventColumn::TenantId.eq(target.tenant_id))
+            .count(&ctx.db).await.unwrap(), 0);
+        request.get("/api/whoami").add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .await.assert_status(axum::http::StatusCode::OK);
+        ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events DROP CONSTRAINT reject_retirement_audit")
+            .await.unwrap();
+        retirement::disable_as(&ctx.db, &actor, target.tenant_id).await.unwrap();
+        assert_eq!(jobs::Entity::find_by_id(job_id).one(&ctx.db).await.unwrap().unwrap().status, "cancelled");
+        assert_eq!(queries::Entity::find_by_id(query_id).one(&ctx.db).await.unwrap().unwrap().status, "failed");
+        assert_eq!(retirement::inventory(&ctx.db, target.tenant_id).await.unwrap().api_keys, 0);
+        assert_eq!(tenant_retirement_events::Entity::find().filter(EventColumn::TenantId.eq(target.tenant_id))
+            .count(&ctx.db).await.unwrap(), 1);
+    }).await;
+}
+
+#[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence() {
     if !crate::require_postgres_backend() {
         return;
