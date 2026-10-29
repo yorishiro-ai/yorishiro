@@ -109,6 +109,44 @@ fn tool_result_json(response: &Value) -> Value {
 }
 
 #[tokio::test]
+async fn issued_read_key_reads_but_rejects_valid_mutations_over_both_transports() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"template_id":"task-management"})).await.assert_status(StatusCode::CREATED);
+        let created = request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"name":"read-transport-contract","scope":"read"})).await;
+        assert_eq!(created.status_code(), StatusCode::CREATED);
+        let key = created.json::<Value>()["full_key"].as_str().unwrap().to_owned();
+        request.get("/api/entities").add_query_param("schema_name", "task-management")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await.assert_status(StatusCode::OK);
+        let session = initialize(&request).await;
+        let read = mcp_call(&request, &session, &key, 2, "tools/call",
+            json!({"name":"list_entities","arguments":{"schema_name":"task-management"}})).await;
+        assert_ne!(read["result"]["isError"], true, "{read}");
+        let entity = json!({"schema_name":"task-management","entity_type":"task","data":{"title":"denied task"}});
+        let schema = json!({"template_id":"general-notes"});
+        let migration = json!({"schema_name":"task-management"});
+        for (path, body) in [("/api/entities", &entity), ("/api/schemas", &schema), ("/api/migration-jobs/fill-defaults", &migration)] {
+            request.post(path).add_header("Authorization", format!("Bearer {key}"))
+                .json(body).await.assert_status(StatusCode::FORBIDDEN);
+        }
+        for (id, name, arguments, scope) in [
+            (3, "create_entity", entity, "write"),
+            (4, "create_schema", schema, "schema"),
+            (5, "fill_defaults", migration, "migration"),
+        ] {
+            let denied = mcp_call(&request, &session, &key, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(denied["result"]["isError"], true, "{denied}");
+            assert_eq!(denied["result"]["structuredContent"]["error"]["required_scope"], scope, "{denied}");
+        }
+    }).await;
+}
+
+#[tokio::test]
 async fn mcp_whoami_matches_rest_identity_without_secrets() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
