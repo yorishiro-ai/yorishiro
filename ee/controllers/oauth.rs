@@ -28,6 +28,56 @@ use crate::edition::ee::services::oauth;
 
 /// Name of the CSRF cookie `authorize` sets and `callback` reads back.
 const CSRF_COOKIE_NAME: &str = "ysr_oauth_csrf";
+const INVITE_COOKIE_NAME: &str = "ysr_oauth_invite";
+
+/// Starts a browser-bound OAuth flow for an existing account's invitation.
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/oauth/invites/accept", request_body = crate::edition::ee::dtos::oauth::AcceptInviteRequest, responses((status = 302, description = "Redirects to the identity provider"), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+async fn accept_invite(
+    State(ctx): State<AppContext>,
+    Json(body): Json<crate::edition::ee::dtos::oauth::AcceptInviteRequest>,
+) -> Result<Response, ApiError> {
+    let config = OAuthConfig::from_config(&ctx.config)?.ok_or_else(not_found)?;
+    if body.invite_token.len() != 48
+        || !body
+            .invite_token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err(YorishiroError::ValidationFailed {
+            message: "invalid invite token".into(),
+            details: vec![],
+            hint: "use the token from the invitation".into(),
+        }
+        .into());
+    }
+    let redirect = oauth::build_authorize_redirect(&config).await?;
+    let payload = format!("{}.{}", redirect.csrf_cookie_value, body.invite_token);
+    let signature = crate::edition::ee::controllers::hmac_sign::sign(
+        &config.state_signing_key,
+        payload.as_bytes(),
+    );
+    let secure = if config.cookies_require_secure() {
+        "; Secure"
+    } else {
+        ""
+    };
+    let invite_cookie = format!(
+        "{INVITE_COOKIE_NAME}={payload}.{signature}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age={}{}",
+        state_token::STATE_TTL_SECS,
+        secure
+    );
+    Ok((
+        [
+            (
+                header::SET_COOKIE,
+                csrf_set_cookie(&redirect.csrf_cookie_value, config.cookies_require_secure()),
+            ),
+            (header::SET_COOKIE, invite_cookie),
+        ],
+        Redirect::to(&redirect.url),
+    )
+        .into_response())
+}
 
 fn not_found() -> ApiError {
     YorishiroError::not_found("OAuth login is not configured on this deployment").into()
@@ -79,7 +129,10 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
     let set_cookie = csrf_set_cookie(&redirect.csrf_cookie_value, config.cookies_require_secure());
 
     Ok((
-        [(header::SET_COOKIE, set_cookie)],
+        [
+            (header::SET_COOKIE, set_cookie),
+            (header::SET_COOKIE, clear_invite_cookie()),
+        ],
         Redirect::to(&redirect.url),
     )
         .into_response())
@@ -110,6 +163,34 @@ async fn callback(
     let identity =
         oauth::handle_callback(&config, &code, &request_state, csrf_cookie_value.as_deref())
             .await?;
+
+    if let Some(cookie) = read_cookie(&headers, INVITE_COOKIE_NAME) {
+        let (payload, signature) = cookie
+            .rsplit_once('.')
+            .ok_or(YorishiroError::Unauthenticated)?;
+        let (csrf, token) = payload
+            .split_once('.')
+            .ok_or(YorishiroError::Unauthenticated)?;
+        if csrf_cookie_value.as_deref() != Some(csrf)
+            || !crate::edition::ee::controllers::hmac_sign::verify(
+                &config.state_signing_key,
+                payload.as_bytes(),
+                signature,
+            )
+        {
+            return Err(YorishiroError::Unauthenticated.into());
+        }
+        crate::edition::ee::models::user_users::accept_invite(&ctx.db, &identity, token).await?;
+        return Ok((
+            StatusCode::FOUND,
+            [
+                (header::LOCATION, "/#/login?invite=accepted".to_owned()),
+                (header::SET_COOKIE, clear_cookie),
+                (header::SET_COOKIE, clear_invite_cookie()),
+            ],
+        )
+            .into_response());
+    }
 
     let max_tenants = ctx
         .shared_store
@@ -158,6 +239,7 @@ pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDo
         crate::controllers::route_inventory::path_doc(__path_status),
         crate::controllers::route_inventory::path_doc(__path_authorize),
         crate::controllers::route_inventory::path_doc(__path_callback),
+        crate::controllers::route_inventory::path_doc(__path_accept_invite),
     ]
 }
 
@@ -169,6 +251,7 @@ fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {
         [
             (header::LOCATION, location),
             (header::SET_COOKIE, clear_cookie),
+            (header::SET_COOKIE, clear_invite_cookie()),
         ],
     )
         .into_response()
@@ -181,17 +264,24 @@ fn login_failure_redirect(clear_cookie: String) -> Response {
         [
             (header::LOCATION, location),
             (header::SET_COOKIE, clear_cookie),
+            (header::SET_COOKIE, clear_invite_cookie()),
         ],
     )
         .into_response()
 }
 
+fn clear_invite_cookie() -> String {
+    format!("{INVITE_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=0")
+}
+
 pub fn routes() -> Routes {
     use axum::routing::get;
+    use axum::routing::post;
 
     Routes::new()
         .prefix("auth/oauth")
         .add("/status", get(status))
         .add("/authorize", get(authorize))
         .add("/callback", get(callback))
+        .add("/invites/accept", post(accept_invite))
 }

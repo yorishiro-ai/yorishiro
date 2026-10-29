@@ -27,6 +27,113 @@ const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
 
 #[tokio::test]
+#[serial(process_environment)]
+async fn invite_authorization_keeps_token_out_of_redirect_and_binds_cookies() {
+    let stub = crate::http_stub::HttpStub::start(axum::Router::new().route(
+        "/.well-known/openid-configuration",
+        axum::routing::get(|| async {
+            axum::Json(serde_json::json!({
+                "authorization_endpoint":"https://idp.example.com/authorize",
+                "token_endpoint":"https://idp.example.com/token",
+                "jwks_uri":"https://idp.example.com/jwks"
+            }))
+        }),
+    ))
+    .await;
+    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
+    guard.set(crate::env::TestEnv::OauthIssuerUrl.name(), &stub.url);
+    guard.set(crate::env::TestEnv::OauthClientId.name(), CLIENT_ID);
+    guard.set(crate::env::TestEnv::OauthClientSecret.name(), CLIENT_SECRET);
+    boot_request::<App, _, _>(|request, ctx| async move {
+        require_licence(&ctx);
+        request
+            .post("/auth/oauth/invites/accept")
+            .json(&serde_json::json!({"invite_token":"invalid"}))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        let token = "a".repeat(48);
+        let response = request
+            .post("/auth/oauth/invites/accept")
+            .json(&serde_json::json!({"invite_token":token}))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::FOUND);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(!location.contains(&token));
+        let url = reqwest::Url::parse(location).unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let cookies = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(cookies.len(), 2);
+        for cookie in &cookies {
+            assert!(
+                cookie.contains("HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=600")
+            );
+        }
+        let csrf = cookies
+            .iter()
+            .find(|value| value.starts_with("ysr_oauth_csrf="))
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .split_once('=')
+            .unwrap()
+            .1;
+        let invite = cookies
+            .iter()
+            .find(|value| value.starts_with("ysr_oauth_invite="))
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .split_once('=')
+            .unwrap()
+            .1;
+        let (payload, signature) = invite.rsplit_once('.').unwrap();
+        assert_eq!(payload, format!("{csrf}.{token}"));
+        assert!(yorishiro::edition::ee::controllers::hmac_sign::verify(
+            CLIENT_SECRET.as_bytes(),
+            payload.as_bytes(),
+            signature
+        ));
+        let verified = yorishiro::edition::ee::controllers::oauth::state_token::verify(
+            CLIENT_SECRET.as_bytes(),
+            &state,
+        )
+        .unwrap();
+        assert_eq!(
+            verified.csrf_hash,
+            yorishiro::edition::ee::controllers::oauth::state_token::hash_csrf_cookie(csrf)
+        );
+        request
+            .get("/auth/oauth/callback")
+            .add_query_param("code", "unused")
+            .add_query_param("state", &state)
+            .add_header(
+                header::COOKIE,
+                format!("ysr_oauth_csrf=wrong; ysr_oauth_invite={invite}"),
+            )
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn verified_subject_accepts_invite_without_workspace_or_key() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use yorishiro::edition::ee::{
