@@ -756,15 +756,30 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         .expect("the linked schema must be active");
         assert_eq!(schema.id, schema_id);
         assert_eq!(schema.name, "general-notes");
-        let grants = yorishiro::models::workspace_memberships::Entity::find()
+        use sea_orm::{ColumnTrait, QueryFilter};
+        use yorishiro::models::_entities::tenant_memberships;
+        let memberships = tenant_memberships::Entity::find()
+            .filter(tenant_memberships::Column::TenantId.eq(workspace.tenant_id))
             .all(&ctx.db)
             .await
-            .expect("explicit OAuth workspace grant");
-        assert_eq!(grants.len(), 1);
-        assert_eq!(grants[0].workspace_id, workspace.id);
-        assert_eq!(grants[0].role, "member");
+            .expect("OAuth tenant owner");
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].role, "owner");
+        let access = yorishiro::models::access::workspace_access(
+            &ctx.db,
+            workspace.tenant_id,
+            workspace.id,
+            memberships[0].user_id,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            access.max_scope,
+            yorishiro::models::api_keys::ApiKeyScope::Migration
+        );
         let candidates =
-            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, grants[0].user_id)
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, memberships[0].user_id)
                 .await
                 .expect("OAuth workspace discovery");
         assert_eq!(candidates.len(), 1);

@@ -26,7 +26,7 @@ pub struct ProvisionedLogin {
 ///
 /// New tenants/workspaces are named after the email's local part (e.g. `alice` from `alice@example.com`) since there is no signup form here to ask for a name.
 /// An admin can rename either afterward through the existing dashboard/API.
-/// The new member's role is always `member`; an existing identity keeps whatever role it already holds.
+/// The creator is the new tenant's owner; an existing identity keeps its current role.
 /// The new workspace gets a schema from the built-in `general-notes` template rather than being left `schema_pending`, since an auto-provisioned SSO login has no admin present afterward to choose one.
 /// The whole first-login path (user row, tenant, workspace, membership) runs in one transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`: a crash partway through rolls everything back rather than leaving an orphaned user row with no tenant membership, and the lock also serializes concurrent first logins for the same identity.
 /// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` so that requirement is enforced by the signature: every advisory lock taken here and in the `create_workspace` it calls is transaction-scoped, and handed a pool each one would be released before the work it guards.
@@ -111,20 +111,13 @@ pub async fn find_or_create(
     };
     let workspace = workspace_active.update(conn).await.internal()?;
 
-    tenant_memberships::add_member_in_transaction(conn, tenant.id, user.id, MembershipRole::Member)
+    tenant_memberships::add_member_in_transaction(conn, tenant.id, user.id, MembershipRole::Owner)
         .await?;
-    crate::models::workspace_memberships::Model::grant(
-        conn,
-        workspace.id,
-        user.id,
-        crate::models::workspace_memberships::WorkspaceRole::Member,
-    )
-    .await?;
 
     Ok(ProvisionedLogin {
         user_id: user.id,
         workspace_id: workspace.id,
-        scope: MembershipRole::Member.max_scope(),
+        scope: MembershipRole::Owner.max_scope(),
     })
 }
 
