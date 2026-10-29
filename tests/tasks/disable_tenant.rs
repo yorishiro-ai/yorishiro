@@ -11,6 +11,45 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 #[tokio::test]
+async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::ConnectionTrait;
+    use tenant_tenants::retirement;
+    use yorishiro::models::workspace_workspaces;
+
+    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
+        let before = retirement::inventory(&ctx.db, target.tenant_id).await.unwrap();
+        // Fail the last write without interfering with the already-committed disable event.
+        ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events ADD CONSTRAINT reject_deleted_event CHECK (action <> 'deleted')")
+            .await.unwrap();
+        let error = retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap_err();
+        assert!(error.to_string().contains("reject_deleted_event"), "{error}");
+        assert!(tenant_tenants::Model::find_by_id(&ctx.db, target.tenant_id).await.unwrap().disabled_at.is_some());
+        assert!(workspace_workspaces::Entity::find_by_id(target.workspace_id).one(&ctx.db).await.unwrap().is_some());
+        let after = retirement::inventory(&ctx.db, target.tenant_id).await.unwrap();
+        assert_eq!(serde_json::to_value(&after).unwrap(), serde_json::to_value(&before).unwrap());
+        let events = tenant_retirement_events::Entity::find().filter(Column::TenantId.eq(target.tenant_id))
+            .all(&ctx.db).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].action, "disabled");
+        request.get("/api/whoami").add_header("Authorization", format!("Bearer {}", target.api_key))
+            .await.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+        ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events DROP CONSTRAINT reject_deleted_event")
+            .await.unwrap();
+        retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
+        assert!(tenant_tenants::Entity::find_by_id(target.tenant_id).one(&ctx.db).await.unwrap().is_none());
+        let events = tenant_retirement_events::Entity::find().filter(Column::TenantId.eq(target.tenant_id))
+            .all(&ctx.db).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events.iter().filter(|event| event.action == "deleted").count(), 1);
+    }).await;
+}
+
+#[tokio::test]
 async fn irreversible_cleanup_requires_disablement_and_preserves_shared_identities() {
     if !crate::require_postgres_backend() {
         return;
