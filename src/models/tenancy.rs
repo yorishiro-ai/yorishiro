@@ -376,3 +376,42 @@ pub async fn create_workspace(
 
     active.insert(conn).await.internal()
 }
+
+/// Creates a workspace after revalidating tenant administration under the membership fence.
+///
+/// # Errors
+/// Rejects revoked credentials, lost administration, invalid input or workspace limits.
+pub async fn create_workspace_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    name: &str,
+    max_entities: Option<i32>,
+    schema_id: Option<Uuid>,
+) -> Result<workspace_workspaces::Model, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let workspace = create_workspace(&txn, actor.tenant_id, name, max_entities, schema_id).await?;
+    txn.commit().await.internal()?;
+    Ok(workspace)
+}
+
+/// Deletes a workspace after revalidating tenant administration and target ownership.
+///
+/// # Errors
+/// Rejects revoked credentials, lost administration, foreign targets or the last workspace.
+pub async fn delete_workspace_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    if crate::models::workspace_workspaces::get_workspace_tenant(&txn, workspace_id).await?
+        != actor.tenant_id
+    {
+        return Err(YorishiroError::not_found("workspace not found"));
+    }
+    crate::models::workspace_workspaces::delete_workspace(&txn, workspace_id).await?;
+    txn.commit().await.internal()?;
+    Ok(())
+}

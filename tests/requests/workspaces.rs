@@ -109,6 +109,77 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 }
 
 #[tokio::test]
+async fn workspace_mutations_recheck_stale_administrator_contexts() {
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::{api_keys, tenancy, workspace_memberships::WorkspaceRole};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let admin = tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("workspace-stale-admin"),
+            "hunter2-hunter2",
+            None,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        yorishiro::models::workspace_memberships::Model::grant(
+            &txn,
+            tenant.workspace_id,
+            admin.id,
+            WorkspaceRole::Member,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            api_keys::ApiKeyScope::Read,
+            Some(admin.id),
+            false,
+        )
+        .await
+        .unwrap();
+        let actor = api_keys::AuthContext {
+            api_key_id: key.id,
+            workspace_id: tenant.workspace_id,
+            tenant_id: tenant.tenant_id,
+            user_id: Some(admin.id),
+            scope: api_keys::ApiKeyScope::Read,
+            audit: false,
+        };
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Member)
+            .await
+            .unwrap();
+        assert!(matches!(
+            tenancy::create_workspace_as(&ctx.db, &actor, "must-not-create", None, None).await,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+        ));
+        assert!(matches!(
+            tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+        ));
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
+            .await
+            .unwrap();
+        api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+        assert!(matches!(
+            tenancy::create_workspace_as(&ctx.db, &actor, "must-not-create", None, None).await,
+            Err(yorishiro::YorishiroError::Unauthenticated)
+        ));
+        assert!(matches!(
+            tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
+            Err(yorishiro::YorishiroError::Unauthenticated)
+        ));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn cannot_delete_a_tenants_only_workspace() {
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let TestTenant {
