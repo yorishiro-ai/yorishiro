@@ -164,6 +164,10 @@ impl RouteMounts {
             controllers::members::openapi_docs()
         );
         mount!(
+            controllers::tenants::routes(),
+            controllers::tenants::openapi_docs()
+        );
+        mount!(
             controllers::relations::routes(),
             controllers::relations::openapi_docs()
         );

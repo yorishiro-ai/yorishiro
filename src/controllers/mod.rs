@@ -23,3 +23,5 @@ pub mod whoami;
 pub mod workspaces;
 
 pub use error::ApiError;
+
+pub mod tenants;

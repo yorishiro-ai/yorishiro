@@ -10,5 +10,6 @@ pub mod search;
 pub mod setup;
 pub mod system;
 pub mod template_library;
+pub mod tenants;
 pub mod whoami;
 pub mod workspaces;

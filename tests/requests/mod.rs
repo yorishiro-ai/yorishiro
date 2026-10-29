@@ -457,3 +457,5 @@ pub(crate) async fn workspace_txn(
         .await
         .expect("begin workspace transaction")
 }
+
+pub mod tenants;

@@ -14,6 +14,7 @@ use crate::models::_entities::{
 
 /// A secret-free snapshot, not approval for a later destructive operation.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RetirementInventory {
     pub tenant_id: Uuid,
     pub tenant_name: String,
@@ -33,6 +34,21 @@ pub struct RetirementInventory {
     pub templates: u64,
     /// Identities are always retained, including accounts belonging to no other tenant.
     pub identity_policy: &'static str,
+}
+
+/// Returns a retirement snapshot for the current tenant owner without changing tenant data.
+///
+/// # Errors
+/// Rejects stale or non-owner credentials and propagates inventory failures.
+pub async fn inventory_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+) -> Result<RetirementInventory, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    let snapshot = inventory(&txn, actor.tenant_id).await?;
+    txn.rollback().await.internal()?;
+    Ok(snapshot)
 }
 
 /// Disables the owner's tenant without deleting retained data or user identities.
