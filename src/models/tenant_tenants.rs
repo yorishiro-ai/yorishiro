@@ -2,6 +2,7 @@ pub use crate::models::_entities::tenant_tenants::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
 mod operations;
+pub mod retirement;
 
 pub(crate) use operations::count_tenants;
 pub use operations::create_tenant;
