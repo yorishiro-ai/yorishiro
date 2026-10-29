@@ -6,6 +6,113 @@ use yorishiro::models::tenant_tenants::retirement;
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
+async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
+    use yorishiro::models::{query_embedding_requests as queries, queue_job_lifecycles as jobs};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut ids = Vec::new();
+        for workspace_id in [target.workspace_id, other.workspace_id] {
+            let id = uuid::Uuid::now_v7();
+            jobs::Entity::record_enqueue(
+                &ctx.db,
+                jobs::Enqueue {
+                    id,
+                    job_name: "test",
+                    worker_class: yorishiro::workers::embedding_sync::WorkerClass::Shared,
+                    workspace_id: Some(workspace_id),
+                    plan: None,
+                    concurrency_key: None,
+                    concurrency_limit: None,
+                },
+            )
+            .await
+            .unwrap();
+            ids.push(id);
+        }
+        let query = queries::Entity::open(
+            &ctx.db,
+            target.workspace_id,
+            "pending",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+        let txn = ctx.db.begin().await.unwrap();
+        assert!(
+            retirement::cancel_work(&txn, target.tenant_id)
+                .await
+                .is_err()
+        );
+        txn.rollback().await.unwrap();
+        let txn = ctx.db.begin().await.unwrap();
+        yorishiro::models::tenant_tenants::ActiveModel {
+            id: Set(target.tenant_id),
+            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await
+        .unwrap();
+        retirement::cancel_work(&txn, target.tenant_id)
+            .await
+            .unwrap();
+        retirement::cancel_work(&txn, target.tenant_id)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        assert_eq!(
+            jobs::Entity::find_by_id(ids[0])
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "cancelled"
+        );
+        assert_eq!(
+            jobs::Entity::find_by_id(ids[1])
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "queued"
+        );
+        assert!(
+            jobs::Entity::finish(
+                &ctx.db,
+                ids[0],
+                Some(1),
+                jobs::LifecycleStatus::Completed,
+                None
+            )
+            .await
+            .is_err()
+        );
+        assert!(matches!(
+            jobs::Entity::start_at(&ctx.db, ids[0], chrono::Utc::now().fixed_offset())
+                .await
+                .unwrap(),
+            jobs::Admission::Terminal
+        ));
+        assert_eq!(
+            queries::Entity::take(&ctx.db, target.workspace_id, query)
+                .await
+                .unwrap(),
+            Some(queries::QueryOutcome::Failed("tenant disabled".into()))
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
     if !crate::require_postgres_backend() {
         return;

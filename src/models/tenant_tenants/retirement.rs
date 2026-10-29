@@ -35,6 +35,91 @@ pub struct RetirementInventory {
     pub identity_policy: &'static str,
 }
 
+/// Cancels retained background work for an already-disabled tenant.
+/// The caller must commit this transaction together with disablement and credential revocation.
+///
+/// # Errors
+/// Rejects active or infrastructure tenants and propagates database failures.
+pub async fn cancel_work(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::query_embedding_requests;
+    use sea_orm::sea_query::Expr;
+    if tenant_id == super::INFRASTRUCTURE_TENANT_ID {
+        return Err(YorishiroError::Unauthenticated);
+    }
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    if super::Model::find_by_id(txn, tenant_id)
+        .await?
+        .disabled_at
+        .is_none()
+    {
+        return Err(YorishiroError::Conflict {
+            message: "disable the tenant before cancelling its work".into(),
+        });
+    }
+    let workspaces = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
+        .all(txn)
+        .await
+        .internal()?
+        .into_iter()
+        .map(|row| row.id)
+        .collect::<Vec<_>>();
+    let now = crate::time::now();
+    queue_job_lifecycles::Entity::update_many()
+        .col_expr(
+            queue_job_lifecycles::Column::Status,
+            Expr::value("cancelled"),
+        )
+        .col_expr(queue_job_lifecycles::Column::CancelledAt, Expr::value(now))
+        .col_expr(queue_job_lifecycles::Column::UpdatedAt, Expr::value(now))
+        .col_expr(
+            queue_job_lifecycles::Column::LeaseUntil,
+            Expr::value(Option::<chrono::DateTime<chrono::FixedOffset>>::None),
+        )
+        .col_expr(
+            queue_job_lifecycles::Column::Error,
+            Expr::value("tenant disabled"),
+        )
+        .filter(queue_job_lifecycles::Column::WorkspaceId.is_in(workspaces.clone()))
+        .filter(queue_job_lifecycles::Column::Status.is_not_in(["completed", "cancelled"]))
+        .exec(txn)
+        .await
+        .internal()?;
+    queue_job_dispatch_outbox::Entity::delete_many()
+        .filter(queue_job_dispatch_outbox::Column::WorkspaceId.is_in(workspaces.clone()))
+        .exec(txn)
+        .await
+        .internal()?;
+    query_embedding_requests::Entity::update_many()
+        .col_expr(
+            query_embedding_requests::Column::Status,
+            Expr::value("failed"),
+        )
+        .col_expr(
+            query_embedding_requests::Column::Error,
+            Expr::value("tenant disabled"),
+        )
+        .col_expr(
+            query_embedding_requests::Column::CompletedAt,
+            Expr::value(now),
+        )
+        .col_expr(
+            query_embedding_requests::Column::UpdatedAt,
+            Expr::value(now),
+        )
+        .filter(query_embedding_requests::Column::WorkspaceId.is_in(workspaces))
+        .filter(query_embedding_requests::Column::Status.eq("pending"))
+        .exec(txn)
+        .await
+        .internal()?;
+    Ok(())
+}
+
 /// Inventories one tenant without changing credentials, memberships, jobs or data.
 /// This operator entry point requires a trusted identity connection, not a tenant-scoped pool.
 ///
