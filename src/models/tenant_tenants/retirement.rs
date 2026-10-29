@@ -18,6 +18,7 @@ use crate::models::_entities::{
 pub struct RetirementInventory {
     pub tenant_id: Uuid,
     pub tenant_name: String,
+    pub disabled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub workspace_ids: Vec<Uuid>,
     pub memberships: u64,
     pub shared_user_accounts: u64,
@@ -452,6 +453,7 @@ pub async fn inventory(
     Ok(RetirementInventory {
         tenant_id,
         tenant_name: tenant.name,
+        disabled_at: tenant.disabled_at,
         workspace_ids,
         memberships,
         shared_user_accounts,

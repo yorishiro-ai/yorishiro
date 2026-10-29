@@ -213,6 +213,11 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let task = Some("disable_tenant".to_owned());
+        let active = tenant_tenants::retirement::inventory(&ctx.db, target.tenant_id)
+            .await
+            .unwrap();
+        assert!(active.disabled_at.is_none());
+        assert!(serde_json::to_value(&active).unwrap()["disabled_at"].is_null());
         for args in [
             vec![("tenant_id".into(), target.tenant_id.to_string())],
             vec![
@@ -267,6 +272,8 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
             .await
             .unwrap();
         assert_eq!(inventory.api_keys, 0);
+        assert_eq!(inventory.disabled_at, disabled_at);
+        assert!(serde_json::to_value(&inventory).unwrap()["disabled_at"].is_string());
         assert!(inventory.workspace_ids.contains(&target.workspace_id));
         request
             .get("/api/whoami")
