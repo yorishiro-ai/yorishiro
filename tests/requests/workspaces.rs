@@ -2,6 +2,7 @@ use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
+use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::tenant_memberships::{self, MembershipRole};
 use yorishiro::models::user_users;
@@ -365,7 +366,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
         let sibling = request
             .post("/api/workspaces")
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .json(&serde_json::json!({"name":"sibling"}))
+            .json(&serde_json::json!({"name":format!("sibling-{}", Uuid::new_v4())}))
             .await;
         sibling.assert_status(StatusCode::CREATED);
         let sibling_id = sibling.json::<serde_json::Value>()["id"]
@@ -414,7 +415,7 @@ async fn workspace_inventory_respects_direct_grants_and_service_binding() {
         let response = request
             .post("/api/workspaces")
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .json(&serde_json::json!({"name":"private-sibling"}))
+            .json(&serde_json::json!({"name":format!("private-sibling-{}", Uuid::new_v4())}))
             .await;
         assert_eq!(response.status_code(), StatusCode::CREATED);
         let sibling = response.json::<serde_json::Value>()["id"]
