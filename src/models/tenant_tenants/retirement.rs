@@ -1,4 +1,4 @@
-//! Read-only retirement inventory for an operator's explicitly selected tenant.
+//! Tenant retirement inventory and fenced lifecycle operations.
 
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
@@ -33,6 +33,56 @@ pub struct RetirementInventory {
     pub templates: u64,
     /// Identities are always retained, including accounts belonging to no other tenant.
     pub identity_policy: &'static str,
+}
+
+/// Disables the owner's tenant without deleting retained data or user identities.
+/// Confirmation names the tenant UUID, not a workspace or a mutable display name.
+///
+/// # Errors
+/// Rejects stale or non-owner credentials, mismatched confirmation and infrastructure tenants.
+/// Database failures roll back disablement, key revocation, work cancellation and audit together.
+pub async fn disable_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    confirmed_tenant_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
+    if confirmed_tenant_id != actor.tenant_id
+        || confirmed_tenant_id == super::INFRASTRUCTURE_TENANT_ID
+    {
+        return Err(YorishiroError::ValidationFailed {
+            message: "tenant retirement confirmation does not match the target".into(),
+            details: vec![],
+            hint: "confirm the non-infrastructure tenant UUID explicitly".into(),
+        });
+    }
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let user_id = crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    super::ActiveModel {
+        id: Set(actor.tenant_id),
+        disabled_at: Set(Some(crate::time::now().fixed_offset())),
+        ..Default::default()
+    }
+    .update(&txn)
+    .await
+    .internal()?;
+    api_keys::Entity::delete_many()
+        .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
+        .exec(&txn)
+        .await
+        .internal()?;
+    cancel_work(&txn, actor.tenant_id).await?;
+    crate::models::tenant_retirement_events::ActiveModel {
+        tenant_id: Set(actor.tenant_id),
+        actor_user_id: Set(Some(user_id)),
+        action: Set("disabled".into()),
+        ..Default::default()
+    }
+    .insert(&txn)
+    .await
+    .internal()?;
+    txn.commit().await.internal()
 }
 
 /// Cancels retained background work for an already-disabled tenant.

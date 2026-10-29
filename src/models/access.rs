@@ -229,6 +229,24 @@ pub(crate) async fn require_current_tenant_admin(
     require_tenant_admin(txn, current.tenant_id, current.user_id).await
 }
 
+/// Requires current owner authority under the shared membership fence.
+pub(crate) async fn require_current_tenant_owner(
+    txn: &DatabaseTransaction,
+    actor: &AuthContext,
+) -> Result<Uuid, YorishiroError> {
+    require_current_tenant_admin(txn, actor).await?;
+    let user_id = actor.user_id.ok_or(YorishiroError::Unauthenticated)?;
+    if tenant_memberships::get_membership_role(txn, actor.tenant_id, user_id).await?
+        != Some(MembershipRole::Owner)
+    {
+        return Err(YorishiroError::ScopeInsufficient {
+            message: "only a tenant owner can retire the tenant".into(),
+            hint: "ask a current tenant owner to perform this operation".into(),
+        });
+    }
+    Ok(user_id)
+}
+
 /// Serializes credential issuance with membership updates and checks attribution.
 pub(crate) async fn require_attributed_key_grant(
     txn: &DatabaseTransaction,

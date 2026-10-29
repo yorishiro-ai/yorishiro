@@ -6,6 +6,185 @@ use yorishiro::models::tenant_tenants::retirement;
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
+async fn confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::_entities::tenant_retirement_events::Column as RetirementEventColumn;
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{
+        api_keys, tenant_memberships, tenant_retirement_events, tenant_tenants,
+    };
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            target.workspace_id,
+            api_keys::ApiKeyScope::Read,
+            Some(target.owner_id),
+            false,
+        )
+        .await
+        .unwrap();
+        let actor = api_keys::AuthContext {
+            api_key_id: key.id,
+            workspace_id: target.workspace_id,
+            tenant_id: target.tenant_id,
+            user_id: Some(target.owner_id),
+            scope: api_keys::ApiKeyScope::Read,
+            audit: false,
+        };
+        tenant_memberships::add_member(
+            &ctx.db,
+            target.tenant_id,
+            other.owner_id,
+            MembershipRole::Owner,
+        )
+        .await
+        .unwrap();
+        let pending = yorishiro::models::query_embedding_requests::Entity::open(
+            &ctx.db,
+            target.workspace_id,
+            "retirement query",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+        let before = retirement::inventory(&ctx.db, target.tenant_id)
+            .await
+            .unwrap();
+        assert!(
+            retirement::disable_as(&ctx.db, &actor, other.tenant_id)
+                .await
+                .is_err()
+        );
+        let service = api_keys::Entity::create_api_key(
+            &ctx.db,
+            target.workspace_id,
+            api_keys::ApiKeyScope::Migration,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let service_actor = api_keys::AuthContext {
+            api_key_id: service.id,
+            user_id: None,
+            ..actor.clone()
+        };
+        assert!(
+            retirement::disable_as(&ctx.db, &service_actor, target.tenant_id)
+                .await
+                .is_err()
+        );
+        tenant_memberships::add_member(
+            &ctx.db,
+            target.tenant_id,
+            target.owner_id,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            retirement::disable_as(&ctx.db, &actor, target.tenant_id).await,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+        ));
+        assert!(
+            tenant_tenants::Model::find_by_id(&ctx.db, target.tenant_id)
+                .await
+                .unwrap()
+                .disabled_at
+                .is_none()
+        );
+        assert_eq!(
+            tenant_retirement_events::Entity::find()
+                .filter(RetirementEventColumn::TenantId.eq(target.tenant_id))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+        tenant_memberships::add_member(
+            &ctx.db,
+            target.tenant_id,
+            target.owner_id,
+            MembershipRole::Owner,
+        )
+        .await
+        .unwrap();
+        retirement::disable_as(&ctx.db, &actor, target.tenant_id)
+            .await
+            .unwrap();
+        assert!(
+            tenant_tenants::Model::find_by_id(&ctx.db, target.tenant_id)
+                .await
+                .unwrap()
+                .disabled_at
+                .is_some()
+        );
+        let after = retirement::inventory(&ctx.db, target.tenant_id)
+            .await
+            .unwrap();
+        assert_eq!(after.api_keys, 0);
+        assert_eq!(after.memberships, before.memberships);
+        assert_eq!(after.workspace_ids, before.workspace_ids);
+        assert_eq!(
+            yorishiro::models::query_embedding_requests::Entity::take(
+                &ctx.db,
+                target.workspace_id,
+                pending,
+            )
+            .await
+            .unwrap(),
+            Some(
+                yorishiro::models::query_embedding_requests::QueryOutcome::Failed(
+                    "tenant disabled".into()
+                )
+            )
+        );
+        let evidence = tenant_retirement_events::Entity::find()
+            .filter(RetirementEventColumn::TenantId.eq(target.tenant_id))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].actor_user_id, Some(target.owner_id));
+        assert_eq!(evidence[0].action, "disabled");
+        assert!(
+            retirement::disable_as(&ctx.db, &actor, target.tenant_id)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            tenant_retirement_events::Entity::find()
+                .filter(RetirementEventColumn::TenantId.eq(target.tenant_id))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            1
+        );
+        for key in [&target.api_key, &service.plaintext] {
+            request
+                .get("/api/whoami")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await
+                .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+        }
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", other.api_key))
+            .await
+            .assert_status(axum::http::StatusCode::OK);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
     if !crate::require_postgres_backend() {
         return;
