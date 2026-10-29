@@ -31,10 +31,10 @@ const CSRF_COOKIE_NAME: &str = "ysr_oauth_csrf";
 const INVITE_COOKIE_NAME: &str = "ysr_oauth_invite";
 
 /// Starts a browser-bound OAuth flow for an existing account's invitation.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/oauth/invites/accept", request_body = crate::edition::ee::dtos::oauth::AcceptInviteRequest, responses((status = 302, description = "Redirects to the identity provider"), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/oauth/invites/accept", request_body = crate::edition::ee::dtos::oauth::AcceptOAuthInviteRequest, responses((status = 302, description = "Redirects to the identity provider"), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
 async fn accept_invite(
     State(ctx): State<AppContext>,
-    Json(body): Json<crate::edition::ee::dtos::oauth::AcceptInviteRequest>,
+    Json(body): Json<crate::edition::ee::dtos::oauth::AcceptOAuthInviteRequest>,
 ) -> Result<Response, ApiError> {
     let config = OAuthConfig::from_config(&ctx.config)?.ok_or_else(not_found)?;
     if body.invite_token.len() != 48
