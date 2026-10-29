@@ -402,6 +402,61 @@ async fn membership_mutations_reject_stale_admin_contexts() {
 }
 
 #[tokio::test]
+async fn role_preview_reports_lost_workspaces_without_keys() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("preview-no-keys"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            user.id,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        for role in ["member", "viewer"] {
+            let response = request
+                .post(&format!("/api/members/{}/role-preview", user.id))
+                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .json(&serde_json::json!({"role": role}))
+                .await;
+            assert_eq!(response.status_code(), StatusCode::OK);
+            let preview = response.json::<serde_json::Value>();
+            assert_eq!(preview["keys"], serde_json::json!([]));
+            assert_eq!(
+                preview["lost_workspace_ids"],
+                serde_json::json!([tenant.workspace_id])
+            );
+        }
+        super::fixtures::grant_workspace(
+            &ctx,
+            tenant.workspace_id,
+            user.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Viewer,
+        )
+        .await;
+        let response = request
+            .post(&format!("/api/members/{}/role-preview", user.id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"role": "viewer"}))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+        assert_eq!(
+            response.json::<serde_json::Value>()["lost_workspace_ids"],
+            serde_json::json!([])
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn existing_keys_follow_current_role_without_widening_their_grant() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

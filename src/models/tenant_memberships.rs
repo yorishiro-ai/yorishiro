@@ -76,6 +76,7 @@ pub struct MembershipRolePreview {
     pub current_role: MembershipRole,
     pub requested_role: MembershipRole,
     pub blocked_by_last_owner: bool,
+    pub lost_workspace_ids: Vec<Uuid>,
     pub keys: Vec<MembershipKeyAccess>,
 }
 

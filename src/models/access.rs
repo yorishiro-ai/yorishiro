@@ -184,6 +184,15 @@ pub async fn workspace_access(
     else {
         return Ok(None);
     };
+    workspace_access_for_role(conn, workspace_id, user_id, tenant_role).await
+}
+
+pub(crate) async fn workspace_access_for_role(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    user_id: Uuid,
+    tenant_role: tenant_memberships::MembershipRole,
+) -> Result<Option<WorkspaceAccess>, YorishiroError> {
     if tenant_role.administers_tenant() {
         return Ok(Some(WorkspaceAccess {
             max_scope: tenant_role.max_scope(),

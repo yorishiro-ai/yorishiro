@@ -231,12 +231,34 @@ pub async fn preview_role_change(
         false
     };
     let keys = key_access(&txn, actor.tenant_id, user_id, role).await?;
+    let mut lost_workspace_ids = Vec::new();
+    let candidates = crate::models::tenancy::list_workspaces_for_user(&txn, user_id).await?;
+    use crate::models::_entities::workspace_workspaces;
+    let workspace_ids = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.eq(actor.tenant_id))
+        .filter(workspace_workspaces::Column::Id.is_in(candidates.into_iter().map(|w| w.id)))
+        .select_only()
+        .column(workspace_workspaces::Column::Id)
+        .into_tuple::<Uuid>()
+        .all(&txn)
+        .await
+        .internal()?;
+    for workspace_id in workspace_ids {
+        if crate::models::access::workspace_access_for_role(&txn, workspace_id, user_id, role)
+            .await?
+            .is_none()
+        {
+            lost_workspace_ids.push(workspace_id);
+        }
+    }
+    lost_workspace_ids.sort_unstable();
     txn.rollback().await.internal()?;
     Ok(super::MembershipRolePreview {
         user_id,
         current_role,
         requested_role: role,
         blocked_by_last_owner,
+        lost_workspace_ids,
         keys,
     })
 }
@@ -260,17 +282,9 @@ async fn key_access(
         let stored_scope = crate::models::api_keys::ApiKeyScope::from_db_str(&key.scope)
             .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown api key scope")))?;
         let effective_scope = if let Some(workspace_id) = key.workspace_id {
-            if role.administers_tenant() {
-                Some(crate::models::access::effective_scope(stored_scope, role))
-            } else {
-                crate::models::workspace_memberships::Model::role(txn, workspace_id, user_id)
-                    .await?
-                    .map(|workspace_role| {
-                        stored_scope
-                            .min(role.max_scope())
-                            .min(workspace_role.max_scope())
-                    })
-            }
+            crate::models::access::workspace_access_for_role(txn, workspace_id, user_id, role)
+                .await?
+                .map(|access| stored_scope.min(access.max_scope))
         } else {
             None
         };
