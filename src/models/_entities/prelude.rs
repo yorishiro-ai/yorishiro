@@ -22,6 +22,7 @@ pub use super::template_versions::Entity as TemplateVersions;
 pub use super::tenant_billing::Entity as TenantBilling;
 pub use super::tenant_memberships::Entity as TenantMemberships;
 pub use super::tenant_reindex_schedules::Entity as TenantReindexSchedules;
+pub use super::tenant_retirement_events::Entity as TenantRetirementEvents;
 pub use super::tenant_tenants::Entity as TenantTenants;
 pub use super::timezone_state::Entity as TimezoneState;
 pub use super::user_users::Entity as UserUsers;

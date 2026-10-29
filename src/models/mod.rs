@@ -33,6 +33,7 @@ pub mod tenancy;
 pub mod tenant_billing;
 pub mod tenant_memberships;
 pub mod tenant_reindex_schedules;
+pub mod tenant_retirement_events;
 pub mod tenant_tenants;
 pub mod timezone_state;
 pub mod user_users;

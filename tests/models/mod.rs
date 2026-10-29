@@ -25,3 +25,5 @@ mod tenancy;
 mod tenancy_sqlite;
 
 mod workspace_memberships;
+
+mod tenant_retirement_events;
