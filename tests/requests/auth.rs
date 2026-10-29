@@ -120,7 +120,7 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
 async fn disabled_tenant_invites_cannot_accept_or_register_accounts() {
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
     use yorishiro::models::{tenant_tenants, user_users, workspace_invites};
-    boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("disabled-invite-existing"), "test-password", None).await.unwrap();
         let email = super::fixtures::unique_email("disabled-invite-new");
