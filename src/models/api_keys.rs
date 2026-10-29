@@ -130,6 +130,7 @@ impl AuthContext {
         mut self,
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
+        crate::models::tenant_tenants::Model::require_active(conn, self.tenant_id).await?;
         if let Some(user_id) = self.user_id {
             crate::models::tenant_memberships::get_membership_role(conn, self.tenant_id, user_id)
                 .await?

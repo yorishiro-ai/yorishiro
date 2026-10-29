@@ -169,6 +169,7 @@ pub async fn workspace_access(
     if workspace_tenant != tenant_id {
         return Ok(None);
     }
+    crate::models::tenant_tenants::Model::require_active(conn, tenant_id).await?;
     let Some(tenant_role) =
         tenant_memberships::get_membership_role(conn, tenant_id, user_id).await?
     else {
@@ -238,6 +239,7 @@ pub(crate) async fn require_attributed_key_grant(
     crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
         .await
         .internal()?;
+    crate::models::tenant_tenants::Model::require_active(txn, tenant_id).await?;
     if let Some(user_id) = user_id {
         let role = tenant_memberships::get_membership_role(txn, tenant_id, user_id)
             .await?

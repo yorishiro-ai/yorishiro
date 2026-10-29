@@ -6,6 +6,76 @@ use yorishiro::models::tenant_tenants::retirement;
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
+async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use yorishiro::models::{api_keys, tenancy, tenant_tenants};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let service = api_keys::Entity::create_api_key(
+            &ctx.db,
+            target.workspace_id,
+            api_keys::ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        // Set persisted state directly until a fully fenced disable operation is available.
+        tenant_tenants::ActiveModel {
+            id: Set(target.tenant_id),
+            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        for key in [&target.api_key, &service.plaintext] {
+            request
+                .get("/api/whoami")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await
+                .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+        }
+        for user_id in [None, Some(target.owner_id)] {
+            assert!(matches!(
+                api_keys::Entity::create_api_key(
+                    &ctx.db,
+                    target.workspace_id,
+                    api_keys::ApiKeyScope::Read,
+                    user_id,
+                    false,
+                )
+                .await,
+                Err(yorishiro::YorishiroError::Unauthenticated)
+            ));
+        }
+        assert!(
+            tenancy::list_workspaces_for_user(&ctx.db, target.owner_id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", other.api_key))
+            .await
+            .assert_status(axum::http::StatusCode::OK);
+        assert!(
+            retirement::inventory(&ctx.db, target.tenant_id)
+                .await
+                .is_ok()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn retirement_inventory_counts_shared_accounts_without_exposing_them() {
     if !crate::require_postgres_backend() {
         return;

@@ -255,6 +255,9 @@ async fn login_options(
         let tenant = tenant.ok_or_else(|| {
             YorishiroError::Internal(anyhow::anyhow!("membership tenant missing"))
         })?;
+        if tenant.disabled_at.is_some() {
+            continue;
+        }
         let role = crate::models::tenant_memberships::MembershipRole::from_db_str(&membership.role)
             .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown membership role")))?;
         memberships.push(LoginMembership {

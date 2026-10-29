@@ -23,6 +23,24 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
+    /// Rejects credentials and new grants for a disabled or missing tenant.
+    ///
+    /// # Errors
+    /// Returns unauthenticated for unavailable tenants or propagates database failures.
+    pub(crate) async fn require_active(
+        conn: &impl ConnectionTrait,
+        id: Uuid,
+    ) -> Result<(), crate::error::YorishiroError> {
+        use crate::error::{ResultExt, YorishiroError};
+        Entity::find_by_id(id)
+            .one(conn)
+            .await
+            .internal()?
+            .filter(|tenant| tenant.disabled_at.is_none())
+            .ok_or(YorishiroError::Unauthenticated)?;
+        Ok(())
+    }
+
     /// Fetches a tenant by its primary key.
     ///
     /// # Errors
