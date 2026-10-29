@@ -37,6 +37,13 @@ impl YorishiroMcpServer {
                     "tenant_admin": capabilities.tenant_admin,
                     "workspace_access": capabilities.workspace_access,
                     "tools": tools,
+                    "constraints": {
+                        "database_backend": capabilities.database_backend,
+                        "row_level_security": capabilities.row_level_security,
+                        "workspace_key_retargeting": false,
+                        "tenant_key_target_header": "X-Workspace-Id",
+                        "discovery_authorizes_requests": false,
+                    },
                 }))
             }
             Err(error) => Ok(err_to_tool_result(error)),

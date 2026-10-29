@@ -55,6 +55,8 @@ pub async fn identity(
 /// Current grant summary, not authorization for a later request or a tool-policy decision.
 #[derive(serde::Serialize)]
 pub struct AccessCapabilities {
+    pub database_backend: &'static str,
+    pub row_level_security: bool,
     pub scopes: Vec<ApiKeyScope>,
     pub audit: bool,
     pub tenant_admin: bool,
@@ -85,6 +87,13 @@ pub async fn capabilities(
         Err(error) => return Err(error),
     };
     Ok(AccessCapabilities {
+        database_backend: match conn.get_database_backend() {
+            sea_orm::DatabaseBackend::Postgres => "postgres",
+            sea_orm::DatabaseBackend::Sqlite => "sqlite",
+            sea_orm::DatabaseBackend::MySql => "mysql",
+            _ => "unknown",
+        },
+        row_level_security: conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres,
         scopes,
         audit: require_audit(&current).is_ok(),
         tenant_admin,

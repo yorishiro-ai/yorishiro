@@ -199,6 +199,12 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         assert_eq!(grants["scopes"], json!(["read"]));
         assert_eq!(grants["audit"], true);
         assert_eq!(grants["tenant_admin"], true);
+        let postgres = ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres;
+        assert_eq!(grants["constraints"]["database_backend"], if postgres { "postgres" } else { "sqlite" });
+        assert_eq!(grants["constraints"]["row_level_security"], postgres);
+        assert_eq!(grants["constraints"]["workspace_key_retargeting"], false);
+        assert_eq!(grants["constraints"]["tenant_key_target_header"], "X-Workspace-Id");
+        assert_eq!(grants["constraints"]["discovery_authorizes_requests"], false);
         let inventory = mcp_call(&request, &session, &key, 4, "tools/list", json!({})).await;
         let tools = grants["tools"].as_array().expect("tool capabilities");
         let inventory = tool_inventory(&inventory);
