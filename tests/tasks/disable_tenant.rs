@@ -52,7 +52,7 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
         let fork_id = fork.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
         let entity = request.post("/api/entities")
             .add_header("Authorization", format!("Bearer {}", target.api_key))
-            .json(&json!({"entity_type":"task", "data":{"title":"retire me"}})).await;
+            .json(&json!({"schema_name":"task-management", "entity_type":"task", "data":{"title":"retire me"}})).await;
         assert_eq!(entity.status_code(), StatusCode::CREATED, "{}", entity.text());
         let entity_id = entity.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
