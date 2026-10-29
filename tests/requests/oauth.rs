@@ -28,6 +28,223 @@ const CLIENT_SECRET: &str = "test-client-secret";
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, PaginatorTrait, QueryFilter};
+    use std::sync::{Arc, Mutex};
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{user_users, workspace_invites};
+
+    let directory = tempfile::tempdir().unwrap();
+    let key_path = directory.path().join("oauth-test.pem");
+    assert!(
+        std::process::Command::new("openssl")
+            .args(["genrsa", "-out"])
+            .arg(&key_path)
+            .arg("2048")
+            .status()
+            .unwrap()
+            .success()
+    );
+    let modulus = std::process::Command::new("openssl")
+        .arg("rsa")
+        .arg("-in")
+        .arg(&key_path)
+        .args(["-modulus", "-noout"])
+        .output()
+        .unwrap();
+    assert!(modulus.status.success());
+    let hex = String::from_utf8(modulus.stdout).unwrap();
+    let hex = hex.trim().strip_prefix("Modulus=").unwrap();
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+        .collect::<Vec<_>>();
+    let jwks = serde_json::json!({"keys":[{"kty":"RSA","kid":"invite-test","use":"sig","alg":"RS256","n":URL_SAFE_NO_PAD.encode(bytes),"e":"AQAB"}]});
+    let signing_key =
+        jsonwebtoken::EncodingKey::from_rsa_pem(&std::fs::read(key_path).unwrap()).unwrap();
+    let subject = uuid::Uuid::new_v4().to_string();
+    let issuer = Arc::new(Mutex::new(String::new()));
+    let discovery_issuer = issuer.clone();
+    let token_issuer = issuer.clone();
+    let token_subject = subject.clone();
+    let stub = crate::http_stub::HttpStub::start(axum::Router::new()
+        .route("/.well-known/openid-configuration", axum::routing::get(move || {
+            let issuer = discovery_issuer.lock().unwrap().clone();
+            async move { axum::Json(serde_json::json!({"authorization_endpoint":format!("{issuer}/authorize"),"token_endpoint":format!("{issuer}/token"),"jwks_uri":format!("{issuer}/jwks")})) }
+        }))
+        .route("/jwks", axum::routing::get(move || { let jwks = jwks.clone(); async move { axum::Json(jwks) } }))
+        .route("/token", axum::routing::post(move |axum::Form(form): axum::Form<std::collections::HashMap<String,String>>| {
+            assert_eq!(form["grant_type"], "authorization_code");
+            assert_eq!(form["client_id"], CLIENT_ID);
+            assert_eq!(form["client_secret"], CLIENT_SECRET);
+            assert_eq!(form["code_verifier"].len(), 43);
+            let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+            header.kid = Some("invite-test".into());
+            let token = jsonwebtoken::encode(&header, &serde_json::json!({"sub":token_subject,"iss":token_issuer.lock().unwrap().clone(),"aud":CLIENT_ID,"exp":chrono::Utc::now().timestamp()+300}), &signing_key).unwrap();
+            async move { axum::Json(serde_json::json!({"id_token":token})) }
+        }))).await;
+    *issuer.lock().unwrap() = stub.url.clone();
+    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
+    guard.set(crate::env::TestEnv::OauthIssuerUrl.name(), &stub.url);
+    guard.set(crate::env::TestEnv::OauthClientId.name(), CLIENT_ID);
+    guard.set(crate::env::TestEnv::OauthClientSecret.name(), CLIENT_SECRET);
+    boot_request::<App, _, _>(|request, ctx| async move {
+        require_licence(&ctx);
+        let tenant = super::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            super::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let user = user_users::ActiveModel {
+            email: Set(super::fixtures::unique_email("oauth-callback-invite")),
+            oauth_provider: Set(Some("oidc".into())),
+            oauth_subject_id: Set(Some(subject)),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let (invite, token) = workspace_invites::create_invite(
+            &ctx.db,
+            tenant.tenant_id,
+            &user.email,
+            MembershipRole::Viewer,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        let start = request
+            .post("/auth/oauth/invites/accept")
+            .json(&serde_json::json!({"invite_token":token}))
+            .await;
+        assert_eq!(start.status_code(), StatusCode::SEE_OTHER);
+        let url = reqwest::Url::parse(
+            start
+                .headers()
+                .get(header::LOCATION)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let cookies = start
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|cookie| {
+                cookie
+                    .to_str()
+                    .unwrap()
+                    .split(';')
+                    .next()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        let cookie_header = cookies.join("; ");
+        let mut tampered = cookies.clone();
+        let cookie = tampered
+            .iter_mut()
+            .find(|cookie| cookie.starts_with("ysr_oauth_invite="))
+            .unwrap();
+        cookie.push('0');
+        request
+            .get("/auth/oauth/callback")
+            .add_query_param("code", "test-code")
+            .add_query_param("state", &state)
+            .add_header(header::COOKIE, tampered.join("; "))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        assert!(
+            workspace_invites::Entity::find_by_id(invite.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .used_at
+                .is_none()
+        );
+        let response = request
+            .get("/auth/oauth/callback")
+            .add_query_param("code", "test-code")
+            .add_query_param("state", &state)
+            .add_header(header::COOKIE, cookie_header.clone())
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::FOUND,
+            "{}",
+            response.text()
+        );
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            "/#/login?invite=accepted"
+        );
+        let cleared = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .collect::<Vec<_>>();
+        assert_eq!(cleared.len(), 2);
+        assert!(
+            cleared
+                .iter()
+                .all(|cookie| cookie.to_str().unwrap().contains("Max-Age=0"))
+        );
+        assert!(
+            workspace_invites::Entity::find_by_id(invite.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .used_at
+                .is_some()
+        );
+        use yorishiro::models::_entities::tenant_memberships;
+        let membership = tenant_memberships::Entity::find()
+            .filter(tenant_memberships::Column::UserId.eq(user.id))
+            .filter(tenant_memberships::Column::TenantId.eq(tenant.tenant_id))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(membership.role, "viewer");
+        use yorishiro::models::_entities::api_keys;
+        assert_eq!(
+            api_keys::Entity::find()
+                .filter(api_keys::Column::UserId.eq(user.id))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        request
+            .get("/auth/oauth/callback")
+            .add_query_param("code", "test-code")
+            .add_query_param("state", &state)
+            .add_header(header::COOKIE, cookie_header)
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn invite_authorization_keeps_token_out_of_redirect_and_binds_cookies() {
     let stub = crate::http_stub::HttpStub::start(axum::Router::new().route(
         "/.well-known/openid-configuration",
