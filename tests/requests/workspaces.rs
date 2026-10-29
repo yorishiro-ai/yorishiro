@@ -50,6 +50,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
         let initial_name = args.workspace_name.clone();
         let tenant = TestTenant::create(&request, &ctx, args).await;
         let tenant_id = tenant.tenant_id;
+        let owner_id = tenant.owner_id;
         let request = tenant.authenticated(request);
 
         let response = request
@@ -84,7 +85,18 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             assert_eq!(created_at.offset().local_minus_utc(), expected_offset);
         }
 
-        let response = request.get(&format!("/api/workspaces/{staging_id}")).await;
+        let staging_key = super::fixtures::issue_api_key(
+            &ctx,
+            staging_id.parse().unwrap(),
+            owner_id,
+            yorishiro::models::api_keys::ApiKeyScope::Read,
+            false,
+        )
+        .await;
+        let response = request
+            .get(&format!("/api/workspaces/{staging_id}"))
+            .add_header("Authorization", format!("Bearer {staging_key}"))
+            .await;
         assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["entity_count"], 0);
