@@ -15,6 +15,7 @@ pub struct AccessIdentity {
     pub tenant_name: String,
     pub stored_scope: ApiKeyScope,
     pub bound_workspace_id: Option<Uuid>,
+    pub workspace_access: WorkspaceAccess,
 }
 
 /// Resolves names and binding after revalidating the credential and membership.
@@ -40,12 +41,14 @@ pub async fn identity(
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
     let grant = key.grant_metadata(conn).await?;
+    let workspace_access = current_workspace_access(conn, &current).await?;
     Ok(AccessIdentity {
         current,
         workspace_name: workspace.name,
         tenant_name: tenant.name,
         stored_scope: grant.scope,
         bound_workspace_id: grant.workspace_id,
+        workspace_access,
     })
 }
 
@@ -55,6 +58,7 @@ pub struct AccessCapabilities {
     pub scopes: Vec<ApiKeyScope>,
     pub audit: bool,
     pub tenant_admin: bool,
+    pub workspace_access: WorkspaceAccess,
 }
 
 /// Inspects current grants using the same decisions as protected operations.
@@ -84,6 +88,7 @@ pub async fn capabilities(
         scopes,
         audit: require_audit(&current).is_ok(),
         tenant_admin,
+        workspace_access: current_workspace_access(conn, &current).await?,
     })
 }
 
@@ -126,10 +131,27 @@ pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope
 
 /// Workspace authority and its provenance, independently of any credential's stored scope.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceAccess {
     pub max_scope: ApiKeyScope,
     pub source: &'static str,
     pub workspace_admin: bool,
+}
+
+async fn current_workspace_access(
+    conn: &impl ConnectionTrait,
+    current: &AuthContext,
+) -> Result<WorkspaceAccess, YorishiroError> {
+    match current.user_id {
+        Some(user_id) => workspace_access(conn, current.tenant_id, current.workspace_id, user_id)
+            .await?
+            .ok_or(YorishiroError::Unauthenticated),
+        None => Ok(WorkspaceAccess {
+            max_scope: current.scope,
+            source: "service_key",
+            workspace_admin: false,
+        }),
+    }
 }
 
 /// Resolves inherited tenant authority or an explicit workspace grant.

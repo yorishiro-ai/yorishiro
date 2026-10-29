@@ -372,3 +372,104 @@ async fn queued_import_rechecks_revoked_credentials_before_writing() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn queued_import_rechecks_workspace_grants_before_writing() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+    use yorishiro::models::{
+        api_keys, schema_schemas, tenancy,
+        tenant_memberships::MembershipRole,
+        workspace_memberships::{Model, WorkspaceRole},
+    };
+
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = super::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            super::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("queued-workspace"),
+            "hunter2-hunter2",
+            None,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        Model::grant(&txn, tenant.workspace_id, member.id, WorkspaceRole::Admin)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            api_keys::ApiKeyScope::Schema,
+            Some(member.id),
+            false,
+        )
+        .await
+        .unwrap();
+        let jsonl = json!({"kind":"schema", "record":{
+            "id":Uuid::new_v4(), "tenant_id":tenant.tenant_id, "workspace_id":tenant.workspace_id,
+            "name":"grant-revoked-import", "version":1,
+            "definition":{"name":"grant-revoked-import","entity_types":{},"relation_types":{}},
+            "status":"active", "origin_template_id":null,"origin_status":"detached",
+            "origin_snapshot":null,"origin_updated_at":null,"created_at":chrono::Utc::now()
+        }})
+        .to_string();
+        let response = request
+            .post("/api/import.jsonl")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .text(jsonl)
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::ACCEPTED,
+            "{}",
+            response.text()
+        );
+        let id = response.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            member.id,
+            MembershipRole::Member,
+        )
+        .await
+        .unwrap();
+        let txn = ctx.db.begin().await.unwrap();
+        Model::revoke(&txn, tenant.workspace_id, member.id)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        finish_job(
+            &ctx,
+            id,
+            "failed",
+            Some((&request, &tenant.api_key, &format!("/api/import-jobs/{id}"))),
+        )
+        .await;
+        assert!(
+            schema_schemas::get_active_schema(&ctx.db, tenant.workspace_id, "grant-revoked-import")
+                .await
+                .is_err()
+        );
+        assert!(
+            api_keys::Entity::find_by_id(key.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    })
+    .await;
+}

@@ -18,6 +18,7 @@ pub struct WhoAmIResponse {
     /// None for a tenant-bound credential that selects a workspace per request.
     pub bound_workspace_id: Option<Uuid>,
     pub identity_kind: &'static str,
+    pub workspace_access: crate::models::access::WorkspaceAccess,
 }
 
 impl From<crate::models::access::AccessIdentity> for WhoAmIResponse {
@@ -28,6 +29,7 @@ impl From<crate::models::access::AccessIdentity> for WhoAmIResponse {
             tenant_name: identity.tenant_name,
             stored_scope: identity.stored_scope,
             bound_workspace_id: identity.bound_workspace_id,
+            workspace_access: identity.workspace_access,
             identity_kind: if ctx.user_id.is_some() {
                 "user"
             } else {

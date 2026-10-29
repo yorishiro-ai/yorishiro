@@ -140,6 +140,8 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         assert_eq!(identity["scope"], "read");
         assert_eq!(identity["audit"], true);
         assert_eq!(identity["identity_kind"], "user");
+        assert_eq!(identity["workspace_access"]["source"], "tenant_role");
+        assert_eq!(identity["workspace_access"]["workspace_admin"], true);
         assert_eq!(identity["stored_scope"], "read");
         assert_eq!(identity["bound_workspace_id"], tenant.workspace_id.to_string());
         assert!(!identity["workspace_name"].as_str().unwrap().is_empty());
@@ -258,6 +260,8 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
         let identity = tool_result_json(&result);
         assert_eq!(identity, rest.json::<Value>());
         assert_eq!(identity["identity_kind"], "service");
+        assert_eq!(identity["workspace_access"]["source"], "service_key");
+        assert_eq!(identity["workspace_access"]["workspace_admin"], false);
         assert!(identity["user_id"].is_null());
         assert_eq!(identity["stored_scope"], "read");
         assert_eq!(identity["scope"], "read");
@@ -347,6 +351,16 @@ async fn mcp_identity_distinguishes_stored_and_membership_capped_scope() {
             .await;
             let grants = tool_result_json(&grants);
             assert_eq!(grants["tenant_admin"], role == MembershipRole::Admin);
+            assert_eq!(grants["workspace_access"], identity["workspace_access"]);
+            assert_eq!(
+                identity["workspace_access"]["source"],
+                if role == MembershipRole::Admin {
+                    "tenant_role"
+                } else {
+                    "workspace_membership"
+                }
+            );
+            assert_eq!(identity["workspace_access"]["workspace_admin"], true);
             assert_eq!(
                 grants["scopes"].as_array().unwrap().len(),
                 if role == MembershipRole::Admin { 4 } else { 1 }

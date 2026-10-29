@@ -35,6 +35,7 @@ impl YorishiroMcpServer {
                     "scopes": capabilities.scopes,
                     "audit": capabilities.audit,
                     "tenant_admin": capabilities.tenant_admin,
+                    "workspace_access": capabilities.workspace_access,
                     "tools": tools,
                 }))
             }
