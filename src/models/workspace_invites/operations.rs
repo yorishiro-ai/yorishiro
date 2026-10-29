@@ -48,6 +48,9 @@ pub(crate) async fn reissue_invite_as(
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
     let invite = managed_invite(&txn, actor.tenant_id, invite_id).await?;
+    if invite.role == MembershipRole::Owner.as_db_str() {
+        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    }
     if invite.used_at.is_some() {
         return Err(YorishiroError::Conflict {
             message: "a used invite cannot be reissued".into(),
@@ -91,6 +94,9 @@ pub(crate) async fn create_invite_as(
 ) -> Result<(Model, String), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    if role == MembershipRole::Owner {
+        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    }
     let now = crate::time::now();
     if expires_at <= now || email.trim().is_empty() || !email.contains('@') {
         return Err(YorishiroError::ValidationFailed {

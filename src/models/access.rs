@@ -249,7 +249,7 @@ pub(crate) async fn require_current_tenant_owner(
         != Some(MembershipRole::Owner)
     {
         return Err(YorishiroError::ScopeInsufficient {
-            message: "only a tenant owner can retire the tenant".into(),
+            message: "this operation requires a tenant owner".into(),
             hint: "ask a current tenant owner to perform this operation".into(),
         });
     }

@@ -103,6 +103,31 @@ async fn non_administrative_credentials_cannot_manage_invites_or_preview_members
 }
 
 #[tokio::test]
+async fn administrators_cannot_grant_or_remove_owner_authority() {
+    use yorishiro::models::api_keys::ApiKeyScope;
+    use yorishiro::models::{tenant_memberships, user_users};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let admin = user_users::create_user(&ctx.db, &super::fixtures::unique_email("owner-boundary"), "test-password", None).await.unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin).await.unwrap();
+        let key = super::fixtures::issue_api_key(&ctx, tenant.workspace_id, admin.id, ApiKeyScope::Migration, false).await;
+        let auth = format!("Bearer {key}");
+        request.post("/api/members").add_header("Authorization", &auth)
+            .json(&serde_json::json!({"email":admin.email,"role":"owner"})).await.assert_status(StatusCode::FORBIDDEN);
+        request.delete(&format!("/api/members/{}", tenant.owner_id)).add_header("Authorization", &auth)
+            .await.assert_status(StatusCode::FORBIDDEN);
+        let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
+        request.post("/api/members/invites").add_header("Authorization", &auth)
+            .json(&serde_json::json!({"email":"other@example.com","role":"owner","expires_at":expiry})).await.assert_status(StatusCode::FORBIDDEN);
+        let (invite, _) = yorishiro::models::workspace_invites::create_invite(&ctx.db, tenant.tenant_id, "owner@example.com", MembershipRole::Owner, chrono::Duration::hours(1)).await.unwrap();
+        request.post(&format!("/api/members/invites/{}/reissue", invite.id)).add_header("Authorization", &auth)
+            .json(&serde_json::json!({"expires_at":expiry})).await.assert_status(StatusCode::FORBIDDEN);
+        request.post("/api/members/invites").add_header("Authorization", &auth)
+            .json(&serde_json::json!({"email":"member@example.com","role":"member","expires_at":expiry})).await.assert_status(StatusCode::CREATED);
+    }).await;
+}
+
+#[tokio::test]
 async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::_entities::tenant_memberships::Column;

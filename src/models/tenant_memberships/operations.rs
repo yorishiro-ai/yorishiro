@@ -195,6 +195,11 @@ pub async fn update_member_access(
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
     let tenant_id = actor.tenant_id;
+    if role == MembershipRole::Owner
+        || get_membership_role(&txn, tenant_id, user_id).await? == Some(MembershipRole::Owner)
+    {
+        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    }
     add_member_in_transaction(&txn, tenant_id, user_id, role).await?;
     let access = key_access(&txn, tenant_id, user_id, role).await?;
     txn.commit().await.internal()?;
@@ -306,6 +311,9 @@ pub async fn remove_member_as(
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    if get_membership_role(&txn, actor.tenant_id, user_id).await? == Some(MembershipRole::Owner) {
+        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    }
     remove_member_in_transaction(&txn, actor.tenant_id, user_id).await?;
     txn.commit().await.internal()?;
     Ok(())
