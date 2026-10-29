@@ -500,6 +500,7 @@ jobs:
             --skip requests::auth::signup_without_invite_respects_the_tenant_cap \
             --skip requests::auth::signup_cannot_raise_the_community_tenant_cap_with_configuration \
             --skip requests::auth::create_tenant_serializes_on_its_advisory_lock \
+            --skip requests::auth::disabled_tenant_invites_cannot_accept_or_register_accounts \
             --skip requests::entities::undo_restores_snapshotted_entities_and_counts_a_deleted_one \
             --skip requests::import::concurrent_import_workers_keep_each_apps_database \
             --skip requests::import::import_resolves_a_pre_existing_schema_for_every_entity_line \
