@@ -693,15 +693,27 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
 
 #[tokio::test]
 async fn revocation_during_llm_call_rejects_the_late_proposal() {
-    permission_change_during_llm_call(false).await;
+    permission_change_during_llm_call(PermissionChange::RevokeKey).await;
 }
 
 #[tokio::test]
 async fn downgrade_during_llm_call_rejects_the_late_proposal() {
-    permission_change_during_llm_call(true).await;
+    permission_change_during_llm_call(PermissionChange::Downgrade).await;
 }
 
-async fn permission_change_during_llm_call(downgrade: bool) {
+#[tokio::test]
+async fn workspace_revocation_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(PermissionChange::RevokeWorkspace).await;
+}
+
+#[derive(Clone, Copy)]
+enum PermissionChange {
+    RevokeKey,
+    Downgrade,
+    RevokeWorkspace,
+}
+
+async fn permission_change_during_llm_call(change: PermissionChange) {
     use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
 
     let (llm, entered, release) = gated_llm().await;
@@ -718,7 +730,7 @@ async fn permission_change_during_llm_call(downgrade: bool) {
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({"base_url":llm.url,"model":"test-model","api_key":"sk-test"})).await;
         assert_eq!(response.status_code(), 204, "{}", response.text());
-        let user_id = if downgrade {
+        let user_id = if !matches!(change, PermissionChange::RevokeKey) {
             let txn = ctx.db.begin().await.unwrap();
             let user = yorishiro::models::tenancy::register_member(
                 &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
@@ -743,7 +755,18 @@ async fn permission_change_during_llm_call(downgrade: bool) {
             tokio::time::timeout(Duration::from_secs(5), entered.notified())
                 .await.expect("worker reached the LLM");
             let changed = tokio::time::timeout(Duration::from_secs(5), async {
-                if let Some(user_id) = user_id {
+                if matches!(change, PermissionChange::RevokeWorkspace) {
+                    let user_id = user_id.unwrap();
+                    yorishiro::models::tenant_memberships::add_member(
+                        &ctx.db, setup.tenant_id, user_id,
+                        yorishiro::models::tenant_memberships::MembershipRole::Member,
+                    ).await.unwrap();
+                    let txn = ctx.db.begin().await.unwrap();
+                    yorishiro::models::workspace_memberships::Model::revoke(
+                        &txn, setup.workspace_id, user_id,
+                    ).await.unwrap();
+                    txn.commit().await.map_err(|error| yorishiro::YorishiroError::Internal(error.into()))
+                } else if let Some(user_id) = user_id {
                     yorishiro::models::tenant_memberships::add_member(&ctx.db, setup.tenant_id, user_id,
                         yorishiro::models::tenant_memberships::MembershipRole::Viewer).await
                 } else {
@@ -762,9 +785,15 @@ async fn permission_change_during_llm_call(downgrade: bool) {
         assert!(inference_proposals::for_job(&ctx.db, setup.workspace_id, job_id).await.unwrap().is_empty());
         let entity = yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity_id).await.unwrap();
         assert_eq!(entity.data, serde_json::json!({"title":"original"}));
-        if downgrade {
+        if matches!(change, PermissionChange::Downgrade) {
             assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
             assert_eq!(actor(&ctx, &key.plaintext).await.scope, yorishiro::models::api_keys::ApiKeyScope::Read);
+        }
+        if matches!(change, PermissionChange::RevokeWorkspace) {
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_none());
+            assert!(yorishiro::models::workspace_memberships::Model::role(
+                &ctx.db, setup.workspace_id, user_id.unwrap(),
+            ).await.unwrap().is_none());
         }
     }).await;
 }

@@ -483,6 +483,7 @@ jobs:
             --skip ee::workers::infer_fill::revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider \
             --skip ee::workers::infer_fill::revocation_during_llm_call_rejects_the_late_proposal \
             --skip ee::workers::infer_fill::downgrade_during_llm_call_rejects_the_late_proposal \
+            --skip ee::workers::infer_fill::workspace_revocation_during_llm_call_rejects_the_late_proposal \
             --skip ee::workers::reindex:: \
             --skip requests::setup:: \
             --skip requests::ee_setup:: \
