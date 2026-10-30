@@ -403,7 +403,7 @@ async fn membership_mutations_reject_stale_admin_contexts() {
 
 #[tokio::test]
 async fn role_preview_reports_lost_workspaces_without_keys() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,

@@ -29,6 +29,9 @@ const CLIENT_SECRET: &str = "test-client-secret";
 #[tokio::test]
 #[serial(process_environment)]
 async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
+    let rate_limit = crate::env::TestEnv::AuthRateLimitMax;
+    let rate_guard = crate::EnvGuard::capture(&[rate_limit.name()]);
+    rate_guard.set(rate_limit.name(), "100");
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, PaginatorTrait, QueryFilter};
     use std::sync::{Arc, Mutex};
@@ -423,17 +426,24 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn invite_authorization_keeps_token_out_of_redirect_and_binds_cookies() {
+    let issuer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let discovery_issuer = issuer.clone();
     let stub = crate::http_stub::HttpStub::start(axum::Router::new().route(
         "/.well-known/openid-configuration",
-        axum::routing::get(|| async {
-            axum::Json(serde_json::json!({
-                "authorization_endpoint":"https://idp.example.com/authorize",
-                "token_endpoint":"https://idp.example.com/token",
-                "jwks_uri":"https://idp.example.com/jwks"
-            }))
+        axum::routing::get(move || {
+            let issuer = discovery_issuer.lock().unwrap().clone();
+            async move {
+                axum::Json(serde_json::json!({
+                    "issuer":issuer,
+                    "authorization_endpoint":"https://idp.example.com/authorize",
+                    "token_endpoint":"https://idp.example.com/token",
+                    "jwks_uri":"https://idp.example.com/jwks"
+                }))
+            }
         }),
     ))
     .await;
+    *issuer.lock().unwrap() = stub.url.clone();
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
     guard.set(crate::env::TestEnv::OauthIssuerUrl.name(), &stub.url);
     guard.set(crate::env::TestEnv::OauthClientId.name(), CLIENT_ID);
