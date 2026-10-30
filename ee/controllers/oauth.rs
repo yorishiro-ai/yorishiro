@@ -307,8 +307,7 @@ async fn callback(
         identity.email.as_deref(),
         identity.display_name.as_deref(),
         max_tenants,
-        crate::edition::ee::data::plan::PlanPolicy::current(&ctx)?
-            == crate::edition::ee::data::plan::PlanPolicy::Enabled,
+        crate::edition::ee::data::plan::PlanPolicy::current(&ctx)?,
     )
     .await?;
     txn.commit().await.internal()?;

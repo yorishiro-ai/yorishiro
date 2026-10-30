@@ -873,7 +873,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
                 Some("newcomer@example.com"),
                 None,
                 max_tenants,
-                false,
+                yorishiro::edition::ee::data::plan::PlanPolicy::Disabled,
             )
             .await;
             // The call is expected to be refused; make the rollback explicit so a
@@ -910,7 +910,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             Some("firstlogin@example.com"),
             None,
             Some(1),
-            false,
+            yorishiro::edition::ee::data::plan::PlanPolicy::Disabled,
         )
         .await
         .expect("first login provisioning");
@@ -987,9 +987,9 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             None => guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name()),
         }
         super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
-            let policy_enabled =
-                yorishiro::edition::ee::data::plan::plan_policy_enabled(&ctx.config)
-                    .expect("resolve provisioning policy");
+            require_licence(&ctx);
+            let policy = yorishiro::edition::ee::data::plan::PlanPolicy::current(&ctx)
+                .expect("resolve provisioning policy");
             let txn = ctx.db.begin().await.expect("begin");
             let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
                 &txn,
@@ -998,7 +998,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
                 Some(&format!("policy-{index}@example.com")),
                 None,
                 Some(1),
-                policy_enabled,
+                policy,
             )
             .await
             .expect("provisioning");

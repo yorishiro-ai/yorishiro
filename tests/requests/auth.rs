@@ -27,7 +27,7 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
             Some(&email),
             None,
             None,
-            false,
+            yorishiro::edition::ee::data::plan::PlanPolicy::Disabled,
         )
         .await
         .expect("provision a valid OAuth identity");

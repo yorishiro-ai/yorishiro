@@ -43,7 +43,7 @@ pub async fn find_or_create(
     email: Option<&str>,
     display_name: Option<&str>,
     max_tenants: Option<i32>,
-    policy_enabled: bool,
+    policy: crate::edition::ee::data::plan::PlanPolicy,
 ) -> Result<ProvisionedLogin, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
         .await
@@ -80,8 +80,8 @@ pub async fn find_or_create(
     crate::edition::ee::models::tenant_tenants::set_max_workspaces(
         conn,
         tenant.id,
-        crate::edition::ee::data::plan::Plan::Free
-            .caps(policy_enabled)
+        policy
+            .caps(crate::edition::ee::data::plan::Plan::Free)
             .max_workspaces,
     )
     .await?;
@@ -90,8 +90,8 @@ pub async fn find_or_create(
         conn,
         tenant.id,
         "default",
-        crate::edition::ee::data::plan::Plan::Free
-            .caps(policy_enabled)
+        policy
+            .caps(crate::edition::ee::data::plan::Plan::Free)
             .default_max_entities,
         None,
     )

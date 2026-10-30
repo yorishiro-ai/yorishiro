@@ -140,7 +140,7 @@ pub(crate) async fn apply_stripe_event(
             if crate::edition::ee::data::plan::PlanPolicy::current(ctx)?
                 == crate::edition::ee::data::plan::PlanPolicy::Enabled
             {
-                tenant_tenants::set_max_workspaces(&txn, tenant_id, plan.caps(true).max_workspaces)
+                tenant_tenants::set_max_workspaces(&txn, tenant_id, plan.caps().max_workspaces)
                     .await?;
             }
         }
@@ -156,7 +156,7 @@ pub(crate) async fn apply_stripe_event(
                 tenant_tenants::set_max_workspaces(
                     &txn,
                     tenant_id,
-                    Plan::Free.caps(true).max_workspaces,
+                    Plan::Free.caps().max_workspaces,
                 )
                 .await?;
             }

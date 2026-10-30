@@ -14,6 +14,16 @@ pub(crate) struct PlanPolicySetting {
 }
 
 impl PlanPolicy {
+    pub(crate) fn caps(self, plan: Plan) -> PlanCaps {
+        match self {
+            Self::Disabled => PlanCaps {
+                max_workspaces: None,
+                default_max_entities: None,
+            },
+            Self::Enabled => plan.caps(),
+        }
+    }
+
     /// Resolves the configured switch and current licence validity together.
     ///
     /// # Errors
@@ -110,13 +120,7 @@ impl Plan {
         }
     }
 
-    pub(crate) fn caps(self, policy_enabled: bool) -> PlanCaps {
-        if !policy_enabled {
-            return PlanCaps {
-                max_workspaces: None,
-                default_max_entities: None,
-            };
-        }
+    pub(crate) fn caps(self) -> PlanCaps {
         match self {
             Plan::Free => PlanCaps {
                 max_workspaces: Some(1),
