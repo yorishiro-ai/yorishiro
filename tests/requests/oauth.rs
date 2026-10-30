@@ -151,6 +151,45 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
         .insert(&ctx.db)
         .await
         .unwrap();
+        for (selection, expected) in [
+            (None, StatusCode::FORBIDDEN),
+            (Some(tenant.workspace_id), StatusCode::FORBIDDEN),
+        ] {
+            let mut start = request.get("/auth/oauth/authorize");
+            if let Some(id) = selection {
+                start = start.add_query_param("workspace_id", id);
+            }
+            let start = start.await;
+            let url = reqwest::Url::parse(
+                start
+                    .headers()
+                    .get(header::LOCATION)
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            let state = url
+                .query_pairs()
+                .find(|(key, _)| key == "state")
+                .unwrap()
+                .1
+                .into_owned();
+            let cookies = start
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .map(|cookie| cookie.to_str().unwrap().split(';').next().unwrap())
+                .collect::<Vec<_>>()
+                .join("; ");
+            request
+                .get("/auth/oauth/callback")
+                .add_query_param("code", "valid")
+                .add_query_param("state", state)
+                .add_header(header::COOKIE, cookies)
+                .await
+                .assert_status(expected);
+        }
         let (invite, token) = workspace_invites::create_invite(
             &ctx.db,
             tenant.tenant_id,
@@ -284,6 +323,87 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
             .add_header(header::COOKIE, cookie_header)
             .await
             .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            user.id,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"name":"oauth-selection-sibling"}))
+            .await
+            .assert_status(StatusCode::CREATED);
+        for (selection, tamper, expected) in [
+            (None, false, StatusCode::UNPROCESSABLE_ENTITY),
+            (Some(tenant.workspace_id), true, StatusCode::UNAUTHORIZED),
+            (Some(tenant.workspace_id), false, StatusCode::FOUND),
+        ] {
+            let mut start = request.get("/auth/oauth/authorize");
+            if let Some(id) = selection {
+                start = start.add_query_param("workspace_id", id);
+            }
+            let start = start.await;
+            let url = reqwest::Url::parse(
+                start
+                    .headers()
+                    .get(header::LOCATION)
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            let state = url
+                .query_pairs()
+                .find(|(key, _)| key == "state")
+                .unwrap()
+                .1
+                .into_owned();
+            let cookies = start
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .map(|cookie| {
+                    let mut value = cookie
+                        .to_str()
+                        .unwrap()
+                        .split(';')
+                        .next()
+                        .unwrap()
+                        .to_owned();
+                    if tamper && value.starts_with("ysr_oauth_workspace=") {
+                        value.push('0');
+                    }
+                    value
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            let response = request
+                .get("/auth/oauth/callback")
+                .add_query_param("code", "valid")
+                .add_query_param("state", state)
+                .add_header(header::COOKIE, cookies)
+                .await;
+            assert_eq!(response.status_code(), expected, "{}", response.text());
+            if expected == StatusCode::FOUND {
+                let key = response
+                    .headers()
+                    .get(header::LOCATION)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .strip_prefix("/#api_key=")
+                    .unwrap();
+                request
+                    .get(&format!("/api/workspaces/{}", tenant.workspace_id))
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .await
+                    .assert_status(StatusCode::OK);
+            }
+        }
     })
     .await;
 }

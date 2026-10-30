@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Deserialize)]
+pub(crate) struct AuthorizeParams {
+    pub(crate) workspace_id: Option<uuid::Uuid>,
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct OAuthStatus {

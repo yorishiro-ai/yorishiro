@@ -29,6 +29,7 @@ use crate::edition::ee::services::oauth;
 /// Name of the CSRF cookie `authorize` sets and `callback` reads back.
 const CSRF_COOKIE_NAME: &str = "ysr_oauth_csrf";
 const INVITE_COOKIE_NAME: &str = "ysr_oauth_invite";
+const WORKSPACE_COOKIE_NAME: &str = "ysr_oauth_workspace";
 
 /// Starts a browser-bound OAuth flow for an existing account's invitation.
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/oauth/invites/accept", request_body = crate::edition::ee::dtos::oauth::AcceptOAuthInviteRequest, responses((status = 303, description = "Redirects to the identity provider using GET"), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
@@ -88,7 +89,7 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let raw = headers.get(header::COOKIE)?.to_str().ok()?;
     raw.split(';').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
-        (key.trim() == name).then(|| value.trim().to_string())
+        (key.trim() == name && !value.trim().is_empty()).then(|| value.trim().to_string())
     })
 }
 
@@ -118,8 +119,11 @@ async fn status(State(ctx): State<AppContext>) -> Result<Json<OAuthStatus>, ApiE
 
 /// `GET /auth/oauth/authorize`: starts the login flow by redirecting the browser to the identity provider's own authorization endpoint.
 /// Also sets the CSRF cookie that `callback` checks the returning `state` against: without it, `state`'s HMAC signature alone only proves this server issued *some* state, not that the browser presenting it at callback time is the one that started this flow.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/authorize", responses((status = 302, description = "Redirects to the configured identity provider"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
-async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> {
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/authorize", params(("workspace_id" = Option<uuid::Uuid>, Query)), responses((status = 302, description = "Redirects to the configured identity provider"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+async fn authorize(
+    State(ctx): State<AppContext>,
+    Query(params): Query<crate::edition::ee::dtos::oauth::AuthorizeParams>,
+) -> Result<Response, ApiError> {
     let config = OAuthConfig::from_config(&ctx.config)?.ok_or_else(not_found)?;
 
     let redirect = oauth::build_authorize_redirect(&config)
@@ -127,11 +131,30 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
         .inspect_err(|err| tracing::error!(error = %err, "failed to build OAuth authorize URL"))?;
 
     let set_cookie = csrf_set_cookie(&redirect.csrf_cookie_value, config.cookies_require_secure());
+    let selection = params
+        .workspace_id
+        .map_or_else(String::new, |id| id.to_string());
+    let payload = format!("{}.{}", redirect.csrf_cookie_value, selection);
+    let signature = crate::edition::ee::controllers::hmac_sign::sign(
+        &config.state_signing_key,
+        payload.as_bytes(),
+    );
+    let secure = if config.cookies_require_secure() {
+        "; Secure"
+    } else {
+        ""
+    };
+    let workspace_cookie = format!(
+        "{WORKSPACE_COOKIE_NAME}={payload}.{signature}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age={}{}",
+        state_token::STATE_TTL_SECS,
+        secure
+    );
 
     Ok((
         AppendHeaders([
             (header::SET_COOKIE, set_cookie),
             (header::SET_COOKIE, clear_invite_cookie()),
+            (header::SET_COOKIE, workspace_cookie),
         ]),
         Redirect::to(&redirect.url),
     )
@@ -140,7 +163,7 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
 /// Exchanges the authorization code for tokens, verifies the ID token, resolves (or auto-provisions) the Yorishiro user/tenant/workspace it corresponds to, issues an API key exactly the way `POST /auth/login` does, and hands it to the client via a URL fragment (`#api_key=...`), a fragment rather than a query parameter so the key never appears in server access logs or gets sent back to any server in a `Referer` header.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/callback", params(("code" = Option<String>, Query), ("state" = Option<String>, Query), ("error" = Option<String>, Query)), responses((status = 302, description = "Redirects to the application login result"), (status = 400, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/callback", params(("code" = Option<String>, Query), ("state" = Option<String>, Query), ("error" = Option<String>, Query)), responses((status = 302, description = "Redirects to the application login result"), (status = 400, body = crate::controllers::openapi::ApiErrorBody), (status = 403, description = "Account recovery or selected workspace access denied"), (status = 422, description = "Workspace selection required or invalid provider claims"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
 async fn callback(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -190,6 +213,80 @@ async fn callback(
             ]),
         )
             .into_response());
+    }
+
+    let requested_workspace = if let Some(cookie) = read_cookie(&headers, WORKSPACE_COOKIE_NAME) {
+        let (payload, signature) = cookie
+            .rsplit_once('.')
+            .ok_or(YorishiroError::Unauthenticated)?;
+        let (csrf, workspace) = payload
+            .split_once('.')
+            .ok_or(YorishiroError::Unauthenticated)?;
+        if csrf_cookie_value.as_deref() != Some(csrf)
+            || !crate::edition::ee::controllers::hmac_sign::verify(
+                &config.state_signing_key,
+                payload.as_bytes(),
+                signature,
+            )
+        {
+            return Err(YorishiroError::Unauthenticated.into());
+        }
+        if workspace.is_empty() {
+            None
+        } else {
+            Some(
+                workspace
+                    .parse::<uuid::Uuid>()
+                    .map_err(|_| YorishiroError::Unauthenticated)?,
+            )
+        }
+    } else {
+        None
+    };
+
+    if let Some(user) = crate::edition::ee::models::user_users::find_by_oauth_identity(
+        &ctx.db,
+        "oidc",
+        &identity.subject_id,
+    )
+    .await?
+    {
+        match crate::models::tenancy::resolve_login_workspace(&ctx.db, user.id, requested_workspace)
+            .await?
+        {
+            crate::models::tenancy::LoginWorkspaceState::Recovery {
+                reason,
+                memberships,
+                workspaces,
+            } => {
+                use crate::dtos::auth::{LoginRecovery, LoginRecoveryCode, LoginRecoveryResponse};
+                let status = if matches!(reason, LoginRecoveryCode::WorkspaceSelectionRequired) {
+                    StatusCode::UNPROCESSABLE_ENTITY
+                } else {
+                    StatusCode::FORBIDDEN
+                };
+                return Ok((
+                    status,
+                    AppendHeaders([
+                        (header::SET_COOKIE, clear_cookie),
+                        (header::SET_COOKIE, clear_workspace_cookie()),
+                    ]),
+                    Json(LoginRecoveryResponse {
+                        error: LoginRecovery::new(reason, memberships, workspaces),
+                    }),
+                )
+                    .into_response());
+            }
+            crate::models::tenancy::LoginWorkspaceState::Selected(workspace_id) => {
+                let created = crate::edition::ee::models::user_users::login_key(
+                    &ctx.db,
+                    user.id,
+                    workspace_id,
+                )
+                .await?;
+                return Ok(login_success_redirect(&created.plaintext, clear_cookie));
+            }
+        }
     }
 
     let max_tenants = ctx
@@ -252,9 +349,16 @@ fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {
             (header::LOCATION, location),
             (header::SET_COOKIE, clear_cookie),
             (header::SET_COOKIE, clear_invite_cookie()),
+            (header::SET_COOKIE, clear_workspace_cookie()),
         ]),
     )
         .into_response()
+}
+
+fn clear_workspace_cookie() -> String {
+    format!(
+        "{WORKSPACE_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=0"
+    )
 }
 
 fn login_failure_redirect(clear_cookie: String) -> Response {
