@@ -14,8 +14,8 @@ pub struct GrantWorkspaceMemberRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateWorkspaceRequest {
     pub name: String,
-    /// Cap on the number of entities this workspace may hold.
-    /// Omit for unlimited.
+    /// Explicit operational cap on entities, independent of any additional deployment policy.
+    /// Omit for no explicit cap.
     pub max_entities: Option<i32>,
     /// Schema to associate with this workspace.
     /// Omit to leave it unset.
@@ -30,6 +30,7 @@ pub struct WorkspaceDetail {
     pub tenant_id: Uuid,
     pub name: String,
     pub max_entities: Option<i32>,
+    pub effective_max_entities: Option<i32>,
     pub schema_id: Option<Uuid>,
     pub created_at: DateTime<Timezone>,
     pub entity_count: i64,

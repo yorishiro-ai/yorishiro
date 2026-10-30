@@ -69,11 +69,16 @@ pub async fn get_workspace(
     let schema_count = schema_schemas::count_active(&txn, workspace.id).await?;
 
     let timezone = crate::time::configured(&ctx);
+    let quotas = crate::quotas(&ctx, &txn, workspace.tenant_id).await?;
     Ok(Json(WorkspaceDetail {
         id: workspace.id,
         tenant_id: workspace.tenant_id,
         name: workspace.name,
         max_entities: workspace.max_entities,
+        effective_max_entities: crate::data::quotas::effective_limit(
+            workspace.max_entities,
+            quotas.entities,
+        ),
         schema_id: workspace.schema_id,
         created_at: crate::time::in_timezone(workspace.created_at, timezone),
         entity_count,
