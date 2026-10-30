@@ -248,6 +248,66 @@ pub(crate) async fn create_template(
     row.try_into()
 }
 
+pub(crate) async fn create_as(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    input: CreateTemplateInput,
+) -> Result<TemplateRecord, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let template = create_template(&txn, actor.tenant_id, actor.user_id, input).await?;
+    txn.commit().await.internal()?;
+    Ok(template)
+}
+
+/// Updates a template after revalidating tenant administration under the membership fence.
+///
+/// # Errors
+/// Rejects stale or unauthorized credentials and propagates validation and persistence errors.
+pub async fn update_as(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    template_id: uuid::Uuid,
+    input: UpdateTemplateInput,
+) -> Result<TemplateRecord, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let template = update_template(&txn, actor.tenant_id, template_id, input).await?;
+    txn.commit().await.internal()?;
+    Ok(template)
+}
+
+pub(crate) async fn delete_as(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    template_id: uuid::Uuid,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    delete_template(&txn, actor.tenant_id, template_id).await?;
+    txn.commit().await.internal()
+}
+
+pub(crate) async fn fork_as(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    source_template_id: uuid::Uuid,
+    name: String,
+) -> Result<TemplateRecord, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let template = fork_template(
+        &txn,
+        actor.tenant_id,
+        actor.user_id,
+        source_template_id,
+        name,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok(template)
+}
+
 /// Updates a template's editable fields.
 /// Only the owning tenant may update its own template (community-visible templates from other tenants are read-only to everyone but their owner).
 ///

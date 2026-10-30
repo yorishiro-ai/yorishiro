@@ -16,6 +16,35 @@ fn note_definition() -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn template_update_revalidates_a_previously_authenticated_administrator() {
+    use yorishiro::models::template_templates::{self, UpdateTemplateInput};
+    use yorishiro::models::{api_keys, tenant_memberships, user_users};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let created = request.post("/api/template-library")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"name":format!("fenced-{}",uuid::Uuid::new_v4()),"definition":note_definition()})).await;
+        created.assert_status(StatusCode::CREATED);
+        let id = created.json::<serde_json::Value>()["id"].as_str().unwrap().parse().unwrap();
+        let user = user_users::create_user(&ctx.db, &fixtures::unique_email("template-admin"), "test-password", None).await.unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Admin).await.unwrap();
+        let key = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, Some(user.id), false).await.unwrap();
+        let actor = api_keys::AuthContext { api_key_id:key.id, workspace_id:tenant.workspace_id,
+            tenant_id:tenant.tenant_id, user_id:Some(user.id), scope:ApiKeyScope::Read, audit:false };
+        let input = || UpdateTemplateInput { name:None,description:Some("must-not-save".into()),definition:None,tags:None,locale:None };
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Member).await.unwrap();
+        assert!(matches!(template_templates::update_as(&ctx.db, &actor, id, input()).await,
+            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })));
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Admin).await.unwrap();
+        api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+        assert!(matches!(template_templates::update_as(&ctx.db, &actor, id, input()).await,
+            Err(yorishiro::YorishiroError::Unauthenticated)));
+        let stored = template_templates::get_template(&ctx.db, tenant.tenant_id, id).await.unwrap();
+        assert_ne!(stored.description.as_deref(), Some("must-not-save"));
+    }).await;
+}
+
+#[tokio::test]
 async fn owner_can_create_update_and_delete_a_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());

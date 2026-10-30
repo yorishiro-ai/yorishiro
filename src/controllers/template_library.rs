@@ -5,16 +5,13 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::TransactionTrait;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
-use crate::controllers::members::require_tenant_admin;
 use crate::dtos::template_library::{
     CreateTemplateRequest, ForkTemplateRequest, UpdateTemplateRequest,
 };
-use crate::error::ResultExt;
 use crate::models::template_templates::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
 };
@@ -55,12 +52,9 @@ pub async fn create_template(
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateTemplateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-
-    let template = template_templates::create_template(
+    let template = template_templates::create_as(
         &ctx.db,
-        auth.tenant_id,
-        auth.user_id,
+        &auth,
         CreateTemplateInput {
             name: body.name,
             description: body.description,
@@ -84,12 +78,9 @@ pub async fn update_template(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateTemplateRequest>,
 ) -> Result<Json<TemplateRecord>, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-
-    let txn = ctx.db.begin().await.internal()?;
-    let template = template_templates::update_template(
-        &txn,
-        auth.tenant_id,
+    let template = template_templates::update_as(
+        &ctx.db,
+        &auth,
         id,
         UpdateTemplateInput {
             name: body.name,
@@ -100,7 +91,6 @@ pub async fn update_template(
         },
     )
     .await?;
-    txn.commit().await.internal()?;
     Ok(Json(template))
 }
 
@@ -110,8 +100,7 @@ pub(crate) async fn delete_template(
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-    template_templates::delete_template(&ctx.db, auth.tenant_id, id).await?;
+    template_templates::delete_as(&ctx.db, &auth, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -125,11 +114,7 @@ pub async fn fork_template(
     Path(id): Path<Uuid>,
     Json(body): Json<ForkTemplateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-
-    let template =
-        template_templates::fork_template(&ctx.db, auth.tenant_id, auth.user_id, id, body.name)
-            .await?;
+    let template = template_templates::fork_as(&ctx.db, &auth, id, body.name).await?;
     Ok((StatusCode::CREATED, Json(template)))
 }
 
