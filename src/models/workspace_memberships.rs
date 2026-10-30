@@ -8,7 +8,8 @@ use crate::models::api_keys::ApiKeyScope;
 
 db_enum! {
     /// Workspace-local authority never grants tenant administration.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
+    #[schemars(rename_all = "lowercase")]
     pub enum WorkspaceRole {
         Admin = "admin",
         Member = "member",
@@ -27,6 +28,39 @@ impl WorkspaceRole {
 }
 
 impl Model {
+    /// Lists direct grants, independently of inherited tenant administrator access.
+    ///
+    /// # Errors
+    /// Rejects unauthorized actors and propagates lookup failures.
+    pub async fn list_as(
+        db: &sea_orm::DatabaseConnection,
+        actor: &crate::models::api_keys::AuthContext,
+        workspace_id: Uuid,
+    ) -> Result<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>, YorishiroError> {
+        use sea_orm::QueryOrder;
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        let records = Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .order_by_asc(Column::UserId)
+            .all(&txn)
+            .await
+            .internal()?
+            .into_iter()
+            .map(|record| {
+                let role = WorkspaceRole::from_db_str(&record.role).ok_or_else(|| {
+                    YorishiroError::Internal(anyhow::anyhow!("unknown workspace membership role"))
+                })?;
+                Ok(crate::dtos::workspaces::WorkspaceMemberRecord {
+                    user_id: record.user_id,
+                    role,
+                })
+            })
+            .collect::<Result<Vec<_>, YorishiroError>>()?;
+        txn.commit().await.internal()?;
+        Ok(records)
+    }
+
     /// Grants workspace-local authority after revalidating the administrator under the fence.
     ///
     /// # Errors

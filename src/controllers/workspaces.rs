@@ -97,6 +97,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_update_workspace),
         super::route_inventory::path_doc(__path_delete_workspace),
         super::route_inventory::path_doc(__path_grant_member),
+        super::route_inventory::path_doc(__path_list_members),
         super::route_inventory::path_doc(__path_revoke_member),
     ]
 }
@@ -123,6 +124,17 @@ async fn revoke_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}/members", params(("id" = Uuid, Path)), responses((status = 200, body = [crate::dtos::workspaces::WorkspaceMemberRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["workspace_admin"]))), tag = "community"))]
+async fn list_members(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>>, ApiError> {
+    Ok(Json(
+        crate::models::workspace_memberships::Model::list_as(&ctx.db, &actor, id).await?,
+    ))
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/workspaces")
@@ -133,4 +145,5 @@ pub fn routes() -> Routes {
         .add("/{id}", delete(delete_workspace))
         .add("/{id}/members/{user_id}", axum::routing::put(grant_member))
         .add("/{id}/members/{user_id}", delete(revoke_member))
+        .add("/{id}/members", get(list_members))
 }

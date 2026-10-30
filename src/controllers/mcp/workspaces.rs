@@ -20,6 +20,21 @@ pub(crate) struct WorkspaceArgs {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct WorkspaceMemberArgs {
+    pub workspace_id: Uuid,
+    pub user_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GrantWorkspaceMemberArgs {
+    pub workspace_id: Uuid,
+    pub user_id: Uuid,
+    pub role: crate::models::workspace_memberships::WorkspaceRole,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CreateWorkspaceArgs {
     pub name: String,
     pub max_entities: Option<i32>,
@@ -38,6 +53,102 @@ pub(crate) struct UpdateWorkspaceArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_workspaces)]
 impl YorishiroMcpServer {
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
+        description = "List direct workspace grants; inherited tenant administrator access is not a direct grant (requires read scope and workspace Admin)"
+    )]
+    pub(crate) async fn list_workspace_members(
+        &self,
+        Parameters(args): Parameters<WorkspaceArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("list_workspace_members")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::workspace_memberships::Model::list_as(
+            &self.app_context().db,
+            &auth,
+            args.workspace_id,
+        )
+        .await
+        {
+            Ok(records) => ok_json(records),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
+        description = "Grant or change a direct workspace role for an existing tenant member; grants no tenant administration or key issuance authority (requires read scope and workspace Admin)"
+    )]
+    pub(crate) async fn grant_workspace_member(
+        &self,
+        Parameters(args): Parameters<GrantWorkspaceMemberArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("grant_workspace_member")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::workspace_memberships::Model::grant_as(
+            &self.app_context().db,
+            &auth,
+            args.workspace_id,
+            args.user_id,
+            args.role,
+        )
+        .await
+        {
+            Ok(()) => ok_json(serde_json::json!({"granted":true})),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
+        description = "Revoke a direct workspace grant and affected workspace-bound credentials; inherited tenant authority remains (requires read scope and workspace Admin)"
+    )]
+    pub(crate) async fn revoke_workspace_member(
+        &self,
+        Parameters(args): Parameters<WorkspaceMemberArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("revoke_workspace_member")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::workspace_memberships::Model::revoke_as(
+            &self.app_context().db,
+            &auth,
+            args.workspace_id,
+            args.user_id,
+        )
+        .await
+        {
+            Ok(()) => ok_json(serde_json::json!({"revoked":true})),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "List visible workspace records in the current tenant; discovery is not authority to retarget a bound credential (requires read scope)"

@@ -3,6 +3,13 @@ use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkspaceMemberRecord {
+    pub user_id: Uuid,
+    pub role: crate::models::workspace_memberships::WorkspaceRole,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
