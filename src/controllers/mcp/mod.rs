@@ -1,4 +1,5 @@
 mod api_keys;
+mod audit_log;
 pub mod entities;
 mod import;
 mod invites;
@@ -125,6 +126,7 @@ impl YorishiroMcpServer {
     pub(crate) fn tool_capabilities(
         &self,
         scopes: &[ApiKeyScope],
+        audit: bool,
     ) -> Result<Vec<serde_json::Value>, ErrorData> {
         self.tool_router
             .list_all()
@@ -132,10 +134,16 @@ impl YorishiroMcpServer {
             .filter(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()))
             .map(|tool| {
                 let required = self.required_scope(tool.name.as_ref())?;
+                let grants = tool.meta.as_ref()
+                    .and_then(|meta| meta.0.get("yorishiro/required_grants"))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([]));
                 Ok(serde_json::json!({
                     "name": tool.name,
                     "required_scope": required,
                     "scope_satisfied": scopes.contains(&required),
+                    "required_grants": grants,
+                    "grants_satisfied": grants.as_array().is_some_and(|grants| grants.iter().all(|grant| grant == "audit" && audit)),
                 }))
             })
             .collect()
@@ -166,6 +174,7 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_whoami(),
         YorishiroMcpServer::tool_router_workspaces(),
         YorishiroMcpServer::tool_router_api_keys(),
+        YorishiroMcpServer::tool_router_audit_log(),
     ])
 }
 

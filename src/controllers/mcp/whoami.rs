@@ -30,7 +30,7 @@ impl YorishiroMcpServer {
         };
         match crate::models::access::capabilities(&self.app_context().db, &auth).await {
             Ok(capabilities) => {
-                let tools = self.tool_capabilities(&capabilities.scopes)?;
+                let tools = self.tool_capabilities(&capabilities.scopes, capabilities.audit)?;
                 ok_json(serde_json::json!({
                     "scopes": capabilities.scopes,
                     "audit": capabilities.audit,

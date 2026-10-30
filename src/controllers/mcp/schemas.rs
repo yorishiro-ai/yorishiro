@@ -62,6 +62,39 @@ pub(crate) struct CreateSchemaArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_schemas)]
 impl YorishiroMcpServer {
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
+        description = "Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema scope)"
+    )]
+    pub(crate) async fn archive_schema(
+        &self,
+        Parameters(args): Parameters<GetSchemaByIdArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("archive_schema")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match schema_schemas::archive(
+            authorized.txn(),
+            authorized.ctx.workspace_id,
+            args.schema_id,
+        )
+        .await
+        {
+            Ok(schema) => {
+                authorized.commit().await?;
+                ok_json(schema)
+            }
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+    #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "List summaries of all schemas registered for the workspace (all \
                            versions, including archived). Use this to discover what schemas \

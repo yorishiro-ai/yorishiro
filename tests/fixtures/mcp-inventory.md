@@ -14,6 +14,28 @@ Authorization remains enforced by the existing centralized MCP authorization pat
 <!-- BEGIN GENERATED MCP INVENTORY -->
 ## Community tools
 
+### `archive_schema`
+
+Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "schema_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `capabilities`
 
 Inspect current grants and visible tools' required scopes and scope satisfaction; this snapshot does not guarantee operation success or authorize later requests (requires read scope)
@@ -795,6 +817,39 @@ Input schema:
 ```json
 {
   "properties": {},
+  "type": "object"
+}
+```
+
+### `list_audit_log`
+
+List the selected workspace's paginated audit history (requires the independent audit grant; tenant or workspace administration does not grant audit access)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "page": {
+      "description": "One-based page number.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "page_size": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```

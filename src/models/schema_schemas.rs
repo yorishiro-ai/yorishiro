@@ -64,6 +64,34 @@ pub async fn lock_version(
         .internal()
 }
 
+/// Retires one version without deleting entity, migration or fork history.
+///
+/// # Errors
+/// Returns an error when the version does not belong to the selected workspace or persistence fails.
+pub(crate) async fn archive(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<SchemaRecord, YorishiroError> {
+    use crate::models::_entities::schema_schemas::Column;
+
+    let schema = get_by_id(conn, workspace_id, schema_id).await?;
+    lock_version(conn, workspace_id, &schema.name).await?;
+    Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(SchemaStatus::Archived.as_db_str()),
+        )
+        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Id.eq(schema_id))
+        .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
+        .exec(conn)
+        .await
+        .internal()?;
+    get_by_id(conn, workspace_id, schema_id).await
+}
+
 /// One version of a workspace's schema.
 //
 // `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.

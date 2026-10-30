@@ -12,6 +12,112 @@ use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use crate::EnvGuard;
 
+#[tokio::test]
+async fn schema_archive_preserves_history_and_version_sequence() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let definition = json!({"name":"archive-history","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
+        let created = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        created.assert_status(StatusCode::CREATED);
+        let schema = created.json::<Value>()["schema"].clone();
+        let id = schema["id"].as_str().unwrap();
+        let entity = request.post("/api/entities").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"schema_name":"archive-history","entity_type":"note","data":{"title":"retained"}})).await;
+        entity.assert_status(StatusCode::CREATED);
+        let entity_id = entity.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let read_key = issue_api_key(&ctx, tenant.workspace_id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let archived = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":id}})).await;
+        assert_eq!(tool_result_json(&archived)["status"], "archived");
+        let retained = request.get(&format!("/api/entities/{entity_id}")).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        retained.assert_status_ok();
+        assert_eq!(retained.json::<Value>()["data"]["title"], "retained");
+        let again = request.post(&format!("/api/schemas/{id}/archive")).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        again.assert_status_ok();
+        assert_eq!(again.json::<Value>(), tool_result_json(&archived));
+        request.get("/api/schemas/active/archive-history").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::NOT_FOUND);
+        request.get(&format!("/api/schemas/{id}")).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
+        let next = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        next.assert_status(StatusCode::CREATED);
+        assert_eq!(next.json::<Value>()["schema"]["version"], 2);
+        let missing = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":Uuid::new_v4()}})).await;
+        assert_eq!(missing["result"]["isError"], true);
+    }).await;
+}
+
+#[tokio::test]
+async fn audit_tool_preserves_independent_grant_and_rest_parity() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let denied = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"list_audit_log","arguments":{}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
+        let audit_key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            tenant.owner_id,
+            ApiKeyScope::Read,
+            true,
+        )
+        .await;
+        let listed = mcp_call(
+            &request,
+            &session,
+            &audit_key,
+            3,
+            "tools/call",
+            json!({"name":"list_audit_log","arguments":{"page":1,"page_size":10}}),
+        )
+        .await;
+        let rest = request
+            .get("/api/audit-log?page=1&page_size=10")
+            .add_header("Authorization", format!("Bearer {audit_key}"))
+            .await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
+        let invalid = mcp_call(
+            &request,
+            &session,
+            &audit_key,
+            4,
+            "tools/call",
+            json!({"name":"list_audit_log","arguments":{"page":u64::MAX}}),
+        )
+        .await;
+        assert_eq!(invalid["result"]["isError"], true);
+        for (key, expected) in [(&tenant.api_key, false), (&audit_key, true)] {
+            let capabilities = mcp_call(
+                &request,
+                &session,
+                key,
+                5,
+                "tools/call",
+                json!({"name":"capabilities","arguments":{}}),
+            )
+            .await;
+            let capabilities = tool_result_json(&capabilities);
+            let audit = capabilities["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == "list_audit_log")
+                .unwrap();
+            assert_eq!(audit["required_grants"], json!(["audit"]));
+            assert_eq!(audit["grants_satisfied"], expected);
+        }
+    })
+    .await;
+}
+
 pub(super) fn rpc_body(text: &str) -> Value {
     let payload = text
         .lines()
