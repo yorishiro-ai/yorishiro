@@ -109,6 +109,199 @@ fn tool_result_json(response: &Value) -> Value {
 }
 
 #[tokio::test]
+async fn tenant_metadata_tools_match_rest_and_keep_updates_atomic() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let updated = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"update_tenant","arguments":{"name":" managed tenant ","replace_max_workspaces":true,"max_workspaces":0}})).await;
+        let record = tool_result_json(&updated);
+        assert_eq!(record["name"], "managed tenant");
+        assert_eq!(record["max_workspaces"], 0);
+        let rest = request.get("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(record, rest.json::<Value>());
+        let blocked = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"create_workspace","arguments":{"name":"blocked"}})).await;
+        assert_eq!(blocked["result"]["isError"], true);
+        for arguments in [json!({"name":"rollback","replace_max_workspaces":true,"max_workspaces":-1}), json!({"name":"rollback","max_workspaces":5}), json!({"name":" "})] {
+            let invalid = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"update_tenant","arguments":arguments})).await;
+            assert_eq!(invalid["result"]["isError"], true);
+        }
+        let detail = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"get_tenant","arguments":{}})).await;
+        assert_eq!(tool_result_json(&detail), record);
+        let cleared = request.put("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"replace_max_workspaces":true,"max_workspaces":null})).await;
+        cleared.assert_status_ok();
+        assert!(cleared.json::<Value>()["max_workspaces"].is_null());
+        let user = yorishiro::models::user_users::create_user(&ctx.db, &super::fixtures::unique_email("tenant-viewer"), "test-password", None).await.unwrap();
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, yorishiro::models::tenant_memberships::MembershipRole::Viewer).await.unwrap();
+        super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id, yorishiro::models::workspace_memberships::WorkspaceRole::Viewer).await;
+        let viewer = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        for (name, args) in [("get_tenant", json!({})), ("update_tenant", json!({"name":"forbidden"}))] {
+            let denied = mcp_call(&request, &session, &viewer, 6, "tools/call", json!({"name":name,"arguments":args})).await;
+            assert_eq!(denied["result"]["isError"], true);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn api_key_tools_preserve_history_ceilings_and_revocation() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let read_key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            tenant.owner_id,
+            ApiKeyScope::Read,
+            false,
+        )
+        .await;
+        for args in [
+            json!({"name":"higher","scope":"write"}),
+            json!({"name":"audit","audit":true}),
+            json!({"name":"   "}),
+        ] {
+            let denied = mcp_call(
+                &request,
+                &session,
+                &read_key,
+                2,
+                "tools/call",
+                json!({"name":"create_api_key","arguments":args}),
+            )
+            .await;
+            assert_eq!(denied["result"]["isError"], true, "{denied}");
+        }
+        let created = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({"name":"create_api_key","arguments":{"name":" managed "}}),
+        )
+        .await;
+        let created = tool_result_json(&created);
+        assert_eq!(created["name"], "managed");
+        let secret = created["full_key"].as_str().unwrap();
+        let rotated = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            4,
+            "tools/call",
+            json!({"name":"rotate_api_key","arguments":{"key_id":created["id"]}}),
+        )
+        .await;
+        let successor = tool_result_json(&rotated);
+        assert_ne!(created["id"], successor["id"]);
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {secret}"))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let listed = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            5,
+            "tools/call",
+            json!({"name":"list_api_keys","arguments":{}}),
+        )
+        .await;
+        let history = tool_result_json(&listed);
+        assert!(!history.to_string().contains(secret));
+        assert!(
+            !history
+                .to_string()
+                .contains(successor["full_key"].as_str().unwrap())
+        );
+        assert!(
+            history["keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|key| key["id"] == created["id"] && key["state"] == "revoked")
+        );
+        let rest = request
+            .get("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        let mut mcp_history = history.clone();
+        let mut rest_history = rest.json::<Value>();
+        // Each authenticated call may independently touch the caller's last-used timestamp.
+        for records in [&mut mcp_history, &mut rest_history] {
+            for key in records["keys"].as_array_mut().unwrap() {
+                key.as_object_mut().unwrap().remove("last_used_at");
+            }
+        }
+        assert_eq!(mcp_history, rest_history);
+        let revoked = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            6,
+            "tools/call",
+            json!({"name":"revoke_api_key","arguments":{"key_id":successor["id"]}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        request
+            .get("/api/whoami")
+            .add_header(
+                "Authorization",
+                format!("Bearer {}", successor["full_key"].as_str().unwrap()),
+            )
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let foreign = mcp_call(
+            &request,
+            &session,
+            &other.api_key,
+            7,
+            "tools/call",
+            json!({"name":"revoke_api_key","arguments":{"key_id":created["id"]}}),
+        )
+        .await;
+        assert_eq!(foreign["result"]["isError"], true);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn workspace_member_tools_match_rest_and_revoke_bound_credentials() {
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{tenant_memberships, user_users, workspace_memberships::WorkspaceRole};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("workspace-managed"), "test-password", None).await.unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Member).await.unwrap();
+        let session = initialize(&request).await;
+        let granted = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id,"role":"admin"}})).await;
+        assert_eq!(tool_result_json(&granted)["granted"], true);
+        let member_key = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        let listed = mcp_call(&request, &session, &member_key, 3, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        let rest = request.get(&format!("/api/workspaces/{}/members", tenant.workspace_id)).add_header("Authorization", format!("Bearer {member_key}")).await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
+        assert_eq!(tool_result_json(&listed), json!([{"user_id":user.id,"role":"admin"}]));
+        let tenant_admin = mcp_call(&request, &session, &member_key, 4, "tools/call", json!({"name":"create_api_key","arguments":{"name":"forbidden"}})).await;
+        assert_eq!(tenant_admin["result"]["isError"], true);
+        super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id, WorkspaceRole::Viewer).await;
+        let denied = mcp_call(&request, &session, &member_key, 5, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let foreign = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":other.workspace_id,"user_id":user.id,"role":"admin"}})).await;
+        assert_eq!(foreign["result"]["isError"], true);
+        let revoked = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"revoke_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id}})).await;
+        assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        request.get("/api/whoami").add_header("Authorization", format!("Bearer {member_key}")).await.assert_status(StatusCode::UNAUTHORIZED);
+        let members = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.json::<Value>();
+        assert!(members.as_array().unwrap().iter().any(|member| member["user_id"] == user.id.to_string() && member["role"] == "member"));
+    }).await;
+}
+
+#[tokio::test]
 async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

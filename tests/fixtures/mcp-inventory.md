@@ -27,6 +27,69 @@ Input schema:
 }
 ```
 
+### `create_api_key`
+
+Issue a workspace-bound API key and return its secret once; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ApiKeyScope": {
+      "description": "Permission level held by an API key.\nDeclaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.\nThe wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').",
+      "oneOf": [
+        {
+          "enum": [
+            "read",
+            "write",
+            "schema"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "migration",
+          "description": "Running a batch migration, and switching maintenance mode.\nAbove `schema` because both act on data already stored.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audit": {
+      "default": false,
+      "type": "boolean"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApiKeyScope"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
 ### `create_entity`
 
 Create a new entity (requires write scope)
@@ -600,6 +663,19 @@ Input schema:
 }
 ```
 
+### `get_tenant`
+
+Read the current tenant's basic metadata and stored manual workspace cap (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `get_workspace`
 
 Get selected workspace details, counts and effective entity cap; cannot retarget a workspace-bound credential (requires read scope)
@@ -618,6 +694,49 @@ Input schema:
   },
   "required": [
     "workspace_id"
+  ],
+  "type": "object"
+}
+```
+
+### `grant_workspace_member`
+
+Grant or change a direct workspace role for an existing tenant member; grants no tenant administration or key issuance authority (requires read scope and workspace Admin)
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "WorkspaceRole": {
+      "description": "Workspace-local authority never grants tenant administration.",
+      "enum": [
+        "admin",
+        "member",
+        "viewer"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "role": {
+      "$ref": "#/$defs/WorkspaceRole"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "workspace_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspace_id",
+    "user_id",
+    "role"
   ],
   "type": "object"
 }
@@ -663,6 +782,19 @@ Input schema:
   "required": [
     "jsonl"
   ],
+  "type": "object"
+}
+```
+
+### `list_api_keys`
+
+List current-tenant API key history including revoked and expired grants without secrets (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "properties": {},
   "type": "object"
 }
 ```
@@ -908,6 +1040,29 @@ Input schema:
 }
 ```
 
+### `list_workspace_members`
+
+List direct workspace grants; inherited tenant administrator access is not a direct grant (requires read scope and workspace Admin)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "workspace_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspace_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `list_workspaces`
 
 List visible workspace records in the current tenant; discovery is not authority to retarget a bound credential (requires read scope)
@@ -1135,6 +1290,29 @@ Input schema:
 }
 ```
 
+### `revoke_api_key`
+
+Revoke a current-tenant API key while retaining secret-free history (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "key_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "key_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `revoke_invite`
 
 Cancel an unused current-tenant invitation; repeated cancellation is safe (requires read scope and tenant Admin or Owner)
@@ -1153,6 +1331,57 @@ Input schema:
   },
   "required": [
     "invite_id"
+  ],
+  "type": "object"
+}
+```
+
+### `revoke_workspace_member`
+
+Revoke a direct workspace grant and affected workspace-bound credentials; inherited tenant authority remains (requires read scope and workspace Admin)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "workspace_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspace_id",
+    "user_id"
+  ],
+  "type": "object"
+}
+```
+
+### `rotate_api_key`
+
+Atomically rotate a current-tenant API key, revoke its predecessor and return the successor secret once (requires read scope and tenant Admin or Owner; issuer ceilings apply)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "key_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "key_id"
   ],
   "type": "object"
 }
@@ -1394,6 +1623,40 @@ Input schema:
   "required": [
     "id"
   ],
+  "type": "object"
+}
+```
+
+### `update_tenant`
+
+Update current tenant name or explicitly replace/clear its manual workspace cap without altering plan quotas (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "max_workspaces": {
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "replace_max_workspaces": {
+      "default": false,
+      "description": "Explicitly replace the manual workspace cap, including clearing it with null.",
+      "type": "boolean"
+    }
+  },
   "type": "object"
 }
 ```
