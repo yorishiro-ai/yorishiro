@@ -307,13 +307,8 @@ async fn callback(
         identity.email.as_deref(),
         identity.display_name.as_deref(),
         max_tenants,
-        *ctx.shared_store
-            .get::<std::sync::Arc<bool>>()
-            .ok_or_else(|| {
-                ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                    "plan policy missing"
-                )))
-            })?,
+        crate::edition::ee::data::plan::PlanPolicy::current(&ctx)?
+            == crate::edition::ee::data::plan::PlanPolicy::Enabled,
     )
     .await?;
     txn.commit().await.internal()?;

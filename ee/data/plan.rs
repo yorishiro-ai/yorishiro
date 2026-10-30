@@ -1,8 +1,55 @@
-//! Subscription tiers for the hosted offering.
-//!
-//! Self-hosted deployments never assign a plan (`tenant_tenants.plan` stays absent, since base never writes `tenant_billing`); this type is only ever produced by this crate's Stripe integration.
+//! Subscription tiers and licence-dependent plan-policy eligibility.
 
 use serde::{Deserialize, Serialize};
+
+/// Whether plan rules may be applied to the current operation.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PlanPolicy {
+    Disabled,
+    Enabled,
+}
+
+pub(crate) struct PlanPolicySetting {
+    pub(crate) enabled: bool,
+}
+
+impl PlanPolicy {
+    /// Resolves the configured switch and current licence validity together.
+    ///
+    /// # Errors
+    /// Returns an error if the deployment policy was not installed.
+    pub fn current(ctx: &loco_rs::app::AppContext) -> Result<Self, crate::YorishiroError> {
+        use crate::edition::ee::controllers::middleware::edition::LicenceState;
+        use std::sync::Arc;
+
+        let setting = ctx
+            .shared_store
+            .get::<Arc<PlanPolicySetting>>()
+            .ok_or_else(|| {
+                crate::YorishiroError::Internal(anyhow::anyhow!("plan policy missing"))
+            })?;
+        let licence = ctx.shared_store.get::<Arc<LicenceState>>();
+        Ok(Self::resolve(
+            setting.enabled,
+            licence.as_deref(),
+            crate::time::now().timestamp(),
+        ))
+    }
+
+    /// Resolves eligibility at a specific clock boundary without freezing licence expiry.
+    #[must_use]
+    pub fn resolve(
+        enabled: bool,
+        licence: Option<&crate::edition::ee::controllers::middleware::edition::LicenceState>,
+        now: i64,
+    ) -> Self {
+        if enabled && licence.is_some_and(|licence| licence.is_active_at(now)) {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -44,3 +44,26 @@ fn each_class_is_admitted_at_its_own_band_without_borrowing_another_classs_capac
     assert!(priority(WorkerClass::TenantPrivate) > priority(WorkerClass::Official));
     assert!(priority(WorkerClass::Official) > priority(WorkerClass::Shared));
 }
+
+#[cfg(feature = "enterprise")]
+#[tokio::test]
+async fn unlicensed_policy_bypasses_plan_and_workspace_resolution() {
+    use std::sync::Arc;
+    use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
+
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let _ = ctx.shared_store.remove::<Arc<LicenceState>>();
+        for class in [
+            WorkerClass::Shared,
+            WorkerClass::Official,
+            WorkerClass::TenantPrivate,
+        ] {
+            let policy = concurrency_for(&ctx, uuid::Uuid::new_v4(), class)
+                .await
+                .unwrap();
+            assert_eq!(policy.plan, "community");
+            assert_eq!(policy.limit, None);
+        }
+    })
+    .await;
+}

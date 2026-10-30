@@ -8,7 +8,9 @@ use crate::edition::ee::{data, workers};
 
 pub(crate) fn install(ctx: &AppContext) -> Result<()> {
     ctx.shared_store
-        .insert(Arc::new(data::plan::plan_policy_enabled(&ctx.config)?));
+        .insert(Arc::new(data::plan::PlanPolicySetting {
+            enabled: data::plan::plan_policy_enabled(&ctx.config)?,
+        }));
     ctx.shared_store.insert(Arc::new(
         data::worker_policy::WorkerClassLimits::from_config(&ctx.config)?,
     ));
