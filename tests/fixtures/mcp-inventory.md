@@ -1807,6 +1807,19 @@ Input schema:
 
 ## Enterprise-only tools
 
+### `get_embedding_provider`
+
+Read the selected workspace's embedding provider metadata without its API key (requires read scope); returns not found when the deployment default is used
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `get_worker_class`
 
 Read the selected workspace's explicit worker-class assignment (requires read scope); missing assignments use shared compute and return not found here
@@ -1927,6 +1940,19 @@ Input schema:
 }
 ```
 
+### `reset_embedding_provider`
+
+Remove the selected workspace's embedding provider override and queue a full reindex atomically using the deployment default (requires schema scope)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `reset_entity_columns`
 
 Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires write scope); this removes only the display preference
@@ -1958,6 +1984,46 @@ Input schema:
 ```json
 {
   "properties": {},
+  "type": "object"
+}
+```
+
+### `set_embedding_provider`
+
+Configure the selected workspace's OpenAI-compatible embedding provider and queue a full reindex atomically (requires schema scope); the supplied API key is stored and never returned
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_key": {
+      "description": "Stored as given and never returned.",
+      "type": "string"
+    },
+    "base_url": {
+      "type": "string"
+    },
+    "dimensions": {
+      "format": "int32",
+      "type": "integer"
+    },
+    "model": {
+      "type": "string"
+    },
+    "send_dimensions_param": {
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "base_url",
+    "model",
+    "api_key",
+    "dimensions"
+  ],
   "type": "object"
 }
 ```
