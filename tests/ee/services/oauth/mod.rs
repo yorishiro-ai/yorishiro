@@ -23,6 +23,35 @@ async fn json_server(
     crate::http_stub::HttpStub,
     tokio::sync::oneshot::Receiver<Vec<u8>>,
 ) {
+    if body.get("authorization_endpoint").is_some() {
+        let issuer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let observed = issuer.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+        let stub = crate::http_stub::HttpStub::start(axum::Router::new().route(
+            "/.well-known/openid-configuration",
+            axum::routing::get(move |request: axum::extract::Request| {
+                let mut body = body.clone();
+                body["issuer"] = serde_json::json!(observed.lock().unwrap().clone());
+                let response = body.clone();
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(
+                        format!(
+                            "{} {} {:?}",
+                            request.method(),
+                            request.uri(),
+                            request.version()
+                        )
+                        .into_bytes(),
+                    );
+                }
+                async move { axum::Json(response) }
+            }),
+        ))
+        .await;
+        *issuer.lock().unwrap() = stub.url.clone();
+        return (stub.url.clone(), stub, rx);
+    }
     let body = body.to_string();
     discovery::start_server(&format!(
         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -42,6 +71,11 @@ async fn authorize_uses_production_discovery() {
     let redirect = build_authorize_redirect(&config(issuer)).await.unwrap();
     assert!(redirect.url.starts_with("https://idp.example/authorize?"));
     assert!(redirect.url.contains("code_challenge_method=S256"));
+    let url = reqwest::Url::parse(&redirect.url).unwrap();
+    let pairs = url
+        .query_pairs()
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(pairs["nonce"], pairs["code_challenge"]);
     assert!(!redirect.csrf_cookie_value.is_empty());
     let request = server.await.unwrap();
     assert!(

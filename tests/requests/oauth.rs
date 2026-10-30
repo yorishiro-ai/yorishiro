@@ -71,7 +71,7 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
     let stub = crate::http_stub::HttpStub::start(axum::Router::new()
         .route("/.well-known/openid-configuration", axum::routing::get(move || {
             let issuer = discovery_issuer.lock().unwrap().clone();
-            async move { axum::Json(serde_json::json!({"authorization_endpoint":format!("{issuer}/authorize"),"token_endpoint":format!("{issuer}/token"),"jwks_uri":format!("{issuer}/jwks")})) }
+            async move { axum::Json(serde_json::json!({"issuer":issuer,"authorization_endpoint":format!("{issuer}/authorize"),"token_endpoint":format!("{issuer}/token"),"jwks_uri":format!("{issuer}/jwks")})) }
         }))
         .route("/jwks", axum::routing::get(move || { let jwks = jwks.clone(); async move { axum::Json(jwks) } }))
         .route("/token", axum::routing::post(move |axum::Form(form): axum::Form<std::collections::HashMap<String,String>>| {
@@ -82,7 +82,10 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
             let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
             header.kid = Some("invite-test".into());
             let subject = if form["code"] == "unverified-email" { "unknown-unverified-subject" } else { &token_subject };
-            let token = jsonwebtoken::encode(&header, &serde_json::json!({"sub":subject,"email":"unverified@example.com","email_verified":false,"iss":token_issuer.lock().unwrap().clone(),"aud":CLIENT_ID,"exp":chrono::Utc::now().timestamp()+300}), &signing_key).unwrap();
+            use sha2::{Digest, Sha256};
+            let nonce = if form["code"] == "wrong-nonce" { "wrong".to_owned() } else { URL_SAFE_NO_PAD.encode(Sha256::digest(form["code_verifier"].as_bytes())) };
+            let nonce = (form["code"] != "missing-nonce").then_some(nonce);
+            let token = jsonwebtoken::encode(&header, &serde_json::json!({"sub":subject,"nonce":nonce,"email":"unverified@example.com","email_verified":false,"iss":token_issuer.lock().unwrap().clone(),"aud":CLIENT_ID,"exp":chrono::Utc::now().timestamp()+300}), &signing_key).unwrap();
             async move { axum::Json(serde_json::json!({"id_token":token})) }
         }))).await;
     *issuer.lock().unwrap() = stub.url.clone();
@@ -118,6 +121,15 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
             .split(';')
             .next()
             .unwrap();
+        for code in ["wrong-nonce", "missing-nonce"] {
+            request
+                .get("/auth/oauth/callback")
+                .add_query_param("code", code)
+                .add_query_param("state", &state)
+                .add_header(header::COOKIE, csrf)
+                .await
+                .assert_status(StatusCode::UNAUTHORIZED);
+        }
         request
             .get("/auth/oauth/callback")
             .add_query_param("code", "unverified-email")

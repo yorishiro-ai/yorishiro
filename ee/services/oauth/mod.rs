@@ -35,6 +35,7 @@ pub async fn build_authorize_redirect(
             ("state", &issued.state),
             ("code_challenge", &issued.pkce_challenge),
             ("code_challenge_method", "S256"),
+            ("nonce", &issued.pkce_challenge),
         ],
     )?;
 
@@ -99,6 +100,13 @@ pub async fn handle_callback(
         &config.issuer_url,
         &config.client_id,
     )?;
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let expected_nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(Sha256::digest(pkce_verifier.as_bytes()));
+    if claims.nonce.as_deref() != Some(expected_nonce.as_str()) {
+        return Err(YorishiroError::Unauthenticated);
+    }
 
     Ok(CallbackIdentity {
         subject_id: claims.sub,
