@@ -504,6 +504,9 @@ async fn mcp_identity_distinguishes_stored_and_membership_capped_scope() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"template_id":"general-notes"})).await.assert_status(StatusCode::CREATED);
         let txn = ctx.db.begin().await.unwrap();
         let member = yorishiro::models::tenancy::register_member(
             &txn,
@@ -558,6 +561,27 @@ async fn mcp_identity_distinguishes_stored_and_membership_capped_scope() {
             assert_eq!(identity["stored_scope"], "migration");
             assert_eq!(identity["scope"], expected);
             assert_eq!(identity["identity_kind"], "user");
+            if role == MembershipRole::Viewer {
+                let definition = json!({
+                    "name":"demoted-key-must-not-create",
+                    "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}
+                });
+                request.post("/api/schemas")
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .json(&definition).await.assert_status(StatusCode::FORBIDDEN);
+                let denied = mcp_call(&request, &session, &key, 20, "tools/call",
+                    json!({"name":"create_schema","arguments":{"definition":definition}})).await;
+                assert_eq!(denied["result"]["isError"], true, "{denied}");
+                assert_eq!(denied["result"]["structuredContent"]["error"]["required_scope"], "schema");
+                let entity = json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"denied"}});
+                request.post("/api/entities")
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .json(&entity).await.assert_status(StatusCode::FORBIDDEN);
+                let denied = mcp_call(&request, &session, &key, 21, "tools/call",
+                    json!({"name":"create_entity","arguments":entity})).await;
+                assert_eq!(denied["result"]["isError"], true, "{denied}");
+                assert_eq!(denied["result"]["structuredContent"]["error"]["required_scope"], "write");
+            }
             assert_eq!(
                 identity["bound_workspace_id"],
                 tenant.workspace_id.to_string()
