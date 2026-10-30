@@ -640,9 +640,9 @@ async fn mcp_transport_requires_protocol_accept_headers() {
 }
 
 /// A server instance is retained by rmcp for the whole session.
-/// Losing the boot-installed licence state must fail closed even in an existing session.
+/// Origin operations remain ungated, like their REST counterparts, in an existing session.
 #[tokio::test]
-async fn mcp_origin_tools_disappear_when_same_session_licence_state_is_missing() {
+async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_missing() {
     boot_request::<App, _, _>(|request, ctx| async move {
         assert!(
             ctx.shared_store
@@ -698,19 +698,25 @@ async fn mcp_origin_tools_disappear_when_same_session_licence_state_is_missing()
             .expect("visible tool capabilities");
         assert_eq!(capabilities.len(), community_tools.len());
         for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
-            assert!(!community_tools.iter().any(|tool| tool["name"] == name));
-            assert!(!capabilities.iter().any(|tool| tool["name"] == name));
-            let denied = mcp_call(
-                &request,
-                &session,
-                &key,
-                10,
-                "tools/call",
-                json!({ "name": name, "arguments": {} }),
-            )
-            .await;
-            assert!(denied.get("error").is_some(), "tool executed: {denied}");
+            assert!(community_tools.iter().any(|tool| tool["name"] == name));
+            assert!(capabilities.iter().any(|tool| tool["name"] == name));
         }
+        let rest = request
+            .get("/api/schemas/upstream-changes")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        let result = mcp_call(
+            &request,
+            &session,
+            &key,
+            10,
+            "tools/call",
+            json!({"name":"list_upstream_changes","arguments":{}}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert_eq!(tool_result_json(&result), rest.json::<Value>());
     })
     .await;
 }

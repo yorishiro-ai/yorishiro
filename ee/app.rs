@@ -154,7 +154,7 @@ pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
         .document(controllers::worker_class::openapi_docs());
 }
 
-/// Adds the enterprise MCP tools, and gates them on the licence.
+/// Adds origin MCP tools with the same ungated policy as their REST routes.
 pub(crate) fn mcp_tools(tools: McpToolSet) -> McpToolSet {
     tools.extend(
         controllers::mcp::tool_router(),
