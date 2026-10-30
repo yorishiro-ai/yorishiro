@@ -241,7 +241,9 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
                 .one(&ctx.db)
                 .await
                 .expect("lookup revoked key")
-                .is_none()
+                .expect("revoked grant history retained")
+                .revoked_at
+                .is_some()
         );
         yorishiro::models::tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, member.id)
             .await

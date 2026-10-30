@@ -797,7 +797,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             assert_eq!(actor(&ctx, &key.plaintext).await.scope, yorishiro::models::api_keys::ApiKeyScope::Read);
         }
         if matches!(change, PermissionChange::RevokeWorkspace) {
-            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_none());
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
             assert!(yorishiro::models::workspace_memberships::Model::role(
                 &ctx.db, setup.workspace_id, user_id.unwrap(),
             ).await.unwrap().is_none());

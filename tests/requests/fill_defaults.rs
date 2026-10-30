@@ -276,7 +276,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
             yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
         for id in [attributed.id, removed.id] {
-            assert!(yorishiro::models::api_keys::Entity::find_by_id(id).one(&ctx.db).await.unwrap().is_none());
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
         }
         let rejected = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", removed.plaintext))
@@ -491,7 +491,9 @@ async fn queued_import_rechecks_workspace_grants_before_writing() {
                 .one(&ctx.db)
                 .await
                 .unwrap()
-                .is_none()
+                .expect("revoked grant history retained")
+                .revoked_at
+                .is_some()
         );
     })
     .await;
