@@ -1,5 +1,6 @@
 mod embedding;
 mod entity_columns;
+mod llm;
 mod origin;
 mod worker_class;
 
@@ -27,6 +28,7 @@ pub fn tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_entity_columns(),
         YorishiroMcpServer::tool_router_worker_class(),
         YorishiroMcpServer::tool_router_embedding(),
+        YorishiroMcpServer::tool_router_llm(),
     ])
 }
 

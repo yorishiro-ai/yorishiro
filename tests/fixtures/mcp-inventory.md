@@ -1820,6 +1820,19 @@ Input schema:
 }
 ```
 
+### `get_llm_provider`
+
+Read the selected workspace's inference LLM endpoint and model without its API key (requires read scope); returns not found when unconfigured
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `get_worker_class`
 
 Read the selected workspace's explicit worker-class assignment (requires read scope); missing assignments use shared compute and return not found here
@@ -1975,6 +1988,19 @@ Input schema:
 }
 ```
 
+### `reset_llm_provider`
+
+Remove the selected workspace's inference LLM credentials (requires schema scope); future inference requires configuration again, and already-started external calls are not cancelled
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `reset_worker_class`
 
 Remove the selected workspace's worker-class assignment and fall back to shared compute (requires schema scope); queued jobs retain their existing routing
@@ -2052,6 +2078,37 @@ Input schema:
   "required": [
     "entity_type",
     "columns"
+  ],
+  "type": "object"
+}
+```
+
+### `set_llm_provider`
+
+Configure the selected workspace's inference LLM endpoint, model and API key (requires schema scope); stores the secret without returning it or invoking inference
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_key": {
+      "description": "Stored as given and never returned.",
+      "type": "string"
+    },
+    "base_url": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "base_url",
+    "model",
+    "api_key"
   ],
   "type": "object"
 }

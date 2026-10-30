@@ -27,7 +27,8 @@ pub(crate) struct InferJobStatusResponse {
     pub(crate) error: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = LlmKeyRequest))]
 pub(crate) struct SetLlmKeyRequest {
