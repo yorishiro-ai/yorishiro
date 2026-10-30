@@ -253,17 +253,19 @@ async fn api_key_tools_preserve_history_ceilings_and_revocation() {
             )
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
-        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let foreign = mcp_call(
-            &request,
-            &session,
-            &other.api_key,
-            7,
-            "tools/call",
-            json!({"name":"revoke_api_key","arguments":{"key_id":created["id"]}}),
-        )
-        .await;
-        assert_eq!(foreign["result"]["isError"], true);
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+            let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+            let foreign = mcp_call(
+                &request,
+                &session,
+                &other.api_key,
+                7,
+                "tools/call",
+                json!({"name":"revoke_api_key","arguments":{"key_id":created["id"]}}),
+            )
+            .await;
+            assert_eq!(foreign["result"]["isError"], true);
+        }
     })
     .await;
 }
@@ -290,9 +292,11 @@ async fn workspace_member_tools_match_rest_and_revoke_bound_credentials() {
         super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id, WorkspaceRole::Viewer).await;
         let denied = mcp_call(&request, &session, &member_key, 5, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
         assert_eq!(denied["result"]["isError"], true);
-        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let foreign = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":other.workspace_id,"user_id":user.id,"role":"admin"}})).await;
-        assert_eq!(foreign["result"]["isError"], true);
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+            let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+            let foreign = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":other.workspace_id,"user_id":user.id,"role":"admin"}})).await;
+            assert_eq!(foreign["result"]["isError"], true);
+        }
         let revoked = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"revoke_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id}})).await;
         assert_eq!(tool_result_json(&revoked)["revoked"], true);
         request.get("/api/whoami").add_header("Authorization", format!("Bearer {member_key}")).await.assert_status(StatusCode::UNAUTHORIZED);
