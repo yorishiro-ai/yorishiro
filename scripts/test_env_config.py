@@ -20,6 +20,25 @@ class EnvConfigTest(unittest.TestCase):
             with self.subTest(config=name):
                 self.assertEqual(common - keys, set())
 
+    def test_test_registry_keys_have_a_config_or_harness_owner(self):
+        registry = set(re.findall(r'=> "([A-Z][A-Z0-9_]+)"', (ROOT / "tests/env.rs").read_text()))
+        config_keys = set()
+        for path in (ROOT / "config").glob("*.yaml"):
+            config_keys.update(re.findall(r'get_env\(name="([A-Z][A-Z0-9_]+)"', path.read_text()))
+        direct = set(re.findall(r'=> "([A-Z][A-Z0-9_]+)"', (ROOT / "src/data/env.rs").read_text()))
+        harness = {
+            "LOCO_ENV",
+            "YORISHIRO_BACKEND_MARKER_DIR",
+            "YORISHIRO_REQUEST_TIMING_DIR",
+            "YORISHIRO_SQLITE_LOCK_CHILD_URI",
+            "YORISHIRO_TEST_E5_MODEL",
+            "YORISHIRO_TEST_E5_TOKENIZER",
+            "YORISHIRO_TEST_REDIS_BASE_URL",
+            "YORISHIRO_TOPOLOGY_MARKER_DIR",
+        }
+        self.assertEqual(registry - config_keys - direct - harness, set())
+        self.assertLessEqual(harness, registry)
+
 
 if __name__ == "__main__":
     unittest.main()
