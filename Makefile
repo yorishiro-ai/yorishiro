@@ -47,6 +47,8 @@ fmt-check: patch-check
 
 python-lint:
 	uv run ruff check scripts patches/loco-rs/verify.py
+	uv run scripts/test_env_reads.py
+	uv run scripts/check_env_reads.py
 	uv run scripts/test_ci_matrix.py
 	uv run scripts/test_classify_ci_changes.py
 	uv run scripts/test_topology_self.py
