@@ -13,7 +13,6 @@ use crate::dtos::entities::{
     CreateEntityRequest, FillDefaultsRequest, FillDefaultsResponse, ListEntitiesParams,
     ReindexResponse, UndoResponse, UpdateEntityRequest,
 };
-use crate::models::api_key_audit_log;
 use crate::models::entity_entities::{self, EntityRecord};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
@@ -159,39 +158,7 @@ pub(crate) async fn reindex_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
 ) -> Result<Json<ReindexResponse>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-
-    // Check queue provider before enqueue: a missing provider means `perform_later` would
-    // return a job ID while silently discarding the job, which is worse than no endpoint
-    // at all.  A 503 with a clear message lets the operator know this needs a queue config
-    // rather than puzzling over a successful 202 with no actual work happening.
-    if ctx.queue_provider.is_none() {
-        return Err(ApiError(crate::error::YorishiroError::BackendUnavailable {
-            message: "reindex requires a queue provider (configure queue: in the server config)"
-                .into(),
-        }));
-    }
-
-    // Record the operation before committing the request transaction.
-    api_key_audit_log::record(
-        authorized.txn(),
-        api_key_audit_log::AuditActor {
-            workspace_id,
-            tenant_id: authorized.ctx.tenant_id,
-            api_key_id: authorized.ctx.api_key_id,
-            user_id: authorized.ctx.user_id,
-        },
-        api_key_audit_log::AuditAction::ReindexEmbeddings,
-        serde_json::json!({ "workspace_id": workspace_id }),
-    )
-    .await?;
-    let job_id = reindex::enqueue_reindex(&ctx, workspace_id, Some(authorized.txn()))
-        .await
-        .map_err(|e| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                e.to_string()
-            )))
-        })?;
+    let job_id = reindex::enqueue_requested(&ctx, authorized.txn(), &authorized.ctx).await?;
     authorized.commit().await?;
 
     Ok(Json(ReindexResponse { job_id }))

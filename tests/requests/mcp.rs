@@ -899,6 +899,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// and cannot change the entity.
 #[tokio::test]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
+    use sea_orm::EntityTrait;
     super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
             tenant_id,
@@ -1104,6 +1105,40 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         assert_eq!(restored.data, json!({ "title": "before" }));
         assert_eq!(restored.schema_version, 1);
 
+        let denied = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            15,
+            "tools/call",
+            json!({"name":"reindex_workspace","arguments":{}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
+        assert_eq!(
+            denied["result"]["structuredContent"]["error"]["required_scope"],
+            "migration"
+        );
+        let reindex = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            16,
+            "tools/call",
+            json!({"name":"reindex_workspace","arguments":{}}),
+        )
+        .await;
+        assert_eq!(reindex["result"]["isError"], false, "{reindex}");
+        let reindex = tool_result_json(&reindex);
+        let reindex_id: Uuid = reindex["job_id"].as_str().unwrap().parse().unwrap();
+        let outbox =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(reindex_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("committed reindex dispatch");
+        assert_eq!(outbox.workspace_id, Some(workspace_id));
+
         let audit = request
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {audit_key}"))
@@ -1115,6 +1150,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             audit.text()
         );
         let entries: Vec<Value> = audit.json();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry["action"] == "reindex_embeddings")
+        );
         let fill_entry = entries
             .iter()
             .find(|entry| entry["action"] == "fill_defaults")

@@ -689,6 +689,19 @@ Input schema:
 }
 ```
 
+### `reindex_workspace`
+
+Enqueue workspace embedding reindex (requires migration scope)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `search_entities`
 
 Vector similarity search over entities using a natural-language query (requires read scope)

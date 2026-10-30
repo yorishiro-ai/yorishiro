@@ -422,6 +422,38 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
+        description = "Enqueue workspace embedding reindex (requires migration scope)"
+    )]
+    pub(crate) async fn reindex_workspace(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("reindex_workspace")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        let job_id = match crate::workers::reindex::enqueue_requested(
+            self.app_context(),
+            authorized.txn(),
+            authorized.auth_context(),
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
+        authorized.commit().await?;
+        ok_json(crate::dtos::entities::ReindexResponse { job_id })
+    }
+
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
         description = "Enqueue undo of a migration job's snapshots (requires migration scope)"
     )]
     pub(crate) async fn undo_migration_job(

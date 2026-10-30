@@ -153,3 +153,33 @@ pub async fn enqueue_reindex(
     )
     .await
 }
+
+pub(crate) async fn enqueue_requested(
+    ctx: &AppContext,
+    txn: &sea_orm::DatabaseTransaction,
+    actor: &crate::models::api_keys::AuthContext,
+) -> Result<String, crate::YorishiroError> {
+    use crate::error::ResultExt;
+    use crate::models::api_key_audit_log::{self, AuditAction, AuditActor};
+    if ctx.queue_provider.is_none() {
+        return Err(crate::YorishiroError::BackendUnavailable {
+            message: "reindex requires a queue provider (configure queue: in the server config)"
+                .into(),
+        });
+    }
+    api_key_audit_log::record(
+        txn,
+        AuditActor {
+            workspace_id: actor.workspace_id,
+            tenant_id: actor.tenant_id,
+            api_key_id: actor.api_key_id,
+            user_id: actor.user_id,
+        },
+        AuditAction::ReindexEmbeddings,
+        serde_json::json!({"workspace_id":actor.workspace_id}),
+    )
+    .await?;
+    enqueue_reindex(ctx, actor.workspace_id, Some(txn))
+        .await
+        .internal()
+}
