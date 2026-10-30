@@ -83,12 +83,14 @@ impl ImportWorker {
                 crate::models::api_keys::ApiKeyScope::Schema,
             )
             .await?;
-            let result = crate::models::import::import_jsonl(
+            let quotas = crate::quotas(&self.ctx, &txn, args.tenant_id).await?;
+            let result = crate::models::import::import_with_quota(
                 &txn,
                 args.tenant_id,
                 args.workspace_id,
                 args.user_id,
                 args.jsonl.as_bytes(),
+                quotas.entities,
             )
             .await?;
             for entity in &result.entity_ids {

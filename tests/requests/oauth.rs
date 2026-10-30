@@ -873,7 +873,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
                 Some("newcomer@example.com"),
                 None,
                 max_tenants,
-                yorishiro::edition::ee::data::plan::PlanPolicy::Disabled,
             )
             .await;
             // The call is expected to be refused; make the rollback explicit so a
@@ -910,7 +909,6 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             Some("firstlogin@example.com"),
             None,
             Some(1),
-            yorishiro::edition::ee::data::plan::PlanPolicy::Disabled,
         )
         .await
         .expect("first login provisioning");
@@ -980,7 +978,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 async fn oauth_provisioning_policy_controls_new_caps() {
     let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::PlanPolicyEnabled.name()]);
     for (index, value, expected_tenant, expected_entities) in
-        [(0, None, None, None), (1, Some("true"), Some(1), Some(500))]
+        [(0, None, None, None), (1, Some("true"), None, None)]
     {
         match value {
             Some(v) => guard.set(crate::env::TestEnv::PlanPolicyEnabled.name(), v),
@@ -988,8 +986,6 @@ async fn oauth_provisioning_policy_controls_new_caps() {
         }
         super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
             require_licence(&ctx);
-            let policy = yorishiro::edition::ee::data::plan::PlanPolicy::current(&ctx)
-                .expect("resolve provisioning policy");
             let txn = ctx.db.begin().await.expect("begin");
             let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
                 &txn,
@@ -998,7 +994,6 @@ async fn oauth_provisioning_policy_controls_new_caps() {
                 Some(&format!("policy-{index}@example.com")),
                 None,
                 Some(1),
-                policy,
             )
             .await
             .expect("provisioning");

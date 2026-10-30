@@ -27,7 +27,15 @@ pub(crate) async fn create_entity(
     let workspace_id = authorized.ctx.workspace_id;
     let input = body.into();
     let created_by = authorized.ctx.user_id;
-    let record = entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
+    let quotas = crate::quotas(&ctx, authorized.txn(), authorized.ctx.tenant_id).await?;
+    let record = entity_entities::create_with_quota(
+        authorized.txn(),
+        workspace_id,
+        input,
+        created_by,
+        quotas.entities,
+    )
+    .await?;
     embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id, authorized.txn()).await?;
     authorized.commit().await?;
     Ok((StatusCode::CREATED, Json(record)))

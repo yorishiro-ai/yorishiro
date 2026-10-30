@@ -41,8 +41,8 @@ pub async fn create_workspace(
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateWorkspaceRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let workspace = tenancy::create_workspace_as(
-        &ctx.db,
+    let workspace = tenancy::create_workspace_in_context(
+        &ctx,
         &auth,
         &body.name,
         body.max_entities,

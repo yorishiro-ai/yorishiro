@@ -14,16 +14,6 @@ pub(crate) struct PlanPolicySetting {
 }
 
 impl PlanPolicy {
-    pub(crate) fn caps(self, plan: Plan) -> PlanCaps {
-        match self {
-            Self::Disabled => PlanCaps {
-                max_workspaces: None,
-                default_max_entities: None,
-            },
-            Self::Enabled => plan.caps(),
-        }
-    }
-
     /// Resolves the configured switch and current licence validity together.
     ///
     /// # Errors
@@ -87,9 +77,7 @@ pub struct ComputePolicy {
     pub burst_ceiling: u32,
 }
 
-/// Caps applied when a tenant is on a given plan.
-/// `max_workspaces` is written onto `tenant_tenants`; `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
-/// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
+/// Operation-time plan caps, never persisted over explicit operator limits.
 #[derive(Clone, Copy)]
 pub(crate) struct PlanCaps {
     pub(crate) max_workspaces: Option<i32>,

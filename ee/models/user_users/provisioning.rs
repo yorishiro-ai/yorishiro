@@ -43,7 +43,6 @@ pub async fn find_or_create(
     email: Option<&str>,
     display_name: Option<&str>,
     max_tenants: Option<i32>,
-    policy: crate::edition::ee::data::plan::PlanPolicy,
 ) -> Result<ProvisionedLogin, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
         .await
@@ -77,25 +76,7 @@ pub async fn find_or_create(
 
     let tenant_name = tenant_name_from_email(email);
     let tenant = tenant_tenants::create_tenant(conn, &tenant_name, max_tenants).await?;
-    crate::edition::ee::models::tenant_tenants::set_max_workspaces(
-        conn,
-        tenant.id,
-        policy
-            .caps(crate::edition::ee::data::plan::Plan::Free)
-            .max_workspaces,
-    )
-    .await?;
-
-    let workspace = tenancy::create_workspace(
-        conn,
-        tenant.id,
-        "default",
-        policy
-            .caps(crate::edition::ee::data::plan::Plan::Free)
-            .default_max_entities,
-        None,
-    )
-    .await?;
+    let workspace = tenancy::create_workspace(conn, tenant.id, "default", None, None).await?;
 
     // A schema requires an existing `workspace_id`, so it is created after the workspace and the workspace is then updated to point at it, moving its `status` to `active`.
     let definition = crate::data::templates::get_template("general-notes")?;

@@ -32,10 +32,18 @@ impl Task for CreateWorkspace {
         let name = vars.cli_arg("name")?;
 
         // `create_workspace` holds a transaction-scoped advisory lock across its count and insert, so it takes a transaction rather than the pool.
-        let txn = app_context.db.begin().await.internal()?;
-        let workspace = tenancy::create_workspace(&txn, tenant_id, name, None, None)
-            .await
-            .internal()?;
+        let txn = crate::db::begin_write(&app_context.db).await.internal()?;
+        let quotas = crate::quotas(app_context, &txn, tenant_id).await?;
+        let workspace = tenancy::create_workspace_with_quota(
+            &txn,
+            tenant_id,
+            name,
+            None,
+            None,
+            quotas.workspaces,
+        )
+        .await
+        .internal()?;
         txn.commit().await.internal()?;
 
         println!("workspace id: {}", workspace.id);

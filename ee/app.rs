@@ -9,6 +9,41 @@ use crate::edition::ee::controllers::middleware::edition;
 use crate::edition::ee::workers::infer_fill::{InferFillArgs, InferFillWorker};
 use crate::workers::registry::WorkerRegistry;
 
+pub(crate) async fn quotas(
+    ctx: &AppContext,
+    _conn: &impl sea_orm::ConnectionTrait,
+    tenant_id: uuid::Uuid,
+) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
+    use crate::edition::ee::controllers::middleware::edition::LicenceState;
+    use crate::edition::ee::data::plan::{Plan, PlanPolicy};
+    if PlanPolicy::current(ctx)? == PlanPolicy::Disabled {
+        return Ok(crate::data::quotas::Quotas::default());
+    }
+    let licence = ctx.shared_store.get::<Arc<LicenceState>>();
+    let plan = match licence.and_then(|state| state.active_plan_at(crate::time::now().timestamp()))
+    {
+        Some(plan) => plan,
+        None => {
+            match crate::edition::ee::models::tenant_billing::get_billing(&ctx.db, tenant_id)
+                .await?
+            {
+                Some(billing) => billing
+                    .plan
+                    .as_deref()
+                    .map(Plan::from_db_str)
+                    .transpose()?
+                    .unwrap_or(Plan::Free),
+                None => Plan::Free,
+            }
+        }
+    };
+    let caps = plan.caps();
+    Ok(crate::data::quotas::Quotas {
+        workspaces: caps.max_workspaces,
+        entities: caps.default_max_entities,
+    })
+}
+
 pub(crate) async fn workspace_worker_class(
     conn: &sea_orm::DatabaseConnection,
     workspace_id: uuid::Uuid,

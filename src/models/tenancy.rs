@@ -333,6 +333,17 @@ pub async fn create_workspace(
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
+    create_workspace_with_quota(conn, tenant_id, name, max_entities, schema_id, None).await
+}
+
+pub(crate) async fn create_workspace_with_quota(
+    conn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    name: &str,
+    max_entities: Option<i32>,
+    schema_id: Option<Uuid>,
+    workspace_quota: Option<i32>,
+) -> Result<workspace_workspaces::Model, YorishiroError> {
     use crate::models::_entities::tenant_tenants;
     use crate::models::workspace_workspaces::WorkspaceStatus;
 
@@ -346,7 +357,8 @@ pub async fn create_workspace(
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
 
-    if let Some(max) = tenant.max_workspaces {
+    if let Some(max) = crate::data::quotas::effective_limit(tenant.max_workspaces, workspace_quota)
+    {
         crate::db::lock_for_update(conn, &workspace_count_lock_key(tenant_id))
             .await
             .internal()?;
@@ -355,7 +367,7 @@ pub async fn create_workspace(
             .count(conn)
             .await
             .internal()?;
-        if count >= max as u64 {
+        if count >= max.max(0) as u64 {
             return Err(YorishiroError::Conflict {
                 message: format!(
                     "tenant '{tenant_id}' has reached its workspace limit ({max}); \
@@ -398,6 +410,29 @@ pub async fn create_workspace_as(
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
     let workspace = create_workspace(&txn, actor.tenant_id, name, max_entities, schema_id).await?;
+    txn.commit().await.internal()?;
+    Ok(workspace)
+}
+
+pub(crate) async fn create_workspace_in_context(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    name: &str,
+    max_entities: Option<i32>,
+    schema_id: Option<Uuid>,
+) -> Result<workspace_workspaces::Model, YorishiroError> {
+    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let quota = crate::quotas(ctx, &txn, actor.tenant_id).await?;
+    let workspace = create_workspace_with_quota(
+        &txn,
+        actor.tenant_id,
+        name,
+        max_entities,
+        schema_id,
+        quota.workspaces,
+    )
+    .await?;
     txn.commit().await.internal()?;
     Ok(workspace)
 }

@@ -32,6 +32,58 @@ async fn member_key(
 }
 
 #[tokio::test]
+#[cfg(feature = "enterprise")]
+#[serial_test::serial(process_environment)]
+async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use std::sync::Arc;
+    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let guard = crate::EnvGuard::capture(&[variable]);
+    guard.set(variable, "true");
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let set_licence = |exp| {
+            ctx.shared_store
+                .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+                    sub: "quota-test".into(),
+                    plan: "free".into(),
+                    exp,
+                })))
+        };
+        set_licence(chrono::Utc::now().timestamp() + 3600);
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"name":format!("blocked-{}", Uuid::new_v4())}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+        set_licence(chrono::Utc::now().timestamp() - 1);
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"name":format!("allowed-{}", Uuid::new_v4())}))
+            .await
+            .assert_status(StatusCode::CREATED);
+        yorishiro::models::tenant_tenants::ActiveModel {
+            id: Set(tenant.tenant_id),
+            max_workspaces: Set(Some(0)),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"name":format!("manual-{}", Uuid::new_v4())}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn owner_can_create_list_view_and_delete_workspaces() {
     boot_request_with_timezone::<App, _, _>("America/New_York", |request, ctx| async move {
         let timezone = ctx

@@ -5,6 +5,61 @@ use yorishiro::models::{entity_entities, schema_schemas};
 
 use super::fixtures::{TenantArgs, TestTenant};
 
+#[cfg(feature = "enterprise")]
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn entity_plan_quota_expires_but_manual_limit_remains() {
+    use axum::http::StatusCode;
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+    use std::sync::Arc;
+    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let guard = crate::EnvGuard::capture(&[variable]);
+    guard.set(variable, "true");
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let definition = serde_json::from_value(serde_json::json!({
+            "name":"quota-note", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}
+        })).unwrap();
+        let (schema, _) = schema_schemas::create_schema(&ctx.db, tenant.tenant_id, tenant.workspace_id, definition, None, None).await.unwrap();
+        // Seed exactly at Free's boundary without hundreds of embedding jobs.
+        entity_entities::Entity::insert_many((0..500).map(|index| entity_entities::ActiveModel {
+            id: Set(Uuid::now_v7()), workspace_id: Set(tenant.workspace_id), schema_id: Set(schema.id),
+            schema_version: Set(schema.version), entity_type: Set("note".into()),
+            data: Set(serde_json::json!({"title":format!("seed-{index}")})), ..Default::default()
+        })).exec(&ctx.db).await.unwrap();
+        let licence = |exp| ctx.shared_store.insert(Arc::new(LicenceState::licensed(LicenceClaims {
+            sub:"entity-quota".into(), plan:"free".into(), exp,
+        })));
+        let body = serde_json::json!({"schema_name":"quota-note","entity_type":"note","data":{"title":"new"}});
+        licence(chrono::Utc::now().timestamp() + 3600);
+        request.post("/api/entities").add_header("Authorization", format!("Bearer {}",tenant.api_key))
+            .json(&body).await.assert_status(StatusCode::CONFLICT);
+        use sea_orm::{ColumnTrait, QueryFilter};
+        let seed = entity_entities::Entity::find()
+            .filter(yorishiro::models::_entities::entity_entities::Column::WorkspaceId.eq(tenant.workspace_id))
+            .one(&ctx.db).await.unwrap().unwrap();
+        let jsonl = serde_json::to_string(&serde_json::json!({"kind":"entity", "record":entity_entities::EntityRecord::from(seed)})).unwrap();
+        let import = request.post("/api/import.jsonl").add_header("Authorization", format!("Bearer {}",tenant.api_key))
+            .text(jsonl).await;
+        import.assert_status(StatusCode::ACCEPTED);
+        let id: Uuid = import.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        super::fill_defaults::fail_via_api(&request, &ctx, id, &tenant.api_key, &format!("/api/import-jobs/{id}")).await;
+        assert_eq!(entity_entities::count(&ctx.db, tenant.workspace_id).await.unwrap(), 500);
+        licence(chrono::Utc::now().timestamp() - 1);
+        request.post("/api/entities").add_header("Authorization", format!("Bearer {}",tenant.api_key))
+            .json(&body).await.assert_status(StatusCode::CREATED);
+        let _ = ctx.shared_store.remove::<Arc<LicenceState>>();
+        request.post("/api/entities").add_header("Authorization", format!("Bearer {}",tenant.api_key))
+            .json(&body).await.assert_status(StatusCode::CREATED);
+        yorishiro::models::workspace_workspaces::ActiveModel {
+            id:Set(tenant.workspace_id), max_entities:Set(Some(0)), ..Default::default()
+        }.update(&ctx.db).await.unwrap();
+        request.post("/api/entities").add_header("Authorization", format!("Bearer {}",tenant.api_key))
+            .json(&body).await.assert_status(StatusCode::CONFLICT);
+    }).await;
+}
+
 /// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {

@@ -172,7 +172,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
     .await;
 }
 
-/// Cancelling a subscription must put the tenant back on Free: both the plan and the workspace cap that comes with it.
+/// Cancelling a subscription changes billing without overwriting operational caps.
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_cancellation_returns_the_tenant_to_free() {
@@ -229,9 +229,8 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 .await
                 .unwrap();
             assert_eq!(
-                tenant.max_workspaces,
-                Some(1),
-                "a cancelled tenant must drop to Free's workspace cap, not keep the paid one"
+                tenant.max_workspaces, None,
+                "billing changes must not persist plan quotas over operational caps"
             );
         })
         .await;

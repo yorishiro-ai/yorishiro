@@ -119,11 +119,22 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.auth_context().workspace_id;
         let created_by = authorized.auth_context().user_id;
-        let record = match entity_entities::create(
+        let quotas = match crate::quotas(
+            self.app_context(),
+            authorized.txn(),
+            authorized.auth_context().tenant_id,
+        )
+        .await
+        {
+            Ok(quotas) => quotas,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
+        let record = match entity_entities::create_with_quota(
             authorized.txn(),
             workspace_id,
             input,
             created_by,
+            quotas.entities,
         )
         .await
         {

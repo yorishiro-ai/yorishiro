@@ -15,6 +15,7 @@ use crate::error::{ResultExt, YorishiroError};
 async fn check_entity_quota(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
+    quota: Option<i32>,
 ) -> Result<(), YorishiroError> {
     let max_entities = crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
         .select_only()
@@ -25,7 +26,7 @@ async fn check_entity_quota(
         .internal()?
         .flatten();
 
-    let Some(max) = max_entities else {
+    let Some(max) = crate::data::quotas::effective_limit(max_entities, quota) else {
         return Ok(());
     };
 
@@ -71,11 +72,21 @@ pub async fn create(
     input: CreateEntityInput,
     created_by: Option<Uuid>,
 ) -> Result<EntityRecord, YorishiroError> {
+    create_with_quota(conn, workspace_id, input, created_by, None).await
+}
+
+pub(crate) async fn create_with_quota(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    input: CreateEntityInput,
+    created_by: Option<Uuid>,
+    quota: Option<i32>,
+) -> Result<EntityRecord, YorishiroError> {
     crate::db::lock_for_update(conn, &workspace_id.to_string())
         .await
         .internal()?;
 
-    check_entity_quota(conn, workspace_id).await?;
+    check_entity_quota(conn, workspace_id, quota).await?;
 
     // Before resolving the schema, so an empty workspace is told it is empty rather than reporting the schema name as not found.
     if crate::models::workspace_workspaces::is_schema_pending(conn, workspace_id).await? {
