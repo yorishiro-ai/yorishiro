@@ -38,6 +38,7 @@ pub async fn preview_removal(
     let revoked_api_key_ids = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
         .filter(api_keys::Column::UserId.eq(user_id))
+        .filter(api_keys::Column::RevokedAt.is_null())
         .select_only()
         .column(api_keys::Column::Id)
         .order_by_asc(api_keys::Column::Id)
@@ -273,6 +274,12 @@ async fn key_access(
     let keys = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
         .filter(api_keys::Column::UserId.eq(user_id))
+        .filter(api_keys::Column::RevokedAt.is_null())
+        .filter(
+            sea_orm::Condition::any()
+                .add(api_keys::Column::ExpiresAt.is_null())
+                .add(api_keys::Column::ExpiresAt.gt(crate::time::now())),
+        )
         .order_by_asc(api_keys::Column::Id)
         .all(txn)
         .await
@@ -358,12 +365,13 @@ async fn remove_member_in_transaction(
         .exec(txn)
         .await
         .internal()?;
-    api_keys::Entity::delete_many()
-        .filter(api_keys::Column::TenantId.eq(tenant_id))
-        .filter(api_keys::Column::UserId.eq(user_id))
-        .exec(txn)
-        .await
-        .internal()?;
+    api_keys::Entity::revoke_matching(
+        txn,
+        sea_orm::Condition::all()
+            .add(api_keys::Column::TenantId.eq(tenant_id))
+            .add(api_keys::Column::UserId.eq(user_id)),
+    )
+    .await?;
     Ok(())
 }
 

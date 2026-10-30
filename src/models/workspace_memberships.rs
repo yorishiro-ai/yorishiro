@@ -87,13 +87,14 @@ impl Model {
                 .await?
                 .is_some_and(|role| role.administers_tenant());
         if !inherited {
-            api_keys::Entity::delete_many()
-                .filter(api_keys::Column::TenantId.eq(tenant_id))
-                .filter(api_keys::Column::WorkspaceId.eq(workspace_id))
-                .filter(api_keys::Column::UserId.eq(user_id))
-                .exec(txn)
-                .await
-                .internal()?;
+            api_keys::Entity::revoke_matching(
+                txn,
+                sea_orm::Condition::all()
+                    .add(api_keys::Column::TenantId.eq(tenant_id))
+                    .add(api_keys::Column::WorkspaceId.eq(workspace_id))
+                    .add(api_keys::Column::UserId.eq(user_id)),
+            )
+            .await?;
         }
         Ok(())
     }

@@ -1,5 +1,6 @@
 use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant};
+use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::controllers::middleware::auth::WORKSPACE_HEADER;
@@ -49,6 +50,27 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         let tenant_key = create_tenant_api_key(&identity, tenant_id, "read", Some(user_id))
             .await
             .expect("issuing a tenant-scoped key");
+
+        let rotated = request
+            .post(&format!("/api/api-keys/{}/rotate", tenant_key.id))
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, workspace_id.to_string())
+            .await;
+        rotated.assert_status(StatusCode::CREATED);
+        let replacement = rotated.json::<serde_json::Value>();
+        assert!(replacement["workspace_id"].is_null());
+        assert_eq!(replacement["tenant_id"], tenant_id.to_string());
+        assert_eq!(replacement["scope"], "read");
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, workspace_id.to_string())
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let tenant_key = yorishiro::edition::ee::models::api_keys::CreatedTenantApiKey {
+            id: replacement["id"].as_str().unwrap().parse().unwrap(),
+            plaintext: replacement["full_key"].as_str().unwrap().to_owned(),
+        };
 
         // Without the header, `authenticate_api_key(hash, NULL)` finds no workspace to resolve against, so this reaches the caller as an ordinary authentication failure, not a validation error naming the header.
         let no_header = request

@@ -309,6 +309,15 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
 
 #[tokio::test]
 async fn queued_import_rechecks_revoked_credentials_before_writing() {
+    queued_import_rechecks_inactive_credentials(false).await;
+}
+
+#[tokio::test]
+async fn queued_import_rechecks_expired_credentials_before_writing() {
+    queued_import_rechecks_inactive_credentials(true).await;
+}
+
+async fn queued_import_rechecks_inactive_credentials(expired: bool) {
     use axum::http::StatusCode;
     use serde_json::json;
     use yorishiro::models::{api_keys, schema_schemas};
@@ -356,7 +365,21 @@ async fn queued_import_rechecks_revoked_credentials_before_writing() {
             .unwrap()
             .parse()
             .unwrap();
-        api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+        if expired {
+            use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+            api_keys::ActiveModel {
+                id: Set(key.id),
+                expires_at: Set(Some(
+                    (chrono::Utc::now() - chrono::Duration::seconds(1)).fixed_offset(),
+                )),
+                ..Default::default()
+            }
+            .update(&ctx.db)
+            .await
+            .unwrap();
+        } else {
+            api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+        }
         finish_job(
             &ctx,
             id,

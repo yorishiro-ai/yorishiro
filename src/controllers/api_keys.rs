@@ -19,6 +19,19 @@ use crate::models::api_keys::IdentityApiKeys;
 
 const MAX_NAME_LENGTH: usize = 100;
 
+fn render_grant(
+    ctx: &AppContext,
+    mut grant: crate::models::api_keys::KeyGrant,
+) -> crate::models::api_keys::KeyGrant {
+    grant.expires_at = grant
+        .expires_at
+        .map(|date| crate::time::render(ctx, date).fixed_offset());
+    grant.revoked_at = grant
+        .revoked_at
+        .map(|date| crate::time::render(ctx, date).fixed_offset());
+    grant
+}
+
 fn validate_name(name: &str) -> Result<String, YorishiroError> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > MAX_NAME_LENGTH {
@@ -46,8 +59,15 @@ pub(crate) async fn create(
     let scope = body.scope.unwrap_or(ApiKeyScope::Read);
     crate::models::access::require_key_grant(&ctx.db, &auth, scope, body.audit).await?;
     let name = validate_name(&body.name)?;
-    let created =
-        IdentityApiKeys::create_delegated_api_key(&ctx.db, &auth, scope, body.audit, &name).await?;
+    let created = IdentityApiKeys::create_delegated_api_key(
+        &ctx.db,
+        &auth,
+        scope,
+        body.audit,
+        &name,
+        body.expires_at,
+    )
+    .await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateApiKeyResponse {
@@ -56,7 +76,7 @@ pub(crate) async fn create(
             full_key: created.plaintext,
             name: created.name,
             created_at: crate::time::render(&ctx, created.created_at),
-            grant: created.grant,
+            grant: render_grant(&ctx, created.grant),
         }),
     ))
 }
@@ -77,7 +97,7 @@ pub(crate) async fn list(
             name: key.name,
             created_at: crate::time::render(&ctx, key.created_at),
             last_used_at: key.last_used_at.map(|time| crate::time::render(&ctx, time)),
-            grant,
+            grant: render_grant(&ctx, grant),
         });
     }
     Ok(Json(ListApiKeysResponse { keys: records }))
@@ -100,6 +120,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_create),
         super::route_inventory::path_doc(__path_list),
         super::route_inventory::path_doc(__path_revoke),
+        super::route_inventory::path_doc(__path_rotate),
     ]
 }
 
@@ -109,4 +130,25 @@ pub(crate) fn routes() -> Routes {
         .add("/", post(create))
         .add("/", get(list))
         .add("/{id}", delete(revoke))
+        .add("/{id}/rotate", post(rotate))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys/{id}/rotate", params(("id" = Uuid, Path)), responses((status = 201, body = crate::dtos::api_keys::CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+async fn rotate(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let created = IdentityApiKeys::rotate(&ctx.db, &auth, id).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateApiKeyResponse {
+            id: created.id,
+            prefix: created.key_prefix,
+            full_key: created.plaintext,
+            name: created.name,
+            created_at: crate::time::render(&ctx, created.created_at),
+            grant: render_grant(&ctx, created.grant),
+        }),
+    ))
 }

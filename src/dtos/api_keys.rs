@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub(crate) struct CreateApiKeyRequest {
     pub(crate) name: String,
     pub(crate) scope: Option<ApiKeyScope>,
+    pub(crate) expires_at: Option<DateTime<chrono::FixedOffset>>,
     #[serde(default)]
     pub(crate) audit: bool,
 }

@@ -121,11 +121,11 @@ async fn disable_in_transaction(
         .await
         .internal()?;
     }
-    api_keys::Entity::delete_many()
-        .filter(api_keys::Column::TenantId.eq(tenant_id))
-        .exec(txn)
-        .await
-        .internal()?;
+    api_keys::Entity::revoke_matching(
+        txn,
+        sea_orm::Condition::all().add(api_keys::Column::TenantId.eq(tenant_id)),
+    )
+    .await?;
     cancel_work(txn, tenant_id).await?;
     if newly_disabled {
         crate::models::tenant_retirement_events::ActiveModel {
@@ -414,6 +414,7 @@ pub async fn inventory(
         .internal()?;
     let api_keys = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
+        .filter(api_keys::Column::RevokedAt.is_null())
         .count(conn)
         .await
         .internal()?;

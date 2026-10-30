@@ -33,6 +33,7 @@ mod m20261020_000027_create_entity_embeddings;
 mod m20261028_160610_workspace_memberships;
 mod m20261029_040619_add_tenant_disabled_at;
 mod m20261029_055438_tenant_retirement_events;
+mod m20261030_080520_api_key_lifecycle;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -70,6 +71,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261028_160610_workspace_memberships::Migration),
             Box::new(m20261029_040619_add_tenant_disabled_at::Migration),
             Box::new(m20261029_055438_tenant_retirement_events::Migration),
+            Box::new(m20261030_080520_api_key_lifecycle::Migration),
             // inject-above (do not remove this comment)
         ]
     }

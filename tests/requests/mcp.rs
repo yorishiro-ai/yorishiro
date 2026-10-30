@@ -109,6 +109,74 @@ fn tool_result_json(response: &Value) -> Value {
 }
 
 #[tokio::test]
+async fn expired_keys_are_rejected_over_rest_and_an_existing_mcp_session() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let before = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        assert_eq!(before["result"]["isError"], false);
+        let keys = request
+            .get("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .json::<Value>();
+        let prefix = tenant.api_key.split('_').nth(1).unwrap();
+        let id = keys["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|key| {
+                key["prefix"]
+                    .as_str()
+                    .is_some_and(|value| value.ends_with(prefix))
+            })
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        yorishiro::models::api_keys::ActiveModel {
+            id: Set(id),
+            expires_at: Set(Some(
+                (Utc::now() - chrono::Duration::seconds(1)).fixed_offset(),
+            )),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let after = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            3,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        assert!(
+            after["error"].is_object() || after["result"]["isError"] == true,
+            "{after}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn issued_read_key_reads_but_rejects_valid_mutations_over_both_transports() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

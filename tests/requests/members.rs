@@ -973,12 +973,13 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
         let keys = api_keys::Entity::find()
             .filter(Column::TenantId.eq(tenant.tenant_id))
             .filter(Column::UserId.eq(user.id))
+            .filter(Column::RevokedAt.is_null())
             .count(&ctx.db)
             .await
             .unwrap();
         assert_eq!(
             keys, 0,
-            "removal must delete a racing issuance or prevent its insertion"
+            "removal must revoke a racing issuance or prevent its insertion"
         );
         assert!(
             api_keys::Entity::create_api_key(
