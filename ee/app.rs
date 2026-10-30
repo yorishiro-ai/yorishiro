@@ -11,7 +11,6 @@ use crate::workers::registry::WorkerRegistry;
 
 pub(crate) async fn quotas(
     ctx: &AppContext,
-    _conn: &impl sea_orm::ConnectionTrait,
     tenant_id: uuid::Uuid,
 ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
     use crate::edition::ee::data::plan::{Plan, PlanPolicy};

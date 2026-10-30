@@ -42,10 +42,9 @@ pub mod edition {
 
     pub(crate) async fn quotas(
         ctx: &AppContext,
-        conn: &impl sea_orm::ConnectionTrait,
         tenant_id: uuid::Uuid,
     ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
-        active::quotas(ctx, conn, tenant_id).await
+        active::quotas(ctx, tenant_id).await
     }
 
     /// The worker registry composed for this build.
@@ -186,7 +185,6 @@ pub mod edition {
 
         pub(super) async fn quotas(
             _ctx: &AppContext,
-            _conn: &impl sea_orm::ConnectionTrait,
             _tenant_id: uuid::Uuid,
         ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
             Ok(crate::data::quotas::Quotas::default())

@@ -83,7 +83,7 @@ impl ImportWorker {
                 crate::models::api_keys::ApiKeyScope::Schema,
             )
             .await?;
-            let quotas = crate::quotas(&self.ctx, &txn, args.tenant_id).await?;
+            let quotas = crate::quotas(&self.ctx, args.tenant_id).await?;
             let result = crate::models::import::import_with_quota(
                 &txn,
                 args.tenant_id,

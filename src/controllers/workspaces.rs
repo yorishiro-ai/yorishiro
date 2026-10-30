@@ -69,7 +69,7 @@ pub async fn get_workspace(
     let schema_count = schema_schemas::count_active(&txn, workspace.id).await?;
 
     let timezone = crate::time::configured(&ctx);
-    let quotas = crate::quotas(&ctx, &txn, workspace.tenant_id).await?;
+    let quotas = crate::quotas(&ctx, workspace.tenant_id).await?;
     Ok(Json(WorkspaceDetail {
         id: workspace.id,
         tenant_id: workspace.tenant_id,

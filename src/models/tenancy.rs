@@ -423,7 +423,7 @@ pub(crate) async fn create_workspace_in_context(
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    let quota = crate::quotas(ctx, &txn, actor.tenant_id).await?;
+    let quota = crate::quotas(ctx, actor.tenant_id).await?;
     let workspace = create_workspace_with_quota(
         &txn,
         actor.tenant_id,

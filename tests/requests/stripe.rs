@@ -187,6 +187,14 @@ async fn a_cancellation_returns_the_tenant_to_free() {
             tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
                 .await
                 .unwrap();
+            tenant_tenants::ActiveModel {
+                id: ActiveValue::Set(tenant_id),
+                max_workspaces: ActiveValue::Set(Some(17)),
+                ..Default::default()
+            }
+            .update(&ctx.db)
+            .await
+            .unwrap();
 
             // Land on Pro first, so the downgrade has somewhere to fall from.
             let up_body = subscription_updated_body("evt_up", 1_000, "cus_cancel");
@@ -229,7 +237,8 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 .await
                 .unwrap();
             assert_eq!(
-                tenant.max_workspaces, None,
+                tenant.max_workspaces,
+                Some(17),
                 "billing changes must not persist plan quotas over operational caps"
             );
         })
