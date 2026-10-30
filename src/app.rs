@@ -366,6 +366,8 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::list_tenants::ListTenants);
     tasks.register(tasks::list_workspaces::ListWorkspaces);
     tasks.register(tasks::create_user::CreateUser);
+    tasks.register(tasks::list_users::ListUsers);
+    tasks.register(tasks::delete_user::DeleteUser);
     tasks.register(tasks::add_member::AddMember);
     tasks.register(tasks::list_members::ListMembers);
     tasks.register(tasks::list_api_keys::ListApiKeys);

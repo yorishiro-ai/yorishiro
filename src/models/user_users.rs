@@ -5,6 +5,7 @@ mod operations;
 
 pub use operations::create_user;
 pub(crate) use operations::{current_profile, update_profile};
+pub(crate) use operations::{delete_by_operator, list_by_operator};
 pub(crate) use operations::{get_user_by_email, verify_login};
 
 #[loco_rs::prelude::async_trait]

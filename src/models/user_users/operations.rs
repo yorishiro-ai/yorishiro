@@ -4,10 +4,66 @@ use loco_rs::hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
 };
+use sea_orm::{Condition, QueryOrder, QuerySelect};
 
 use super::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::user_users::Column;
+
+pub(crate) async fn list_by_operator(
+    conn: &impl ConnectionTrait,
+    limit: u64,
+    offset: u64,
+) -> Result<Vec<Model>, YorishiroError> {
+    Entity::find()
+        .order_by_asc(Column::Id)
+        .limit(limit.clamp(1, 100))
+        .offset(offset)
+        .all(conn)
+        .await
+        .internal()
+}
+
+pub(crate) async fn delete_by_operator(
+    db: &sea_orm::DatabaseConnection,
+    user_id: uuid::Uuid,
+    confirmed_user_id: uuid::Uuid,
+) -> Result<(), YorishiroError> {
+    if user_id != confirmed_user_id {
+        return Err(YorishiroError::Conflict {
+            message: "confirmed_user_id must match user_id".into(),
+        });
+    }
+    let txn = crate::db::begin_write(db).await.internal()?;
+    // The row lock also serializes concurrent membership/key inserts through their user foreign key.
+    Entity::find_by_id(user_id)
+        .lock_exclusive()
+        .one(&txn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("user not found"))?;
+    use crate::models::_entities::tenant_memberships as memberships;
+    if memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user_id))
+        .one(&txn)
+        .await
+        .internal()?
+        .is_some()
+    {
+        return Err(YorishiroError::Conflict {
+            message: "remove every tenant membership before deleting a global user account".into(),
+        });
+    }
+    // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
+    crate::models::api_keys::Entity::revoke_matching(
+        &txn,
+        Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+    )
+    .await?;
+    Entity::delete_by_id(user_id).exec(&txn).await.internal()?;
+    txn.commit().await.internal()?;
+    Ok(())
+}
 
 pub(crate) async fn current_profile(
     conn: &impl ConnectionTrait,
