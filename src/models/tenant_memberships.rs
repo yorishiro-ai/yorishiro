@@ -15,7 +15,8 @@ pub(crate) use operations::{add_member_in_transaction, get_membership_role, list
 
 db_enum! {
     /// Mirrors the `tenant_memberships.role` check constraint.
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
+    #[schemars(rename_all = "lowercase")]
     pub enum MembershipRole {
         Owner = "owner",
         Admin = "admin",

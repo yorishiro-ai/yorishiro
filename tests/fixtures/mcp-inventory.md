@@ -58,6 +58,49 @@ Input schema:
 }
 ```
 
+### `create_invite`
+
+Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant Admin or Owner; inviting an Owner requires Owner)
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "MembershipRole": {
+      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "enum": [
+        "owner",
+        "admin",
+        "member",
+        "viewer"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "email": {
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/MembershipRole"
+    }
+  },
+  "required": [
+    "email",
+    "role",
+    "expires_at"
+  ],
+  "type": "object"
+}
+```
+
 ### `create_relation`
 
 Create a relation between two entities (requires write scope). Properties cannot be edited in place; to change them, delete the relation and recreate it. To retire a relation without losing the record that it existed, use set_relation_status instead of deleting.
@@ -118,6 +161,55 @@ Input schema:
 }
 ```
 
+### `create_template_library_item`
+
+Create a tenant-shared schema template in the library, not a workspace data schema (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "definition": true,
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "locale": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "definition"
+  ],
+  "type": "object"
+}
+```
+
 ### `delete_entity`
 
 Delete an entity (requires write scope)
@@ -162,6 +254,52 @@ Input schema:
 }
 ```
 
+### `delete_template_library_item`
+
+Delete an owned tenant template while preserving existing workspace schemas (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}
+```
+
+### `disable_tenant`
+
+Disable the current tenant after confirming its UUID, revoking all its credentials and cancelling work; data and identities remain and quota stays occupied (requires read scope and tenant Owner; physical deletion is operator-only)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "confirmed_tenant_id": {
+      "description": "Must equal the current tenant UUID, not its display name.",
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "confirmed_tenant_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `discover_workspaces`
 
 Discover workspace candidates within the current credential's tenant; service credentials list only the selected workspace, and discovery does not grant access (requires read scope)
@@ -192,6 +330,33 @@ Input schema:
   },
   "required": [
     "schema_name"
+  ],
+  "type": "object"
+}
+```
+
+### `fork_template_library_item`
+
+Fork a visible schema template into the current tenant's library (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name"
   ],
   "type": "object"
 }
@@ -468,6 +633,66 @@ Input schema:
 }
 ```
 
+### `list_invites`
+
+List current-tenant invitations without exposing their tokens (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+### `list_members`
+
+List members of the current tenant (requires read scope and tenant Admin or Owner; service credentials are rejected)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
 ### `list_relations`
 
 List relations (requires read scope)
@@ -644,6 +869,68 @@ Input schema:
 }
 ```
 
+### `preview_member_removal`
+
+Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "type": "object"
+}
+```
+
+### `preview_member_role_change`
+
+Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "MembershipRole": {
+      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "enum": [
+        "owner",
+        "admin",
+        "member",
+        "viewer"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "role": {
+      "$ref": "#/$defs/MembershipRole"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "role"
+  ],
+  "type": "object"
+}
+```
+
 ### `recall_context`
 
 Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope)
@@ -702,6 +989,80 @@ Input schema:
 }
 ```
 
+### `reissue_invite`
+
+Replace an unused current-tenant invitation token and expiry, invalidating the old token, for caller delivery (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "expires_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "invite_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "invite_id",
+    "expires_at"
+  ],
+  "type": "object"
+}
+```
+
+### `remove_member`
+
+Remove a current-tenant membership and revoke attributed tenant credentials, retaining the global user account (requires read scope and tenant Admin or Owner; last Owner is protected)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "type": "object"
+}
+```
+
+### `revoke_invite`
+
+Cancel an unused current-tenant invitation; repeated cancellation is safe (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "invite_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "invite_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `search_entities`
 
 Vector similarity search over entities using a natural-language query (requires read scope)
@@ -741,6 +1102,45 @@ Input schema:
 }
 ```
 
+### `set_member_role`
+
+Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata (requires read scope and tenant Admin or Owner; Owner changes require Owner)
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "MembershipRole": {
+      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "enum": [
+        "owner",
+        "admin",
+        "member",
+        "viewer"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "role": {
+      "$ref": "#/$defs/MembershipRole"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "role"
+  ],
+  "type": "object"
+}
+```
+
 ### `set_relation_status`
 
 Set a relation's status to active, deprecated or archived (requires write scope). Retiring a relation this way keeps the record that it existed, which delete_relation does not; graph traversal follows active relations only.
@@ -763,6 +1163,42 @@ Input schema:
   "required": [
     "id",
     "status"
+  ],
+  "type": "object"
+}
+```
+
+### `tenant_retirement_inventory`
+
+Inspect current-tenant retirement inventory and retention consequences without changing data (requires read scope and tenant Owner)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
+### `transfer_ownership`
+
+Atomically transfer tenant ownership to an existing member and demote the caller to Admin (requires read scope and tenant Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "successor_user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "successor_user_id"
   ],
   "type": "object"
 }
@@ -811,6 +1247,57 @@ Input schema:
   "required": [
     "id",
     "data"
+  ],
+  "type": "object"
+}
+```
+
+### `update_template_library_item`
+
+Update an owned tenant template; existing workspace schema versions are unchanged (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "definition": true,
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "locale": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id"
   ],
   "type": "object"
 }

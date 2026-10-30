@@ -1,10 +1,13 @@
 pub mod entities;
 mod import;
+mod invites;
+mod members;
 mod recall;
 pub mod relations;
 mod schemas;
 mod search;
 mod template_library;
+mod tenants;
 mod whoami;
 
 use std::collections::HashSet;
@@ -150,11 +153,14 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([
         YorishiroMcpServer::tool_router_entities(),
         YorishiroMcpServer::tool_router_import(),
+        YorishiroMcpServer::tool_router_invites(),
+        YorishiroMcpServer::tool_router_members(),
         YorishiroMcpServer::tool_router_recall(),
         YorishiroMcpServer::tool_router_relations(),
         YorishiroMcpServer::tool_router_schemas(),
         YorishiroMcpServer::tool_router_search(),
         YorishiroMcpServer::tool_router_template_library(),
+        YorishiroMcpServer::tool_router_tenants(),
         YorishiroMcpServer::tool_router_whoami(),
     ])
 }
