@@ -2,6 +2,7 @@ mod embedding;
 mod entity_columns;
 mod llm;
 mod origin;
+mod schema_forks;
 mod worker_class;
 
 use std::sync::Arc;
@@ -29,6 +30,7 @@ pub fn tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_worker_class(),
         YorishiroMcpServer::tool_router_embedding(),
         YorishiroMcpServer::tool_router_llm(),
+        YorishiroMcpServer::tool_router_schema_forks(),
     ])
 }
 

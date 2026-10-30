@@ -40,7 +40,8 @@ pub struct ForkRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = CreateForkRequest))]
 pub struct CreateInput {

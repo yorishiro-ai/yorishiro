@@ -1807,6 +1807,57 @@ Input schema:
 
 ## Enterprise-only tools
 
+### `create_schema_fork`
+
+Create a workspace-owned fork of a same-tenant source schema (requires schema scope); validates source identity and workspace cycles without modifying the source
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "source_schema_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "source_workspace_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source_workspace_id",
+    "source_schema_id"
+  ],
+  "type": "object"
+}
+```
+
+### `delete_schema_fork`
+
+Delete a selected-workspace fork association using the REST reference-preserving model (requires schema scope); does not delete the source schema
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "fork_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "fork_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `get_embedding_provider`
 
 Read the selected workspace's embedding provider metadata without its API key (requires read scope); returns not found when the deployment default is used
@@ -1829,6 +1880,29 @@ Input schema:
 ```json
 {
   "properties": {},
+  "type": "object"
+}
+```
+
+### `get_schema_fork`
+
+Read a schema fork owned by the selected workspace, including its immutable current head (requires read scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "fork_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "fork_id"
+  ],
   "type": "object"
 }
 ```
@@ -1872,6 +1946,19 @@ Input schema:
       ]
     }
   },
+  "type": "object"
+}
+```
+
+### `list_schema_forks`
+
+List schema forks owned by the selected workspace (requires read scope); source visibility does not authorize changing the source workspace
+
+Input schema:
+
+```json
+{
+  "properties": {},
   "type": "object"
 }
 ```
@@ -2153,6 +2240,54 @@ Input schema:
   },
   "required": [
     "worker_class"
+  ],
+  "type": "object"
+}
+```
+
+### `update_schema_fork`
+
+Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires schema scope); force is required to discard local edits
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "definition": true,
+    "expected_fork_schema_id": {
+      "format": "uuid",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expected_source_schema_id": {
+      "format": "uuid",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "force": {
+      "default": false,
+      "type": "boolean"
+    },
+    "fork_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "fork_id"
   ],
   "type": "object"
 }
