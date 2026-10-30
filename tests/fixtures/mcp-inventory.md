@@ -14,6 +14,28 @@ Authorization remains enforced by the existing centralized MCP authorization pat
 <!-- BEGIN GENERATED MCP INVENTORY -->
 ## Community tools
 
+### `accept_invite`
+
+Accept a tenant invitation as the authenticated human account (requires read scope and matching account email); service credentials cannot accept, no login credential is issued and the selected workspace does not change
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "invite_token": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "invite_token"
+  ],
+  "type": "object"
+}
+```
+
 ### `archive_schema`
 
 Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema scope)

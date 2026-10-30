@@ -30,6 +30,12 @@ pub(crate) struct InviteArgs {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct AcceptInviteArgs {
+    pub invite_token: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ReissueInviteArgs {
     pub invite_id: Uuid,
     pub expires_at: DateTime<Utc>,
@@ -37,6 +43,38 @@ pub(crate) struct ReissueInviteArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_invites)]
 impl YorishiroMcpServer {
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Accept a tenant invitation as the authenticated human account (requires read scope and matching account email); service credentials cannot accept, no login credential is issued and the selected workspace does not change")]
+    pub(crate) async fn accept_invite(
+        &self,
+        Parameters(args): Parameters<AcceptInviteArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("accept_invite")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match workspace_invites::accept_authenticated_user(
+            &self.app_context().db,
+            &auth,
+            &args.invite_token,
+        )
+        .await
+        {
+            Ok((user, invite)) => ok_json(crate::dtos::auth::AcceptInviteResponse {
+                user_id: user.id,
+                tenant_id: invite.tenant_id,
+                role: invite.role,
+            }),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant Admin or Owner; inviting an Owner requires Owner)"
