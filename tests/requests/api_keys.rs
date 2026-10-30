@@ -166,10 +166,11 @@ async fn concurrent_rotation_issues_only_one_replacement() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let auth = format!("Bearer {}", tenant.api_key);
+        let name = format!("rotation-race-{}", Uuid::new_v4());
         let created = request
             .post("/api/api-keys")
             .add_header("Authorization", &auth)
-            .json(&serde_json::json!({"name":"race"}))
+            .json(&serde_json::json!({"name":name}))
             .await;
         created.assert_status(StatusCode::CREATED);
         let id = created.json::<Value>()["id"].as_str().unwrap().to_owned();
@@ -191,7 +192,7 @@ async fn concurrent_rotation_issues_only_one_replacement() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .filter(|key| key["name"] == "race" && key["state"] == "active")
+                .filter(|key| key["name"] == name && key["state"] == "active")
                 .count(),
             1
         );
