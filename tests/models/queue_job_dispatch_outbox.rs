@@ -32,6 +32,7 @@ async fn acknowledgement_preserves_correlation_after_consumer_starts() {
         .await
         .unwrap();
         let claim = Uuid::now_v7();
+        let provider_id = format!("provider-ack-race-{id}");
         assert!(claim_dispatch(&ctx.db, id, claim, 60).await.unwrap());
         let admission = Lifecycles::start_at(&ctx.db, id, Utc::now().fixed_offset())
             .await
@@ -46,7 +47,7 @@ async fn acknowledgement_preserves_correlation_after_consumer_starts() {
             .unwrap()
             .unwrap();
         assert!(
-            acknowledge_dispatch(&ctx.db, id, claim, "provider-ack-race")
+            acknowledge_dispatch(&ctx.db, id, claim, &provider_id)
                 .await
                 .unwrap()
         );
@@ -55,7 +56,7 @@ async fn acknowledgement_preserves_correlation_after_consumer_starts() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(after.provider_job_id.as_deref(), Some("provider-ack-race"));
+        assert_eq!(after.provider_job_id.as_deref(), Some(provider_id.as_str()));
         assert_eq!(after.status, before.status);
         assert_eq!(after.attempt, before.attempt);
         let outbox =
@@ -78,7 +79,7 @@ async fn acknowledgement_preserves_correlation_after_consumer_starts() {
                 .unwrap()
                 .provider_job_id
                 .as_deref(),
-            Some("provider-ack-race")
+            Some(provider_id.as_str())
         );
     })
     .await;
