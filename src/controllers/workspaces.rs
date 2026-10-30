@@ -104,7 +104,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     ]
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), request_body = crate::dtos::workspaces::GrantWorkspaceMemberRequest, responses((status = 204, description = "Direct workspace grant saved"), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), request_body = crate::dtos::workspaces::GrantWorkspaceMemberRequest, responses((status = 204, description = "Direct workspace grant saved"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["workspace_admin"]))), tag = "community"))]
 async fn grant_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -116,7 +116,7 @@ async fn grant_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), responses((status = 204, description = "Direct workspace grant and bound credentials revoked"), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), responses((status = 204, description = "Direct workspace grant and bound credentials revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["workspace_admin"]))), tag = "community"))]
 async fn revoke_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,

@@ -158,7 +158,7 @@ async fn signup_without_invite(
     post,
     path = "/auth/login",
     request_body = crate::dtos::auth::LoginRequest,
-    responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = crate::dtos::auth::LoginRecoveryResponse), (status = 422, body = crate::dtos::auth::LoginRecoveryResponse)),
+    responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = crate::dtos::auth::LoginRecoveryResponse), (status = 422, description = "Workspace selection required (JSON recovery) or invalid request fields (plain-text JSON extraction error)", content((crate::dtos::auth::LoginRecoveryResponse = "application/json"), (String = "text/plain")))),
     security(()),
     tag = "community"
 ))]
