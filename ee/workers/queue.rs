@@ -5,9 +5,7 @@ use loco_rs::prelude::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::edition::ee::controllers::middleware::edition::LicenceState;
 use crate::edition::ee::data::plan::{Plan, PlanPolicy};
-use crate::edition::ee::models::tenant_billing;
 use crate::error::YorishiroError;
 use crate::models::workspace_workspaces;
 use crate::workers::embedding_sync::WorkerClass;
@@ -60,22 +58,7 @@ async fn plan_for(ctx: &AppContext, workspace_id: Uuid) -> Result<Plan, String> 
             other => format!("queue policy lookup failed for workspace: {other}"),
         })?;
 
-    let licence = ctx
-        .shared_store
-        .get::<std::sync::Arc<LicenceState>>()
-        .ok_or_else(|| "queue policy unavailable: licence state is missing".to_owned())?;
-    if let Some(plan) = licence.active_plan_at(crate::time::now().timestamp()) {
-        return Ok(plan);
-    }
-
-    let billing = tenant_billing::get_billing(&ctx.db, workspace.tenant_id)
+    Plan::for_tenant(ctx, workspace.tenant_id)
         .await
-        .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?;
-    let Some(billing) = billing else {
-        return Ok(Plan::Free);
-    };
-    let value = billing
-        .plan
-        .ok_or_else(|| "queue policy unavailable: billing plan is missing".to_owned())?;
-    Plan::from_db_str(&value).map_err(|error| error.to_string())
+        .map_err(|error| format!("queue policy lookup failed for plan: {error}"))
 }

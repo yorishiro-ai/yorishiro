@@ -85,6 +85,29 @@ pub(crate) struct PlanCaps {
 }
 
 impl Plan {
+    pub(crate) async fn for_tenant(
+        ctx: &loco_rs::app::AppContext,
+        tenant_id: uuid::Uuid,
+    ) -> Result<Self, crate::YorishiroError> {
+        use crate::edition::ee::controllers::middleware::edition::LicenceState;
+        use std::sync::Arc;
+
+        let licence = ctx.shared_store.get::<Arc<LicenceState>>();
+        if let Some(plan) =
+            licence.and_then(|state| state.active_plan_at(crate::time::now().timestamp()))
+        {
+            return Ok(plan);
+        }
+        let billing =
+            crate::edition::ee::models::tenant_billing::get_billing(&ctx.db, tenant_id).await?;
+        match billing {
+            None => Ok(Self::Free),
+            Some(billing) => Self::from_db_str(billing.plan.as_deref().ok_or_else(|| {
+                crate::YorishiroError::Internal(anyhow::anyhow!("billing plan is missing"))
+            })?),
+        }
+    }
+
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Plan::Free => "free",

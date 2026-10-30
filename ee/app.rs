@@ -14,29 +14,11 @@ pub(crate) async fn quotas(
     _conn: &impl sea_orm::ConnectionTrait,
     tenant_id: uuid::Uuid,
 ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
-    use crate::edition::ee::controllers::middleware::edition::LicenceState;
     use crate::edition::ee::data::plan::{Plan, PlanPolicy};
     if PlanPolicy::current(ctx)? == PlanPolicy::Disabled {
         return Ok(crate::data::quotas::Quotas::default());
     }
-    let licence = ctx.shared_store.get::<Arc<LicenceState>>();
-    let plan = match licence.and_then(|state| state.active_plan_at(crate::time::now().timestamp()))
-    {
-        Some(plan) => plan,
-        None => {
-            match crate::edition::ee::models::tenant_billing::get_billing(&ctx.db, tenant_id)
-                .await?
-            {
-                Some(billing) => billing
-                    .plan
-                    .as_deref()
-                    .map(Plan::from_db_str)
-                    .transpose()?
-                    .unwrap_or(Plan::Free),
-                None => Plan::Free,
-            }
-        }
-    };
+    let plan = Plan::for_tenant(ctx, tenant_id).await?;
     let caps = plan.caps();
     Ok(crate::data::quotas::Quotas {
         workspaces: caps.max_workspaces,
