@@ -13,13 +13,10 @@ use crate::controllers::members::require_tenant_admin;
 use crate::dtos::api_keys::{
     ApiKeyRecord, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysResponse,
 };
-use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::IdentityApiKeys;
 
-const MAX_NAME_LENGTH: usize = 100;
-
-fn render_grant(
+pub(crate) fn render_grant(
     ctx: &AppContext,
     mut grant: crate::models::api_keys::KeyGrant,
 ) -> crate::models::api_keys::KeyGrant {
@@ -32,24 +29,6 @@ fn render_grant(
     grant
 }
 
-fn validate_name(name: &str) -> Result<String, YorishiroError> {
-    let name = name.trim();
-    if name.is_empty() || name.chars().count() > MAX_NAME_LENGTH {
-        return Err(YorishiroError::ValidationFailed {
-            message: "name must be between 1 and 100 characters".into(),
-            details: vec![ValidationDetail {
-                field: "name".into(),
-                problem: "name must not be empty and must be at most 100 characters".into(),
-                code: ValidationErrorCode::EmptyRequired,
-                expected: Some("1-100 characters".into()),
-                actual: Some(name.chars().count().to_string()),
-            }],
-            hint: "provide a non-empty API key name".into(),
-        });
-    }
-    Ok(name.to_owned())
-}
-
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys", request_body = crate::dtos::api_keys::CreateApiKeyRequest, responses((status = 201, body = crate::dtos::api_keys::CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub(crate) async fn create(
     State(ctx): State<AppContext>,
@@ -58,13 +37,12 @@ pub(crate) async fn create(
 ) -> Result<impl IntoResponse, ApiError> {
     let scope = body.scope.unwrap_or(ApiKeyScope::Read);
     crate::models::access::require_key_grant(&ctx.db, &auth, scope, body.audit).await?;
-    let name = validate_name(&body.name)?;
     let created = IdentityApiKeys::create_delegated_api_key(
         &ctx.db,
         &auth,
         scope,
         body.audit,
-        &name,
+        &body.name,
         body.expires_at,
     )
     .await?;

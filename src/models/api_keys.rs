@@ -126,7 +126,8 @@ db_enum! {
     /// Permission level held by an API key.
     /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
     /// The wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema)]
+    #[schemars(rename_all = "lowercase")]
     pub enum ApiKeyScope {
         Read = "read",
         Write = "write",
@@ -487,6 +488,20 @@ impl Entity {
         use crate::models::_entities::workspace_workspaces;
 
         let txn = crate::db::begin_write(db).await.internal()?;
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 100 {
+            return Err(YorishiroError::ValidationFailed {
+                message: "name must be between 1 and 100 characters".into(),
+                details: vec![crate::error::ValidationDetail {
+                    field: "name".into(),
+                    problem: "name must not be empty and must be at most 100 characters".into(),
+                    code: crate::error::ValidationErrorCode::EmptyRequired,
+                    expected: Some("1-100 characters".into()),
+                    actual: Some(name.chars().count().to_string()),
+                }],
+                hint: "provide a non-empty API key name".into(),
+            });
+        }
         if expires_at.is_some_and(|expires| expires <= crate::time::now()) {
             return Err(YorishiroError::ValidationFailed {
                 message: "key expiry must be in the future".into(),

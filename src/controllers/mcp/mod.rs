@@ -1,3 +1,4 @@
+mod api_keys;
 pub mod entities;
 mod import;
 mod invites;
@@ -164,6 +165,7 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_tenants(),
         YorishiroMcpServer::tool_router_whoami(),
         YorishiroMcpServer::tool_router_workspaces(),
+        YorishiroMcpServer::tool_router_api_keys(),
     ])
 }
 
