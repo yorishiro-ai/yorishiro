@@ -1029,21 +1029,67 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         assert_eq!(updated.schema_version, 1);
         let job_id: Uuid = report["job_id"].as_str().unwrap().parse().unwrap();
 
-        let undo = request
-            .post(&format!("/api/migration-jobs/{job_id}/undo"))
+        for (index, name) in ["migration_job_status", "undo_migration_job"]
+            .iter()
+            .enumerate()
+        {
+            let denied = mcp_call(
+                &request,
+                &session,
+                &read_key,
+                10 + index as i64,
+                "tools/call",
+                json!({"name":name,"arguments":{"job_id":job_id}}),
+            )
+            .await;
+            assert_eq!(denied["result"]["isError"], true);
+            assert_eq!(
+                denied["result"]["structuredContent"]["error"]["required_scope"],
+                "migration"
+            );
+        }
+        let status = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            12,
+            "tools/call",
+            json!({"name":"migration_job_status","arguments":{"job_id":job_id}}),
+        )
+        .await;
+        assert_eq!(status["result"]["isError"], false);
+        let status: Value =
+            serde_json::from_str(status["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let rest = request
+            .get(&format!("/api/migration-jobs/{job_id}"))
             .add_header("Authorization", format!("Bearer {migration_key}"))
             .await;
-        assert_eq!(
-            undo.status_code(),
-            StatusCode::ACCEPTED,
-            "response: {}",
-            undo.text()
-        );
-        let undo_id = undo.json::<Value>()["job_id"]
-            .as_str()
-            .unwrap()
-            .parse()
-            .unwrap();
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(status, rest.json::<Value>());
+        let missing = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            13,
+            "tools/call",
+            json!({"name":"migration_job_status","arguments":{"job_id":Uuid::new_v4()}}),
+        )
+        .await;
+        assert_eq!(missing["result"]["isError"], true);
+        let undo = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            14,
+            "tools/call",
+            json!({"name":"undo_migration_job","arguments":{"job_id":job_id}}),
+        )
+        .await;
+        assert_eq!(undo["result"]["isError"], false, "{undo}");
+        let undo: Value =
+            serde_json::from_str(undo["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(undo["snapshot_job_id"], job_id.to_string());
+        let undo_id = undo["job_id"].as_str().unwrap().parse().unwrap();
         super::fill_defaults::finish_via_api(
             &request,
             &ctx,

@@ -55,6 +55,11 @@ pub(crate) struct FillDefaultsArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct MigrationJobArgs {
+    pub job_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct ListEntitiesArgs {
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
@@ -375,6 +380,74 @@ impl YorishiroMcpServer {
         ok_json(crate::dtos::entities::FillDefaultsResponse {
             schema_name: args.schema_name,
             job_id,
+        })
+    }
+
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
+        description = "Get a migration job's status (requires migration scope)"
+    )]
+    pub(crate) async fn migration_job_status(
+        &self,
+        Parameters(args): Parameters<MigrationJobArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("migration_job_status")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::queue_job_lifecycles::migration_job_status(
+            authorized.txn(),
+            authorized.auth_context().workspace_id,
+            args.job_id,
+        )
+        .await
+        {
+            Ok(status) => ok_json(status),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
+        description = "Enqueue undo of a migration job's snapshots (requires migration scope)"
+    )]
+    pub(crate) async fn undo_migration_job(
+        &self,
+        Parameters(args): Parameters<MigrationJobArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("undo_migration_job")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        let job_id = match crate::workers::undo::enqueue(
+            self.app_context(),
+            authorized.txn(),
+            authorized.auth_context(),
+            args.job_id,
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
+        authorized.commit().await?;
+        ok_json(crate::dtos::entities::UndoResponse {
+            job_id,
+            snapshot_job_id: args.job_id,
         })
     }
 }

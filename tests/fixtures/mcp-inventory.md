@@ -622,6 +622,28 @@ Input schema:
 }
 ```
 
+### `migration_job_status`
+
+Get a migration job's status (requires migration scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `recall_context`
 
 Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope)
@@ -728,6 +750,28 @@ Input schema:
   "required": [
     "id",
     "status"
+  ],
+  "type": "object"
+}
+```
+
+### `undo_migration_job`
+
+Enqueue undo of a migration job's snapshots (requires migration scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
   ],
   "type": "object"
 }
