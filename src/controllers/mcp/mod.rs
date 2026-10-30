@@ -9,6 +9,7 @@ mod search;
 mod template_library;
 mod tenants;
 mod whoami;
+mod workspaces;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -162,6 +163,7 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_template_library(),
         YorishiroMcpServer::tool_router_tenants(),
         YorishiroMcpServer::tool_router_whoami(),
+        YorishiroMcpServer::tool_router_workspaces(),
     ])
 }
 

@@ -210,6 +210,42 @@ Input schema:
 }
 ```
 
+### `create_workspace`
+
+Create a workspace in the current tenant without retargeting the current credential (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "max_entities": {
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "schema_id": {
+      "format": "uuid",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
 ### `delete_entity`
 
 Delete an entity (requires write scope)
@@ -271,6 +307,29 @@ Input schema:
   },
   "required": [
     "id"
+  ],
+  "type": "object"
+}
+```
+
+### `delete_workspace`
+
+Permanently delete a current-tenant workspace and its data; the last workspace is protected (requires read scope and tenant Admin or Owner)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "workspace_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspace_id"
   ],
   "type": "object"
 }
@@ -536,6 +595,29 @@ Input schema:
   },
   "required": [
     "id"
+  ],
+  "type": "object"
+}
+```
+
+### `get_workspace`
+
+Get selected workspace details, counts and effective entity cap; cannot retarget a workspace-bound credential (requires read scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "workspace_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspace_id"
   ],
   "type": "object"
 }
@@ -816,6 +898,19 @@ Input schema:
 ### `list_templates`
 
 List built-in schema templates that can be used as a starting point for create_schema instead of writing a definition from scratch (requires read scope)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
+### `list_workspaces`
+
+List visible workspace records in the current tenant; discovery is not authority to retarget a bound credential (requires read scope)
 
 Input schema:
 
@@ -1298,6 +1393,46 @@ Input schema:
   },
   "required": [
     "id"
+  ],
+  "type": "object"
+}
+```
+
+### `update_workspace`
+
+Update selected workspace name (workspace Admin) or replace/clear manual entity cap (tenant Admin); schema binding is immutable here (requires read scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "max_entities": {
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "replace_max_entities": {
+      "default": false,
+      "type": "boolean"
+    },
+    "workspace_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspace_id"
   ],
   "type": "object"
 }

@@ -38,3 +38,14 @@ pub struct WorkspaceDetail {
     /// Currently *active* schemas only (one per distinct schema name), not a raw row count, which would also include archived versions.
     pub schema_count: i64,
 }
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateWorkspaceRequest {
+    pub name: Option<String>,
+    /// When true, replace the manual cap, including clearing it with null.
+    #[serde(default)]
+    pub replace_max_entities: bool,
+    pub max_entities: Option<i32>,
+}

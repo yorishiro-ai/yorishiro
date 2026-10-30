@@ -109,6 +109,37 @@ fn tool_result_json(response: &Value) -> Value {
 }
 
 #[tokio::test]
+async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let detail = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"get_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        let rest = request.get(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
+        assert_eq!(tool_result_json(&detail),rest.json::<Value>());
+        let updated = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":tenant.workspace_id,"name":"renamed","replace_max_entities":true,"max_entities":42}})).await;
+        assert_eq!(tool_result_json(&updated)["name"],"renamed");
+        let rest = request.get(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
+        assert_eq!(rest.json::<Value>()["max_entities"],42);
+        let rest = request.put(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).json(&json!({"replace_max_entities":true,"max_entities":null})).await;
+        rest.assert_status_ok();
+        assert!(rest.json::<Value>()["max_entities"].is_null());
+        let invalid = request.put(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).json(&json!({"name":"must-not-save","replace_max_entities":true,"max_entities":-1})).await;
+        assert!(!invalid.status_code().is_success());
+        let created = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"create_workspace","arguments":{"name":"second"}})).await;
+        let second = tool_result_json(&created)["id"].as_str().unwrap().to_owned();
+        let denied = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"get_workspace","arguments":{"workspace_id":second}})).await;
+        assert_eq!(denied["result"]["isError"],true);
+        let denied = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":second,"name":"retargeted"}})).await;
+        assert_eq!(denied["result"]["isError"],true);
+        let list = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"list_workspaces","arguments":{}})).await;
+        let rest = request.get("/api/workspaces").add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
+        assert_eq!(tool_result_json(&list),rest.json::<Value>());
+        let deleted = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"delete_workspace","arguments":{"workspace_id":second}})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"],true);
+    }).await;
+}
+
+#[tokio::test]
 async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

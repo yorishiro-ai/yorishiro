@@ -11,9 +11,9 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::extractors::{ReadScope, Verified};
 use crate::dtos::workspaces::{CreateWorkspaceRequest, WorkspaceDetail};
+use crate::models::tenancy;
 use crate::models::workspace_workspaces;
 use crate::models::workspace_workspaces::WorkspaceRecord;
-use crate::models::{entity_entities, entity_relations, schema_schemas, tenancy};
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub(crate) async fn list_workspaces(
@@ -61,30 +61,21 @@ pub async fn get_workspace(
     verified: Verified<ReadScope>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<WorkspaceDetail>, ApiError> {
-    let workspace = workspace_workspaces::get_for_actor(&ctx.db, &verified.ctx, id).await?;
-    let txn = crate::db::begin_workspace(&ctx, workspace.tenant_id, workspace.id).await?;
+    Ok(Json(
+        workspace_workspaces::detail_for_actor(&ctx, &verified.ctx, id).await?,
+    ))
+}
 
-    let entity_count = entity_entities::count(&txn, workspace.id).await?;
-    let relation_count = entity_relations::count(&txn, workspace.id).await?;
-    let schema_count = schema_schemas::count_active(&txn, workspace.id).await?;
-
-    let timezone = crate::time::configured(&ctx);
-    let quotas = crate::quotas(&ctx, workspace.tenant_id).await?;
-    Ok(Json(WorkspaceDetail {
-        id: workspace.id,
-        tenant_id: workspace.tenant_id,
-        name: workspace.name,
-        max_entities: workspace.max_entities,
-        effective_max_entities: crate::data::quotas::effective_limit(
-            workspace.max_entities,
-            quotas.entities,
-        ),
-        schema_id: workspace.schema_id,
-        created_at: crate::time::in_timezone(workspace.created_at, timezone),
-        entity_count,
-        relation_count,
-        schema_count,
-    }))
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::workspaces::UpdateWorkspaceRequest, responses((status = 200, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["workspace_admin"]))), tag = "community"))]
+async fn update_workspace(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Path(id): Path<Uuid>,
+    Json(body): Json<crate::dtos::workspaces::UpdateWorkspaceRequest>,
+) -> Result<Json<WorkspaceRecord>, ApiError> {
+    Ok(Json(
+        workspace_workspaces::update_as(&ctx.db, &actor, id, body).await?,
+    ))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
@@ -103,6 +94,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_list_workspaces),
         super::route_inventory::path_doc(__path_create_workspace),
         super::route_inventory::path_doc(__path_get_workspace),
+        super::route_inventory::path_doc(__path_update_workspace),
         super::route_inventory::path_doc(__path_delete_workspace),
         super::route_inventory::path_doc(__path_grant_member),
         super::route_inventory::path_doc(__path_revoke_member),
@@ -137,6 +129,7 @@ pub fn routes() -> Routes {
         .add("/", get(list_workspaces))
         .add("/", post(create_workspace))
         .add("/{id}", get(get_workspace))
+        .add("/{id}", axum::routing::put(update_workspace))
         .add("/{id}", delete(delete_workspace))
         .add("/{id}/members/{user_id}", axum::routing::put(grant_member))
         .add("/{id}/members/{user_id}", delete(revoke_member))
