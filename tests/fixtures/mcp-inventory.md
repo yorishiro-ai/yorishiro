@@ -1807,6 +1807,36 @@ Input schema:
 
 ## Enterprise-only tools
 
+### `list_entity_columns`
+
+List the selected workspace's stored entity-table column preferences (requires read scope); these display preferences are shared by workspace users
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
 ### `list_upstream_changes`
 
 List schemas in this workspace whose origin template has changed since the schema was last copied (requires read scope). Use this to discover which schemas have pending upstream updates that have not yet been merged.
@@ -1879,6 +1909,57 @@ Input schema:
   },
   "required": [
     "schema_id"
+  ],
+  "type": "object"
+}
+```
+
+### `reset_entity_columns`
+
+Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires write scope); this removes only the display preference
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "entity_type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "entity_type"
+  ],
+  "type": "object"
+}
+```
+
+### `set_entity_columns`
+
+Replace the selected workspace's visible columns for one entity type (requires write scope); validates duplicate columns and the display limit without changing schema definitions
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "columns": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "entity_type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "entity_type",
+    "columns"
   ],
   "type": "object"
 }
