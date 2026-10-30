@@ -10,6 +10,7 @@ mod schemas;
 mod search;
 mod template_library;
 mod tenants;
+mod users;
 mod whoami;
 mod workspaces;
 
@@ -175,6 +176,7 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_workspaces(),
         YorishiroMcpServer::tool_router_api_keys(),
         YorishiroMcpServer::tool_router_audit_log(),
+        YorishiroMcpServer::tool_router_users(),
     ])
 }
 

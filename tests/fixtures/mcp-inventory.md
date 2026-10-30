@@ -527,6 +527,19 @@ Input schema:
 }
 ```
 
+### `get_current_user`
+
+Read your own global user profile without exposing password hashes or OAuth subjects; service credentials are denied (requires read scope)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `get_entity`
 
 Get a single entity by ID (requires read scope)
@@ -1601,6 +1614,29 @@ Input schema:
   "required": [
     "job_id"
   ],
+  "type": "object"
+}
+```
+
+### `update_current_user`
+
+Update or clear your own global display name across all tenants, not another user's identity; email, password and OAuth subjects cannot be changed here (requires read scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "display_name": {
+      "description": "New display name.\nNull clears it.\nEmail, password and OAuth subjects are not editable here.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```

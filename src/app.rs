@@ -200,6 +200,10 @@ impl RouteMounts {
             controllers::whoami::openapi_docs()
         );
         mount!(
+            controllers::users::routes(),
+            controllers::users::openapi_docs()
+        );
+        mount!(
             controllers::workspaces::routes(),
             controllers::workspaces::openapi_docs()
         );
