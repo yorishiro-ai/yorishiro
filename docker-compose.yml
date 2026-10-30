@@ -34,9 +34,8 @@ x-yorishiro: &yorishiro
     # model into the container cache when no read-only model mount is supplied.
     # `YORISHIRO_EMBEDDING_PROVIDER=none docker compose up` skips the model download.
     YORISHIRO_EMBEDDING_PROVIDER: ${YORISHIRO_EMBEDDING_PROVIDER:-local}
-    # Also the binary's own default: `src/bin/main.rs` sets YORISHIRO_MAX_TENANTS to "1" when
-    # it is unset, which is what keeps the first-run setup wizard reachable. Set it to "0" for
-    # multiple tenants, which turns that wizard off.
+    # Loco configuration defaults to one tenant, keeping the first-run setup wizard reachable.
+    # Set to "0" for multiple tenants on a licensed PostgreSQL deployment, disabling that wizard.
     YORISHIRO_MAX_TENANTS: "1"
 
 services:
