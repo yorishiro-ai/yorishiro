@@ -1,5 +1,6 @@
 mod entity_columns;
 mod origin;
+mod worker_class;
 
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ pub fn tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([
         YorishiroMcpServer::tool_router_origin(),
         YorishiroMcpServer::tool_router_entity_columns(),
+        YorishiroMcpServer::tool_router_worker_class(),
     ])
 }
 

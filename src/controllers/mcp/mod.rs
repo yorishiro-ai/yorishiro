@@ -286,7 +286,7 @@ pub(crate) enum AuthzOutcome {
 
 /// A connection-less version of `Authorized`: only authenticates and verifies scope, without opening a transaction.
 /// Tools that do slow work before touching the database (embedding generation) use this instead and call `TenantDb::acquire_for_workspace` afterward.
-pub(super) enum VerifyOutcome {
+pub(crate) enum VerifyOutcome {
     Verified(AuthContext),
     ScopeDenied(CallToolResult),
 }
@@ -345,7 +345,7 @@ pub(crate) async fn authorize(
 
 /// Connection-less counterpart to `authorize`, used by tools that must run a slow operation (embedding generation) before touching the database.
 /// See `RequestAuth::verify`.
-pub(super) async fn verify(
+pub(crate) async fn verify(
     ctx: &AppContext,
     parts: &Parts,
     required: ApiKeyScope,

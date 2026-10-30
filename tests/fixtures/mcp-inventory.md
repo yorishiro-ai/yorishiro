@@ -1807,6 +1807,19 @@ Input schema:
 
 ## Enterprise-only tools
 
+### `get_worker_class`
+
+Read the selected workspace's explicit worker-class assignment (requires read scope); missing assignments use shared compute and return not found here
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `list_entity_columns`
 
 List the selected workspace's stored entity-table column preferences (requires read scope); these display preferences are shared by workspace users
@@ -1936,6 +1949,19 @@ Input schema:
 }
 ```
 
+### `reset_worker_class`
+
+Remove the selected workspace's worker-class assignment and fall back to shared compute (requires schema scope); queued jobs retain their existing routing
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `set_entity_columns`
 
 Replace the selected workspace's visible columns for one entity type (requires write scope); validates duplicate columns and the display limit without changing schema definitions
@@ -1960,6 +1986,50 @@ Input schema:
   "required": [
     "entity_type",
     "columns"
+  ],
+  "type": "object"
+}
+```
+
+### `set_worker_class`
+
+Assign the selected workspace's worker class (requires schema scope); the deployment must declare the destination worker target, which does not guarantee a worker is online
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "WorkerClass": {
+      "description": "What kind of compute a queued job is meant for.\n\nThe class is recorded on the job's lifecycle row and decides its priority band and concurrency limit.\nIt does not choose the worker: that is the job's [`crate::workers::target::WorkerTarget`], which a `TenantPrivate` job derives from the tenant that owns its workspace.",
+      "oneOf": [
+        {
+          "const": "tenant_private",
+          "description": "Runs only on compute a single tenant registered for its own workspaces.",
+          "type": "string"
+        },
+        {
+          "const": "official",
+          "description": "Runs only on compute this deployment operates itself.",
+          "type": "string"
+        },
+        {
+          "const": "shared",
+          "description": "Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "worker_class": {
+      "$ref": "#/$defs/WorkerClass"
+    }
+  },
+  "required": [
+    "worker_class"
   ],
   "type": "object"
 }
