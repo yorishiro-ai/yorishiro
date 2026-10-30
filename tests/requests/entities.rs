@@ -16,7 +16,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
     let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "true");
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::from_value(serde_json::json!({
             "name":"quota-note", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}
