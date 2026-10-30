@@ -385,9 +385,16 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             deliver_lifecycle(&delivery_ctx, lifecycle_id).await;
         });
 
-        tokio::time::timeout(Duration::from_secs(5), entered.notified())
-            .await
-            .expect("worker reached the external LLM call");
+        if tokio::time::timeout(Duration::from_secs(5), entered.notified()).await.is_err() {
+            let lifecycle = yorishiro::models::_entities::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db).await.unwrap();
+            let dispatch = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db).await.unwrap();
+            let job = inference_jobs::get(&ctx.db, job_id).await;
+            let dispatch_state = dispatch.map(|row| (row.published_at, row.last_attempt_at, row.claim_until));
+            let lifecycle_state = lifecycle.map(|row| (row.status, row.attempt, row.provider_job_id, row.error));
+            panic!("worker did not reach LLM: delivery_finished={}, lifecycle={lifecycle_state:?}, dispatch={dispatch_state:?}, inference={:?}", run.is_finished(), job.map(|row| row.map(|row| row.status)));
+        }
         let replacement = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
