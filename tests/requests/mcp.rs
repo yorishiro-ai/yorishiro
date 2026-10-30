@@ -13,6 +13,56 @@ use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use crate::EnvGuard;
 
 #[tokio::test]
+async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let overview = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"get_tenant_overview","arguments":{}}),
+        )
+        .await;
+        let overview = tool_result_json(&overview);
+        let rest = request
+            .get("/api/tenant/overview")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        rest.assert_status_ok();
+        assert_eq!(overview, rest.json::<Value>());
+        assert_eq!(overview["tenant_id"], json!(tenant.tenant_id));
+        let service = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let denied = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            3,
+            "tools/call",
+            json!({"name":"get_tenant_overview","arguments":{}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
+        request
+            .get("/api/tenant/overview")
+            .add_header("Authorization", format!("Bearer {}", service.plaintext))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn invite_acceptance_uses_current_human_identity_without_retargeting() {
     boot_request::<App, _, _>(|request, ctx| async move {
         use sea_orm::EntityTrait;

@@ -1929,6 +1929,19 @@ Input schema:
 }
 ```
 
+### `get_tenant_overview`
+
+Read current tenant billing plan metadata, effective workspace cap, usage and member summary (requires read scope and tenant Admin or Owner); this read never changes billing or plan policy
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `get_worker_class`
 
 Read the selected workspace's explicit worker-class assignment (requires read scope); missing assignments use shared compute and return not found here

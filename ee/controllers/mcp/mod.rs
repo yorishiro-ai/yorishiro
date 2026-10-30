@@ -1,3 +1,4 @@
+mod dashboard;
 mod embedding;
 mod entity_columns;
 mod llm;
@@ -25,6 +26,7 @@ impl McpToolPolicy for ManagementToolPolicy {
 /// The complete enterprise-only MCP tool set.
 pub fn tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([
+        YorishiroMcpServer::tool_router_dashboard(),
         YorishiroMcpServer::tool_router_origin(),
         YorishiroMcpServer::tool_router_entity_columns(),
         YorishiroMcpServer::tool_router_worker_class(),

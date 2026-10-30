@@ -50,3 +50,51 @@ pub(crate) async fn compute_tenant_usage(
         entity_count: entity_count as i64,
     })
 }
+
+/// Reads the current tenant administrative summary after revalidating the actor.
+pub(crate) async fn overview_as(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+) -> Result<crate::edition::ee::dtos::dashboard::TenantOverview, YorishiroError> {
+    use crate::edition::ee::dtos::dashboard::TenantOverview;
+    use crate::edition::ee::models::{tenant_billing, tenant_tenants};
+    use crate::models::tenant_memberships;
+    let current = crate::models::api_keys::Model::current_context(&ctx.db, actor).await?;
+    crate::models::access::require_tenant_admin(&ctx.db, current.tenant_id, current.user_id)
+        .await?;
+    let tenant_id = current.tenant_id;
+    let tenant = crate::models::tenant_tenants::Model::find_by_id(&ctx.db, tenant_id).await?;
+    let billing = tenant_billing::get_billing(&ctx.db, tenant_id).await?;
+    let usage = tenant_tenants::compute_tenant_usage(&ctx.db, tenant_id).await?;
+    let active_plan = match crate::edition::ee::data::plan::PlanPolicy::current(ctx)? {
+        crate::edition::ee::data::plan::PlanPolicy::Disabled => None,
+        crate::edition::ee::data::plan::PlanPolicy::Enabled => {
+            Some(crate::edition::ee::data::plan::Plan::for_tenant(ctx, tenant_id).await?)
+        }
+    };
+    let effective_max_workspaces = crate::data::quotas::effective_limit(
+        tenant.max_workspaces,
+        active_plan.and_then(|plan| plan.caps().max_workspaces),
+    );
+    // The dashboard overview shows every member, not a page: it's a fixed-shape summary, not a browsable list with its own query params.
+    // A tenant with more than MAX_LIST_LIMIT members sees a truncated list; flagged rather than silently accepted, since nothing here has measured how common that is.
+    let members = tenant_memberships::list_members(
+        &ctx.db,
+        tenant_id,
+        crate::models::pagination::ListParams {
+            limit: crate::models::pagination::MAX_LIST_LIMIT,
+            offset: 0,
+        },
+    )
+    .await?;
+
+    Ok(TenantOverview {
+        tenant_id,
+        plan: billing.and_then(|record| record.plan),
+        active_plan,
+        max_workspaces: tenant.max_workspaces,
+        effective_max_workspaces,
+        usage,
+        members,
+    })
+}
