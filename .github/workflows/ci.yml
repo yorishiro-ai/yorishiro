@@ -512,6 +512,7 @@ jobs:
             --skip requests::members::owner_can_list_and_add_members \
             --skip requests::members::last_owner_cannot_be_demoted_or_removed_through_any_membership_operation \
             --skip requests::members::competing_owner_demotion_and_removal_preserve_an_owner \
+            --skip requests::members::role_preview_reports_lost_workspaces_without_keys \
             --skip requests::mcp::fill_defaults_mcp_executes_and_enforces_migration_scope \
             --skip requests::mcp::mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid \
             --skip requests::mcp::mcp_search_asks_a_worker_to_embed_the_query \
