@@ -333,6 +333,27 @@ Input schema:
 }
 ```
 
+### `get_template`
+
+Get a built-in schema template definition by ID (requires read scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "template_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "template_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `get_template_library_item`
 
 Get a single template from the tenant's DB-backed template library by ID (requires read scope)

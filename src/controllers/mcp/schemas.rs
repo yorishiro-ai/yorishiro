@@ -27,6 +27,11 @@ pub(crate) struct GetSchemaByIdArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct GetTemplateArgs {
+    pub template_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetEntityTypeJsonSchemaArgs {
     /// Name of the active schema.
     pub schema_name: String,
@@ -260,6 +265,31 @@ impl YorishiroMcpServer {
         };
 
         ok_json(crate::data::templates::list_templates())
+    }
+
+    #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
+        description = "Get a built-in schema template definition by ID (requires read scope)"
+    )]
+    pub(crate) async fn get_template(
+        &self,
+        Parameters(args): Parameters<GetTemplateArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let _authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("get_template")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::data::templates::get_template(&args.template_id) {
+            Ok(template) => ok_json(template),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
     }
 
     #[tool(

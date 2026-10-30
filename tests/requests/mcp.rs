@@ -127,6 +127,16 @@ async fn issued_read_key_reads_but_rejects_valid_mutations_over_both_transports(
         let read = mcp_call(&request, &session, &key, 2, "tools/call",
             json!({"name":"list_entities","arguments":{"schema_name":"task-management"}})).await;
         assert_ne!(read["result"]["isError"], true, "{read}");
+        let template = mcp_call(&request, &session, &key, 20, "tools/call",
+            json!({"name":"get_template","arguments":{"template_id":"general-notes"}})).await;
+        assert_ne!(template["result"]["isError"], true, "{template}");
+        let rest = request.get("/api/templates/general-notes")
+            .add_header("Authorization", format!("Bearer {key}")) .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(tool_result_json(&template), rest.json::<Value>());
+        let missing = mcp_call(&request, &session, &key, 21, "tools/call",
+            json!({"name":"get_template","arguments":{"template_id":"missing"}})).await;
+        assert_eq!(missing["result"]["isError"], true, "{missing}");
         let entity = json!({"schema_name":"task-management","entity_type":"task","data":{"title":"denied task"}});
         let schema = json!({"template_id":"general-notes"});
         let migration = json!({"schema_name":"task-management"});
