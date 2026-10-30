@@ -95,6 +95,59 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
 /// The full round trip: a schema copied from a template, the template edited afterward, the change surfacing in the upstream-changes listing and the merge preview, and merge writing a new version that both takes upstream's addition and keeps the workspace's own field.
 /// SQLite and PostgreSQL both return the upstream listing and support preview and merge.
 #[tokio::test]
+async fn concurrent_rest_merges_commit_for_separate_workspaces() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let mut inputs = Vec::new();
+        for _ in 0..2 {
+            let tenant = TestTenant::create(
+                &request,
+                &ctx,
+                TenantArgs {
+                    key_scope: ApiKeyScope::Schema,
+                    ..Default::default()
+                },
+            )
+            .await;
+            let template = create_template(&request, &tenant.api_key, note_definition()).await;
+            let response = request
+                .post("/api/schemas")
+                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .json(&json!({"template_id":template.to_string()}))
+                .await;
+            response.assert_status(StatusCode::CREATED);
+            let id = response.json::<serde_json::Value>()["schema"]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            inputs.push((tenant.api_key, id));
+        }
+        let barrier = tokio::sync::Barrier::new(2);
+        let merge = |(key, id): (String, String)| {
+            let request = &request;
+            let barrier = &barrier;
+            async move {
+                barrier.wait().await;
+                let response = request
+                    .post(&format!("/api/schemas/{id}/merge"))
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .await;
+                response.assert_status(StatusCode::CREATED);
+                let body = response.json::<serde_json::Value>();
+                let created = body["schema"]["id"].as_str().unwrap();
+                let persisted = request
+                    .get(&format!("/api/schemas/{created}"))
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .await;
+                persisted.assert_status(StatusCode::OK);
+                assert_eq!(body["schema"]["version"], 2);
+            }
+        };
+        tokio::join!(merge(inputs.pop().unwrap()), merge(inputs.pop().unwrap()));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn upstream_changes_preview_and_merge_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs {

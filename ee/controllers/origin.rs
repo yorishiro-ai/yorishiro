@@ -76,7 +76,7 @@ async fn merge_apply(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
     let schema_txn =
-        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
+        crate::db::begin_workspace_write(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
     let (schema, diff, summary) = origin::merge_apply(
         &schema_txn,
         &ctx,
