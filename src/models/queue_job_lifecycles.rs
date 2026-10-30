@@ -23,7 +23,7 @@ pub(crate) async fn migration_job_status(
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<BulkJobStatus, crate::YorishiroError> {
-    bulk_job_status(db, workspace_id, id, &["undo", "fill_defaults"]).await
+    bulk_job_status(db, workspace_id, id, &["undo", "fill_defaults", "reindex"]).await
 }
 
 pub(crate) async fn bulk_job_status(

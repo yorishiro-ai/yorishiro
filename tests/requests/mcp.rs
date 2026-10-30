@@ -1138,6 +1138,25 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
                 .unwrap()
                 .expect("committed reindex dispatch");
         assert_eq!(outbox.workspace_id, Some(workspace_id));
+        let status = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            17,
+            "tools/call",
+            json!({"name":"migration_job_status","arguments":{"job_id":reindex_id}}),
+        )
+        .await;
+        assert_eq!(status["result"]["isError"], false, "{status}");
+        let status = tool_result_json(&status);
+        assert_eq!(status["job_name"], "reindex");
+        let rest = request
+            .get(&format!("/api/migration-jobs/{reindex_id}"))
+            .add_header("Authorization", format!("Bearer {migration_key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(rest.json::<Value>()["job_name"], status["job_name"]);
+        assert_eq!(rest.json::<Value>()["job_id"], status["job_id"]);
 
         let audit = request
             .get("/api/audit-log")
