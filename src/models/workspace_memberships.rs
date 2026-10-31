@@ -1,0 +1,208 @@
+pub use crate::models::_entities::workspace_memberships::{ActiveModel, Column, Entity, Model};
+use sea_orm::DatabaseTransaction;
+use sea_orm::entity::prelude::*;
+
+use crate::db_enum::db_enum;
+use crate::error::{ResultExt, YorishiroError};
+use crate::models::api_keys::ApiKeyScope;
+
+db_enum! {
+    /// Workspace-local authority never grants tenant administration.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
+    #[schemars(rename_all = "lowercase")]
+    pub enum WorkspaceRole {
+        Admin = "admin",
+        Member = "member",
+        Viewer = "viewer",
+    }
+}
+
+impl WorkspaceRole {
+    pub fn max_scope(self) -> ApiKeyScope {
+        match self {
+            Self::Admin => ApiKeyScope::Migration,
+            Self::Member => ApiKeyScope::Write,
+            Self::Viewer => ApiKeyScope::Read,
+        }
+    }
+}
+
+impl Model {
+    /// Lists direct grants, independently of inherited tenant administrator access.
+    ///
+    /// # Errors
+    /// Rejects unauthorized actors and propagates lookup failures.
+    pub async fn list_as(
+        db: &sea_orm::DatabaseConnection,
+        actor: &crate::models::api_keys::AuthContext,
+        workspace_id: Uuid,
+    ) -> Result<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>, YorishiroError> {
+        use sea_orm::QueryOrder;
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        let records = Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .order_by_asc(Column::UserId)
+            .all(&txn)
+            .await
+            .internal()?
+            .into_iter()
+            .map(|record| {
+                let role = WorkspaceRole::from_db_str(&record.role).ok_or_else(|| {
+                    YorishiroError::Internal(anyhow::anyhow!("unknown workspace membership role"))
+                })?;
+                Ok(crate::dtos::workspaces::WorkspaceMemberRecord {
+                    user_id: record.user_id,
+                    role,
+                })
+            })
+            .collect::<Result<Vec<_>, YorishiroError>>()?;
+        txn.commit().await.internal()?;
+        Ok(records)
+    }
+
+    /// Grants workspace-local authority after revalidating the administrator under the fence.
+    ///
+    /// # Errors
+    /// Rejects unauthorized actors or users outside the tenant and propagates persistence errors.
+    pub async fn grant_as(
+        db: &sea_orm::DatabaseConnection,
+        actor: &crate::models::api_keys::AuthContext,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), YorishiroError> {
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        Self::grant(&txn, workspace_id, user_id, role).await?;
+        txn.commit().await.internal()
+    }
+
+    /// Revokes a direct grant after revalidating the administrator under the fence.
+    ///
+    /// # Errors
+    /// Rejects unauthorized actors and propagates persistence errors.
+    pub async fn revoke_as(
+        db: &sea_orm::DatabaseConnection,
+        actor: &crate::models::api_keys::AuthContext,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), YorishiroError> {
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        Self::revoke(&txn, workspace_id, user_id).await?;
+        txn.commit().await.internal()
+    }
+
+    /// Revokes a direct grant and its workspace-bound credentials under the membership fence.
+    /// Tenant-bound credentials remain stored and must recheck each selected workspace.
+    ///
+    /// # Errors
+    /// Propagates workspace lookup or persistence failures.
+    pub async fn revoke(
+        txn: &DatabaseTransaction,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), YorishiroError> {
+        use crate::models::_entities::api_keys;
+        let tenant_id =
+            crate::models::workspace_workspaces::get_workspace_tenant(txn, workspace_id).await?;
+        crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+            .await
+            .internal()?;
+        Entity::delete_many()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::UserId.eq(user_id))
+            .exec(txn)
+            .await
+            .internal()?;
+        let inherited =
+            crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
+                .await?
+                .is_some_and(|role| role.administers_tenant());
+        if !inherited {
+            api_keys::Entity::revoke_matching(
+                txn,
+                sea_orm::Condition::all()
+                    .add(api_keys::Column::TenantId.eq(tenant_id))
+                    .add(api_keys::Column::WorkspaceId.eq(workspace_id))
+                    .add(api_keys::Column::UserId.eq(user_id)),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Records an explicit grant under the membership fence in the caller's transaction.
+    ///
+    /// # Errors
+    /// Rejects users outside the workspace's tenant and propagates persistence failures.
+    pub async fn grant(
+        txn: &DatabaseTransaction,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<(), YorishiroError> {
+        use sea_orm::sea_query::OnConflict;
+        let tenant_id =
+            crate::models::workspace_workspaces::get_workspace_tenant(txn, workspace_id).await?;
+        crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+            .await
+            .internal()?;
+        crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
+            .await?
+            .ok_or_else(|| YorishiroError::not_found("tenant membership not found"))?;
+        let active = ActiveModel {
+            id: crate::db::sqlite_generated_id(txn, sea_orm::ActiveValue::NotSet),
+            workspace_id: sea_orm::ActiveValue::Set(workspace_id),
+            user_id: sea_orm::ActiveValue::Set(user_id),
+            role: sea_orm::ActiveValue::Set(role.as_db_str().into()),
+            ..Default::default()
+        };
+        Entity::insert(active)
+            .on_conflict(
+                OnConflict::columns([Column::WorkspaceId, Column::UserId])
+                    .update_column(Column::Role)
+                    .to_owned(),
+            )
+            .exec(txn)
+            .await
+            .internal()?;
+        Ok(())
+    }
+
+    /// Finds a direct workspace grant, independently of inherited tenant authority.
+    ///
+    /// # Errors
+    /// Propagates lookup failures and rejects invalid persisted roles.
+    pub async fn role(
+        conn: &impl ConnectionTrait,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<WorkspaceRole>, YorishiroError> {
+        let membership = Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::UserId.eq(user_id))
+            .one(conn)
+            .await
+            .internal()?;
+        membership
+            .map(|membership| {
+                WorkspaceRole::from_db_str(&membership.role).ok_or_else(|| {
+                    YorishiroError::Internal(anyhow::anyhow!("unknown workspace membership role"))
+                })
+            })
+            .transpose()
+    }
+}
+
+#[loco_rs::prelude::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        self.id = crate::db::sqlite_generated_id(db, self.id);
+        Ok(self)
+    }
+}

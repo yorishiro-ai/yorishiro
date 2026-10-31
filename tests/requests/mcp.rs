@@ -12,7 +12,520 @@ use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use crate::EnvGuard;
 
-fn rpc_body(text: &str) -> Value {
+#[tokio::test]
+async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let overview = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"get_tenant_overview","arguments":{}}),
+        )
+        .await;
+        let overview = tool_result_json(&overview);
+        let rest = request
+            .get("/api/tenant/overview")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        rest.assert_status_ok();
+        assert_eq!(overview, rest.json::<Value>());
+        assert_eq!(overview["tenant_id"], json!(tenant.tenant_id));
+        let service = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let denied = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            3,
+            "tools/call",
+            json!({"name":"get_tenant_overview","arguments":{}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
+        request
+            .get("/api/tenant/overview")
+            .add_header("Authorization", format!("Bearer {}", service.plaintext))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn invite_acceptance_uses_current_human_identity_without_retargeting() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        use sea_orm::EntityTrait;
+        use yorishiro::models::{api_keys, user_users};
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let owner = user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap();
+        let created = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
+        let invite = tool_result_json(&created);
+        let service = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false).await.unwrap();
+        let denied = mcp_call(&request, &session, &service.plaintext, 3, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let duplicate = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+        assert_eq!(duplicate["result"]["isError"], true);
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+            let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+            let created = mcp_call(&request, &session, &target.api_key, 5, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
+            let invite = tool_result_json(&created);
+            let wrong = mcp_call(&request, &session, &target.api_key, 6, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+            assert_eq!(wrong["result"]["isError"], true);
+            let accepted = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+            let accepted = tool_result_json(&accepted);
+            assert_eq!(accepted["user_id"], json!(tenant.owner_id));
+            assert_eq!(accepted["tenant_id"], json!(target.tenant_id));
+            let replay = mcp_call(&request, &session, &tenant.api_key, 9, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+            assert_eq!(replay["result"]["isError"], true);
+            let identity = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"whoami","arguments":{}})).await;
+            assert_eq!(tool_result_json(&identity)["workspace_id"], json!(tenant.workspace_id));
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let source = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"template_id":"task-management"})).await;
+        source.assert_status(StatusCode::CREATED);
+        let source: Value = source.json();
+        let target = request.post("/api/workspaces").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"name":"fork target"})).await;
+        target.assert_status(StatusCode::CREATED);
+        let target: Value = target.json();
+        let workspace_id = target["id"].as_str().unwrap().parse().unwrap();
+        let key = issue_api_key(&ctx, workspace_id, tenant.owner_id, ApiKeyScope::Schema, false).await;
+        let read_key = issue_api_key(&ctx, workspace_id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let input = json!({"source_workspace_id":tenant.workspace_id,"source_schema_id":source["schema"]["id"]});
+        let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"create_schema_fork","arguments":input})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let created = mcp_call(&request, &session, &key, 3, "tools/call", json!({"name":"create_schema_fork","arguments":input})).await;
+        let fork = tool_result_json(&created);
+        let id = fork["id"].as_str().unwrap();
+        let rest = request.get(&format!("/api/schema-forks/{id}")).add_header("Authorization", format!("Bearer {key}")).await;
+        rest.assert_status_ok();
+        assert_eq!(fork, rest.json::<Value>());
+        let listed = mcp_call(&request, &session, &read_key, 4, "tools/call", json!({"name":"list_schema_forks","arguments":{}})).await;
+        assert_eq!(tool_result_json(&listed), json!([fork.clone()]));
+        let foreign = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"get_schema_fork","arguments":{"fork_id":id}})).await;
+        assert_eq!(foreign["result"]["isError"], true);
+        let stale = mcp_call(&request, &session, &key, 6, "tools/call", json!({"name":"update_schema_fork","arguments":{"fork_id":id,"definition":fork["definition"],"expected_fork_schema_id":Uuid::new_v4()}})).await;
+        assert_eq!(stale["result"]["isError"], true);
+        let updated = mcp_call(&request, &session, &key, 7, "tools/call", json!({"name":"update_schema_fork","arguments":{"fork_id":id,"definition":fork["definition"],"expected_fork_schema_id":fork["fork_schema_id"]}})).await;
+        assert_eq!(tool_result_json(&updated)["id"], fork["id"]);
+        let denied = mcp_call(&request, &session, &read_key, 8, "tools/call", json!({"name":"delete_schema_fork","arguments":{"fork_id":id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let deleted = mcp_call(&request, &session, &key, 9, "tools/call", json!({"name":"delete_schema_fork","arguments":{"fork_id":id}})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"], true);
+        request.get(&format!("/api/schema-forks/{id}")).add_header("Authorization", format!("Bearer {key}")).await.assert_status(StatusCode::NOT_FOUND);
+        request.get(&format!("/api/schemas/{}", source["schema"]["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
+    }).await;
+}
+
+#[tokio::test]
+async fn llm_provider_tools_keep_secrets_private_and_match_rest() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let input = json!({"base_url":"https://llm.example.invalid/v1","model":"test-llm","api_key":"test-only-llm-secret"});
+        let saved = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"set_llm_provider","arguments":input})).await;
+        assert_eq!(tool_result_json(&saved)["saved"], true);
+        assert!(!saved.to_string().contains("test-only-llm-secret"));
+        let read_key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false).await.unwrap().plaintext;
+        let current = mcp_call(&request, &session, &read_key, 3, "tools/call", json!({"name":"get_llm_provider","arguments":{}})).await;
+        let metadata = tool_result_json(&current);
+        assert!(metadata.get("api_key").is_none());
+        assert!(!current.to_string().contains("test-only-llm-secret"));
+        assert_eq!(metadata["model"], "test-llm");
+        let rest = request.get("/api/workspace/llm-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(metadata, rest.json::<Value>());
+        for (id, name, arguments) in [
+            (4, "set_llm_provider", input.clone()),
+            (5, "reset_llm_provider", json!({})),
+        ] {
+            let denied = mcp_call(&request, &session, &read_key, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(denied["result"]["isError"], true);
+        }
+        let mut invalid = input;
+        invalid["api_key"] = json!("");
+        let rejected = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"set_llm_provider","arguments":invalid})).await;
+        assert_eq!(rejected["result"]["isError"], true);
+        let unchanged = mcp_call(&request, &session, &read_key, 7, "tools/call", json!({"name":"get_llm_provider","arguments":{}})).await;
+        assert_eq!(tool_result_json(&unchanged), metadata);
+        let reset = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"reset_llm_provider","arguments":{}})).await;
+        assert_eq!(tool_result_json(&reset)["reset"], true);
+        request.get("/api/workspace/llm-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::NOT_FOUND);
+    }).await;
+}
+
+#[tokio::test]
+async fn embedding_provider_tools_keep_secrets_private_and_match_rest() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let input = json!({"base_url":"https://embedding.example.invalid/v1","model":"test-embedding","api_key":"test-only-provider-secret","dimensions":32});
+        let saved = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"set_embedding_provider","arguments":input})).await;
+        assert_eq!(tool_result_json(&saved)["saved"], true);
+        assert!(!saved.to_string().contains("test-only-provider-secret"));
+        let read_key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false).await.unwrap().plaintext;
+        let current = mcp_call(&request, &session, &read_key, 3, "tools/call", json!({"name":"get_embedding_provider","arguments":{}})).await;
+        let metadata = tool_result_json(&current);
+        assert!(metadata.get("api_key").is_none());
+        assert!(!current.to_string().contains("test-only-provider-secret"));
+        assert_eq!(metadata["dimensions"], 32);
+        let rest = request.get("/api/workspace/embedding-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(metadata, rest.json::<Value>());
+        for (id, name, arguments) in [
+            (4, "set_embedding_provider", input.clone()),
+            (5, "reset_embedding_provider", json!({})),
+        ] {
+            let denied = mcp_call(&request, &session, &read_key, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(denied["result"]["isError"], true);
+        }
+        let mut invalid = input;
+        invalid["dimensions"] = json!(0);
+        let rejected = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"set_embedding_provider","arguments":invalid})).await;
+        assert_eq!(rejected["result"]["isError"], true);
+        let unchanged = mcp_call(&request, &session, &read_key, 7, "tools/call", json!({"name":"get_embedding_provider","arguments":{}})).await;
+        assert_eq!(tool_result_json(&unchanged), metadata);
+        let reset = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"reset_embedding_provider","arguments":{}})).await;
+        assert_eq!(tool_result_json(&reset)["reset"], true);
+        request.get("/api/workspace/embedding-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::NOT_FOUND);
+    }).await;
+}
+
+#[tokio::test]
+async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let saved = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"set_worker_class","arguments":{"worker_class":"shared"}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&saved)["saved"], true);
+        let current = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            3,
+            "tools/call",
+            json!({"name":"get_worker_class","arguments":{}}),
+        )
+        .await;
+        let rest = request
+            .get("/api/workspace/worker-class")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&current), rest.json::<Value>());
+        assert_eq!(tool_result_json(&current)["worker_class"], "shared");
+        let read_key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .plaintext;
+        for (id, name, arguments) in [
+            (4, "set_worker_class", json!({"worker_class":"shared"})),
+            (5, "reset_worker_class", json!({})),
+        ] {
+            let denied = mcp_call(
+                &request,
+                &session,
+                &read_key,
+                id,
+                "tools/call",
+                json!({"name":name,"arguments":arguments}),
+            )
+            .await;
+            assert_eq!(denied["result"]["isError"], true);
+        }
+        let reset = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            6,
+            "tools/call",
+            json!({"name":"reset_worker_class","arguments":{}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&reset)["reset"], true);
+        request
+            .get("/api/workspace/worker-class")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        let absent = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            7,
+            "tools/call",
+            json!({"name":"get_worker_class","arguments":{}}),
+        )
+        .await;
+        assert_eq!(absent["result"]["isError"], true);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn entity_column_tools_match_rest_and_enforce_write_scope() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let saved = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"set_entity_columns","arguments":{"entity_type":"note","columns":["title","body"]}})).await;
+        assert_eq!(tool_result_json(&saved), json!({"entity_type":"note","columns":["title","body"]}));
+        let listed = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"list_entity_columns","arguments":{}})).await;
+        let rest = request.get("/api/workspace/entity-columns").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
+        let invalid = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"set_entity_columns","arguments":{"entity_type":"note","columns":["title","title"]}})).await;
+        assert_eq!(invalid["result"]["isError"], true);
+        let read_key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false).await.unwrap().plaintext;
+        for (id, name, arguments) in [
+            (5, "set_entity_columns", json!({"entity_type":"note","columns":[]})),
+            (6, "reset_entity_columns", json!({"entity_type":"note"})),
+        ] {
+            let denied = mcp_call(&request, &session, &read_key, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(denied["result"]["isError"], true);
+        }
+        let unchanged = mcp_call(&request, &session, &read_key, 7, "tools/call", json!({"name":"list_entity_columns","arguments":{}})).await;
+        assert_eq!(tool_result_json(&unchanged), tool_result_json(&listed));
+        let reset = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"reset_entity_columns","arguments":{"entity_type":"note"}})).await;
+        assert_eq!(tool_result_json(&reset)["reset"], true);
+        request.get("/api/workspace/entity-columns").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_json(&json!([]));
+    }).await;
+}
+
+#[tokio::test]
+async fn current_user_tools_are_self_only_and_secret_free() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let updated = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"update_current_user","arguments":{"display_name":"  Profile  "}}),
+        )
+        .await;
+        let profile = tool_result_json(&updated);
+        assert_eq!(profile["id"], tenant.owner_id.to_string());
+        assert_eq!(profile["display_name"], "Profile");
+        assert!(profile.get("password_hash").is_none());
+        assert!(profile.get("oauth_subject_id").is_none());
+        let rest = request
+            .get("/api/users/me")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        rest.assert_status_ok();
+        assert_eq!(profile, rest.json::<Value>());
+        let invalid = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            3,
+            "tools/call",
+            json!({"name":"update_current_user","arguments":{"display_name":" "}}),
+        )
+        .await;
+        assert_eq!(invalid["result"]["isError"], true);
+        request
+            .put("/api/users/me")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"display_name":"Other", "email":"replacement@example.com"}))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        request
+            .put("/api/users/me")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"display_name":null}))
+            .await
+            .assert_status_ok();
+        let current = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            4,
+            "tools/call",
+            json!({"name":"get_current_user","arguments":{}}),
+        )
+        .await;
+        assert!(tool_result_json(&current)["display_name"].is_null());
+        let service = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .plaintext;
+        let denied = mcp_call(
+            &request,
+            &session,
+            &service,
+            5,
+            "tools/call",
+            json!({"name":"get_current_user","arguments":{}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
+        let denied_update = mcp_call(
+            &request,
+            &session,
+            &service,
+            6,
+            "tools/call",
+            json!({"name":"update_current_user","arguments":{"display_name":"Service"}}),
+        )
+        .await;
+        assert_eq!(denied_update["result"]["isError"], true);
+        request
+            .get("/api/users/me")
+            .add_header("Authorization", format!("Bearer {service}"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn schema_archive_preserves_history_and_version_sequence() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let definition = json!({"name":"archive-history","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
+        let created = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        created.assert_status(StatusCode::CREATED);
+        let schema = created.json::<Value>()["schema"].clone();
+        let id = schema["id"].as_str().unwrap();
+        let entity = request.post("/api/entities").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"schema_name":"archive-history","entity_type":"note","data":{"title":"retained"}})).await;
+        entity.assert_status(StatusCode::CREATED);
+        let entity_id = entity.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let read_key = issue_api_key(&ctx, tenant.workspace_id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let archived = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":id}})).await;
+        assert_eq!(tool_result_json(&archived)["status"], "archived");
+        let retained = request.get(&format!("/api/entities/{entity_id}")).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        retained.assert_status_ok();
+        assert_eq!(retained.json::<Value>()["data"]["title"], "retained");
+        let again = request.post(&format!("/api/schemas/{id}/archive")).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        again.assert_status_ok();
+        assert_eq!(again.json::<Value>(), tool_result_json(&archived));
+        request.get("/api/schemas/active/archive-history").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::NOT_FOUND);
+        request.get(&format!("/api/schemas/{id}")).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
+        let next = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        next.assert_status(StatusCode::CREATED);
+        assert_eq!(next.json::<Value>()["schema"]["version"], 2);
+        let missing = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":Uuid::new_v4()}})).await;
+        assert_eq!(missing["result"]["isError"], true);
+    }).await;
+}
+
+#[tokio::test]
+async fn audit_tool_preserves_independent_grant_and_rest_parity() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let denied = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"list_audit_log","arguments":{}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
+        let audit_key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            tenant.owner_id,
+            ApiKeyScope::Read,
+            true,
+        )
+        .await;
+        let listed = mcp_call(
+            &request,
+            &session,
+            &audit_key,
+            3,
+            "tools/call",
+            json!({"name":"list_audit_log","arguments":{"page":1,"page_size":10}}),
+        )
+        .await;
+        let rest = request
+            .get("/api/audit-log?page=1&page_size=10")
+            .add_header("Authorization", format!("Bearer {audit_key}"))
+            .await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
+        let invalid = mcp_call(
+            &request,
+            &session,
+            &audit_key,
+            4,
+            "tools/call",
+            json!({"name":"list_audit_log","arguments":{"page":u64::MAX}}),
+        )
+        .await;
+        assert_eq!(invalid["result"]["isError"], true);
+        for (key, expected) in [(&tenant.api_key, false), (&audit_key, true)] {
+            let capabilities = mcp_call(
+                &request,
+                &session,
+                key,
+                5,
+                "tools/call",
+                json!({"name":"capabilities","arguments":{}}),
+            )
+            .await;
+            let capabilities = tool_result_json(&capabilities);
+            let audit = capabilities["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == "list_audit_log")
+                .unwrap();
+            assert_eq!(audit["required_grants"], json!(["audit"]));
+            assert_eq!(audit["grants_satisfied"], expected);
+        }
+    })
+    .await;
+}
+
+pub(super) fn rpc_body(text: &str) -> Value {
     let payload = text
         .lines()
         .filter_map(|line| line.strip_prefix("data:").map(str::trim))
@@ -21,7 +534,7 @@ fn rpc_body(text: &str) -> Value {
     serde_json::from_str(payload).unwrap_or_else(|err| panic!("invalid MCP response {err}: {text}"))
 }
 
-async fn initialize(request: &TestServer) -> String {
+pub(super) async fn initialize(request: &TestServer) -> String {
     let response = request
         .post("/mcp")
         .add_header("Accept", "application/json, text/event-stream")
@@ -109,6 +622,923 @@ fn tool_result_json(response: &Value) -> Value {
 }
 
 #[tokio::test]
+async fn tenant_metadata_tools_match_rest_and_keep_updates_atomic() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let updated = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"update_tenant","arguments":{"name":" managed tenant ","replace_max_workspaces":true,"max_workspaces":0}})).await;
+        let record = tool_result_json(&updated);
+        assert_eq!(record["name"], "managed tenant");
+        assert_eq!(record["max_workspaces"], 0);
+        let rest = request.get("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(record, rest.json::<Value>());
+        let blocked = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"create_workspace","arguments":{"name":"blocked"}})).await;
+        assert_eq!(blocked["result"]["isError"], true);
+        for arguments in [json!({"name":"rollback","replace_max_workspaces":true,"max_workspaces":-1}), json!({"name":"rollback","max_workspaces":5}), json!({"name":" "})] {
+            let invalid = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"update_tenant","arguments":arguments})).await;
+            assert_eq!(invalid["result"]["isError"], true);
+        }
+        let detail = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"get_tenant","arguments":{}})).await;
+        assert_eq!(tool_result_json(&detail), record);
+        let cleared = request.put("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"replace_max_workspaces":true,"max_workspaces":null})).await;
+        cleared.assert_status_ok();
+        assert!(cleared.json::<Value>()["max_workspaces"].is_null());
+        let user = yorishiro::models::user_users::create_user(&ctx.db, &super::fixtures::unique_email("tenant-viewer"), "test-password", None).await.unwrap();
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, yorishiro::models::tenant_memberships::MembershipRole::Viewer).await.unwrap();
+        super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id, yorishiro::models::workspace_memberships::WorkspaceRole::Viewer).await;
+        let viewer = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        for (name, args) in [("get_tenant", json!({})), ("update_tenant", json!({"name":"forbidden"}))] {
+            let denied = mcp_call(&request, &session, &viewer, 6, "tools/call", json!({"name":name,"arguments":args})).await;
+            assert_eq!(denied["result"]["isError"], true);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn api_key_tools_preserve_history_ceilings_and_revocation() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let read_key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            tenant.owner_id,
+            ApiKeyScope::Read,
+            false,
+        )
+        .await;
+        for args in [
+            json!({"name":"higher","scope":"write"}),
+            json!({"name":"audit","audit":true}),
+            json!({"name":"   "}),
+        ] {
+            let denied = mcp_call(
+                &request,
+                &session,
+                &read_key,
+                2,
+                "tools/call",
+                json!({"name":"create_api_key","arguments":args}),
+            )
+            .await;
+            assert_eq!(denied["result"]["isError"], true, "{denied}");
+        }
+        let created = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({"name":"create_api_key","arguments":{"name":" managed "}}),
+        )
+        .await;
+        let created = tool_result_json(&created);
+        assert_eq!(created["name"], "managed");
+        let secret = created["full_key"].as_str().unwrap();
+        let rotated = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            4,
+            "tools/call",
+            json!({"name":"rotate_api_key","arguments":{"key_id":created["id"]}}),
+        )
+        .await;
+        let successor = tool_result_json(&rotated);
+        assert_ne!(created["id"], successor["id"]);
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {secret}"))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let listed = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            5,
+            "tools/call",
+            json!({"name":"list_api_keys","arguments":{}}),
+        )
+        .await;
+        let history = tool_result_json(&listed);
+        assert!(!history.to_string().contains(secret));
+        assert!(
+            !history
+                .to_string()
+                .contains(successor["full_key"].as_str().unwrap())
+        );
+        assert!(
+            history["keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|key| key["id"] == created["id"] && key["state"] == "revoked")
+        );
+        let rest = request
+            .get("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        let mut mcp_history = history.clone();
+        let mut rest_history = rest.json::<Value>();
+        // Each authenticated call may independently touch the caller's last-used timestamp.
+        for records in [&mut mcp_history, &mut rest_history] {
+            for key in records["keys"].as_array_mut().unwrap() {
+                key.as_object_mut().unwrap().remove("last_used_at");
+            }
+        }
+        assert_eq!(mcp_history, rest_history);
+        let revoked = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            6,
+            "tools/call",
+            json!({"name":"revoke_api_key","arguments":{"key_id":successor["id"]}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        request
+            .get("/api/whoami")
+            .add_header(
+                "Authorization",
+                format!("Bearer {}", successor["full_key"].as_str().unwrap()),
+            )
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+            let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+            let foreign = mcp_call(
+                &request,
+                &session,
+                &other.api_key,
+                7,
+                "tools/call",
+                json!({"name":"revoke_api_key","arguments":{"key_id":created["id"]}}),
+            )
+            .await;
+            assert_eq!(foreign["result"]["isError"], true);
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn workspace_member_tools_match_rest_and_revoke_bound_credentials() {
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{tenant_memberships, user_users, workspace_memberships::WorkspaceRole};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("workspace-managed"), "test-password", None).await.unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Member).await.unwrap();
+        let session = initialize(&request).await;
+        let granted = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id,"role":"admin"}})).await;
+        assert_eq!(tool_result_json(&granted)["granted"], true);
+        let member_key = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        let listed = mcp_call(&request, &session, &member_key, 3, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        let rest = request.get(&format!("/api/workspaces/{}/members", tenant.workspace_id)).add_header("Authorization", format!("Bearer {member_key}")).await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
+        assert_eq!(tool_result_json(&listed), json!([{"user_id":user.id,"role":"admin"}]));
+        let tenant_admin = mcp_call(&request, &session, &member_key, 4, "tools/call", json!({"name":"create_api_key","arguments":{"name":"forbidden"}})).await;
+        assert_eq!(tenant_admin["result"]["isError"], true);
+        super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id, WorkspaceRole::Viewer).await;
+        let denied = mcp_call(&request, &session, &member_key, 5, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+            let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+            let foreign = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":other.workspace_id,"user_id":user.id,"role":"admin"}})).await;
+            assert_eq!(foreign["result"]["isError"], true);
+        }
+        let revoked = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"revoke_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id}})).await;
+        assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        request.get("/api/whoami").add_header("Authorization", format!("Bearer {member_key}")).await.assert_status(StatusCode::UNAUTHORIZED);
+        let members = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.json::<Value>();
+        assert!(members.as_array().unwrap().iter().any(|member| member["user_id"] == user.id.to_string() && member["role"] == "member"));
+    }).await;
+}
+
+#[tokio::test]
+async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let detail = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"get_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        let rest = request.get(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
+        assert_eq!(tool_result_json(&detail),rest.json::<Value>());
+        let updated = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":tenant.workspace_id,"name":"renamed","replace_max_entities":true,"max_entities":42}})).await;
+        assert_eq!(tool_result_json(&updated)["name"],"renamed");
+        let rest = request.get(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
+        assert_eq!(rest.json::<Value>()["max_entities"],42);
+        let rest = request.put(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).json(&json!({"replace_max_entities":true,"max_entities":null})).await;
+        rest.assert_status_ok();
+        assert!(rest.json::<Value>()["max_entities"].is_null());
+        let invalid = request.put(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).json(&json!({"name":"must-not-save","replace_max_entities":true,"max_entities":-1})).await;
+        assert!(!invalid.status_code().is_success());
+        let created = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"create_workspace","arguments":{"name":"second"}})).await;
+        let second = tool_result_json(&created)["id"].as_str().unwrap().to_owned();
+        let denied = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"get_workspace","arguments":{"workspace_id":second}})).await;
+        assert_eq!(denied["result"]["isError"],true);
+        let denied = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":second,"name":"retargeted"}})).await;
+        assert_eq!(denied["result"]["isError"],true);
+        let list = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"list_workspaces","arguments":{}})).await;
+        let rest = request.get("/api/workspaces").add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
+        assert_eq!(tool_result_json(&list),rest.json::<Value>());
+        let deleted = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"delete_workspace","arguments":{"workspace_id":second}})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"],true);
+    }).await;
+}
+
+#[tokio::test]
+async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let created = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+            json!({"name":"create_template_library_item","arguments":{"name":format!("mcp-template-{}",Uuid::now_v7()),"definition":{"name":"note","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}}}})).await;
+        let created = tool_result_json(&created);
+        let id = created["id"].as_str().unwrap();
+        let updated = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+            json!({"name":"update_template_library_item","arguments":{"id":id,"description":"updated through MCP"}})).await;
+        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&updated), rest.json::<Value>());
+        let fork = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call",
+            json!({"name":"fork_template_library_item","arguments":{"id":id,"name":format!("fork-{}",Uuid::now_v7())}})).await;
+        let fork = tool_result_json(&fork);
+        assert_ne!(fork["id"], created["id"]);
+        let service = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Migration, None, false).await.unwrap();
+        let denied = mcp_call(&request, &session, &service.plaintext, 5, "tools/call",
+            json!({"name":"delete_template_library_item","arguments":{"id":id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let deleted = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call",
+            json!({"name":"delete_template_library_item","arguments":{"id":id}})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"], true);
+        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant.api_key)).await;
+        rest.assert_status(StatusCode::NOT_FOUND);
+        let rest = request.get(&format!("/api/template-library/{}",fork["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {}",tenant.api_key)).await;
+        rest.assert_status_ok();
+    }).await;
+}
+
+#[tokio::test]
+async fn tenant_retirement_tools_require_confirmation_and_revoke_the_caller() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let inventory = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"tenant_retirement_inventory","arguments":{}}),
+        )
+        .await;
+        let rest = request
+            .get("/api/tenants/current/retirement")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&inventory), rest.json::<Value>());
+        let wrong = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            3,
+            "tools/call",
+            json!({"name":"disable_tenant","arguments":{"confirmed_tenant_id":Uuid::now_v7()}}),
+        )
+        .await;
+        assert_eq!(wrong["result"]["isError"], true);
+        let disabled = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            4,
+            "tools/call",
+            json!({"name":"disable_tenant","arguments":{"confirmed_tenant_id":tenant.tenant_id}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&disabled)["disabled"], true);
+        let revoked = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        revoked.assert_status(StatusCode::UNAUTHORIZED);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn tenant_invitation_tools_rotate_tokens_and_match_rest_inventory() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let email = super::fixtures::unique_email("mcp-invite");
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        let created = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+            json!({"name":"create_invite","arguments":{"email":email,"role":"member","expires_at":expires_at}})).await;
+        let created = tool_result_json(&created);
+        let id = created["id"].as_str().unwrap();
+        assert_eq!(created["email"], email);
+        assert!(!created["token"].as_str().unwrap().is_empty());
+        let listed = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+            json!({"name":"list_invites","arguments":{}})).await;
+        let rest = request.get("/api/members/invites").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
+        assert!(!listed.to_string().contains(created["token"].as_str().unwrap()));
+        let reissued = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call",
+            json!({"name":"reissue_invite","arguments":{"invite_id":id,"expires_at":expires_at}})).await;
+        let reissued = tool_result_json(&reissued);
+        assert_ne!(created["token"], reissued["token"]);
+        let old = request.post("/auth/invites/accept").json(&json!({"invite_token":created["token"],"email":email,"password":"test-password"})).await;
+        assert!(!old.status_code().is_success());
+        let revoked = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call",
+            json!({"name":"revoke_invite","arguments":{"invite_id":id}})).await;
+        assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        let cancelled = request.post("/auth/invites/accept").json(&json!({"invite_token":reissued["token"],"email":email,"password":"test-password"})).await;
+        assert!(!cancelled.status_code().is_success());
+        let service = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Migration, None, false).await.unwrap();
+        for (id, name, arguments) in [
+            (6, "list_invites", json!({})),
+            (7, "create_invite", json!({"email":email,"role":"owner","expires_at":expires_at})),
+            (8, "reissue_invite", json!({"invite_id":created["id"],"expires_at":expires_at})),
+            (9, "revoke_invite", json!({"invite_id":created["id"]})),
+        ] {
+            let denied = mcp_call(&request, &session, &service.plaintext, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(denied["result"]["isError"], true, "{denied}");
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn tenant_membership_management_matches_rest_and_protects_owners() {
+    use sea_orm::EntityTrait;
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{tenant_memberships, user_users};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("mcp-managed"), "test-password", None).await.unwrap();
+        let session = initialize(&request).await;
+        let set = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+            json!({"name":"set_member_role","arguments":{"user_id":user.id,"role":"viewer"}})).await;
+        assert_eq!(tool_result_json(&set)["role"], "viewer");
+        let listed = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+            json!({"name":"list_members","arguments":{}})).await;
+        let rest = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status_ok();
+        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
+        let preview = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call",
+            json!({"name":"preview_member_role_change","arguments":{"user_id":user.id,"role":"member"}})).await;
+        assert_eq!(tool_result_json(&preview)["requested_role"], "member");
+
+        super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Viewer).await;
+        let viewer_key = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        for (id, name, args) in [
+            (5, "list_members", json!({})),
+            (6, "remove_member", json!({"user_id":tenant.owner_id})),
+            (7, "transfer_ownership", json!({"successor_user_id":user.id})),
+            (8, "set_member_role", json!({"user_id":user.id,"role":"owner"})),
+        ] {
+            let denied = mcp_call(&request, &session, &viewer_key, id, "tools/call", json!({"name":name,"arguments":args})).await;
+            assert_eq!(denied["result"]["isError"], true, "{denied}");
+        }
+        let preview = mcp_call(&request, &session, &tenant.api_key, 9, "tools/call",
+            json!({"name":"preview_member_removal","arguments":{"user_id":tenant.owner_id}})).await;
+        assert_eq!(tool_result_json(&preview)["blocked_by_last_owner"], true);
+        let protected = mcp_call(&request, &session, &tenant.api_key, 10, "tools/call",
+            json!({"name":"remove_member","arguments":{"user_id":tenant.owner_id}})).await;
+        assert_eq!(protected["result"]["isError"], true);
+        let removed = mcp_call(&request, &session, &tenant.api_key, 11, "tools/call",
+            json!({"name":"remove_member","arguments":{"user_id":user.id}})).await;
+        assert_eq!(tool_result_json(&removed)["removed"], true);
+        assert!(user_users::Entity::find_by_id(user.id).one(&ctx.db).await.unwrap().is_some());
+        let revoked = request.get("/api/whoami").add_header("Authorization", format!("Bearer {viewer_key}")).await;
+        revoked.assert_status(StatusCode::UNAUTHORIZED);
+        let members = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.json::<Value>();
+        assert!(!members.as_array().unwrap().iter().any(|member| member["user_id"] == user.id.to_string()));
+        // Re-add the existing identity before exercising the atomic ownership transition.
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Member).await.unwrap();
+        let transferred = mcp_call(&request, &session, &tenant.api_key, 12, "tools/call",
+            json!({"name":"transfer_ownership","arguments":{"successor_user_id":user.id}})).await;
+        assert_eq!(tool_result_json(&transferred)["transferred"], true);
+    }).await;
+}
+
+#[tokio::test]
+async fn expired_keys_are_rejected_over_rest_and_an_existing_mcp_session() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let before = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        assert_eq!(before["result"]["isError"], false);
+        let keys = request
+            .get("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .json::<Value>();
+        let prefix = tenant.api_key.split('_').nth(1).unwrap();
+        let id = keys["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|key| {
+                key["prefix"]
+                    .as_str()
+                    .is_some_and(|value| value.ends_with(prefix))
+            })
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        yorishiro::models::api_keys::ActiveModel {
+            id: Set(id),
+            expires_at: Set(Some(
+                (Utc::now() - chrono::Duration::seconds(1)).fixed_offset(),
+            )),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let after = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            3,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        assert!(
+            after["error"].is_object() || after["result"]["isError"] == true,
+            "{after}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issued_read_key_reads_but_rejects_valid_mutations_over_both_transports() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"template_id":"task-management"})).await.assert_status(StatusCode::CREATED);
+        let created = request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"name":"read-transport-contract","scope":"read"})).await;
+        assert_eq!(created.status_code(), StatusCode::CREATED);
+        let key = created.json::<Value>()["full_key"].as_str().unwrap().to_owned();
+        request.get("/api/entities").add_query_param("schema_name", "task-management")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await.assert_status(StatusCode::OK);
+        let session = initialize(&request).await;
+        let read = mcp_call(&request, &session, &key, 2, "tools/call",
+            json!({"name":"list_entities","arguments":{"schema_name":"task-management"}})).await;
+        assert_ne!(read["result"]["isError"], true, "{read}");
+        let template = mcp_call(&request, &session, &key, 20, "tools/call",
+            json!({"name":"get_template","arguments":{"template_id":"general-notes"}})).await;
+        assert_ne!(template["result"]["isError"], true, "{template}");
+        let rest = request.get("/api/templates/general-notes")
+            .add_header("Authorization", format!("Bearer {key}")) .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(tool_result_json(&template), rest.json::<Value>());
+        let missing = mcp_call(&request, &session, &key, 21, "tools/call",
+            json!({"name":"get_template","arguments":{"template_id":"missing"}})).await;
+        assert_eq!(missing["result"]["isError"], true, "{missing}");
+        let entity = json!({"schema_name":"task-management","entity_type":"task","data":{"title":"denied task"}});
+        let schema = json!({"template_id":"general-notes"});
+        let migration = json!({"schema_name":"task-management"});
+        for (path, body) in [("/api/entities", &entity), ("/api/schemas", &schema), ("/api/migration-jobs/fill-defaults", &migration)] {
+            request.post(path).add_header("Authorization", format!("Bearer {key}"))
+                .json(body).await.assert_status(StatusCode::FORBIDDEN);
+        }
+        for (id, name, arguments, scope) in [
+            (3, "create_entity", entity, "write"),
+            (4, "create_schema", schema, "schema"),
+            (5, "fill_defaults", migration, "migration"),
+        ] {
+            let denied = mcp_call(&request, &session, &key, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(denied["result"]["isError"], true, "{denied}");
+            assert_eq!(denied["result"]["structuredContent"]["error"]["required_scope"], scope, "{denied}");
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn mcp_whoami_matches_rest_identity_without_secrets() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            tenant.owner_id,
+            ApiKeyScope::Read,
+            true,
+        )
+        .await;
+        let session = initialize(&request).await;
+        let rest = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(rest.status_code(), StatusCode::OK);
+        let result = mcp_call(
+            &request,
+            &session,
+            &key,
+            2,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        let identity = tool_result_json(&result);
+        assert_eq!(identity, rest.json::<Value>());
+        assert_eq!(identity["scope"], "read");
+        assert_eq!(identity["audit"], true);
+        assert_eq!(identity["identity_kind"], "user");
+        assert_eq!(identity["workspace_access"]["source"], "tenant_role");
+        assert_eq!(identity["workspace_access"]["workspace_admin"], true);
+        assert_eq!(identity["stored_scope"], "read");
+        assert_eq!(identity["bound_workspace_id"], tenant.workspace_id.to_string());
+        assert!(!identity["workspace_name"].as_str().unwrap().is_empty());
+        assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
+        assert!(!result.to_string().contains(&key));
+        assert!(!result.to_string().contains("key_hash"));
+        let grants = mcp_call(
+            &request,
+            &session,
+            &key,
+            3,
+            "tools/call",
+            json!({"name":"capabilities","arguments":{}}),
+        )
+        .await;
+        let grants = tool_result_json(&grants);
+        assert_eq!(grants["scopes"], json!(["read"]));
+        assert_eq!(grants["audit"], true);
+        assert_eq!(grants["tenant_admin"], true);
+        let postgres = ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres;
+        assert_eq!(grants["constraints"]["database_backend"], if postgres { "postgres" } else { "sqlite" });
+        assert_eq!(grants["constraints"]["row_level_security"], postgres);
+        assert_eq!(grants["constraints"]["workspace_key_retargeting"], false);
+        assert_eq!(grants["constraints"]["tenant_key_target_header"], "X-Workspace-Id");
+        assert_eq!(grants["constraints"]["discovery_authorizes_requests"], false);
+        let inventory = mcp_call(&request, &session, &key, 4, "tools/list", json!({})).await;
+        let tools = grants["tools"].as_array().expect("tool capabilities");
+        let inventory = tool_inventory(&inventory);
+        assert_eq!(tools.len(), inventory.len());
+        for tool in &inventory {
+            let capability = tools.iter().find(|entry| entry["name"] == tool["name"])
+                .expect("every visible tool has a capability");
+            assert_eq!(capability["required_scope"], tool["_meta"]["yorishiro/required_scope"]);
+            assert_eq!(capability["scope_satisfied"], capability["required_scope"] == "read");
+        }
+        let denied = mcp_call(&request, &session, &key, 5, "tools/call",
+            json!({"name":"create_entity","arguments":{"schema_name":"missing","entity_type":"missing","data":{}}})).await;
+        let create = tools.iter().find(|entry| entry["name"] == "create_entity").unwrap();
+        assert_eq!(create["required_scope"], denied["result"]["structuredContent"]["error"]["required_scope"]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::workspace_memberships::WorkspaceRole;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let sibling = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"name":format!("private-{}", uuid::Uuid::new_v4())}))
+            .await;
+        assert_eq!(sibling.status_code(), StatusCode::CREATED);
+        let sibling_id = sibling.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let txn = ctx.db.begin().await.unwrap();
+        let user = yorishiro::models::tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("viewer-discovery"),
+            "hunter2-hunter2",
+            None,
+            MembershipRole::Viewer,
+        )
+        .await
+        .unwrap();
+        yorishiro::models::workspace_memberships::Model::grant(
+            &txn,
+            tenant.workspace_id,
+            user.id,
+            WorkspaceRole::Viewer,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let key = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        let session = initialize(&request).await;
+        let discovered = mcp_call(
+            &request,
+            &session,
+            &key,
+            2,
+            "tools/call",
+            json!({"name":"discover_workspaces","arguments":{}}),
+        )
+        .await;
+        assert_ne!(discovered["result"]["isError"], true, "{discovered}");
+        let candidates = tool_result_json(&discovered);
+        assert_eq!(candidates.as_array().unwrap().len(), 1);
+        assert_eq!(
+            candidates[0]["workspace_id"],
+            tenant.workspace_id.to_string()
+        );
+        let listed = request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(listed.status_code(), StatusCode::OK);
+        let listed = listed.json::<Value>();
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed[0]["id"], candidates[0]["workspace_id"]);
+        request
+            .get(&format!("/api/workspaces/{sibling_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        let login = request
+            .post("/auth/login")
+            .json(&json!({"email":user.email,"password":"hunter2-hunter2"}))
+            .await;
+        assert_eq!(login.status_code(), StatusCode::OK, "{}", login.text());
+        assert_eq!(
+            login.json::<Value>()["workspace_id"],
+            candidates[0]["workspace_id"]
+        );
+        let identity = mcp_call(
+            &request,
+            &session,
+            &key,
+            3,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        let rest = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        assert_eq!(rest.status_code(), StatusCode::OK);
+        let identity = tool_result_json(&identity);
+        assert_eq!(identity, rest.json::<Value>());
+        assert_eq!(
+            identity["workspace_access"]["source"],
+            "workspace_membership"
+        );
+        assert_eq!(identity["workspace_access"]["workspace_admin"], false);
+        assert!(!candidates.to_string().contains(&sibling_id));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let response = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":"discover_workspaces","arguments":{}}),
+        )
+        .await;
+        let workspaces = tool_result_json(&response);
+        let candidates = workspaces.as_array().unwrap();
+        assert!(
+            candidates
+                .iter()
+                .any(|workspace| workspace["workspace_id"] == tenant.workspace_id.to_string())
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|workspace| workspace["tenant_id"] == tenant.tenant_id.to_string())
+        );
+        let service = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let response = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            3,
+            "tools/call",
+            json!({"name":"discover_workspaces","arguments":{}}),
+        )
+        .await;
+        let workspaces = tool_result_json(&response);
+        assert_eq!(workspaces.as_array().unwrap().len(), 1);
+        assert_eq!(
+            workspaces[0]["workspace_id"],
+            tenant.workspace_id.to_string()
+        );
+        assert!(!response.to_string().contains(&service.plaintext));
+        let grants = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            4,
+            "tools/call",
+            json!({"name":"capabilities","arguments":{}}),
+        )
+        .await;
+        let grants = tool_result_json(&grants);
+        assert_eq!(grants["scopes"], json!(["read"]));
+        assert_eq!(grants["audit"], false);
+        assert_eq!(grants["tenant_admin"], false);
+        let rest = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", service.plaintext))
+            .await;
+        assert_eq!(rest.status_code(), StatusCode::OK);
+        let result = mcp_call(
+            &request,
+            &session,
+            &service.plaintext,
+            5,
+            "tools/call",
+            json!({"name":"whoami","arguments":{}}),
+        )
+        .await;
+        let identity = tool_result_json(&result);
+        assert_eq!(identity, rest.json::<Value>());
+        assert_eq!(identity["identity_kind"], "service");
+        assert_eq!(identity["workspace_access"]["source"], "service_key");
+        assert_eq!(identity["workspace_access"]["workspace_admin"], false);
+        assert!(identity["user_id"].is_null());
+        assert_eq!(identity["stored_scope"], "read");
+        assert_eq!(identity["scope"], "read");
+        assert_eq!(
+            identity["bound_workspace_id"],
+            tenant.workspace_id.to_string()
+        );
+        assert!(!result.to_string().contains(&service.plaintext));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mcp_identity_distinguishes_stored_and_membership_capped_scope() {
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::tenant_memberships::{self, MembershipRole};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&json!({"template_id":"general-notes"})).await.assert_status(StatusCode::CREATED);
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("identity-member"),
+            "hunter2-hunter2",
+            None,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            member.id,
+            ApiKeyScope::Migration,
+            false,
+        )
+        .await;
+        let session = initialize(&request).await;
+        for (id, role, expected) in [
+            (2, MembershipRole::Viewer, "read"),
+            (4, MembershipRole::Admin, "migration"),
+        ] {
+            super::fixtures::grant_workspace(
+                &ctx,
+                tenant.workspace_id,
+                member.id,
+                yorishiro::models::workspace_memberships::WorkspaceRole::Admin,
+            )
+            .await;
+            tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id, role)
+                .await
+                .unwrap();
+            let rest = request
+                .get("/api/whoami")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await;
+            assert_eq!(rest.status_code(), StatusCode::OK);
+            let result = mcp_call(
+                &request,
+                &session,
+                &key,
+                id,
+                "tools/call",
+                json!({"name":"whoami","arguments":{}}),
+            )
+            .await;
+            let identity = tool_result_json(&result);
+            assert_eq!(identity, rest.json::<Value>());
+            assert_eq!(identity["stored_scope"], "migration");
+            assert_eq!(identity["scope"], expected);
+            assert_eq!(identity["identity_kind"], "user");
+            if role == MembershipRole::Viewer {
+                let definition = json!({
+                    "name":"demoted-key-must-not-create",
+                    "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}
+                });
+                request.post("/api/schemas")
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .json(&definition).await.assert_status(StatusCode::FORBIDDEN);
+                let denied = mcp_call(&request, &session, &key, 20, "tools/call",
+                    json!({"name":"create_schema","arguments":{"definition":definition}})).await;
+                assert_eq!(denied["result"]["isError"], true, "{denied}");
+                assert_eq!(denied["result"]["structuredContent"]["error"]["required_scope"], "schema");
+                let entity = json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"denied"}});
+                request.post("/api/entities")
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .json(&entity).await.assert_status(StatusCode::FORBIDDEN);
+                let denied = mcp_call(&request, &session, &key, 21, "tools/call",
+                    json!({"name":"create_entity","arguments":entity})).await;
+                assert_eq!(denied["result"]["isError"], true, "{denied}");
+                assert_eq!(denied["result"]["structuredContent"]["error"]["required_scope"], "write");
+            }
+            assert_eq!(
+                identity["bound_workspace_id"],
+                tenant.workspace_id.to_string()
+            );
+            assert!(!result.to_string().contains(&key));
+            let grants = mcp_call(
+                &request,
+                &session,
+                &key,
+                id + 1,
+                "tools/call",
+                json!({"name":"capabilities","arguments":{}}),
+            )
+            .await;
+            let grants = tool_result_json(&grants);
+            assert_eq!(grants["tenant_admin"], role == MembershipRole::Admin);
+            assert_eq!(grants["workspace_access"], identity["workspace_access"]);
+            assert_eq!(
+                identity["workspace_access"]["source"],
+                if role == MembershipRole::Admin {
+                    "tenant_role"
+                } else {
+                    "workspace_membership"
+                }
+            );
+            assert_eq!(identity["workspace_access"]["workspace_admin"], true);
+            assert_eq!(
+                grants["scopes"].as_array().unwrap().len(),
+                if role == MembershipRole::Admin { 4 } else { 1 }
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn mcp_authentication_database_failure_is_redacted() {
     if !crate::require_sqlite_backend() {
         return;
@@ -137,6 +1567,52 @@ async fn mcp_authentication_database_failure_is_redacted() {
     .await;
 }
 
+#[tokio::test]
+async fn mcp_authenticator_permission_denials_are_structured_not_internal_errors() {
+    use std::sync::Arc;
+    use yorishiro::controllers::middleware::auth::Authenticator;
+
+    struct PermissionDenied;
+    #[loco_rs::prelude::async_trait]
+    impl Authenticator for PermissionDenied {
+        async fn authenticate(
+            &self,
+            _app: &loco_rs::app::AppContext,
+            _key: &str,
+            _headers: &[(String, String)],
+        ) -> Result<yorishiro::models::api_keys::AuthContext, yorishiro::YorishiroError> {
+            Err(yorishiro::YorishiroError::ScopeInsufficient {
+                message: "workspace access denied".into(),
+                hint: "request a workspace grant".into(),
+            })
+        }
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let session = initialize(&request).await;
+        ctx.shared_store
+            .insert(Arc::new(PermissionDenied) as Arc<dyn Authenticator>);
+        for (id, name) in [(2, "list_entities"), (3, "whoami")] {
+            let result = mcp_call(
+                &request,
+                &session,
+                "denied-key",
+                id,
+                "tools/call",
+                json!({"name":name,"arguments":{}}),
+            )
+            .await;
+            assert_eq!(result["result"]["isError"], true, "{result}");
+            let error = &result["result"]["structuredContent"]["error"];
+            assert_eq!(error["code"], "scope_insufficient");
+            assert_eq!(error["message"], "workspace access denied");
+            assert_eq!(error["hint"], "request a workspace grant");
+            assert!(error.get("required_scope").is_none());
+            assert!(error.get("effective_scope").is_none());
+        }
+    })
+    .await;
+}
+
 /// Transport compatibility regressions from the MCP HTTP issues.
 #[tokio::test]
 async fn mcp_transport_rejects_unconfigured_host_by_default() {
@@ -156,8 +1632,11 @@ async fn mcp_transport_rejects_unconfigured_host_by_default() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn mcp_transport_requires_protocol_accept_headers() {
-    let guard = EnvGuard::capture(&["YORISHIRO_MCP_ALLOWED_HOSTS"]);
-    guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "mcp.remote.test");
+    let guard = EnvGuard::capture(&[crate::env::TestEnv::McpAllowedHosts.name()]);
+    guard.set(
+        crate::env::TestEnv::McpAllowedHosts.name(),
+        "mcp.remote.test",
+    );
     boot_request::<App, _, _>(|request, _ctx| async move {
         let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
         for accept in [None, Some("*/*"), Some("application/json")] {
@@ -174,9 +1653,9 @@ async fn mcp_transport_requires_protocol_accept_headers() {
 }
 
 /// A server instance is retained by rmcp for the whole session.
-/// Losing the boot-installed licence state must fail closed even in an existing session.
+/// Origin operations remain ungated, like their REST counterparts, in an existing session.
 #[tokio::test]
-async fn mcp_origin_tools_disappear_when_same_session_licence_state_is_missing() {
+async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_missing() {
     boot_request::<App, _, _>(|request, ctx| async move {
         assert!(
             ctx.shared_store
@@ -217,19 +1696,40 @@ async fn mcp_origin_tools_disappear_when_same_session_licence_state_is_missing()
         );
         let community = mcp_call(&request, &session, &key, 3, "tools/list", json!({})).await;
         let community_tools = tool_inventory(&community);
+        let grants = mcp_call(
+            &request,
+            &session,
+            &key,
+            4,
+            "tools/call",
+            json!({"name":"capabilities","arguments":{}}),
+        )
+        .await;
+        let grants = tool_result_json(&grants);
+        let capabilities = grants["tools"]
+            .as_array()
+            .expect("visible tool capabilities");
+        assert_eq!(capabilities.len(), community_tools.len());
         for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
-            assert!(!community_tools.iter().any(|tool| tool["name"] == name));
-            let denied = mcp_call(
-                &request,
-                &session,
-                &key,
-                10,
-                "tools/call",
-                json!({ "name": name, "arguments": {} }),
-            )
-            .await;
-            assert!(denied.get("error").is_some(), "tool executed: {denied}");
+            assert!(community_tools.iter().any(|tool| tool["name"] == name));
+            assert!(capabilities.iter().any(|tool| tool["name"] == name));
         }
+        let rest = request
+            .get("/api/schemas/upstream-changes")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        let result = mcp_call(
+            &request,
+            &session,
+            &key,
+            10,
+            "tools/call",
+            json!({"name":"list_upstream_changes","arguments":{}}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert_eq!(tool_result_json(&result), rest.json::<Value>());
     })
     .await;
 }
@@ -364,6 +1864,14 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
         .await;
         assert_eq!(denied["result"]["isError"], true, "MCP call: {denied}");
         assert_eq!(
+            denied["result"]["structuredContent"]["error"]["code"],
+            "scope_insufficient"
+        );
+        assert_eq!(
+            denied["result"]["structuredContent"]["error"]["effective_scope"],
+            "read"
+        );
+        assert_eq!(
             schema_schemas::get_active_schema(&ctx.db, workspace_id, "library-note")
                 .await
                 .expect("active schema after denial")
@@ -404,6 +1912,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// and cannot change the entity.
 #[tokio::test]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
+    use sea_orm::EntityTrait;
     super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
             tenant_id,
@@ -479,6 +1988,10 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         )
         .await;
         assert_eq!(denied["result"]["isError"], true);
+        assert_eq!(
+            denied["result"]["structuredContent"]["error"]["required_scope"],
+            "migration"
+        );
         assert!(
             denied["result"]["content"][0]["text"]
                 .as_str()
@@ -530,21 +2043,67 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         assert_eq!(updated.schema_version, 1);
         let job_id: Uuid = report["job_id"].as_str().unwrap().parse().unwrap();
 
-        let undo = request
-            .post(&format!("/api/migration-jobs/{job_id}/undo"))
+        for (index, name) in ["migration_job_status", "undo_migration_job"]
+            .iter()
+            .enumerate()
+        {
+            let denied = mcp_call(
+                &request,
+                &session,
+                &read_key,
+                10 + index as i64,
+                "tools/call",
+                json!({"name":name,"arguments":{"job_id":job_id}}),
+            )
+            .await;
+            assert_eq!(denied["result"]["isError"], true);
+            assert_eq!(
+                denied["result"]["structuredContent"]["error"]["required_scope"],
+                "migration"
+            );
+        }
+        let status = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            12,
+            "tools/call",
+            json!({"name":"migration_job_status","arguments":{"job_id":job_id}}),
+        )
+        .await;
+        assert_eq!(status["result"]["isError"], false);
+        let status: Value =
+            serde_json::from_str(status["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let rest = request
+            .get(&format!("/api/migration-jobs/{job_id}"))
             .add_header("Authorization", format!("Bearer {migration_key}"))
             .await;
-        assert_eq!(
-            undo.status_code(),
-            StatusCode::ACCEPTED,
-            "response: {}",
-            undo.text()
-        );
-        let undo_id = undo.json::<Value>()["job_id"]
-            .as_str()
-            .unwrap()
-            .parse()
-            .unwrap();
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(status, rest.json::<Value>());
+        let missing = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            13,
+            "tools/call",
+            json!({"name":"migration_job_status","arguments":{"job_id":Uuid::new_v4()}}),
+        )
+        .await;
+        assert_eq!(missing["result"]["isError"], true);
+        let undo = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            14,
+            "tools/call",
+            json!({"name":"undo_migration_job","arguments":{"job_id":job_id}}),
+        )
+        .await;
+        assert_eq!(undo["result"]["isError"], false, "{undo}");
+        let undo: Value =
+            serde_json::from_str(undo["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(undo["snapshot_job_id"], job_id.to_string());
+        let undo_id = undo["job_id"].as_str().unwrap().parse().unwrap();
         super::fill_defaults::finish_via_api(
             &request,
             &ctx,
@@ -559,6 +2118,59 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         assert_eq!(restored.data, json!({ "title": "before" }));
         assert_eq!(restored.schema_version, 1);
 
+        let denied = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            15,
+            "tools/call",
+            json!({"name":"reindex_workspace","arguments":{}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
+        assert_eq!(
+            denied["result"]["structuredContent"]["error"]["required_scope"],
+            "migration"
+        );
+        let reindex = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            16,
+            "tools/call",
+            json!({"name":"reindex_workspace","arguments":{}}),
+        )
+        .await;
+        assert_eq!(reindex["result"]["isError"], false, "{reindex}");
+        let reindex = tool_result_json(&reindex);
+        let reindex_id: Uuid = reindex["job_id"].as_str().unwrap().parse().unwrap();
+        let outbox =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(reindex_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("committed reindex dispatch");
+        assert_eq!(outbox.workspace_id, Some(workspace_id));
+        let status = mcp_call(
+            &request,
+            &session,
+            &migration_key,
+            17,
+            "tools/call",
+            json!({"name":"migration_job_status","arguments":{"job_id":reindex_id}}),
+        )
+        .await;
+        assert_eq!(status["result"]["isError"], false, "{status}");
+        let status = tool_result_json(&status);
+        assert_eq!(status["job_name"], "reindex");
+        let rest = request
+            .get(&format!("/api/migration-jobs/{reindex_id}"))
+            .add_header("Authorization", format!("Bearer {migration_key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(rest.json::<Value>()["job_name"], status["job_name"]);
+        assert_eq!(rest.json::<Value>()["job_id"], status["job_id"]);
+
         let audit = request
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {audit_key}"))
@@ -570,6 +2182,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             audit.text()
         );
         let entries: Vec<Value> = audit.json();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry["action"] == "reindex_embeddings")
+        );
         let fill_entry = entries
             .iter()
             .find(|entry| entry["action"] == "fill_defaults")

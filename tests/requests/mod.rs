@@ -53,8 +53,8 @@ pub(crate) async fn with_max_tenants<T>(
     value: &str,
     fut: impl std::future::Future<Output = T>,
 ) -> T {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
-    guard.set("YORISHIRO_MAX_TENANTS", value);
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::MaxTenants.name()]);
+    guard.set(crate::env::TestEnv::MaxTenants.name(), value);
     fut.await
 }
 
@@ -146,7 +146,7 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
 /// Used by `boot_request` to dispatch to the correct boot path so the same
 /// test code runs against either backend.
 fn is_sqlite_backend() -> bool {
-    let url = std::env::var("DATABASE_URL").unwrap_or_default();
+    let url = crate::env::TestEnv::DatabaseUrl.read().unwrap_or_default();
     url.starts_with("sqlite:")
 }
 
@@ -275,7 +275,7 @@ where
 }
 
 fn record_request_timing(name: &str, scope: &str, phases: &[(&str, std::time::Duration)]) {
-    let Some(directory) = std::env::var_os("YORISHIRO_REQUEST_TIMING_DIR") else {
+    let Some(directory) = crate::env::TestEnv::RequestTimingDir.read_os() else {
         return;
     };
     let rows = phases
@@ -341,7 +341,9 @@ async fn migrate_shared_database() {
     static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
     MIGRATED
         .get_or_init(|| async {
-            let url = std::env::var("DATABASE_URL").expect("DATABASE_URL for the shared database");
+            let url = crate::env::TestEnv::DatabaseUrl
+                .read()
+                .expect("DATABASE_URL for the shared database");
             let db = sea_orm::Database::connect(&url)
                 .await
                 .expect("connect shared test database");
@@ -379,8 +381,8 @@ pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_TIMEZONE"]);
-    guard.set("YORISHIRO_TIMEZONE", timezone);
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::Timezone.name()]);
+    guard.set(crate::env::TestEnv::Timezone.name(), timezone);
     boot_request_isolated::<H, _, _>(callback).await;
 }
 
@@ -418,7 +420,8 @@ async fn serve<H: Hooks>(
 ) -> (TestServer, loco_rs::app::AppContext) {
     if let Some(loco_rs::config::QueueConfig::Redis(queue)) = config.queue.as_mut() {
         static NEXT_DATABASE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let service = std::env::var("YORISHIRO_TEST_REDIS_BASE_URL")
+        let service = crate::env::TestEnv::RedisBaseUrl
+            .read()
             .expect("Redis app fixtures require the matrix service URL");
         let database = NEXT_DATABASE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         assert!(database < 65536, "matrix Redis logical databases exhausted");
@@ -454,3 +457,5 @@ pub(crate) async fn workspace_txn(
         .await
         .expect("begin workspace transaction")
 }
+
+pub mod tenants;

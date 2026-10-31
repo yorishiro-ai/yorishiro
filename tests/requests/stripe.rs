@@ -27,13 +27,16 @@ fn require_licence(ctx: &loco_rs::app::AppContext) {
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_STRIPE_WEBHOOK_SECRET",
-        "YORISHIRO_STRIPE_PRICE_PRO",
-        "YORISHIRO_STRIPE_PRICE_TEAM",
+        crate::env::TestEnv::StripeWebhookSecret.name(),
+        crate::env::TestEnv::StripePricePro.name(),
+        crate::env::TestEnv::StripePriceTeam.name(),
     ]);
-    guard.set("YORISHIRO_STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET);
-    guard.set("YORISHIRO_STRIPE_PRICE_PRO", "price_pro");
-    guard.set("YORISHIRO_STRIPE_PRICE_TEAM", "price_team");
+    guard.set(
+        crate::env::TestEnv::StripeWebhookSecret.name(),
+        WEBHOOK_SECRET,
+    );
+    guard.set(crate::env::TestEnv::StripePricePro.name(), "price_pro");
+    guard.set(crate::env::TestEnv::StripePriceTeam.name(), "price_team");
     fut.await
 }
 fn sign(secret: &str, timestamp: i64, payload: &[u8]) -> String {
@@ -93,20 +96,20 @@ async fn a_duplicate_event_id_is_not_reapplied() {
         boot_request::<App, _, _>(|request, ctx| async move {
             require_licence(&ctx);
             let changed = crate::EnvGuard::capture(&[
-                "YORISHIRO_STRIPE_WEBHOOK_SECRET",
-                "YORISHIRO_STRIPE_PRICE_PRO",
-                "YORISHIRO_STRIPE_PRICE_TEAM",
+                crate::env::TestEnv::StripeWebhookSecret.name(),
+                crate::env::TestEnv::StripePricePro.name(),
+                crate::env::TestEnv::StripePriceTeam.name(),
             ]);
             changed.set(
-                "YORISHIRO_STRIPE_WEBHOOK_SECRET",
+                crate::env::TestEnv::StripeWebhookSecret.name(),
                 "changed-after-config-load",
             );
             changed.set(
-                "YORISHIRO_STRIPE_PRICE_PRO",
+                crate::env::TestEnv::StripePricePro.name(),
                 "changed-price-after-config-load",
             );
             changed.set(
-                "YORISHIRO_STRIPE_PRICE_TEAM",
+                crate::env::TestEnv::StripePriceTeam.name(),
                 "changed-team-after-config-load",
             );
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
@@ -169,12 +172,12 @@ async fn a_duplicate_event_id_is_not_reapplied() {
     .await;
 }
 
-/// Cancelling a subscription must put the tenant back on Free: both the plan and the workspace cap that comes with it.
+/// Cancelling a subscription changes billing without overwriting operational caps.
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_cancellation_returns_the_tenant_to_free() {
-    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    policy.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
+    let policy = crate::EnvGuard::capture(&[crate::env::TestEnv::PlanPolicyEnabled.name()]);
+    policy.set(crate::env::TestEnv::PlanPolicyEnabled.name(), "true");
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             require_licence(&ctx);
@@ -184,6 +187,14 @@ async fn a_cancellation_returns_the_tenant_to_free() {
             tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
                 .await
                 .unwrap();
+            tenant_tenants::ActiveModel {
+                id: ActiveValue::Set(tenant_id),
+                max_workspaces: ActiveValue::Set(Some(17)),
+                ..Default::default()
+            }
+            .update(&ctx.db)
+            .await
+            .unwrap();
 
             // Land on Pro first, so the downgrade has somewhere to fall from.
             let up_body = subscription_updated_body("evt_up", 1_000, "cus_cancel");
@@ -227,8 +238,8 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 .unwrap();
             assert_eq!(
                 tenant.max_workspaces,
-                Some(1),
-                "a cancelled tenant must drop to Free's workspace cap, not keep the paid one"
+                Some(17),
+                "billing changes must not persist plan quotas over operational caps"
             );
         })
         .await;
@@ -239,8 +250,8 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
-    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    policy.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    let policy = crate::EnvGuard::capture(&[crate::env::TestEnv::PlanPolicyEnabled.name()]);
+    policy.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             require_licence(&ctx);

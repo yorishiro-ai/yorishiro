@@ -78,7 +78,7 @@ queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL", default="redis://localhost:6379") %>
   dangerously_flush: false
-  num_workers: 2
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper:
     age_minutes: 10
     interval_seconds: 60
@@ -97,7 +97,7 @@ queue:
   uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro_queue.sqlite3?mode=rwc") %>
 
   dangerously_flush: false
-  num_workers: 1
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="1") %>
   reaper:
     age_minutes: 10
     interval_seconds: 60
@@ -117,7 +117,7 @@ queue:
   dangerously_flush: false
 
   # Workers dequeuing in parallel. Postgres claims rows with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism here, unlike on SQLite where `BEGIN IMMEDIATE` serializes every dequeue regardless of this number.
-  num_workers: 2
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
 
   # Requeues jobs left in `processing` by a worker that died before completing or failing them.
   # Off by default in Loco, which leaves such a job stuck forever: nothing else moves it, since `fail_job` only runs when `perform` actually returns an error.

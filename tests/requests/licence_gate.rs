@@ -85,8 +85,8 @@ const UNGATED: &[&str] = &[
 #[tokio::test]
 #[serial(process_environment)]
 async fn gated_routes_are_absent_without_a_licence() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     boot_request::<App, _, _>(|request, _ctx| async move {
         // Boot the real verifier without a key, even when licensed cases have one available.
         for path in GATED {

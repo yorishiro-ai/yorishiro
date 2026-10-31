@@ -42,6 +42,7 @@ pub(crate) struct MergeApplyArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_origin)]
 impl YorishiroMcpServer {
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "List schemas in this workspace whose origin template has changed since \
                        the schema was last copied (requires read scope). Use this to discover \
                        which schemas have pending upstream updates that have not yet been \
@@ -52,7 +53,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+        let authorized = match authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("list_upstream_changes")?,
+        )
+        .await?
+        {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
@@ -73,6 +80,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Preview what merging the origin template would do to a schema (requires \
                        read scope). Returns a list of fields that would be added, updated, \
                        kept, or conflicted. Does not write anything."
@@ -82,7 +90,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergePreviewArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
+        let authorized = match authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("merge_preview")?,
+        )
+        .await?
+        {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
@@ -105,6 +119,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
         description = "Merge the origin template into a schema, writing the merged definition \
                        as the schema's next version (requires schema scope). Returns the new \
                        schema version and a diff describing whether the merge was breaking. \
@@ -115,7 +130,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergeApplyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(self.app_context(), &parts, ApiKeyScope::Schema).await? {
+        let authorized = match authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("merge_apply")?,
+        )
+        .await?
+        {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };

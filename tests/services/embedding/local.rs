@@ -1,9 +1,11 @@
 /// Tests for the local embedding provider: mean pooling, config validation, and model loading.
 use std::path::Path;
 
-use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
-use yorishiro::services::embedding::local::{LocalEmbeddingConfig, LocalEmbeddingProvider, mean_pool_normalized};
+use yorishiro::services::embedding::local::{
+    LocalEmbeddingConfig, LocalEmbeddingProvider, mean_pool_normalized,
+};
 use yorishiro::services::embedding::model_fetch;
+use yorishiro::services::embedding::{EmbedKind, EmbeddingProvider};
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
@@ -57,9 +59,11 @@ fn load_reports_missing_files_clearly() {
 /// Model files aren't checked into the repo (models/ is gitignored), so the test skips if they're absent.
 #[tokio::test]
 async fn embeds_texts_with_a_real_e5_model() {
-    let model_path = std::env::var("YORISHIRO_TEST_E5_MODEL")
+    let model_path = crate::env::TestEnv::E5Model
+        .read()
         .unwrap_or_else(|_| "models/multilingual-e5-base/model.safetensors".into());
-    let tokenizer_path = std::env::var("YORISHIRO_TEST_E5_TOKENIZER")
+    let tokenizer_path = crate::env::TestEnv::E5Tokenizer
+        .read()
         .unwrap_or_else(|_| "models/multilingual-e5-base/tokenizer.json".into());
     if !Path::new(&model_path).exists() || !Path::new(&tokenizer_path).exists() {
         eprintln!("skipping embeds_texts_with_a_real_e5_model: model files not found");
@@ -123,9 +127,11 @@ async fn embeds_texts_with_a_real_e5_model() {
 #[tokio::test]
 #[ignore = "requires models/multilingual-e5-base/model.safetensors and its tokenizer"]
 async fn matches_a_real_sentence_transformers_run_of_e5() {
-    let model_path = std::env::var("YORISHIRO_TEST_E5_MODEL")
+    let model_path = crate::env::TestEnv::E5Model
+        .read()
         .unwrap_or_else(|_| "models/multilingual-e5-base/model.safetensors".into());
-    let tokenizer_path = std::env::var("YORISHIRO_TEST_E5_TOKENIZER")
+    let tokenizer_path = crate::env::TestEnv::E5Tokenizer
+        .read()
         .unwrap_or_else(|_| "models/multilingual-e5-base/tokenizer.json".into());
     assert!(
         Path::new(&model_path).exists(),
@@ -147,8 +153,9 @@ async fn matches_a_real_sentence_transformers_run_of_e5() {
         document_vector: Vec<f32>,
     }
 
-    let fixture_bytes = std::fs::read("tests/fixtures/multilingual-e5-base_reference_embeddings.json")
-        .expect("fixture missing: see tests/fixtures/generate_e5_reference/ to generate it");
+    let fixture_bytes =
+        std::fs::read("tests/fixtures/multilingual-e5-base_reference_embeddings.json")
+            .expect("fixture missing: see tests/fixtures/generate_e5_reference/ to generate it");
     let fixture: Fixture =
         serde_json::from_slice(&fixture_bytes).expect("fixture is not valid JSON");
 

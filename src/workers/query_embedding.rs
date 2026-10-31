@@ -122,6 +122,9 @@ async fn embed(
             retry_after: RETRY_AFTER,
         });
     }
+    let tenant_id =
+        crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id).await?;
+    crate::models::tenant_tenants::Model::require_active(&ctx.db, tenant_id).await?;
     let vector = provider.embed_as(EmbedKind::Query, query_text).await?;
     search::check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     Ok((vector, provider.model_name()))

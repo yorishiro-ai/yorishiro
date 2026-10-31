@@ -7,12 +7,16 @@ use crate::models::api_keys::ApiKeyScope;
 
 mod operations;
 
-pub use operations::{add_member, remove_member};
-pub(crate) use operations::{get_membership_role, list_members, update_member_access};
+pub use operations::preview_removal;
+pub use operations::preview_role_change;
+pub use operations::transfer_ownership;
+pub use operations::{add_member, remove_member, remove_member_as, update_member_access};
+pub(crate) use operations::{add_member_in_transaction, get_membership_role, list_members};
 
 db_enum! {
     /// Mirrors the `tenant_memberships.role` check constraint.
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
+    #[schemars(rename_all = "lowercase")]
     pub enum MembershipRole {
         Owner = "owner",
         Admin = "admin",
@@ -50,9 +54,31 @@ pub struct MembershipRecord {
 pub struct MembershipKeyAccess {
     pub api_key_id: Uuid,
     pub stored_scope: ApiKeyScope,
-    pub effective_scope: ApiKeyScope,
+    pub effective_scope: Option<ApiKeyScope>,
     /// Explicit operator grant, independent of the membership's ordered scope cap.
     pub audit: bool,
+}
+
+/// A point-in-time snapshot, not authorization for a later mutation.
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MembershipRemovalPreview {
+    pub user_id: Uuid,
+    pub role: Option<MembershipRole>,
+    pub blocked_by_last_owner: bool,
+    pub revoked_api_key_ids: Vec<Uuid>,
+    pub lost_workspace_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MembershipRolePreview {
+    pub user_id: Uuid,
+    pub current_role: MembershipRole,
+    pub requested_role: MembershipRole,
+    pub blocked_by_last_owner: bool,
+    pub lost_workspace_ids: Vec<Uuid>,
+    pub keys: Vec<MembershipKeyAccess>,
 }
 
 #[loco_rs::prelude::async_trait]

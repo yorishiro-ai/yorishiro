@@ -5,6 +5,171 @@ use serial_test::serial;
 use yorishiro::App;
 use yorishiro::models::tenant_memberships::MembershipRole;
 
+#[tokio::test]
+#[cfg(feature = "enterprise")]
+async fn attributed_key_can_accept_invite_for_passwordless_account() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+    use yorishiro::models::{
+        api_keys, tenant_memberships, tenant_tenants, user_users, workspace_invites,
+    };
+    // A credential in one tenant accepting an invite to another requires multi-tenancy.
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let email = super::fixtures::unique_email("passwordless-invite");
+        let txn = ctx.db.begin().await.unwrap();
+        yorishiro::edition::ee::models::user_users::find_or_create(
+            &txn,
+            "invite-test-provider",
+            &uuid::Uuid::new_v4().to_string(),
+            Some(&email),
+            None,
+            None,
+        )
+        .await
+        .expect("provision a valid OAuth identity");
+        txn.commit().await.unwrap();
+        let user = user_users::Entity::find()
+            .filter(yorishiro::models::_entities::user_users::Column::Email.eq(&email))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(user.password_hash.is_none());
+        assert!(user.oauth_provider.is_some());
+        assert!(user.oauth_subject_id.is_some());
+        tenant_memberships::add_member(&ctx.db, source.tenant_id, user.id, MembershipRole::Viewer)
+            .await
+            .unwrap();
+        super::fixtures::grant_workspace(
+            &ctx,
+            source.workspace_id,
+            user.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Viewer,
+        )
+        .await;
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            source.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Read,
+            Some(user.id),
+            false,
+        )
+        .await
+        .unwrap();
+        let txn = ctx.db.begin().await.unwrap();
+        let target = tenant_tenants::create_tenant(&txn, "invite-target", None)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        let (_, token) = workspace_invites::create_invite(
+            &ctx.db,
+            target.id,
+            &user.email,
+            MembershipRole::Member,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        let body = serde_json::json!({"invite_token":token});
+        let anonymous = request
+            .post("/auth/invites/accept-authenticated")
+            .json(&body)
+            .await;
+        assert_eq!(anonymous.status_code(), StatusCode::UNAUTHORIZED);
+        let wrong = request
+            .post("/auth/invites/accept-authenticated")
+            .add_header("Authorization", format!("Bearer {}", source.api_key))
+            .json(&body)
+            .await;
+        assert_eq!(wrong.status_code(), StatusCode::UNAUTHORIZED);
+        let accepted = request
+            .post("/auth/invites/accept-authenticated")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&body)
+            .await;
+        assert_eq!(
+            accepted.status_code(),
+            StatusCode::OK,
+            "{}",
+            accepted.text()
+        );
+        let replay = request
+            .post("/auth/invites/accept-authenticated")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&body)
+            .await;
+        assert_eq!(replay.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            user_users::Entity::find_by_id(user.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .password_hash
+                .is_none()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn disabled_tenant_invites_cannot_accept_or_register_accounts() {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::{tenant_tenants, user_users, workspace_invites};
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("disabled-invite-existing"), "test-password", None).await.unwrap();
+        let email = super::fixtures::unique_email("disabled-invite-new");
+        let mut invites = Vec::new();
+        for recipient in [&user.email, &email] {
+            invites.push(workspace_invites::create_invite(&ctx.db, tenant.tenant_id, recipient, MembershipRole::Member, chrono::Duration::hours(1)).await.unwrap());
+        }
+        let before = tenant_tenants::retirement::inventory(&ctx.db, tenant.tenant_id).await.unwrap();
+        tenant_tenants::retirement::disable_by_operator(&ctx.db, tenant.tenant_id, tenant.tenant_id).await.unwrap();
+        request.post("/auth/invites/accept")
+            .json(&serde_json::json!({"invite_token":invites[0].1,"email":user.email,"password":"test-password"}))
+            .await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        request.post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":invites[1].1,"password":"test-password"}))
+            .await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        for (invite, _) in invites {
+            assert!(workspace_invites::Entity::find_by_id(invite.id).one(&ctx.db).await.unwrap().unwrap().used_at.is_none());
+        }
+        assert_eq!(user_users::Entity::find().filter(yorishiro::models::_entities::user_users::Column::Email.eq(email)).count(&ctx.db).await.unwrap(), 0);
+        let inventory = tenant_tenants::retirement::inventory(&ctx.db, tenant.tenant_id).await.unwrap();
+        assert_eq!(inventory.memberships, before.memberships);
+    }).await;
+}
+
+#[tokio::test]
+async fn existing_account_invite_acceptance_requires_credentials_and_consumes_once() {
+    use sea_orm::EntityTrait;
+    use yorishiro::models::{user_users, workspace_invites};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("accept-invite"), "test-password", None).await.unwrap();
+        let (_, token) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, &user.email, MembershipRole::Member, chrono::Duration::hours(1)).await.unwrap();
+        let wrong = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":token,"email":user.email,"password":"wrong"})).await;
+        assert_eq!(wrong.status_code(), StatusCode::UNAUTHORIZED);
+        let other = user_users::create_user(&ctx.db, &super::fixtures::unique_email("other-invite"), "test-password", None).await.unwrap();
+        let mismatch = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":token,"email":other.email,"password":"test-password"})).await;
+        assert_eq!(mismatch.status_code(), StatusCode::UNAUTHORIZED);
+        let body = serde_json::json!({"invite_token":token,"email":user.email,"password":"test-password"});
+        let accepted = request.post("/auth/invites/accept").json(&body).await;
+        assert_eq!(accepted.status_code(), StatusCode::OK);
+        assert_eq!(accepted.json::<serde_json::Value>()["user_id"], user.id.to_string());
+        let replay = request.post("/auth/invites/accept").json(&body).await;
+        assert_eq!(replay.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        let (_, duplicate) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, &user.email, MembershipRole::Viewer, chrono::Duration::hours(1)).await.unwrap();
+        let conflict = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":duplicate,"email":user.email,"password":"test-password"})).await;
+        assert_eq!(conflict.status_code(), StatusCode::CONFLICT);
+        assert_eq!(user_users::Entity::find_by_id(user.id).one(&ctx.db).await.unwrap().unwrap().password_hash, user.password_hash);
+    }).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_invited_signups_consume_the_token_once_without_internal_errors() {
     let race_invite_email = super::fixtures::unique_email("race-invite");
@@ -161,6 +326,30 @@ async fn signup_then_login_round_trip() {
 }
 
 #[tokio::test]
+async fn invited_member_signup_does_not_discover_ungranted_workspaces() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let (_, token) = yorishiro::models::workspace_invites::create_invite(
+            &ctx.db,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("ungranted-invite"),
+            MembershipRole::Member,
+            chrono::Duration::hours(1),
+        )
+        .await
+        .expect("invite member");
+        let response = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({"invite_token":token,"password":"hunter2-hunter2"}))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::CREATED);
+        let body = response.json::<serde_json::Value>();
+        assert!(body["workspaces"].as_array().unwrap().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn signup_without_invite_creates_its_own_tenant() {
     boot_request_isolated::<App, _, _>(|request, _ctx| async move {
         let signup_response = request
@@ -306,8 +495,8 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
     if !crate::require_postgres_backend() {
         return;
     }
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     super::with_max_tenants("100", async move {
         boot_request_isolated::<App, _, _>(|request, _ctx| async move {
             for email in ["first@example.com", "second@example.com"] {
@@ -332,8 +521,8 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
 
 /// Widens `DB_MAX_CONNECTIONS` past `config/test_postgres.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
 async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);
-    guard.set("DB_MAX_CONNECTIONS", value);
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::DbMaxConnections.name()]);
+    guard.set(crate::env::TestEnv::DbMaxConnections.name(), value);
     fut.await
 }
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.

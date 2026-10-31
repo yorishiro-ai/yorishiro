@@ -40,6 +40,13 @@ pub mod edition {
 
     pub struct App;
 
+    pub(crate) async fn quotas(
+        ctx: &AppContext,
+        tenant_id: uuid::Uuid,
+    ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
+        active::quotas(ctx, tenant_id).await
+    }
+
     /// The worker registry composed for this build.
     #[must_use]
     pub fn workers() -> WorkerRegistry {
@@ -176,6 +183,13 @@ pub mod edition {
         use crate::controllers::mcp::McpToolSet;
         use crate::workers::registry::WorkerRegistry;
 
+        pub(super) async fn quotas(
+            _ctx: &AppContext,
+            _tenant_id: uuid::Uuid,
+        ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
+            Ok(crate::data::quotas::Quotas::default())
+        }
+
         pub(super) async fn workspace_worker_class(
             _conn: &sea_orm::DatabaseConnection,
             _workspace_id: uuid::Uuid,
@@ -255,7 +269,7 @@ pub mod workers;
 
 pub use edition::App;
 pub(crate) use edition::{
-    tenant_reindex_scheduler, workspace_embedding_metadata, workspace_embedding_provider,
+    quotas, tenant_reindex_scheduler, workspace_embedding_metadata, workspace_embedding_provider,
     workspace_worker_class,
 };
 pub use error::YorishiroError;

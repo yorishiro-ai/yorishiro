@@ -19,7 +19,10 @@ pub mod setup;
 pub mod swagger;
 pub mod system;
 pub mod template_library;
+pub mod users;
 pub mod whoami;
 pub mod workspaces;
 
 pub use error::ApiError;
+
+pub mod tenants;

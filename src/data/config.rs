@@ -20,7 +20,9 @@ use crate::error::YorishiroError;
 /// Returns an error if the operation cannot be completed.
 pub async fn load(environment: &Environment) -> Result<Config> {
     let environment = test_environment(environment);
-    let folder = std::env::var_os("LOCO_CONFIG_FOLDER").map(PathBuf::from);
+    let folder = crate::data::env::Env::LocoConfigFolder
+        .read_os()
+        .map(PathBuf::from);
     let config = if let Some(folder) = folder.as_ref()
         && matches!(environment, Environment::Production)
         && !folder.join("production.yaml").exists()

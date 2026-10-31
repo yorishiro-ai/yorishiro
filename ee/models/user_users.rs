@@ -17,6 +17,64 @@ pub(crate) struct OAuthUser {
     pub(crate) id: Uuid,
 }
 
+pub(crate) async fn login_key(
+    db: &sea_orm::DatabaseConnection,
+    user_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<crate::models::api_keys::CreatedApiKey, YorishiroError> {
+    let tenant_id =
+        crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?;
+    let access = crate::models::access::workspace_access(db, tenant_id, workspace_id, user_id)
+        .await?
+        .ok_or_else(|| YorishiroError::ScopeInsufficient {
+            message: "this account has no access to the selected workspace".into(),
+            hint: "ask a tenant admin for a workspace grant".into(),
+        })?;
+    crate::models::api_keys::IdentityApiKeys::create_api_key(
+        db,
+        workspace_id,
+        access.max_scope,
+        Some(user_id),
+        false,
+    )
+    .await
+}
+
+/// Accepts an invitation for an existing account identified by a verified OAuth callback.
+/// This trusted boundary never resolves identity from an email claim or provisions a new account.
+///
+/// # Errors
+/// Rejects unknown subjects, mismatched invite recipients and invalid or unavailable invitations.
+/// Database errors roll back membership creation and token consumption together.
+pub async fn accept_invite(
+    db: &sea_orm::DatabaseConnection,
+    identity: &crate::edition::ee::services::oauth::CallbackIdentity,
+    raw_token: &str,
+) -> Result<
+    (
+        crate::models::user_users::Model,
+        crate::models::workspace_invites::RedeemedInvite,
+    ),
+    YorishiroError,
+> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::db::lock_for_update(&txn, &format!("oauth:oidc:{}", identity.subject_id))
+        .await
+        .internal()?;
+    let existing = find_by_oauth_identity(&txn, "oidc", &identity.subject_id)
+        .await?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let user = user_users::Entity::find_by_id(existing.id)
+        .one(&txn)
+        .await
+        .internal()?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let invite =
+        crate::models::workspace_invites::accept_in_transaction(&txn, raw_token, &user).await?;
+    txn.commit().await.internal()?;
+    Ok((user, invite))
+}
+
 /// Looks up a user previously provisioned through this exact provider + subject id pair.
 /// Keyed on the pair (not email alone) because the subject id is what the provider actually guarantees stable and unique: an email can be reassigned or changed at the provider, but `sub` never changes for the same account.
 /// Returns `None` on first login for a given identity, whether or not a different (e.g. password-based) account already exists under the same email.

@@ -16,6 +16,17 @@ use crate::models::schema_schemas::metaschema::{self, MetaSchemaDefinition};
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
 use crate::models::template_templates;
 
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/archive", params(("schema_id" = Uuid, Path)), responses((status = 200, body = crate::models::schema_schemas::SchemaRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
+pub(crate) async fn archive_schema(
+    authorized: Authorized<SchemaScope>,
+    Path(schema_id): Path<Uuid>,
+) -> Result<Json<SchemaRecord>, ApiError> {
+    let schema =
+        schema_schemas::archive(authorized.txn(), authorized.ctx.workspace_id, schema_id).await?;
+    authorized.commit().await?;
+    Ok(Json(schema))
+}
+
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::schema_schemas::SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub(crate) async fn list_schemas(
     authorized: Authorized<ReadScope>,
@@ -144,6 +155,7 @@ pub fn routes() -> Routes {
         .add("/", post(create_schema))
         .add("/active/{name}", get(get_active_schema))
         .add("/{schema_id}", get(get_schema_by_id))
+        .add("/{schema_id}/archive", post(archive_schema))
         .add(
             "/active/{name}/entity-types/{entity_type}/json-schema",
             get(get_entity_type_json_schema),
@@ -162,6 +174,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_list_schemas),
         super::route_inventory::path_doc(__path_create_schema),
+        super::route_inventory::path_doc(__path_archive_schema),
         super::route_inventory::path_doc(__path_get_active_schema),
         super::route_inventory::path_doc(__path_get_schema_by_id),
         super::route_inventory::path_doc(__path_get_entity_type_json_schema),

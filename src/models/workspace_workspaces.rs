@@ -108,6 +108,11 @@ pub(crate) async fn fence_embedding(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::workspace_workspaces::Column;
     use sea_orm::sea_query::Expr;
+    let tenant_id = get_workspace_tenant(conn, workspace_id).await?;
+    crate::db::lock_for_update(conn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    crate::models::tenant_tenants::Model::require_active(conn, tenant_id).await?;
     let result = Entity::update_many()
         .col_expr(
             Column::EmbeddingRevision,
@@ -165,8 +170,7 @@ pub(crate) async fn effective_embedding_metadata(
 }
 
 pub(crate) use tenancy::{
-    delete_workspace, get_workspace, get_workspace_tenant, list_workspaces,
-    workspace_count_lock_key,
+    delete_workspace, get_workspace, get_workspace_tenant, workspace_count_lock_key,
 };
 
 /// A workspace summary returned by tenancy lookups and signup.
@@ -299,18 +303,119 @@ pub(crate) async fn stamped_for_reindex(
         .internal()
 }
 
-pub(crate) async fn list_for_tenant(
+pub(crate) async fn list_for_actor(
     conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
+    actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
+    let candidates = crate::models::tenancy::discover_workspaces(conn, actor).await?;
     Entity::find()
-        .filter(crate::models::_entities::workspace_workspaces::Column::TenantId.eq(tenant_id))
+        .filter(
+            crate::models::_entities::workspace_workspaces::Column::TenantId.eq(actor.tenant_id),
+        )
+        .filter(
+            crate::models::_entities::workspace_workspaces::Column::Id.is_in(
+                candidates
+                    .into_iter()
+                    .map(|workspace| workspace.workspace_id),
+            ),
+        )
         .all(conn)
         .await
         .internal()?
         .into_iter()
         .map(WorkspaceRecord::try_from)
         .collect()
+}
+
+pub(crate) async fn get_for_actor(
+    conn: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    workspace_id: Uuid,
+) -> Result<Model, YorishiroError> {
+    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    let workspace = get_workspace(conn, workspace_id).await?;
+    let allowed =
+        if workspace.tenant_id != current.tenant_id || workspace_id != current.workspace_id {
+            false
+        } else if let Some(user_id) = current.user_id {
+            crate::models::access::workspace_access(conn, current.tenant_id, workspace_id, user_id)
+                .await?
+                .is_some()
+        } else {
+            workspace_id == current.workspace_id
+        };
+    if !allowed {
+        return Err(YorishiroError::not_found("workspace not found"));
+    }
+    Ok(workspace)
+}
+
+pub(crate) async fn update_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+    input: crate::dtos::workspaces::UpdateWorkspaceRequest,
+) -> Result<WorkspaceRecord, YorishiroError> {
+    use sea_orm::ActiveValue::Set;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_workspace_admin(&txn, actor, id).await?;
+    let workspace = get_for_actor(&txn, actor, id).await?;
+    if input.max_entities.is_some() && !input.replace_max_entities {
+        return Err(YorishiroError::Conflict {
+            message: "max_entities requires replace_max_entities=true".into(),
+        });
+    }
+    if input.max_entities.is_some_and(|limit| limit < 0) {
+        return Err(YorishiroError::Conflict {
+            message: "max_entities must not be negative".into(),
+        });
+    }
+    let mut active: ActiveModel = workspace.into();
+    if let Some(name) = input.name {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 100 {
+            return Err(YorishiroError::Conflict {
+                message: "workspace name must contain 1-100 characters".into(),
+            });
+        }
+        active.name = Set(name.to_owned());
+    }
+    if input.replace_max_entities {
+        // Manual quota policy belongs to the tenant, not a delegated workspace administrator.
+        crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+        active.max_entities = Set(input.max_entities);
+    }
+    let saved = active.update(&txn).await.internal()?;
+    txn.commit().await.internal()?;
+    WorkspaceRecord::try_from(saved)
+}
+
+pub(crate) async fn detail_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<crate::dtos::workspaces::WorkspaceDetail, YorishiroError> {
+    let workspace = get_for_actor(&ctx.db, actor, id).await?;
+    let txn = crate::db::begin_workspace(ctx, workspace.tenant_id, workspace.id).await?;
+    let entity_count = crate::models::entity_entities::count(&txn, id).await?;
+    let relation_count = crate::models::entity_relations::count(&txn, id).await?;
+    let schema_count = crate::models::schema_schemas::count_active(&txn, id).await?;
+    let quotas = crate::quotas(ctx, workspace.tenant_id).await?;
+    Ok(crate::dtos::workspaces::WorkspaceDetail {
+        id,
+        tenant_id: workspace.tenant_id,
+        name: workspace.name,
+        max_entities: workspace.max_entities,
+        effective_max_entities: crate::data::quotas::effective_limit(
+            workspace.max_entities,
+            quotas.entities,
+        ),
+        schema_id: workspace.schema_id,
+        created_at: crate::time::in_timezone(workspace.created_at, crate::time::configured(ctx)),
+        entity_count,
+        relation_count,
+        schema_count,
+    })
 }
 
 pub(crate) async fn models_for_tenant(

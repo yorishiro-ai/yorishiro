@@ -61,6 +61,7 @@ fn require_https_or_loopback(url: &str) -> Result<(), YorishiroError> {
 /// The subset of an OIDC discovery document (`{issuer}/.well-known/openid-configuration`) this crate reads.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiscoveryDocument {
+    pub issuer: String,
     pub authorization_endpoint: String,
     pub token_endpoint: String,
     pub jwks_uri: String,
@@ -109,8 +110,13 @@ impl ReqwestOAuthHttp {
         &self,
         issuer_url: &str,
     ) -> Result<DiscoveryDocument, YorishiroError> {
-        self.get_json(&format!("{issuer_url}/.well-known/openid-configuration"))
-            .await
+        let document: DiscoveryDocument = self
+            .get_json(&format!("{issuer_url}/.well-known/openid-configuration"))
+            .await?;
+        if document.issuer != issuer_url {
+            return Err(YorishiroError::Unauthenticated);
+        }
+        Ok(document)
     }
 
     /// # Errors

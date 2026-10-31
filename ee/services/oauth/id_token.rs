@@ -11,6 +11,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct IdTokenClaims {
     pub sub: String,
+    pub nonce: Option<String>,
     pub email: Option<String>,
     #[serde(default)]
     pub email_verified: bool,

@@ -23,7 +23,7 @@ pub(crate) async fn migration_job_status(
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<BulkJobStatus, crate::YorishiroError> {
-    bulk_job_status(db, workspace_id, id, &["undo", "fill_defaults"]).await
+    bulk_job_status(db, workspace_id, id, &["undo", "fill_defaults", "reindex"]).await
 }
 
 pub(crate) async fn bulk_job_status(
@@ -141,13 +141,12 @@ impl Entity {
                 Expr::value(Some(provider_job_id.to_owned())),
             )
             .filter(Column::Id.eq(id))
-            .filter(Column::Status.eq(LifecycleStatus::Queued.as_db_str()))
             .exec(db)
             .await?;
         if result.rows_affected == 1 {
             Ok(())
         } else {
-            Err(DbErr::RecordNotFound("queued queue lifecycle".into()))
+            Err(DbErr::RecordNotFound("queue lifecycle".into()))
         }
     }
 

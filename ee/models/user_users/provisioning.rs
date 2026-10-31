@@ -18,7 +18,7 @@ use super::{CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_id
 pub struct ProvisionedLogin {
     pub(crate) user_id: Uuid,
     pub workspace_id: Uuid,
-    pub(crate) role: MembershipRole,
+    pub(crate) scope: crate::models::api_keys::ApiKeyScope,
 }
 
 /// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
@@ -26,7 +26,7 @@ pub struct ProvisionedLogin {
 ///
 /// New tenants/workspaces are named after the email's local part (e.g. `alice` from `alice@example.com`) since there is no signup form here to ask for a name.
 /// An admin can rename either afterward through the existing dashboard/API.
-/// The new member's role is always `member`; an existing identity keeps whatever role it already holds.
+/// The creator is the new tenant's owner; an existing identity keeps its current role.
 /// The new workspace gets a schema from the built-in `general-notes` template rather than being left `schema_pending`, since an auto-provisioned SSO login has no admin present afterward to choose one.
 /// The whole first-login path (user row, tenant, workspace, membership) runs in one transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`: a crash partway through rolls everything back rather than leaving an orphaned user row with no tenant membership, and the lock also serializes concurrent first logins for the same identity.
 /// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` so that requirement is enforced by the signature: every advisory lock taken here and in the `create_workspace` it calls is transaction-scoped, and handed a pool each one would be released before the work it guards.
@@ -43,7 +43,6 @@ pub async fn find_or_create(
     email: Option<&str>,
     display_name: Option<&str>,
     max_tenants: Option<i32>,
-    policy_enabled: bool,
 ) -> Result<ProvisionedLogin, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
         .await
@@ -77,25 +76,7 @@ pub async fn find_or_create(
 
     let tenant_name = tenant_name_from_email(email);
     let tenant = tenant_tenants::create_tenant(conn, &tenant_name, max_tenants).await?;
-    crate::edition::ee::models::tenant_tenants::set_max_workspaces(
-        conn,
-        tenant.id,
-        crate::edition::ee::data::plan::Plan::Free
-            .caps(policy_enabled)
-            .max_workspaces,
-    )
-    .await?;
-
-    let workspace = tenancy::create_workspace(
-        conn,
-        tenant.id,
-        "default",
-        crate::edition::ee::data::plan::Plan::Free
-            .caps(policy_enabled)
-            .default_max_entities,
-        None,
-    )
-    .await?;
+    let workspace = tenancy::create_workspace(conn, tenant.id, "default", None, None).await?;
 
     // A schema requires an existing `workspace_id`, so it is created after the workspace and the workspace is then updated to point at it, moving its `status` to `active`.
     let definition = crate::data::templates::get_template("general-notes")?;
@@ -111,12 +92,13 @@ pub async fn find_or_create(
     };
     let workspace = workspace_active.update(conn).await.internal()?;
 
-    tenant_memberships::add_member(conn, tenant.id, user.id, MembershipRole::Member).await?;
+    tenant_memberships::add_member_in_transaction(conn, tenant.id, user.id, MembershipRole::Owner)
+        .await?;
 
     Ok(ProvisionedLogin {
         user_id: user.id,
         workspace_id: workspace.id,
-        role: MembershipRole::Member,
+        scope: MembershipRole::Owner.max_scope(),
     })
 }
 
@@ -152,17 +134,17 @@ async fn resolve_existing_login(
     };
 
     let tenant_id = workspace_workspaces::get_workspace_tenant(conn, workspace.id).await?;
-    let role = tenant_memberships::get_membership_role(conn, tenant_id, user.id)
+    let access = crate::models::access::workspace_access(conn, tenant_id, workspace.id, user.id)
         .await?
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this account is not a member of the tenant that owns its workspace".into(),
-            hint: "ask a tenant admin to add you as a member first".into(),
+            message: "this account has no access to its workspace".into(),
+            hint: "ask a tenant admin for a workspace grant".into(),
         })?;
 
     Ok(ProvisionedLogin {
         user_id: user.id,
         workspace_id: workspace.id,
-        role,
+        scope: access.max_scope,
     })
 }
 

@@ -399,9 +399,8 @@ pub async fn acknowledge_dispatch(
         txn.rollback().await?;
         return Ok(false);
     }
-    if let Some(lifecycle) = lifecycle
-        && lifecycle.status == LifecycleStatus::Queued.as_db_str()
-    {
+    // A fast consumer may start or finish before the provider's enqueue acknowledgement.
+    if let Some(lifecycle) = lifecycle {
         crate::models::queue_job_lifecycles::Entity::mark_dispatched(
             &txn,
             lifecycle.id,

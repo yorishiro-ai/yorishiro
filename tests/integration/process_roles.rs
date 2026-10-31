@@ -9,12 +9,12 @@ fn yorishiro(dir: &std::path::Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_yorishiro"))
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .env("LOCO_ENV", "test_sqlite")
-        .env("DATABASE_URL", uri("app.sqlite3"))
-        .env("QUEUE_URL", uri("queue.sqlite3"))
-        .env("YORISHIRO_EMBEDDING_PROVIDER", "local")
+        .env(crate::env::TestEnv::LocoEnvironment.name(), "test_sqlite")
+        .env(crate::env::TestEnv::DatabaseUrl.name(), uri("app.sqlite3"))
+        .env(crate::env::TestEnv::QueueUrl.name(), uri("queue.sqlite3"))
+        .env(crate::env::TestEnv::EmbeddingProvider.name(), "local")
         .env(
-            "YORISHIRO_LOCAL_MODEL",
+            crate::env::TestEnv::LocalModel.name(),
             "nonexistent-model-that-does-not-exist",
         )
         .output()
@@ -81,8 +81,8 @@ async fn a_job_consumer_does_not_build_the_embedding_provider() {
         let mut child = Command::new(env!("CARGO_BIN_EXE_yorishiro"))
             .args(["start", "--worker=job-target:shared"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .env("LOCO_ENV", "development")
-            .env("LOCO_CONFIG_FOLDER", dir.path())
+            .env(crate::env::TestEnv::LocoEnvironment.name(), "development")
+            .env(crate::env::TestEnv::LocoConfigFolder.name(), dir.path())
             .stdout(log.try_clone().unwrap())
             .stderr(log)
             .spawn()

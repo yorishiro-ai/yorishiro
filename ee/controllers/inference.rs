@@ -55,10 +55,9 @@ async fn infer_fill(
         .into());
     }
 
-    let job_id =
-        crate::edition::ee::workers::infer_fill::enqueue_infer_fill(&ctx, workspace_id, name)
-            .await
-            .internal()?;
+    let job_id = crate::edition::ee::workers::infer_fill::enqueue_infer_fill(&ctx, &auth_ctx, name)
+        .await
+        .internal()?;
 
     Ok(Json(InferFillResponse {
         job_id,

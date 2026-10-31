@@ -2,7 +2,8 @@ use serde::Deserialize;
 
 use crate::workers::embedding_sync::WorkerClass;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = WorkerClassRequest))]
 pub(crate) struct SetWorkerClassRequest {

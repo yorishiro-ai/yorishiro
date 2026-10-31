@@ -119,7 +119,8 @@ impl RouteMounts {
         };
         mounts
             .guard_credentials("/auth/signup")
-            .guard_credentials("/auth/login");
+            .guard_credentials("/auth/login")
+            .guard_credentials("/auth/invites/accept");
 
         // Registers a route group with Loco and records it, with its OpenAPI document when the
         // `openapi` feature is on, in the inventory.
@@ -163,6 +164,10 @@ impl RouteMounts {
             controllers::members::openapi_docs()
         );
         mount!(
+            controllers::tenants::routes(),
+            controllers::tenants::openapi_docs()
+        );
+        mount!(
             controllers::relations::routes(),
             controllers::relations::openapi_docs()
         );
@@ -193,6 +198,10 @@ impl RouteMounts {
         mount!(
             controllers::whoami::routes(),
             controllers::whoami::openapi_docs()
+        );
+        mount!(
+            controllers::users::routes(),
+            controllers::users::openapi_docs()
         );
         mount!(
             controllers::workspaces::routes(),
@@ -346,6 +355,10 @@ pub(crate) async fn connect_workers(
 }
 
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
+    tasks.register(tasks::inspect_tenant_retirement::InspectTenantRetirement);
+    tasks.register(tasks::disable_tenant::DisableTenant);
+    tasks.register(tasks::delete_tenant::DeleteTenant);
+    // tasks-inject
     tasks.register(tasks::create_tenant::CreateTenant);
     tasks.register(tasks::create_workspace::CreateWorkspace);
     tasks.register(tasks::create_api_key::CreateApiKey);
@@ -353,6 +366,8 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::list_tenants::ListTenants);
     tasks.register(tasks::list_workspaces::ListWorkspaces);
     tasks.register(tasks::create_user::CreateUser);
+    tasks.register(tasks::list_users::ListUsers);
+    tasks.register(tasks::delete_user::DeleteUser);
     tasks.register(tasks::add_member::AddMember);
     tasks.register(tasks::list_members::ListMembers);
     tasks.register(tasks::list_api_keys::ListApiKeys);

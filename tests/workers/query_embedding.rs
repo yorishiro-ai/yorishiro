@@ -134,6 +134,56 @@ fn the_job_payload_carries_ids_only() {
 }
 
 #[tokio::test]
+async fn tenant_disabled_while_query_waits_for_capacity_makes_no_provider_call() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use yorishiro::models::_entities::tenant_tenants;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let (provider, _server, calls) = provider().await;
+        ctx.shared_store.insert(provider);
+        let capacity = Arc::new(tokio::sync::Semaphore::new(0));
+        ctx.shared_store.insert(capacity.clone());
+        let request_id = Requests::open(
+            &ctx.db,
+            tenant.workspace_id,
+            "alpha",
+            60,
+            chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+        let worker = QueryEmbeddingWorker::build(&ctx);
+        let future = worker.perform(QueryEmbeddingArgs {
+            request_id,
+            workspace_id: tenant.workspace_id,
+        });
+        tokio::pin!(future);
+        tokio::time::timeout(Duration::from_millis(100), &mut future)
+            .await
+            .expect_err("worker waits for embedding capacity");
+        tenant_tenants::ActiveModel {
+            id: Set(tenant.tenant_id),
+            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        capacity.add_permits(1);
+        assert!(future.await.is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(matches!(
+            Requests::take(&ctx.db, tenant.workspace_id, request_id)
+                .await
+                .unwrap(),
+            Some(QueryOutcome::Failed(_))
+        ));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn a_job_for_a_request_that_is_gone_or_finished_does_nothing() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let ws = workspace(&request, &ctx).await;

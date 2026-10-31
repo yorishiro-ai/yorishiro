@@ -9,6 +9,22 @@ use crate::edition::ee::controllers::middleware::edition;
 use crate::edition::ee::workers::infer_fill::{InferFillArgs, InferFillWorker};
 use crate::workers::registry::WorkerRegistry;
 
+pub(crate) async fn quotas(
+    ctx: &AppContext,
+    tenant_id: uuid::Uuid,
+) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
+    use crate::edition::ee::data::plan::{Plan, PlanPolicy};
+    if PlanPolicy::current(ctx)? == PlanPolicy::Disabled {
+        return Ok(crate::data::quotas::Quotas::default());
+    }
+    let plan = Plan::for_tenant(ctx, tenant_id).await?;
+    let caps = plan.caps();
+    Ok(crate::data::quotas::Quotas {
+        workspaces: caps.max_workspaces,
+        entities: caps.default_max_entities,
+    })
+}
+
 pub(crate) async fn workspace_worker_class(
     conn: &sea_orm::DatabaseConnection,
     workspace_id: uuid::Uuid,
@@ -136,7 +152,8 @@ pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
         .mount(controllers::oauth::routes().layer(gate.clone()))
         .document(edition::licence_required(controllers::oauth::openapi_docs()))
         .guard_credentials("/auth/oauth/authorize")
-        .guard_credentials("/auth/oauth/callback");
+        .guard_credentials("/auth/oauth/callback")
+        .guard_credentials("/auth/oauth/invites/accept");
     mounts
         .mount(controllers::origin::routes())
         .document(controllers::origin::openapi_docs());
@@ -153,7 +170,7 @@ pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
         .document(controllers::worker_class::openapi_docs());
 }
 
-/// Adds the enterprise MCP tools, and gates them on the licence.
+/// Adds origin MCP tools with the same ungated policy as their REST routes.
 pub(crate) fn mcp_tools(tools: McpToolSet) -> McpToolSet {
     tools.extend(
         controllers::mcp::tool_router(),

@@ -43,6 +43,17 @@ pub async fn import_jsonl(
     imported_by: Option<Uuid>,
     reader: impl BufRead,
 ) -> Result<ImportResult, YorishiroError> {
+    import_with_quota(conn, tenant_id, workspace_id, imported_by, reader, None).await
+}
+
+pub(crate) async fn import_with_quota(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    imported_by: Option<Uuid>,
+    reader: impl BufRead,
+    entity_quota: Option<i32>,
+) -> Result<ImportResult, YorishiroError> {
     let mut result = ImportResult::default();
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
     // Exported schema_ids are workspace-local to the source, so track name-by-old-id for schema lines this import has processed instead of re-querying the exported id.
@@ -110,9 +121,15 @@ pub async fn import_jsonl(
                     entity_type: entity.entity_type,
                     data: entity.data,
                 };
-                let created = entity_entities::create(conn, workspace_id, input, imported_by)
-                    .await
-                    .map_err(|err| annotate_line(line_no, err))?;
+                let created = entity_entities::create_with_quota(
+                    conn,
+                    workspace_id,
+                    input,
+                    imported_by,
+                    entity_quota,
+                )
+                .await
+                .map_err(|err| annotate_line(line_no, err))?;
                 entity_id_map.insert(old_id, created.id);
                 result.entity_ids.push(created.id);
                 result.entities += 1;

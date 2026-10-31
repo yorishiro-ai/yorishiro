@@ -9,9 +9,12 @@ use yorishiro::edition::ee::workers::infer_fill::*;
 #[tokio::test]
 async fn rejects_a_missing_queue_before_creating_a_job() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|_request, mut ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&_request, &ctx, Default::default())
+                .await;
         ctx.queue_provider = None;
 
-        let error = enqueue_infer_fill(&ctx, Uuid::now_v7(), "note".into())
+        let error = enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
             .await
             .expect_err("missing queue must fail");
 
@@ -41,12 +44,11 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let workspace_id = fixture.workspace_id;
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
         let mut ctx = ctx;
         let queue = crate::requests::query_worker::job_target_queue(&mut ctx, target).await;
-        let job_id = enqueue_infer_fill(&ctx, workspace_id, "note".into())
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
             .await
             .unwrap();
         let job_id = Uuid::parse_str(&job_id).unwrap();
@@ -141,9 +143,10 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
             .await
             .unwrap();
 
-        let stalled_job = enqueue_infer_fill(&ctx, fixture.workspace_id, "note".into())
-            .await
-            .unwrap();
+        let stalled_job =
+            enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
+                .await
+                .unwrap();
         let stalled_id = Outbox::find()
             .all(&ctx.db)
             .await
@@ -178,7 +181,11 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
             producer_job = Some(
                 tokio::time::timeout(
                     Duration::from_secs(2),
-                    enqueue_infer_fill(&ctx, fixture.workspace_id, "next-note".into()),
+                    enqueue_infer_fill(
+                        &ctx,
+                        &actor(&ctx, &fixture.api_key).await,
+                        "next-note".into(),
+                    ),
                 )
                 .await
                 .expect("producer commits while provider enqueue remains stalled")
@@ -360,7 +367,7 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             .await;
         assert_eq!(llm_key.status_code(), 204, "{}", llm_key.text());
 
-        let job_id = enqueue_infer_fill(&ctx, setup.workspace_id, "note".into())
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
             .await
             .unwrap()
             .parse::<Uuid>()
@@ -378,9 +385,16 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             deliver_lifecycle(&delivery_ctx, lifecycle_id).await;
         });
 
-        tokio::time::timeout(Duration::from_secs(5), entered.notified())
-            .await
-            .expect("worker reached the external LLM call");
+        if tokio::time::timeout(Duration::from_secs(5), entered.notified()).await.is_err() {
+            let lifecycle = yorishiro::models::_entities::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db).await.unwrap();
+            let dispatch = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(lifecycle_id)
+                .one(&ctx.db).await.unwrap();
+            let job = inference_jobs::get(&ctx.db, job_id).await;
+            let dispatch_state = dispatch.map(|row| (row.published_at, row.last_attempt_at, row.claim_until));
+            let lifecycle_state = lifecycle.map(|row| (row.status, row.attempt, row.provider_job_id, row.error));
+            panic!("worker did not reach LLM: delivery_finished={}, lifecycle={lifecycle_state:?}, dispatch={dispatch_state:?}, inference={:?}", run.is_finished(), job.map(|row| row.map(|row| row.status)));
+        }
         let replacement = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -431,11 +445,12 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             .expect("entity id")
             .parse()
             .expect("UUID entity id");
-        let reclaimed_job_id = enqueue_infer_fill(&ctx, setup.workspace_id, "note".into())
-            .await
-            .unwrap()
-            .parse::<Uuid>()
-            .unwrap();
+        let reclaimed_job_id =
+            enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
+                .await
+                .unwrap()
+                .parse::<Uuid>()
+                .unwrap();
         let reclaimed_lifecycle_id =
             yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
                 .all(&ctx.db)
@@ -537,7 +552,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
         let mut jobs = Vec::new();
         for _ in 0..2 {
             jobs.push(
-                enqueue_infer_fill(&ctx, setup.workspace_id, "note".into())
+                enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
                     .await
                     .expect("enqueue competing inference job")
                     .parse::<Uuid>()
@@ -630,4 +645,174 @@ async fn two_jobs_for_one_workspace_never_run_together() {
         }
     })
     .await;
+}
+
+#[tokio::test]
+async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider() {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            fixture.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Schema,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
+            .await
+            .unwrap()
+            .parse::<Uuid>()
+            .unwrap();
+        let lifecycle = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.payload["job_id"] == job_id.to_string())
+            .unwrap()
+            .id;
+        yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id)
+            .await
+            .unwrap();
+        crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed").await;
+        let job = yorishiro::edition::ee::models::inference_jobs::get(&ctx.db, job_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            job.status,
+            yorishiro::edition::ee::models::inference_jobs::InferenceJobStatus::Failed
+        );
+        let proposals = yorishiro::edition::ee::models::inference_proposals::for_job(
+            &ctx.db,
+            fixture.workspace_id,
+            job_id,
+        )
+        .await
+        .unwrap();
+        assert!(proposals.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn revocation_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(PermissionChange::RevokeKey).await;
+}
+
+#[tokio::test]
+async fn downgrade_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(PermissionChange::Downgrade).await;
+}
+
+#[tokio::test]
+async fn workspace_revocation_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(PermissionChange::RevokeWorkspace).await;
+}
+
+#[derive(Clone, Copy)]
+enum PermissionChange {
+    RevokeKey,
+    Downgrade,
+    RevokeWorkspace,
+}
+
+async fn permission_change_during_llm_call(change: PermissionChange) {
+    use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
+
+    let (llm, entered, release) = gated_llm().await;
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        let setup = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let entity_id = crate::requests::inference::create_entity(&request, &setup).await;
+        let response = request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({"name":"note", "entity_types":{"note":{"fields":{
+                "title":{"type":"string","required":true}, "summary":{"type":"string"}, "extra":{"type":"string"}
+            }}}})).await;
+        assert_eq!(response.status_code(), 201, "{}", response.text());
+        let response = request.put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({"base_url":llm.url,"model":"test-model","api_key":"sk-test"})).await;
+        assert_eq!(response.status_code(), 204, "{}", response.text());
+        let user_id = if !matches!(change, PermissionChange::RevokeKey) {
+            let txn = ctx.db.begin().await.unwrap();
+            let user = yorishiro::models::tenancy::register_member(
+                &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
+                "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Admin,
+            ).await.unwrap();
+            yorishiro::models::workspace_memberships::Model::grant(&txn, setup.workspace_id, user.id,
+                yorishiro::models::workspace_memberships::WorkspaceRole::Admin).await.unwrap();
+            txn.commit().await.unwrap();
+            Some(user.id)
+        } else {
+            None
+        };
+        let key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema, user_id, false,
+        ).await.unwrap();
+        let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
+            .await.unwrap().parse::<Uuid>().unwrap();
+        let lifecycle = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+            .all(&ctx.db).await.unwrap().into_iter()
+            .find(|row| row.payload["job_id"] == job_id.to_string()).unwrap().id;
+        let revoke = async {
+            tokio::time::timeout(Duration::from_secs(5), entered.notified())
+                .await.expect("worker reached the LLM");
+            let changed = tokio::time::timeout(Duration::from_secs(5), async {
+                if matches!(change, PermissionChange::RevokeWorkspace) {
+                    let user_id = user_id.unwrap();
+                    yorishiro::models::tenant_memberships::add_member(
+                        &ctx.db, setup.tenant_id, user_id,
+                        yorishiro::models::tenant_memberships::MembershipRole::Member,
+                    ).await.unwrap();
+                    let txn = ctx.db.begin().await.unwrap();
+                    yorishiro::models::workspace_memberships::Model::revoke(
+                        &txn, setup.workspace_id, user_id,
+                    ).await.unwrap();
+                    txn.commit().await.map_err(|error| yorishiro::YorishiroError::Internal(error.into()))
+                } else if let Some(user_id) = user_id {
+                    yorishiro::models::tenant_memberships::add_member(&ctx.db, setup.tenant_id, user_id,
+                        yorishiro::models::tenant_memberships::MembershipRole::Viewer).await
+                } else {
+                    yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id).await
+                }
+            }).await;
+            release.add_permits(1);
+            changed.expect("permission changes must not wait for the LLM reply").unwrap();
+        };
+        tokio::join!(
+            crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed"),
+            revoke,
+        );
+        let job = inference_jobs::get(&ctx.db, job_id).await.unwrap().unwrap();
+        assert_eq!(job.status, inference_jobs::InferenceJobStatus::Failed);
+        assert!(inference_proposals::for_job(&ctx.db, setup.workspace_id, job_id).await.unwrap().is_empty());
+        let entity = yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity_id).await.unwrap();
+        assert_eq!(entity.data, serde_json::json!({"title":"original"}));
+        if matches!(change, PermissionChange::Downgrade) {
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
+            assert_eq!(actor(&ctx, &key.plaintext).await.scope, yorishiro::models::api_keys::ApiKeyScope::Read);
+        }
+        if matches!(change, PermissionChange::RevokeWorkspace) {
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
+            assert!(yorishiro::models::workspace_memberships::Model::role(
+                &ctx.db, setup.workspace_id, user_id.unwrap(),
+            ).await.unwrap().is_none());
+        }
+    }).await;
+}
+
+async fn actor(
+    ctx: &loco_rs::app::AppContext,
+    key: &str,
+) -> yorishiro::models::api_keys::AuthContext {
+    use yorishiro::models::api_keys::Entity;
+    if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
+        Entity::authenticate(&db, key).await.unwrap()
+    } else {
+        Entity::authenticate_sqlite(&ctx.db, key).await.unwrap()
+    }
 }

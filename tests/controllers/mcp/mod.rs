@@ -154,6 +154,13 @@ fn assert_inventory_contract(label: &str, tools: &[rmcp::model::Tool]) {
         "duplicate {label} MCP tool names: {names:?}"
     );
     for tool in tools {
+        let required = tool
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.0.get("yorishiro/required_scope"))
+            .expect("every registered tool declares its authorization scope");
+        serde_json::from_value::<yorishiro::models::api_keys::ApiKeyScope>(required.clone())
+            .expect("tool scope is valid");
         assert!(
             tool.description
                 .as_deref()

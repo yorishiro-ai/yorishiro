@@ -35,6 +35,8 @@ pub enum Relation {
     TemplateVersions,
     #[sea_orm(has_many = "super::tenant_memberships::Entity")]
     TenantMemberships,
+    #[sea_orm(has_many = "super::workspace_memberships::Entity")]
+    WorkspaceMemberships,
 }
 
 impl Related<super::api_key_audit_log::Entity> for Entity {
@@ -70,5 +72,11 @@ impl Related<super::template_versions::Entity> for Entity {
 impl Related<super::tenant_memberships::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::TenantMemberships.def()
+    }
+}
+
+impl Related<super::workspace_memberships::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::WorkspaceMemberships.def()
     }
 }

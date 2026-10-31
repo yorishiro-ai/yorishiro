@@ -7,7 +7,7 @@ use sea_orm::ConnectionTrait;
 use crate::db;
 use crate::edition::ee::data::{plan::Plan, stripe::StripeConfig};
 use crate::edition::ee::dtos::stripe::VerifiedStripeEvent;
-use crate::edition::ee::models::{stripe_events, tenant_billing, tenant_tenants};
+use crate::edition::ee::models::{stripe_events, tenant_billing};
 use crate::error::{ResultExt, YorishiroError};
 
 fn unlinked_customer() -> YorishiroError {
@@ -137,14 +137,6 @@ pub(crate) async fn apply_stripe_event(
                 return Ok(());
             };
             tenant_billing::set_plan(&txn, tenant_id, plan.as_str()).await?;
-            if *ctx
-                .shared_store
-                .get::<std::sync::Arc<bool>>()
-                .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("plan policy missing")))?
-            {
-                tenant_tenants::set_max_workspaces(&txn, tenant_id, plan.caps(true).max_workspaces)
-                    .await?;
-            }
         }
         "customer.subscription.deleted" => {
             let object = &event.data.object;
@@ -152,18 +144,6 @@ pub(crate) async fn apply_stripe_event(
                 return Err(unlinked_customer());
             };
             tenant_billing::set_plan(&txn, tenant_id, Plan::Free.as_str()).await?;
-            if *ctx
-                .shared_store
-                .get::<std::sync::Arc<bool>>()
-                .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("plan policy missing")))?
-            {
-                tenant_tenants::set_max_workspaces(
-                    &txn,
-                    tenant_id,
-                    Plan::Free.caps(true).max_workspaces,
-                )
-                .await?;
-            }
         }
         _ => {}
     }

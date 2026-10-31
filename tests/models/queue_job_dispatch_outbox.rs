@@ -9,6 +9,83 @@ use yorishiro::models::queue_job_lifecycles::{Enqueue, Entity as Lifecycles, Lif
 use yorishiro::workers::embedding_sync::WorkerClass;
 
 #[tokio::test]
+async fn acknowledgement_preserves_correlation_after_consumer_starts() {
+    use yorishiro::models::queue_job_dispatch_outbox::{acknowledge_dispatch, claim_dispatch};
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let id = Uuid::now_v7();
+        record(
+            &ctx.db,
+            Enqueue {
+                id,
+                job_name: "ack-race",
+                worker_class: WorkerClass::Shared,
+                workspace_id: None,
+                plan: None,
+                concurrency_key: None,
+                concurrency_limit: None,
+            },
+            serde_json::json!({}),
+            "TestWorker".into(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let claim = Uuid::now_v7();
+        let provider_id = format!("provider-ack-race-{id}");
+        assert!(claim_dispatch(&ctx.db, id, claim, 60).await.unwrap());
+        let admission = Lifecycles::start_at(&ctx.db, id, Utc::now().fixed_offset())
+            .await
+            .unwrap();
+        assert!(matches!(
+            admission,
+            yorishiro::models::queue_job_lifecycles::Admission::Started { .. }
+        ));
+        let before = Lifecycles::find_by_id(id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            acknowledge_dispatch(&ctx.db, id, claim, &provider_id)
+                .await
+                .unwrap()
+        );
+        let after = Lifecycles::find_by_id(id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.provider_job_id.as_deref(), Some(provider_id.as_str()));
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.attempt, before.attempt);
+        let outbox =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(outbox.published_at.is_some());
+        assert!(
+            !acknowledge_dispatch(&ctx.db, id, claim, "stale-ack")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            Lifecycles::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .provider_job_id
+                .as_deref(),
+            Some(provider_id.as_str())
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn record_is_recoverable_until_attempted() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
         let db = ctx.db.clone();

@@ -1,3 +1,4 @@
+mod local;
 mod model_fetch;
 mod openai;
 use serial_test::serial;

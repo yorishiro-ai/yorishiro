@@ -15,6 +15,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<i32>,
+    pub disabled_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

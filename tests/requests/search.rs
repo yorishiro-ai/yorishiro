@@ -78,6 +78,87 @@ fn titles(hits: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// Opt-in live-provider smoke test using only configured credentials and synthetic documents.
+#[tokio::test]
+#[ignore = "requires an explicitly configured live OpenAI-compatible embedding endpoint"]
+async fn configured_live_provider_embeds_stores_and_searches() {
+    use loco_rs::{app::Hooks, environment::Environment};
+    use serde::Deserialize;
+    use yorishiro::services::embedding::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
+
+    #[derive(Deserialize)]
+    struct LiveSettings {
+        embedding: LiveEmbedding,
+    }
+    #[derive(Deserialize)]
+    struct LiveEmbedding {
+        provider: String,
+        dimensions: usize,
+        base_url: String,
+        api_key: String,
+        model: String,
+        send_dimensions_param: bool,
+    }
+
+    let config = App::load_config(&Environment::Test).await.unwrap();
+    let settings = config.settings::<LiveSettings>().unwrap().embedding;
+    assert_eq!(
+        settings.provider, "openai",
+        "explicit live provider required"
+    );
+    assert!(
+        !settings.api_key.is_empty(),
+        "configured credential required"
+    );
+    let dimensions = settings.dimensions;
+    let provider: Arc<dyn EmbeddingProvider> =
+        Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+            base_url: settings.base_url,
+            api_key: settings.api_key,
+            model: settings.model,
+            dimensions,
+            send_dimensions_param: settings.send_dimensions_param,
+        }));
+    let vectors = provider
+        .embed_batch(&[
+            "A cat sleeps on a warm sofa.",
+            "PostgreSQL database backup and recovery.",
+        ])
+        .await
+        .unwrap();
+    assert_eq!(vectors.len(), 2);
+    for vector in &vectors {
+        assert_eq!(vector.len(), dimensions);
+        assert!(vector.iter().all(|value| value.is_finite()));
+        assert!(vector.iter().any(|value| *value != 0.0));
+    }
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let documents = [
+            "A cat sleeps on a warm sofa.",
+            "PostgreSQL database backup and recovery.",
+            "Fresh bread is baked in the kitchen.",
+        ];
+        embedded_notes(&ctx, &setup, provider.as_ref(), &documents).await;
+        for (query, expected) in [
+            ("A cat sleeps on a warm sofa.", documents[0]),
+            ("How do I back up and restore a PostgreSQL database?", documents[1]),
+        ] {
+            let response = request.get("/api/search")
+                .add_query_param("query_text", query)
+                .add_query_param("limit", "3")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
+            response.assert_status(StatusCode::OK);
+            let hits = response.json::<serde_json::Value>();
+            assert_eq!(titles(&hits).len(), 3);
+            assert_eq!(titles(&hits)[0], expected, "live semantic ranking");
+            assert!(hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
+        }
+        assert_eq!(rows_left(&ctx, setup.workspace_id).await, 0);
+        println!("Live embedding smoke passed: dimensions={dimensions}, stored_documents=3, queued_searches=2");
+    }).await;
+}
+
 /// The whole semantic path with the model only in the worker: the server enqueues the query, a worker embeds it as `Query`, and the vector ranks the entities.
 /// Two searches run at once, and each must get the vector for its own text.
 #[tokio::test]
@@ -149,11 +230,14 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
 #[serial(process_environment)]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
     let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS",
-        "YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS",
+        crate::env::TestEnv::QueryEmbeddingTimeoutMs.name(),
+        crate::env::TestEnv::QueryEmbeddingPollIntervalMs.name(),
     ]);
-    guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", "300");
-    guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", "50");
+    guard.set(crate::env::TestEnv::QueryEmbeddingTimeoutMs.name(), "300");
+    guard.set(
+        crate::env::TestEnv::QueryEmbeddingPollIntervalMs.name(),
+        "50",
+    );
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(
             &request,

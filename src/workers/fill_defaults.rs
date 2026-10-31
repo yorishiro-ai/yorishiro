@@ -67,6 +67,19 @@ impl FillDefaultsWorker {
             txn.commit().await?;
             return Ok(());
         }
+        crate::models::access::require_job_actor(
+            &txn,
+            &self.ctx.db,
+            &api_key_audit_log::AuditActor {
+                tenant_id: args.tenant_id,
+                workspace_id: args.workspace_id,
+                api_key_id: args.api_key_id,
+                user_id: args.user_id,
+            },
+            crate::models::api_keys::ApiKeyScope::Migration,
+        )
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
         let report = entity_entities::fill_defaults(
             &txn,
             args.workspace_id,

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use loco_rs::app::{AppContext, Hooks};
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
 use uuid::Uuid;
 
 pub(crate) use super::boot_request_isolated as boot_request;
@@ -222,5 +222,279 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
         assert_eq!(entity_entities::migration_dry_run(&ctx.db, workspace, "note").await.unwrap().needs_values, 1);
         assert_eq!(entity_entities::drift(&ctx.db, workspace, entity_id).await.unwrap().missing_fields[0].name, "rank");
+
+        let revoked = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, None, false,
+        ).await.unwrap();
+        let response = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", revoked.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let denied_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id).await.unwrap();
+        finish_job(&ctx, denied_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{denied_id}")))).await;
+        assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
+
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, tenant, &super::fixtures::unique_email("queued-member"),
+            "hunter2-hunter2", None,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin,
+        ).await.unwrap();
+        txn.commit().await.unwrap();
+        let attributed = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+        ).await.unwrap();
+        let response = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let downgraded_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        super::fixtures::grant_workspace(&ctx, workspace, member.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Admin).await;
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
+            yorishiro::models::tenant_memberships::MembershipRole::Viewer).await.unwrap();
+        finish_job(&ctx, downgraded_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{downgraded_id}")))).await;
+        assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
+        assert!(yorishiro::models::api_keys::Entity::find_by_id(attributed.id).one(&ctx.db).await.unwrap().is_some());
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+        let failed = request.get(&format!("/api/migration-jobs/{downgraded_id}"))
+            .add_header("Authorization", format!("Bearer {key}")).await;
+        assert_eq!(failed.status_code(), StatusCode::OK);
+        assert_eq!(failed.json::<serde_json::Value>()["status"], "failed");
+
+        let removed = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+        ).await.unwrap();
+        let response = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", removed.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let removed_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        yorishiro::models::tenant_memberships::remove_member(&ctx.db, tenant, member.id).await.unwrap();
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+        for id in [attributed.id, removed.id] {
+            assert!(yorishiro::models::api_keys::Entity::find_by_id(id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
+        }
+        let rejected = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", removed.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(rejected.status_code(), StatusCode::UNAUTHORIZED);
+        finish_job(&ctx, removed_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{removed_id}")))).await;
+        assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
+
+        let attributed = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+        ).await.unwrap();
+        let response = request.post("/api/migration-jobs/fill-defaults")
+            .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
+            .json(&json!({"schema_name":"note"})).await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let filled_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        finish_via_api(&request, &ctx, filled_id, &key, &format!("/api/migration-jobs/{filled_id}")).await;
+        let revoked = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, workspace, ApiKeyScope::Migration, None, false,
+        ).await.unwrap();
+        let response = request.post(&format!("/api/migration-jobs/{filled_id}/undo"))
+            .add_header("Authorization", format!("Bearer {}", revoked.plaintext)).await;
+        assert_eq!(response.status_code(), StatusCode::ACCEPTED);
+        let denied_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id).await.unwrap();
+        finish_job(&ctx, denied_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{denied_id}")))).await;
+        assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, after.data);
     }).await;
+}
+
+#[tokio::test]
+async fn queued_import_rechecks_revoked_credentials_before_writing() {
+    queued_import_rechecks_inactive_credentials(false).await;
+}
+
+#[tokio::test]
+async fn queued_import_rechecks_expired_credentials_before_writing() {
+    queued_import_rechecks_inactive_credentials(true).await;
+}
+
+async fn queued_import_rechecks_inactive_credentials(expired: bool) {
+    use axum::http::StatusCode;
+    use serde_json::json;
+    use yorishiro::models::{api_keys, schema_schemas};
+
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = super::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            super::fixtures::TenantArgs {
+                key_scope: api_keys::ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            api_keys::ApiKeyScope::Schema,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let jsonl = json!({"kind":"schema", "record":{
+            "id": Uuid::new_v4(), "tenant_id":tenant.tenant_id, "workspace_id":tenant.workspace_id,
+            "name":"revoked-import", "version":1,
+            "definition":{"name":"revoked-import","entity_types":{},"relation_types":{}},
+            "status":"active", "origin_template_id":null, "origin_status":"detached",
+            "origin_snapshot":null, "origin_updated_at":null, "created_at":chrono::Utc::now()
+        }})
+        .to_string();
+        let response = request
+            .post("/api/import.jsonl")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .text(jsonl)
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::ACCEPTED,
+            "{}",
+            response.text()
+        );
+        let id = response.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        if expired {
+            use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+            api_keys::ActiveModel {
+                id: Set(key.id),
+                expires_at: Set(Some(
+                    (chrono::Utc::now() - chrono::Duration::seconds(1)).fixed_offset(),
+                )),
+                ..Default::default()
+            }
+            .update(&ctx.db)
+            .await
+            .unwrap();
+        } else {
+            api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+        }
+        finish_job(
+            &ctx,
+            id,
+            "failed",
+            Some((&request, &tenant.api_key, &format!("/api/import-jobs/{id}"))),
+        )
+        .await;
+        assert!(
+            schema_schemas::get_active_schema(&ctx.db, tenant.workspace_id, "revoked-import")
+                .await
+                .is_err()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn queued_import_rechecks_workspace_grants_before_writing() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+    use yorishiro::models::{
+        api_keys, schema_schemas, tenancy,
+        tenant_memberships::MembershipRole,
+        workspace_memberships::{Model, WorkspaceRole},
+    };
+
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = super::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            super::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("queued-workspace"),
+            "hunter2-hunter2",
+            None,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
+        Model::grant(&txn, tenant.workspace_id, member.id, WorkspaceRole::Admin)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        let key = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            api_keys::ApiKeyScope::Schema,
+            Some(member.id),
+            false,
+        )
+        .await
+        .unwrap();
+        let jsonl = json!({"kind":"schema", "record":{
+            "id":Uuid::new_v4(), "tenant_id":tenant.tenant_id, "workspace_id":tenant.workspace_id,
+            "name":"grant-revoked-import", "version":1,
+            "definition":{"name":"grant-revoked-import","entity_types":{},"relation_types":{}},
+            "status":"active", "origin_template_id":null,"origin_status":"detached",
+            "origin_snapshot":null,"origin_updated_at":null,"created_at":chrono::Utc::now()
+        }})
+        .to_string();
+        let response = request
+            .post("/api/import.jsonl")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .text(jsonl)
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::ACCEPTED,
+            "{}",
+            response.text()
+        );
+        let id = response.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            member.id,
+            MembershipRole::Member,
+        )
+        .await
+        .unwrap();
+        let txn = ctx.db.begin().await.unwrap();
+        Model::revoke(&txn, tenant.workspace_id, member.id)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        finish_job(
+            &ctx,
+            id,
+            "failed",
+            Some((&request, &tenant.api_key, &format!("/api/import-jobs/{id}"))),
+        )
+        .await;
+        assert!(
+            schema_schemas::get_active_schema(&ctx.db, tenant.workspace_id, "grant-revoked-import")
+                .await
+                .is_err()
+        );
+        assert!(
+            api_keys::Entity::find_by_id(key.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("revoked grant history retained")
+                .revoked_at
+                .is_some()
+        );
+    })
+    .await;
 }

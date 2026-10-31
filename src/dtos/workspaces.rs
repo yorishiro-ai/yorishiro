@@ -3,12 +3,26 @@ use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkspaceMemberRecord {
+    pub user_id: Uuid,
+    pub role: crate::models::workspace_memberships::WorkspaceRole,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct GrantWorkspaceMemberRequest {
+    pub role: crate::models::workspace_memberships::WorkspaceRole,
+}
+
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateWorkspaceRequest {
     pub name: String,
-    /// Cap on the number of entities this workspace may hold.
-    /// Omit for unlimited.
+    /// Explicit operational cap on entities, independent of any additional deployment policy.
+    /// Omit for no explicit cap.
     pub max_entities: Option<i32>,
     /// Schema to associate with this workspace.
     /// Omit to leave it unset.
@@ -23,10 +37,22 @@ pub struct WorkspaceDetail {
     pub tenant_id: Uuid,
     pub name: String,
     pub max_entities: Option<i32>,
+    pub effective_max_entities: Option<i32>,
     pub schema_id: Option<Uuid>,
     pub created_at: DateTime<Timezone>,
     pub entity_count: i64,
     pub relation_count: i64,
     /// Currently *active* schemas only (one per distinct schema name), not a raw row count, which would also include archived versions.
     pub schema_count: i64,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateWorkspaceRequest {
+    pub name: Option<String>,
+    /// When true, replace the manual cap, including clearing it with null.
+    #[serde(default)]
+    pub replace_max_entities: bool,
+    pub max_entities: Option<i32>,
 }

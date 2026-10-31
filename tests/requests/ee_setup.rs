@@ -49,8 +49,8 @@ async fn unlicensed_ee_cannot_raise_the_tenant_cap() {
     if !crate::require_postgres_backend() {
         return;
     }
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     with_max_tenants("100", async move {
         boot_request_isolated::<App, _, _>(|request, _ctx| async move {
             let first = request

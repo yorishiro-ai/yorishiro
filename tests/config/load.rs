@@ -9,23 +9,27 @@ use super::EnvGuard;
 #[tokio::test]
 #[serial(process_environment)]
 async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_WORKER_TARGETS"]);
+    let guard = EnvGuard::capture(&[
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::WorkerTargets.name(),
+    ]);
     guard.set(
-        "DATABASE_URL",
+        crate::env::TestEnv::DatabaseUrl.name(),
         "sqlite:///tmp/worker-target-config.sqlite3?mode=rwc",
     );
     guard.set(
-        "QUEUE_URL",
+        crate::env::TestEnv::QueueUrl.name(),
         "sqlite:///tmp/worker-target-queue.sqlite3?mode=rwc",
     );
-    guard.remove("YORISHIRO_WORKER_TARGETS");
+    guard.remove(crate::env::TestEnv::WorkerTargets.name());
     let config = load(&Environment::Development).await.unwrap();
     let settings = config
         .settings::<yorishiro::data::settings::Settings>()
         .unwrap();
     assert_eq!(settings.worker_targets, vec!["worker-target:shared"]);
     guard.set(
-        "YORISHIRO_WORKER_TARGETS",
+        crate::env::TestEnv::WorkerTargets.name(),
         r#"["worker-target:shared","worker-target:official"]"#,
     );
     assert!(load(&Environment::Development).await.is_ok());
@@ -34,7 +38,7 @@ async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
         r#"["official"]"#,
         r#"["worker-target:tenant:not-a-uuid"]"#,
     ] {
-        guard.set("YORISHIRO_WORKER_TARGETS", value);
+        guard.set(crate::env::TestEnv::WorkerTargets.name(), value);
         let error = load(&Environment::Development)
             .await
             .expect_err("invalid target declaration");
@@ -49,18 +53,21 @@ async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
 #[serial(process_environment)]
 async fn development_uses_loco_environment_config_and_typed_settings() {
     let _guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-        "YORISHIRO_EMBEDDING_PROVIDER",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueueKind.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
     ]);
-    _guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
     _guard.set(
-        "QUEUE_URL",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/config-load.sqlite3?mode=rwc",
+    );
+    _guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
         "sqlite:///tmp/config-load-queue.sqlite3?mode=rwc",
     );
-    _guard.remove("YORISHIRO_QUEUE_KIND");
-    _guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    _guard.remove(crate::env::TestEnv::QueueKind.name());
+    _guard.set(crate::env::TestEnv::EmbeddingProvider.name(), "none");
 
     let config = load(&Environment::Development).await.unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
@@ -75,13 +82,20 @@ async fn development_uses_loco_environment_config_and_typed_settings() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn sqlite_test_config_preserves_loco_application_pragmas() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
-    guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
+    let guard = EnvGuard::capture(&[
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueueKind.name(),
+    ]);
     guard.set(
-        "QUEUE_URL",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/config-load.sqlite3?mode=rwc",
+    );
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
         "sqlite:///tmp/config-load-queue.sqlite3?mode=rwc",
     );
-    guard.remove("YORISHIRO_QUEUE_KIND");
+    guard.remove(crate::env::TestEnv::QueueKind.name());
     let config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
     assert_eq!(
         config.database.run_on_start.as_deref(),
@@ -94,21 +108,37 @@ async fn sqlite_test_config_preserves_loco_application_pragmas() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn the_topology_picks_the_queue_provider_for_one_database() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
-    guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
+    let guard = EnvGuard::capture(&[
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::TestTopology.name(),
+    ]);
+    guard.set(
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/test.sqlite3?mode=rwc",
+    );
 
-    guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
-    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-sqlite");
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "sqlite:///tmp/test-queue.sqlite3?mode=rwc",
+    );
+    guard.set(crate::env::TestEnv::TestTopology.name(), "sqlite-sqlite");
     let sqlite_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(sqlite_queue.queue, Some(QueueConfig::Sqlite(_))));
 
-    guard.set("QUEUE_URL", "redis://localhost:6379");
-    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-redis");
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "redis://localhost:6379",
+    );
+    guard.set(crate::env::TestEnv::TestTopology.name(), "sqlite-redis");
     let redis_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(redis_queue.queue, Some(QueueConfig::Redis(_))));
 
-    guard.set("QUEUE_URL", "rediss://localhost:6379");
-    guard.set("YORISHIRO_TEST_TOPOLOGY", "sqlite-redis");
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "rediss://localhost:6379",
+    );
+    guard.set(crate::env::TestEnv::TestTopology.name(), "sqlite-redis");
     let rediss_queue = load(&Environment::Test).await.unwrap();
     assert!(matches!(rediss_queue.queue, Some(QueueConfig::Redis(_))));
 }
@@ -118,20 +148,23 @@ async fn the_topology_picks_the_queue_provider_for_one_database() {
 #[serial(process_environment)]
 async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
     let guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_TEST_TOPOLOGY",
-        "DB_CONNECT_TIMEOUT",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::TestTopology.name(),
+        crate::env::TestEnv::DbConnectTimeout.name(),
     ]);
-    guard.remove("YORISHIRO_TEST_TOPOLOGY");
-    guard.remove("QUEUE_URL");
+    guard.remove(crate::env::TestEnv::TestTopology.name());
+    guard.remove(crate::env::TestEnv::QueueUrl.name());
 
-    guard.set("DATABASE_URL", "sqlite:///tmp/scheme.sqlite3?mode=rwc");
+    guard.set(
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/scheme.sqlite3?mode=rwc",
+    );
     let sqlite = load(&Environment::Test).await.unwrap();
     assert!(matches!(sqlite.queue, Some(QueueConfig::Sqlite(_))));
 
-    guard.set("DATABASE_URL", "postgres://db/app");
-    guard.set("DB_CONNECT_TIMEOUT", "5000");
+    guard.set(crate::env::TestEnv::DatabaseUrl.name(), "postgres://db/app");
+    guard.set(crate::env::TestEnv::DbConnectTimeout.name(), "5000");
     let postgres = load(&Environment::Test).await.unwrap();
     assert!(matches!(
         postgres.queue,
@@ -151,10 +184,20 @@ async fn the_test_environment_follows_the_database_scheme_without_a_topology() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn redis_test_config_keeps_queue_independent_from_database() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_TEST_TOPOLOGY"]);
-    _guard.remove("YORISHIRO_TEST_TOPOLOGY");
-    _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
-    _guard.set("QUEUE_URL", "redis://queue.example.com:6379");
+    let _guard = EnvGuard::capture(&[
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::TestTopology.name(),
+    ]);
+    _guard.remove(crate::env::TestEnv::TestTopology.name());
+    _guard.set(
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "postgres://test:test@localhost:5432/test",
+    );
+    _guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "redis://queue.example.com:6379",
+    );
 
     let config = load(&Environment::Any("test_sqlite_redis".into()))
         .await
@@ -173,10 +216,20 @@ async fn redis_test_config_keeps_queue_independent_from_database() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn test_configs_disable_external_embedding_downloads_by_default() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
-    _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
-    _guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
-    _guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
+    let _guard = EnvGuard::capture(&[
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
+    ]);
+    _guard.set(
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/test.sqlite3?mode=rwc",
+    );
+    _guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "sqlite:///tmp/test-queue.sqlite3?mode=rwc",
+    );
+    _guard.remove(crate::env::TestEnv::EmbeddingProvider.name());
 
     let config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
@@ -188,12 +241,12 @@ async fn test_configs_disable_external_embedding_downloads_by_default() {
 #[serial(process_environment)]
 async fn every_supported_topology_loads_from_loco_test_environment() {
     let guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_TEST_TOPOLOGY",
-        "PORT",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::TestTopology.name(),
+        crate::env::TestEnv::Port.name(),
     ]);
-    guard.set("PORT", "5151");
+    guard.set(crate::env::TestEnv::Port.name(), "5151");
     for (topology, database, queue) in [
         (
             "postgres-postgres",
@@ -216,9 +269,9 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
             "redis://redis:6379/15",
         ),
     ] {
-        guard.set("YORISHIRO_TEST_TOPOLOGY", topology);
-        guard.set("DATABASE_URL", database);
-        guard.set("QUEUE_URL", queue);
+        guard.set(crate::env::TestEnv::TestTopology.name(), topology);
+        guard.set(crate::env::TestEnv::DatabaseUrl.name(), database);
+        guard.set(crate::env::TestEnv::QueueUrl.name(), queue);
         let config = load(&Environment::Test).await.unwrap();
         assert_eq!(config.database.uri, database);
         assert_eq!(config.server.port, 5151, "{topology} must honor PORT");
@@ -249,15 +302,15 @@ async fn every_supported_topology_loads_from_loco_test_environment() {
 #[serial(process_environment)]
 async fn production_config_is_the_packaged_loco_config() {
     let _guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-        "YORISHIRO_EMBEDDING_PROVIDER",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueueKind.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
     ]);
-    _guard.remove("DATABASE_URL");
-    _guard.remove("QUEUE_URL");
-    _guard.remove("YORISHIRO_QUEUE_KIND");
-    _guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
+    _guard.remove(crate::env::TestEnv::DatabaseUrl.name());
+    _guard.remove(crate::env::TestEnv::QueueUrl.name());
+    _guard.remove(crate::env::TestEnv::QueueKind.name());
+    _guard.remove(crate::env::TestEnv::EmbeddingProvider.name());
 
     let config = load(&Environment::Production).await.unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
@@ -279,21 +332,24 @@ async fn production_example_is_used_when_local_config_is_absent() {
     )
     .unwrap();
     let guard = EnvGuard::capture(&[
-        "LOCO_CONFIG_FOLDER",
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_EMBEDDING_PROVIDER",
+        crate::env::TestEnv::LocoConfigFolder.name(),
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
     ]);
-    guard.set("LOCO_CONFIG_FOLDER", directory.path().to_str().unwrap());
     guard.set(
-        "DATABASE_URL",
+        crate::env::TestEnv::LocoConfigFolder.name(),
+        directory.path().to_str().unwrap(),
+    );
+    guard.set(
+        crate::env::TestEnv::DatabaseUrl.name(),
         "sqlite:///tmp/packaged-fallback.sqlite3?mode=rwc",
     );
     guard.set(
-        "QUEUE_URL",
+        crate::env::TestEnv::QueueUrl.name(),
         "sqlite:///tmp/packaged-fallback-queue.sqlite3?mode=rwc",
     );
-    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    guard.set(crate::env::TestEnv::EmbeddingProvider.name(), "none");
 
     let config = load(&Environment::Production).await.unwrap();
     assert_eq!(
@@ -322,19 +378,57 @@ async fn production_example_is_used_when_local_config_is_absent() {
     assert_eq!(queue.idle_timeout, overridden.database.idle_timeout);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+#[serial(process_environment)]
+async fn config_folder_preserves_non_utf8_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join(OsStr::from_bytes(b"config-\xff"));
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/config/production.yaml"),
+        folder.join("production.yaml"),
+    )
+    .unwrap();
+    let guard = EnvGuard::capture(&[
+        crate::env::TestEnv::LocoConfigFolder.name(),
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueueKind.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
+    ]);
+    guard.set(crate::env::TestEnv::LocoConfigFolder.name(), &folder);
+    guard.set(crate::env::TestEnv::DatabaseUrl.name(), "sqlite::memory:");
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "sqlite:///tmp/non-utf8-config-queue.sqlite3?mode=rwc",
+    );
+    guard.set(crate::env::TestEnv::QueueKind.name(), "Sqlite");
+    guard.set(crate::env::TestEnv::EmbeddingProvider.name(), "none");
+
+    let config = load(&Environment::Production).await.unwrap();
+    assert_eq!(config.database.uri, "sqlite::memory:");
+}
+
 #[tokio::test]
 #[serial(process_environment)]
 async fn production_selects_queue_provider_independently_from_database() {
     let _guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-        "YORISHIRO_EMBEDDING_PROVIDER",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueueKind.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
     ]);
-    _guard.set("DATABASE_URL", "postgres://db/yorishiro");
-    _guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
-    _guard.remove("YORISHIRO_QUEUE_KIND");
-    _guard.remove("QUEUE_URL");
+    _guard.set(
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "postgres://db/yorishiro",
+    );
+    _guard.set(crate::env::TestEnv::EmbeddingProvider.name(), "none");
+    _guard.remove(crate::env::TestEnv::QueueKind.name());
+    _guard.remove(crate::env::TestEnv::QueueUrl.name());
 
     let postgres_queue = load(&Environment::Production).await.unwrap();
 
@@ -344,8 +438,11 @@ async fn production_selects_queue_provider_independently_from_database() {
         Some(QueueConfig::Postgres(queue)) if queue.uri == "postgres://db/yorishiro"
     ));
 
-    _guard.set("YORISHIRO_QUEUE_KIND", "Redis");
-    _guard.set("QUEUE_URL", "redis://queue.example.com:6379");
+    _guard.set(crate::env::TestEnv::QueueKind.name(), "Redis");
+    _guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
+        "redis://queue.example.com:6379",
+    );
 
     let redis_queue = load(&Environment::Production).await.unwrap();
 
@@ -361,16 +458,16 @@ async fn production_selects_queue_provider_independently_from_database() {
 #[serial(process_environment)]
 async fn production_defaults_follow_the_database_and_queue_topology() {
     let guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-        "YORISHIRO_QUEUE_WORKERS",
-        "DB_MAX_CONNECTIONS",
-        "YORISHIRO_EMBEDDING_PROVIDER",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueueKind.name(),
+        crate::env::TestEnv::QueueWorkers.name(),
+        crate::env::TestEnv::DbMaxConnections.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
     ]);
-    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
-    guard.remove("YORISHIRO_QUEUE_WORKERS");
-    guard.remove("DB_MAX_CONNECTIONS");
+    guard.set(crate::env::TestEnv::EmbeddingProvider.name(), "none");
+    guard.remove(crate::env::TestEnv::QueueWorkers.name());
+    guard.remove(crate::env::TestEnv::DbMaxConnections.name());
     for (database, kind, queue, pool, workers) in [
         ("sqlite:///var/lib/y/a.sqlite3?mode=rwc", None, None, 10, 1),
         ("sqlite:/var/lib/y/a.sqlite3?mode=rwc", None, None, 10, 1),
@@ -391,14 +488,14 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
             2,
         ),
     ] {
-        guard.set("DATABASE_URL", database);
+        guard.set(crate::env::TestEnv::DatabaseUrl.name(), database);
         match kind {
-            Some(kind) => guard.set("YORISHIRO_QUEUE_KIND", kind),
-            None => guard.remove("YORISHIRO_QUEUE_KIND"),
+            Some(kind) => guard.set(crate::env::TestEnv::QueueKind.name(), kind),
+            None => guard.remove(crate::env::TestEnv::QueueKind.name()),
         }
         match queue {
-            Some(queue) => guard.set("QUEUE_URL", queue),
-            None => guard.remove("QUEUE_URL"),
+            Some(queue) => guard.set(crate::env::TestEnv::QueueUrl.name(), queue),
+            None => guard.remove(crate::env::TestEnv::QueueUrl.name()),
         }
         let config = load(&Environment::Production).await.unwrap();
         assert_eq!(config.database.max_connections, pool, "{database} pool");
@@ -417,12 +514,12 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
 #[serial(process_environment)]
 async fn production_refuses_crossed_sql_queue_backends() {
     let guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-        "YORISHIRO_EMBEDDING_PROVIDER",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueueKind.name(),
+        crate::env::TestEnv::EmbeddingProvider.name(),
     ]);
-    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    guard.set(crate::env::TestEnv::EmbeddingProvider.name(), "none");
     for (database, kind, queue) in [
         (
             "postgres://db/app",
@@ -435,9 +532,9 @@ async fn production_refuses_crossed_sql_queue_backends() {
             "postgres://queue/app",
         ),
     ] {
-        guard.set("DATABASE_URL", database);
-        guard.set("YORISHIRO_QUEUE_KIND", kind);
-        guard.set("QUEUE_URL", queue);
+        guard.set(crate::env::TestEnv::DatabaseUrl.name(), database);
+        guard.set(crate::env::TestEnv::QueueKind.name(), kind);
+        guard.set(crate::env::TestEnv::QueueUrl.name(), queue);
         let loco_rs::Error::CustomError(_, detail) = load(&Environment::Production)
             .await
             .expect_err("invalid pair must not boot")
@@ -453,15 +550,18 @@ async fn production_refuses_crossed_sql_queue_backends() {
 #[serial(process_environment)]
 async fn query_embedding_settings_are_validated() {
     let guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS",
-        "YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS",
-        "YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::QueryEmbeddingTimeoutMs.name(),
+        crate::env::TestEnv::QueryEmbeddingPollIntervalMs.name(),
+        crate::env::TestEnv::QueryEmbeddingRetentionSecs.name(),
     ]);
-    guard.set("DATABASE_URL", "sqlite:///tmp/qe-config.sqlite3?mode=rwc");
     guard.set(
-        "QUEUE_URL",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/qe-config.sqlite3?mode=rwc",
+    );
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
         "sqlite:///tmp/qe-config-queue.sqlite3?mode=rwc",
     );
     let environment = Environment::Any("test_sqlite".into());
@@ -479,9 +579,15 @@ async fn query_embedding_settings_are_validated() {
         ("1000", "2000", "300", "poll_interval_ms must not exceed"),
         ("15000", "100", "5", "retention_seconds must cover"),
     ] {
-        guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", timeout);
-        guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", poll);
-        guard.set("YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", retention);
+        guard.set(crate::env::TestEnv::QueryEmbeddingTimeoutMs.name(), timeout);
+        guard.set(
+            crate::env::TestEnv::QueryEmbeddingPollIntervalMs.name(),
+            poll,
+        );
+        guard.set(
+            crate::env::TestEnv::QueryEmbeddingRetentionSecs.name(),
+            retention,
+        );
         let error = load(&environment).await.unwrap_err().to_string();
         assert!(
             error.contains(expected),
@@ -493,14 +599,21 @@ async fn query_embedding_settings_are_validated() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn mcp_allowed_hosts_load_and_reject_wildcards() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_MCP_ALLOWED_HOSTS"]);
-    guard.set("DATABASE_URL", "sqlite:///tmp/mcp-config.sqlite3?mode=rwc");
+    let guard = EnvGuard::capture(&[
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::McpAllowedHosts.name(),
+    ]);
     guard.set(
-        "QUEUE_URL",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/mcp-config.sqlite3?mode=rwc",
+    );
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
         "sqlite:///tmp/mcp-config-queue.sqlite3?mode=rwc",
     );
     guard.set(
-        "YORISHIRO_MCP_ALLOWED_HOSTS",
+        crate::env::TestEnv::McpAllowedHosts.name(),
         "mcp.example.com,10.0.0.4:5150",
     );
     let config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
@@ -510,7 +623,7 @@ async fn mcp_allowed_hosts_load_and_reject_wildcards() {
         "mcp.example.com,10.0.0.4:5150"
     );
 
-    guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "*");
+    guard.set(crate::env::TestEnv::McpAllowedHosts.name(), "*");
     let error = load(&Environment::Any("test_sqlite".into()))
         .await
         .expect_err("wildcard MCP hosts must be rejected");
@@ -534,20 +647,23 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
     impl rmcp::ServerHandler for EmptyServer {}
 
     let guard = EnvGuard::capture(&[
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "BINDING",
-        "YORISHIRO_MCP_ALLOWED_HOSTS",
-        "YORISHIRO_ALLOWED_ORIGINS",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        crate::env::TestEnv::QueueUrl.name(),
+        crate::env::TestEnv::Binding.name(),
+        crate::env::TestEnv::McpAllowedHosts.name(),
+        crate::env::TestEnv::AllowedOrigins.name(),
     ]);
-    guard.set("DATABASE_URL", "sqlite:///tmp/mcp-policy.sqlite3?mode=rwc");
     guard.set(
-        "QUEUE_URL",
+        crate::env::TestEnv::DatabaseUrl.name(),
+        "sqlite:///tmp/mcp-policy.sqlite3?mode=rwc",
+    );
+    guard.set(
+        crate::env::TestEnv::QueueUrl.name(),
         "sqlite:///tmp/mcp-policy-queue.sqlite3?mode=rwc",
     );
-    guard.remove("BINDING");
-    guard.remove("YORISHIRO_MCP_ALLOWED_HOSTS");
-    guard.remove("YORISHIRO_ALLOWED_ORIGINS");
+    guard.remove(crate::env::TestEnv::Binding.name());
+    guard.remove(crate::env::TestEnv::McpAllowedHosts.name());
+    guard.remove(crate::env::TestEnv::AllowedOrigins.name());
     let mut config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
     assert_eq!(config.server.binding, "localhost");
     let production = load(&Environment::Production).await.unwrap();
@@ -620,7 +736,10 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         );
     }
 
-    guard.set("YORISHIRO_ALLOWED_ORIGINS", r#"["https://example.com"]"#);
+    guard.set(
+        crate::env::TestEnv::AllowedOrigins.name(),
+        r#"["https://example.com"]"#,
+    );
     config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
     let service = StreamableHttpService::new(
         || Ok(EmptyServer),
@@ -688,7 +807,7 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
         "https://example.com/",
     ] {
         guard.set(
-            "YORISHIRO_ALLOWED_ORIGINS",
+            crate::env::TestEnv::AllowedOrigins.name(),
             serde_json::to_string(&[origin]).unwrap(),
         );
         assert!(

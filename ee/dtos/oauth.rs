@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Deserialize)]
+pub(crate) struct AuthorizeParams {
+    pub(crate) workspace_id: Option<uuid::Uuid>,
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct OAuthStatus {
@@ -11,4 +16,11 @@ pub(crate) struct CallbackParams {
     pub(crate) code: Option<String>,
     pub(crate) state: Option<String>,
     pub(crate) error: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub(crate) struct AcceptOAuthInviteRequest {
+    pub(crate) invite_token: String,
 }

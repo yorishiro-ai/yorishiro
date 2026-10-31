@@ -209,24 +209,3 @@ pub(crate) async fn authenticate_tenant(
     let auth_ctx = authenticate(ctx, headers).await?;
     Ok((auth_ctx.tenant_id, auth_ctx.user_id))
 }
-
-/// Authenticates the bearer API key and requires the attributed user to hold an Owner/Admin membership in the key's tenant.
-///
-/// This is a **role-based** check (orthogonal to `ApiKeyScope`): a Member-role key can hold `write` scope for content operations while still having no business reading billing data.
-///
-/// Service-only API keys (no `user_id`) are rejected because admin status can only be determined from a user's tenant membership.
-pub(crate) async fn authenticate_tenant_admin(
-    ctx: &AppContext,
-    headers: &HeaderMap,
-) -> Result<Uuid, YorishiroError> {
-    let auth_ctx = authenticate(ctx, headers).await?;
-    let user_id = auth_ctx.user_id.ok_or(YorishiroError::Unauthenticated)?;
-    crate::models::tenant_memberships::get_membership_role(&ctx.db, auth_ctx.tenant_id, user_id)
-        .await?
-        .filter(|role| role.administers_tenant())
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "the hosted dashboard is restricted to tenant owners/admins".into(),
-            hint: "ask a tenant owner to grant you the admin role".into(),
-        })?;
-    Ok(auth_ctx.tenant_id)
-}

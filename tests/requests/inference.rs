@@ -168,8 +168,8 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
+    guard.remove(crate::env::TestEnv::LicenseKey.name());
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
@@ -291,6 +291,51 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         assert!(
             fetched["data"].get("summary").is_none(),
             "the proposal must not be written before confirmation: {fetched:?}"
+        );
+
+        let revoked = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            setup.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Schema,
+            None,
+            false,
+        )
+        .await
+        .expect("issue confirmation service key");
+        let denied = request
+            .post(&format!("/api/inference-jobs/{job_id}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", revoked.plaintext))
+            .await;
+        assert_eq!(
+            denied.status_code(),
+            StatusCode::ACCEPTED,
+            "{}",
+            denied.text()
+        );
+        let denied_id = denied.json::<serde_json::Value>()["job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id)
+            .await
+            .expect("revoke queued confirmation actor");
+        super::fill_defaults::fail_via_api(
+            &request,
+            &ctx,
+            denied_id,
+            &setup.api_key,
+            &format!("/api/inference-jobs/confirmations/{denied_id}"),
+        )
+        .await;
+        let unchanged = request
+            .get(&format!("/api/entities/{entity}"))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(unchanged.status_code(), StatusCode::OK);
+        assert_eq!(
+            unchanged.json::<serde_json::Value>()["data"],
+            fetched["data"]
         );
 
         let confirm = request

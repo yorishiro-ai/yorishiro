@@ -114,17 +114,12 @@ impl RequiredScope for MigrationScope {
 /// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
 /// A read-only handler can just let it drop; a rollback of nothing-written is a no-op.
 pub struct Authorized<R> {
-    app_ctx: AppContext,
     pub ctx: api_keys::AuthContext,
     txn: sea_orm::DatabaseTransaction,
     _scope: PhantomData<R>,
 }
 
 impl<R> Authorized<R> {
-    pub(crate) fn timezone(&self) -> chrono_tz::Tz {
-        crate::time::configured(&self.app_ctx)
-    }
-
     pub fn txn(&self) -> &sea_orm::DatabaseTransaction {
         &self.txn
     }
@@ -162,7 +157,6 @@ where
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Authorized {
-            app_ctx,
             ctx,
             txn,
             _scope: PhantomData,

@@ -24,10 +24,34 @@ fn client(timeout: Duration) -> Client {
 }
 
 #[tokio::test]
+async fn discovery_rejects_a_different_issuer() {
+    let body = serde_json::json!({
+        "issuer":"https://other.example",
+        "authorization_endpoint":"https://other.example/authorize",
+        "token_endpoint":"https://other.example/token",
+        "jwks_uri":"https://other.example/jwks"
+    })
+    .to_string();
+    let (issuer, _stub, request) = start_server(&format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    ))
+    .await;
+    let http = ReqwestOAuthHttp::with_client(client(Duration::from_secs(1)));
+    assert!(matches!(
+        http.fetch_discovery_document(&issuer).await,
+        Err(YorishiroError::Unauthenticated)
+    ));
+    request.await.unwrap();
+}
+
+#[tokio::test]
 async fn production_transport_fetches_discovery_and_jwks_and_exchanges_code() {
-    let (issuer, _discovery_task_stub, discovery_task) = start_server(
-        "HTTP/1.1 200 OK\r\nContent-Length: 132\r\nConnection: close\r\n\r\n{\"authorization_endpoint\":\"http://127.0.0.1/authorize\",\"token_endpoint\":\"http://127.0.0.1/token\",\"jwks_uri\":\"http://127.0.0.1/jwks\"}",
-    )
+    let (issuer, _discovery_task_stub, discovery_task) = super::json_server(serde_json::json!({
+        "authorization_endpoint":"http://127.0.0.1/authorize",
+        "token_endpoint":"http://127.0.0.1/token",
+        "jwks_uri":"http://127.0.0.1/jwks"
+    }))
     .await;
     let http = ReqwestOAuthHttp::with_client(client(Duration::from_secs(1)));
     let discovery = http

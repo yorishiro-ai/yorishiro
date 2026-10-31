@@ -71,6 +71,18 @@ impl UndoWorker {
             txn.commit().await.internal()?;
             return Ok(());
         }
+        crate::models::access::require_job_actor(
+            &txn,
+            &self.ctx.db,
+            &api_key_audit_log::AuditActor {
+                tenant_id: args.tenant_id,
+                workspace_id: args.workspace_id,
+                api_key_id: args.api_key_id,
+                user_id: args.user_id,
+            },
+            crate::models::api_keys::ApiKeyScope::Migration,
+        )
+        .await?;
         let report =
             entity_entities::undo_job(&txn, args.workspace_id, args.snapshot_job_id).await?;
         api_key_audit_log::record(

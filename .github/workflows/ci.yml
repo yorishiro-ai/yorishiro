@@ -480,6 +480,10 @@ jobs:
             --skip ee::workers::infer_fill::stalled_provider_enqueue_does_not_block_new_dispatch_records \
             --skip ee::workers::infer_fill::two_jobs_for_one_workspace_never_run_together \
             --skip ee::workers::infer_fill::schema_change_during_llm_call_rejects_the_old_schema_proposal \
+            --skip ee::workers::infer_fill::revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider \
+            --skip ee::workers::infer_fill::revocation_during_llm_call_rejects_the_late_proposal \
+            --skip ee::workers::infer_fill::downgrade_during_llm_call_rejects_the_late_proposal \
+            --skip ee::workers::infer_fill::workspace_revocation_during_llm_call_rejects_the_late_proposal \
             --skip ee::workers::reindex:: \
             --skip requests::setup:: \
             --skip requests::ee_setup:: \
@@ -496,6 +500,7 @@ jobs:
             --skip requests::auth::signup_without_invite_respects_the_tenant_cap \
             --skip requests::auth::signup_cannot_raise_the_community_tenant_cap_with_configuration \
             --skip requests::auth::create_tenant_serializes_on_its_advisory_lock \
+            --skip requests::auth::disabled_tenant_invites_cannot_accept_or_register_accounts \
             --skip requests::entities::undo_restores_snapshotted_entities_and_counts_a_deleted_one \
             --skip requests::import::concurrent_import_workers_keep_each_apps_database \
             --skip requests::import::import_resolves_a_pre_existing_schema_for_every_entity_line \
@@ -505,6 +510,10 @@ jobs:
             --skip requests::inference::the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant \
             --skip requests::marketplace::without_a_licence_the_marketplace_is_not_served \
             --skip requests::members::owner_can_list_and_add_members \
+            --skip requests::members::last_owner_cannot_be_demoted_or_removed_through_any_membership_operation \
+            --skip requests::members::competing_owner_demotion_and_removal_preserve_an_owner \
+            --skip requests::members::role_preview_reports_lost_workspaces_without_keys \
+            --skip requests::entities::entity_plan_quota_expires_but_manual_limit_remains \
             --skip requests::mcp::fill_defaults_mcp_executes_and_enforces_migration_scope \
             --skip requests::mcp::mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid \
             --skip requests::mcp::mcp_search_asks_a_worker_to_embed_the_query \

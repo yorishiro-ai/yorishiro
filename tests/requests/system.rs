@@ -120,6 +120,13 @@ async fn a_member_key_cannot_touch_maintenance() {
         )
         .await
         .expect("add member");
+        super::fixtures::grant_workspace(
+            &ctx,
+            tenant.workspace_id,
+            member.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
+        )
+        .await;
         let key = issue_api_key(
             &ctx,
             tenant.workspace_id,

@@ -5,9 +5,11 @@ pub mod create_tenant;
 pub mod create_user;
 pub mod create_workspace;
 pub(crate) mod db_load_guard;
+pub(crate) mod delete_user;
 pub(crate) mod list_api_keys;
 pub mod list_members;
 pub(crate) mod list_tenants;
+pub(crate) mod list_users;
 pub(crate) mod list_workspaces;
 pub mod maintenance;
 pub(crate) mod maintenance_status;
@@ -16,3 +18,9 @@ pub mod reindex_embeddings;
 pub(crate) mod resync_embeddings;
 pub(crate) mod revoke_api_key;
 pub mod tenant_reindex_scheduler;
+
+pub mod inspect_tenant_retirement;
+
+pub mod disable_tenant;
+
+pub mod delete_tenant;

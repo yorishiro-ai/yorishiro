@@ -5,6 +5,7 @@
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Env {
     DatabaseUrl,
+    LocoConfigFolder,
     TestTopology,
 }
 
@@ -12,11 +13,16 @@ impl Env {
     const fn name(self) -> &'static str {
         match self {
             Self::DatabaseUrl => "DATABASE_URL",
+            Self::LocoConfigFolder => "LOCO_CONFIG_FOLDER",
             Self::TestTopology => "YORISHIRO_TEST_TOPOLOGY",
         }
     }
 
     pub(crate) fn read(self) -> Result<String, std::env::VarError> {
         std::env::var(self.name())
+    }
+
+    pub(crate) fn read_os(self) -> Option<std::ffi::OsString> {
+        std::env::var_os(self.name())
     }
 }

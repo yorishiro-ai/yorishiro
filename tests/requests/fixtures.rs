@@ -9,6 +9,19 @@ use yorishiro::models::_entities::api_keys;
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy;
 
+pub async fn grant_workspace(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+    user_id: Uuid,
+    role: yorishiro::models::workspace_memberships::WorkspaceRole,
+) {
+    let txn = ctx.db.begin().await.expect("begin workspace grant");
+    yorishiro::models::workspace_memberships::Model::grant(&txn, workspace_id, user_id, role)
+        .await
+        .expect("grant explicit workspace access");
+    txn.commit().await.expect("commit workspace grant");
+}
+
 pub struct TestTenant {
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
@@ -17,11 +30,6 @@ pub struct TestTenant {
 }
 
 impl TestTenant {
-    pub fn authenticated(&self, mut request: loco_rs::TestServer) -> loco_rs::TestServer {
-        request.add_header("Authorization", format!("Bearer {}", self.api_key));
-        request
-    }
-
     pub async fn create(request: &loco_rs::TestServer, ctx: &AppContext, args: TenantArgs) -> Self {
         let started = std::time::Instant::now();
         let name = std::thread::current()
@@ -30,7 +38,9 @@ impl TestTenant {
             .to_owned();
         #[cfg(not(feature = "enterprise"))]
         if ctx.config.database.uri.starts_with("postgres:")
-            && std::env::var("DATABASE_URL").is_ok_and(|url| url == ctx.config.database.uri)
+            && crate::env::TestEnv::DatabaseUrl
+                .read()
+                .is_ok_and(|url| url == ctx.config.database.uri)
         {
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
             use yorishiro::models::{tenant_memberships, tenant_tenants};

@@ -1,10 +1,58 @@
-//! Subscription tiers for the hosted offering.
-//!
-//! Self-hosted deployments never assign a plan (`tenant_tenants.plan` stays absent, since base never writes `tenant_billing`); this type is only ever produced by this crate's Stripe integration.
+//! Subscription tiers and licence-dependent plan-policy eligibility.
 
 use serde::{Deserialize, Serialize};
 
+/// Whether plan rules may be applied to the current operation.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PlanPolicy {
+    Disabled,
+    Enabled,
+}
+
+pub(crate) struct PlanPolicySetting {
+    pub(crate) enabled: bool,
+}
+
+impl PlanPolicy {
+    /// Resolves the configured switch and current licence validity together.
+    ///
+    /// # Errors
+    /// Returns an error if the deployment policy was not installed.
+    pub fn current(ctx: &loco_rs::app::AppContext) -> Result<Self, crate::YorishiroError> {
+        use crate::edition::ee::controllers::middleware::edition::LicenceState;
+        use std::sync::Arc;
+
+        let setting = ctx
+            .shared_store
+            .get::<Arc<PlanPolicySetting>>()
+            .ok_or_else(|| {
+                crate::YorishiroError::Internal(anyhow::anyhow!("plan policy missing"))
+            })?;
+        let licence = ctx.shared_store.get::<Arc<LicenceState>>();
+        Ok(Self::resolve(
+            setting.enabled,
+            licence.as_deref(),
+            crate::time::now().timestamp(),
+        ))
+    }
+
+    /// Resolves eligibility at a specific clock boundary without freezing licence expiry.
+    #[must_use]
+    pub fn resolve(
+        enabled: bool,
+        licence: Option<&crate::edition::ee::controllers::middleware::edition::LicenceState>,
+        now: i64,
+    ) -> Self {
+        if enabled && licence.is_some_and(|licence| licence.is_active_at(now)) {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Plan {
     Free,
@@ -30,9 +78,7 @@ pub struct ComputePolicy {
     pub burst_ceiling: u32,
 }
 
-/// Caps applied when a tenant is on a given plan.
-/// `max_workspaces` is written onto `tenant_tenants`; `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
-/// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
+/// Operation-time plan caps, never persisted over explicit operator limits.
 #[derive(Clone, Copy)]
 pub(crate) struct PlanCaps {
     pub(crate) max_workspaces: Option<i32>,
@@ -40,6 +86,29 @@ pub(crate) struct PlanCaps {
 }
 
 impl Plan {
+    pub(crate) async fn for_tenant(
+        ctx: &loco_rs::app::AppContext,
+        tenant_id: uuid::Uuid,
+    ) -> Result<Self, crate::YorishiroError> {
+        use crate::edition::ee::controllers::middleware::edition::LicenceState;
+        use std::sync::Arc;
+
+        let licence = ctx.shared_store.get::<Arc<LicenceState>>();
+        if let Some(plan) =
+            licence.and_then(|state| state.active_plan_at(crate::time::now().timestamp()))
+        {
+            return Ok(plan);
+        }
+        let billing =
+            crate::edition::ee::models::tenant_billing::get_billing(&ctx.db, tenant_id).await?;
+        match billing {
+            None => Ok(Self::Free),
+            Some(billing) => Self::from_db_str(billing.plan.as_deref().ok_or_else(|| {
+                crate::YorishiroError::Internal(anyhow::anyhow!("billing plan is missing"))
+            })?),
+        }
+    }
+
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Plan::Free => "free",
@@ -63,13 +132,7 @@ impl Plan {
         }
     }
 
-    pub(crate) fn caps(self, policy_enabled: bool) -> PlanCaps {
-        if !policy_enabled {
-            return PlanCaps {
-                max_workspaces: None,
-                default_max_entities: None,
-            };
-        }
+    pub(crate) fn caps(self) -> PlanCaps {
         match self {
             Plan::Free => PlanCaps {
                 max_workspaces: Some(1),

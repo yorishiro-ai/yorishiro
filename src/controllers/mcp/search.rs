@@ -31,6 +31,7 @@ pub(crate) struct SearchEntitiesArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_search)]
 impl YorishiroMcpServer {
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Vector similarity search over entities using a natural-language query (requires read scope)"
     )]
     pub(crate) async fn search_entities(
@@ -38,7 +39,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SearchEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth_ctx = match super::verify(self.app_context(), &parts, ApiKeyScope::Read).await? {
+        let auth_ctx = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("search_entities")?,
+        )
+        .await?
+        {
             VerifyOutcome::Verified(auth_ctx) => auth_ctx,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };

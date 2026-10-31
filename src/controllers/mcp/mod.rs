@@ -1,10 +1,18 @@
+mod api_keys;
+mod audit_log;
 pub mod entities;
 mod import;
+mod invites;
+mod members;
 mod recall;
 pub mod relations;
 mod schemas;
 mod search;
 mod template_library;
+mod tenants;
+mod users;
+mod whoami;
+mod workspaces;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -105,6 +113,50 @@ impl YorishiroMcpServer {
     pub(crate) fn app_context(&self) -> &AppContext {
         &self.ctx
     }
+
+    pub(crate) fn required_scope(&self, name: &str) -> Result<ApiKeyScope, ErrorData> {
+        self.tool_router
+            .get(name)
+            .and_then(|tool| tool.meta.as_ref())
+            .and_then(|meta| meta.0.get("yorishiro/required_scope"))
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+            .ok_or_else(|| ErrorData::internal_error("tool scope requirement missing", None))
+    }
+
+    pub(crate) fn tool_capabilities(
+        &self,
+        scopes: &[ApiKeyScope],
+        audit: bool,
+    ) -> Result<Vec<serde_json::Value>, ErrorData> {
+        self.tool_router
+            .list_all()
+            .into_iter()
+            .filter(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()))
+            .map(|tool| {
+                let required = self.required_scope(tool.name.as_ref())?;
+                let grants = tool.meta.as_ref()
+                    .and_then(|meta| meta.0.get("yorishiro/required_grants"))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([]));
+                Ok(serde_json::json!({
+                    "name": tool.name,
+                    "required_scope": required,
+                    "scope_satisfied": scopes.contains(&required),
+                    "required_grants": grants,
+                    "grants_satisfied": grants.as_array().is_some_and(|grants| grants.iter().all(|grant| grant == "audit" && audit)),
+                }))
+            })
+            .collect()
+    }
+}
+
+/// Declares the scope used by both tool authorization and capability discovery.
+pub fn scope_requirement(scope: ApiKeyScope) -> rmcp::model::MetaObject {
+    let mut meta = rmcp::model::MetaObject::new();
+    meta.0
+        .insert("yorishiro/required_scope".into(), serde_json::json!(scope));
+    meta
 }
 
 /// The complete community-edition tool set.
@@ -112,11 +164,19 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([
         YorishiroMcpServer::tool_router_entities(),
         YorishiroMcpServer::tool_router_import(),
+        YorishiroMcpServer::tool_router_invites(),
+        YorishiroMcpServer::tool_router_members(),
         YorishiroMcpServer::tool_router_recall(),
         YorishiroMcpServer::tool_router_relations(),
         YorishiroMcpServer::tool_router_schemas(),
         YorishiroMcpServer::tool_router_search(),
         YorishiroMcpServer::tool_router_template_library(),
+        YorishiroMcpServer::tool_router_tenants(),
+        YorishiroMcpServer::tool_router_whoami(),
+        YorishiroMcpServer::tool_router_workspaces(),
+        YorishiroMcpServer::tool_router_api_keys(),
+        YorishiroMcpServer::tool_router_audit_log(),
+        YorishiroMcpServer::tool_router_users(),
     ])
 }
 
@@ -226,7 +286,7 @@ pub(crate) enum AuthzOutcome {
 
 /// A connection-less version of `Authorized`: only authenticates and verifies scope, without opening a transaction.
 /// Tools that do slow work before touching the database (embedding generation) use this instead and call `TenantDb::acquire_for_workspace` afterward.
-pub(super) enum VerifyOutcome {
+pub(crate) enum VerifyOutcome {
     Verified(AuthContext),
     ScopeDenied(CallToolResult),
 }
@@ -250,8 +310,26 @@ pub(crate) async fn authorize(
     let presented_key = extract_bearer_key(parts)?;
     let headers = auth::header_pairs(parts);
 
-    match auth::RequestAuth::new(ctx)
-        .authorize(presented_key, required, &headers)
+    let request_auth = auth::RequestAuth::new(ctx);
+    let current = match request_auth.resolve(presented_key, &headers).await {
+        Ok(current) => current,
+        Err(error @ YorishiroError::ScopeInsufficient { .. }) => {
+            return Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(error)));
+        }
+        Err(YorishiroError::Unauthenticated) => {
+            return Err(ErrorData::invalid_request("authentication failed", None));
+        }
+        Err(error) => return Err(crate::error::mcp_internal(error)),
+    };
+    if let Err(error) = auth::require_scope(&current, required) {
+        return Ok(AuthzOutcome::ScopeDenied(scope_denied(
+            error,
+            required,
+            current.scope,
+        )));
+    }
+    match request_auth
+        .begin(current, required >= ApiKeyScope::Write)
         .await
     {
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
@@ -267,7 +345,7 @@ pub(crate) async fn authorize(
 
 /// Connection-less counterpart to `authorize`, used by tools that must run a slow operation (embedding generation) before touching the database.
 /// See `RequestAuth::verify`.
-pub(super) async fn verify(
+pub(crate) async fn verify(
     ctx: &AppContext,
     parts: &Parts,
     required: ApiKeyScope,
@@ -276,10 +354,22 @@ pub(super) async fn verify(
     let headers = auth::header_pairs(parts);
 
     match auth::RequestAuth::new(ctx)
-        .verify(presented_key, required, &headers)
+        .resolve(presented_key, &headers)
         .await
     {
-        Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
+        Ok(current) => {
+            if let Err(error) = auth::require_scope(&current, required) {
+                return Ok(VerifyOutcome::ScopeDenied(scope_denied(
+                    error,
+                    required,
+                    current.scope,
+                )));
+            }
+            crate::models::api_keys::Entity::touch_authenticated(ctx, &current)
+                .await
+                .map_err(crate::error::mcp_internal)?;
+            Ok(VerifyOutcome::Verified(current))
+        }
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))
         }
@@ -290,9 +380,32 @@ pub(super) async fn verify(
     }
 }
 
+fn scope_denied(
+    error: YorishiroError,
+    required: ApiKeyScope,
+    effective: ApiKeyScope,
+) -> CallToolResult {
+    let mut result = err_to_tool_result(error);
+    if let Some(details) = result
+        .structured_content
+        .as_mut()
+        .and_then(|value| value.get_mut("error"))
+    {
+        details["required_scope"] = serde_json::json!(required);
+        details["effective_scope"] = serde_json::json!(effective);
+    }
+    result
+}
+
 /// Converts a business-logic error into a tool call result (`is_error: true`).
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
+    let structured = match &err {
+        YorishiroError::ScopeInsufficient { message, hint } => Some(serde_json::json!({
+            "error": { "code": "scope_insufficient", "message": message, "hint": hint }
+        })),
+        _ => None,
+    };
     let message = match err {
         YorishiroError::Internal(err) => crate::error::report_internal(&err).to_string(),
         YorishiroError::ValidationFailed {
@@ -315,7 +428,9 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
         }
         other => other.to_string(),
     };
-    CallToolResult::error(vec![ContentBlock::text(message)])
+    let mut result = CallToolResult::error(vec![ContentBlock::text(message)]);
+    result.structured_content = structured;
+    result
 }
 
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {

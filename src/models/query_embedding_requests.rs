@@ -11,7 +11,7 @@ use chrono::Duration;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ConnectionTrait, QueryFilter};
+use sea_orm::{ConnectionTrait, QueryFilter, QuerySelect, QueryTrait};
 
 pub use crate::models::_entities::query_embedding_requests::{ActiveModel, Column, Entity, Model};
 
@@ -119,6 +119,17 @@ impl Entity {
     ) -> Result<bool, DbErr> {
         let dimensions = i32::try_from(vector.len())
             .map_err(|_| DbErr::Custom("query vector is too wide to store".into()))?;
+        use crate::models::_entities::{tenant_tenants, workspace_workspaces};
+        let active_tenants = tenant_tenants::Entity::find()
+            .select_only()
+            .column(tenant_tenants::Column::Id)
+            .filter(tenant_tenants::Column::DisabledAt.is_null());
+        let active_workspaces = workspace_workspaces::Entity::find()
+            .select_only()
+            .column(workspace_workspaces::Column::Id)
+            .filter(
+                workspace_workspaces::Column::TenantId.in_subquery(active_tenants.into_query()),
+            );
         let now = crate::time::now();
         let result = Entity::update_many()
             .col_expr(
@@ -132,6 +143,7 @@ impl Entity {
             .col_expr(Column::UpdatedAt, Expr::value(now))
             .filter(Column::Id.eq(id))
             .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::WorkspaceId.in_subquery(active_workspaces.into_query()))
             .filter(Column::Status.eq(QueryEmbeddingStatus::Pending.as_db_str()))
             .exec(db)
             .await?;
