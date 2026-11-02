@@ -344,6 +344,20 @@ async fn entity_update_refuses_a_stale_expected_updated_at() {
             .json(&serde_json::json!({ "data": { "title": "fourth" } }))
             .await;
         no_token.assert_status(StatusCode::OK);
+
+        let token = no_token.json::<serde_json::Value>()["updated_at"].clone();
+        let barrier = tokio::sync::Barrier::new(2);
+        let write = async |title: &str| {
+            barrier.wait().await;
+            request.put(&format!("/api/entities/{id}"))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .json(&serde_json::json!({"data":{"title":title},"expected_updated_at":token}))
+                .await
+        };
+        let (first, second) = tokio::join!(write("racer-one"), write("racer-two"));
+        let mut statuses = [first.status_code().as_u16(), second.status_code().as_u16()];
+        statuses.sort();
+        assert_eq!(statuses, [200, 409], "first: {}, second: {}", first.text(), second.text());
     })
     .await;
 }

@@ -8,6 +8,8 @@ use yorishiro::models::api_keys::WORKSPACE_HEADER;
 use super::fixtures::{self, TenantArgs, TestTenant};
 use super::{boot_request, boot_request_with_timezone};
 
+mod issuance_race;
+
 #[tokio::test]
 async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
     use yorishiro::models::api_keys::{ApiKeyScope, Entity};
@@ -601,8 +603,54 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await
             .assert_status(StatusCode::FORBIDDEN);
 
+        let member_tenant_key = api_keys::Entity::create_tenant_api_key(
+            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Read,
+            Some(member.id), false, "member-tenant-issuer",
+        ).await.unwrap();
+        request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+            .json(&serde_json::json!({"name":"denied-member", "tenant_scoped":true}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+
+        let read_issuer = api_keys::Entity::create_tenant_api_key(
+            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Read,
+            Some(tenant.owner_id), false, "read-tenant-issuer",
+        ).await.unwrap();
+        request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+            .json(&serde_json::json!({"name":"denied-escalation", "scope":"write", "tenant_scoped":true}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
+        api_keys::Entity::update_many()
+            .col_expr(yorishiro::models::_entities::api_keys::Column::ExpiresAt, sea_orm::sea_query::Expr::value(expiry.fixed_offset()))
+            .filter(yorishiro::models::_entities::api_keys::Column::Id.eq(read_issuer.id))
+            .exec(&ctx.db).await.unwrap();
+        for requested in [serde_json::Value::Null, serde_json::json!(expiry + chrono::Duration::hours(1))] {
+            request.post("/api/api-keys")
+                .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
+                .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+                .json(&serde_json::json!({"name":"denied-expiry", "tenant_scoped":true, "expires_at":requested}))
+                .await.assert_status(StatusCode::FORBIDDEN);
+        }
+        request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+            .json(&serde_json::json!({"name":"capped-expiry", "tenant_scoped":true, "expires_at":expiry - chrono::Duration::minutes(1)}))
+            .await.assert_status(StatusCode::CREATED);
+
         // The new key names its workspace per request and appears in the listing.
         let full_key = record["full_key"].as_str().unwrap().to_owned();
+        let txn = ctx.db.begin().await.unwrap();
+        let second = tenancy::create_workspace(&txn, tenant.tenant_id, "second-key-target", None, None).await.unwrap();
+        txn.commit().await.unwrap();
+        request.get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {full_key}"))
+            .add_header(WORKSPACE_HEADER, second.id.to_string())
+            .await.assert_status(StatusCode::OK);
         request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {full_key}"))
@@ -629,6 +677,10 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await
             .assert_status(StatusCode::NO_CONTENT);
+        request.get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {full_key}"))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+            .await.assert_status(StatusCode::UNAUTHORIZED);
     })
     .await;
 }

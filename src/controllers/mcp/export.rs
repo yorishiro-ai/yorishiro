@@ -13,7 +13,7 @@ use crate::models::export;
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Export every schema, entity, and relation in the selected workspace as newline-delimited JSON (requires read scope); one {\"kind\":\"schema\"|\"entity\"|\"relation\",\"record\":{...}} object per line, the same format import_jsonl reads back. The result can be large for a busy workspace."
+        description = "Export schemas, entities, and relations in the selected workspace as newline-delimited JSON (requires read scope); one {\"kind\":\"schema\"|\"entity\"|\"relation\",\"record\":{...}} object per line, the same format import_jsonl reads back. Limited to 8 MiB and 10,000 records; larger workspaces must use paginated list APIs."
     )]
     pub(crate) async fn export_jsonl(
         &self,
@@ -30,20 +30,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let records = match export::export_all(
-            authorized.txn(),
-            authorized.auth_context().workspace_id,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
-        let mut lines = String::new();
-        for record in &records {
-            lines.push_str(&serde_json::to_string(record).map_err(crate::error::mcp_internal)?);
-            lines.push('\n');
-        }
+        let lines =
+            match export::export_jsonl(authorized.txn(), authorized.auth_context().workspace_id)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         Ok(CallToolResult::success(vec![ContentBlock::text(lines)]))
     }
 }

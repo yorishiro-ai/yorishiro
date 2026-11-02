@@ -508,7 +508,7 @@ Input schema:
 
 ### `export_jsonl`
 
-Export every schema, entity, and relation in the selected workspace as newline-delimited JSON (requires read scope); one {"kind":"schema"|"entity"|"relation","record":{...}} object per line, the same format import_jsonl reads back. The result can be large for a busy workspace.
+Export schemas, entities, and relations in the selected workspace as newline-delimited JSON (requires read scope); one {"kind":"schema"|"entity"|"relation","record":{...}} object per line, the same format import_jsonl reads back. Limited to 8 MiB and 10,000 records; larger workspaces must use paginated list APIs.
 
 Input schema:
 

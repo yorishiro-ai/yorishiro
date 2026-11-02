@@ -35,10 +35,47 @@ mod m20261029_040619_add_tenant_disabled_at;
 mod m20261029_055438_tenant_retirement_events;
 mod m20261030_080520_api_key_lifecycle;
 mod m20261102_050000_tenant_api_key_resolution;
+mod m20261103_000000_schema_reference_counts;
 pub struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        Migrations::migrations()
+    }
+
+    async fn up<'c, C>(db: C, steps: Option<u32>) -> Result<(), DbErr>
+    where
+        C: sea_orm_migration::IntoSchemaManagerConnection<'c>,
+    {
+        use sea_orm_migration::sea_orm::{
+            SqliteTransactionMode, TransactionOptions, TransactionTrait,
+        };
+
+        let db = db.into_database_executor();
+        // The fence and migrations use one transaction, including through transaction-pooling proxies.
+        let txn = db
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
+            .await?;
+        if txn.get_database_backend() == sea_orm_migration::sea_orm::DbBackend::Postgres {
+            txn.execute_unprepared(
+                "SELECT pg_advisory_xact_lock(hashtextextended('yorishiro:boot-migrations', 0))",
+            )
+            .await?;
+        }
+        Migrations::up(&txn, steps).await?;
+        txn.commit().await
+    }
+}
+
+// Keeps the framework's migration execution without recursively entering our fence.
+struct Migrations;
+
+#[async_trait::async_trait]
+impl MigratorTrait for Migrations {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
             Box::new(m20261020_000000_create_tenants::Migration),
@@ -74,6 +111,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261029_055438_tenant_retirement_events::Migration),
             Box::new(m20261030_080520_api_key_lifecycle::Migration),
             Box::new(m20261102_050000_tenant_api_key_resolution::Migration),
+            Box::new(m20261103_000000_schema_reference_counts::Migration),
             // inject-above (do not remove this comment)
         ]
     }

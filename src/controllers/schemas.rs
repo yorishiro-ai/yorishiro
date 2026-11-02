@@ -27,7 +27,7 @@ pub(crate) async fn archive_schema(
     Ok(Json(schema))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 204, description = "Schema version deleted"), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 204, description = "Schema version deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
 pub(crate) async fn delete_schema(
     authorized: Authorized<SchemaScope>,
     Path(schema_id): Path<Uuid>,

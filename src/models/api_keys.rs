@@ -648,8 +648,8 @@ impl Entity {
             });
         }
 
+        crate::models::access::require_current_tenant_admin(&txn, issuer).await?;
         let current = Model::current_context(&txn, issuer).await?;
-        crate::models::access::require_tenant_admin(&txn, issuer.tenant_id, issuer.user_id).await?;
         crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
         let issuer_key = Entity::find_by_id(issuer.api_key_id)
             .one(&txn)

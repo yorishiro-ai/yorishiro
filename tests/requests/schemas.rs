@@ -6,6 +6,8 @@ use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{TenantArgs, TestTenant};
 
+mod deletion;
+
 /// Creates the next schema version from the definition and returns its id.
 async fn create_schema_version(
     request: &loco_rs::TestServer,
@@ -27,7 +29,12 @@ async fn create_schema_version(
 #[tokio::test]
 async fn schema_deletion_refuses_active_versions_and_references() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { api_key: key, .. } = TestTenant::create(
+        let TestTenant {
+            api_key: key,
+            workspace_id,
+            owner_id,
+            ..
+        } = TestTenant::create(
             &request,
             &ctx,
             TenantArgs {
@@ -49,6 +56,19 @@ async fn schema_deletion_refuses_active_versions_and_references() {
         let v2_id = create_schema_version(&request, &key, &definition).await;
         let v3_id = create_schema_version(&request, &key, &definition).await;
 
+        request
+            .delete(&format!("/api/schemas/{v2_id}"))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let read_key =
+            super::fixtures::issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false)
+                .await;
+        request
+            .delete(&format!("/api/schemas/{v2_id}"))
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+
         // An active version cannot be deleted.
         request
             .delete(&format!("/api/schemas/{v3_id}"))
@@ -69,11 +89,24 @@ async fn schema_deletion_refuses_active_versions_and_references() {
         );
 
         // v2 is archived and unbound, so it is deleted.
-        request
-            .delete(&format!("/api/schemas/{v2_id}"))
-            .add_header("Authorization", format!("Bearer {key}"))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
+        let barrier = tokio::sync::Barrier::new(2);
+        let delete = async || {
+            barrier.wait().await;
+            request
+                .delete(&format!("/api/schemas/{v2_id}"))
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await
+        };
+        let (first, second) = tokio::join!(delete(), delete());
+        let mut statuses = [first.status_code().as_u16(), second.status_code().as_u16()];
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            [204, 404],
+            "first: {}, second: {}",
+            first.text(),
+            second.text()
+        );
         request
             .get(&format!("/api/schemas/{v2_id}"))
             .add_header("Authorization", format!("Bearer {key}"))

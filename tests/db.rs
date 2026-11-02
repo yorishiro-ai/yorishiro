@@ -1,3 +1,5 @@
+mod migrations;
+
 mod vector_blob_tests {
     use yorishiro::db::sqlite_vec_blob;
 

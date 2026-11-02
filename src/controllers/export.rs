@@ -5,22 +5,15 @@ use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope};
-use crate::error::ResultExt;
 use crate::models::export;
 
 /// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/export.jsonl", responses((status = 200, description = "Newline-delimited JSON export", content_type = "application/x-ndjson", body = String), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/export.jsonl", responses((status = 200, description = "Newline-delimited JSON export, at most 8 MiB and 10,000 records", content_type = "application/x-ndjson", body = String), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub(crate) async fn export_jsonl(
     authorized: Authorized<ReadScope>,
 ) -> Result<impl IntoResponse, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let records = export::export_all(authorized.txn(), workspace_id).await?;
-
-    let mut body = Vec::new();
-    for record in &records {
-        serde_json::to_writer(&mut body, record).internal()?;
-        body.push(b'\n');
-    }
+    let body = export::export_jsonl(authorized.txn(), workspace_id).await?;
 
     Ok(([(header::CONTENT_TYPE, "application/x-ndjson")], body))
 }

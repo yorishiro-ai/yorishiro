@@ -498,6 +498,9 @@ async fn api_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
         let created = mcp_call(&request, &session, &issuer.plaintext, 3, "tools/call", json!({"name":"create_api_key","arguments":{"name":"tenant-scoped","scope":"write","tenant_scoped":true}})).await;
         let record = tool_result_json(&created);
         assert!(record["workspace_id"].is_null(), "record: {record:?}");
+        request.get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", record["full_key"].as_str().unwrap()))
+            .await.assert_status(StatusCode::OK);
         assert_eq!(record["scope"], "write");
         assert_eq!(record["effective_scope"], "write");
         let rest = request.post("/api/api-keys").add_header("Authorization", format!("Bearer {}", issuer.plaintext)).json(&json!({"name":"rest-twin","scope":"write","tenant_scoped":true})).await;
@@ -506,6 +509,9 @@ async fn api_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
         assert!(rest_record["workspace_id"].is_null());
         let revoked = mcp_call(&request, &session, &issuer.plaintext, 4, "tools/call", json!({"name":"revoke_api_key","arguments":{"key_id":record["id"].as_str().unwrap()}})).await;
         assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        let missing = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":Uuid::new_v4()}})).await;
+        assert_eq!(missing["result"]["isError"], true);
+        assert!(missing.to_string().contains("was not found"));
     }).await;
 }
 
@@ -566,6 +572,14 @@ async fn export_jsonl_tool_matches_the_rest_export() {
         let rest = request.get("/api/export.jsonl").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
         rest.assert_status(StatusCode::OK);
         assert_eq!(text, rest.text());
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use yorishiro::models::_entities::entity_entities::{Column, Entity};
+        Entity::update_many()
+            .col_expr(Column::Data, sea_orm::sea_query::Expr::value(json!({"title":"x".repeat(8 * 1024 * 1024)})))
+            .filter(Column::Id.eq(entity_id.parse::<Uuid>().unwrap())).exec(&ctx.db).await.unwrap();
+        let overflow = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"export_jsonl","arguments":{}})).await;
+        assert_eq!(overflow["result"]["isError"], true);
+        assert!(overflow.to_string().contains("8 MiB"));
     }).await;
 }
 

@@ -19,6 +19,8 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
         invalid.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
         assert!(invalid.headers()["content-type"].to_str().unwrap().starts_with("text/plain"));
         assert!(document["paths"]["/api/entities"].is_object());
+        assert!(document["paths"]["/api/entities/{id}"]["put"]["responses"]["409"].is_object());
+        assert!(document["paths"]["/api/schemas/{schema_id}"]["delete"]["responses"]["401"].is_object());
         assert!(document["paths"]["/api/marketplace"].is_object());
         assert!(document["paths"]["/mcp"].is_null());
         assert_eq!(

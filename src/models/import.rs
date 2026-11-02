@@ -25,10 +25,10 @@ pub struct ImportResult {
     pub(crate) entity_ids: Vec<Uuid>,
 }
 
-/// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Imports a JSON Lines document produced by `export::export_jsonl` (or hand-written in the same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 ///
 /// Schemas and entities are re-inserted with freshly generated IDs, so an entity line resolves its schema by *name* (preferring a schema line this same import already processed over the exported, workspace-local `schema_id`), and a relation line's `source_id`/`target_id` are remapped through the entity lines this same import already processed.
-/// A schema/entity line must therefore appear before anything that references it: the order `export::export_all` produces (schemas, then entities, then relations).
+/// A schema/entity line must therefore appear before anything that references it: the order `export::export_jsonl` produces (schemas, then entities, then relations).
 ///
 /// `tenant_id` comes from the authenticated request, not the export: an exported schema's `tenant_id` is only meaningful in its source tenant, and reusing it here would violate `schema_schemas`' FK to `tenant_tenants` once source and destination tenants differ.
 ///

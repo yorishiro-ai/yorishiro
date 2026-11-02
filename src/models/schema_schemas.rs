@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr};
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr, Statement};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -104,6 +104,16 @@ pub(crate) async fn delete(
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
     let schema = get_by_id(conn, workspace_id, schema_id).await?;
+    lock_version(conn, workspace_id, &schema.name).await?;
+    // A row lock also fences reference writers that rely on the foreign key rather than the version lock.
+    let row = Entity::find_by_id(schema_id)
+        .filter(crate::models::_entities::schema_schemas::Column::WorkspaceId.eq(workspace_id))
+        .lock_exclusive()
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?;
+    let schema = SchemaRecord::try_from(row)?;
     if schema.status != SchemaStatus::Archived {
         return Err(YorishiroError::Conflict {
             message: format!(
@@ -163,9 +173,6 @@ pub(crate) async fn delete(
         .count(conn)
         .await
         .internal()?;
-    if forks > 0 {
-        blockers.push("schema forks");
-    }
     let fork_heads = crate::models::_entities::workspace_schema_fork_heads::Entity::find()
         .filter(
             crate::models::_entities::workspace_schema_fork_heads::Column::SchemaId.eq(schema_id),
@@ -173,6 +180,29 @@ pub(crate) async fn delete(
         .count(conn)
         .await
         .internal()?;
+    let (forks, fork_heads) = if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        // Incoming forks can live outside the selected workspace, so ordinary RLS-scoped counts miss them.
+        let row = conn
+            .query_one_raw(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT forks, fork_heads FROM schema_fork_reference_counts($1)",
+                [schema_id.into()],
+            ))
+            .await
+            .internal()?
+            .ok_or_else(|| {
+                YorishiroError::not_found(format!("schema '{schema_id}' was not found"))
+            })?;
+        (
+            row.try_get::<i64>("", "forks").internal()? as u64,
+            row.try_get::<i64>("", "fork_heads").internal()? as u64,
+        )
+    } else {
+        (forks, fork_heads)
+    };
+    if forks > 0 {
+        blockers.push("schema forks");
+    }
     if fork_heads > 0 {
         blockers.push("schema fork heads");
     }
@@ -186,11 +216,15 @@ pub(crate) async fn delete(
             ),
         });
     }
-    lock_version(conn, workspace_id, &schema.name).await?;
-    Entity::delete_by_id(schema_id)
+    let deleted = Entity::delete_by_id(schema_id)
         .exec(conn)
         .await
         .internal()?;
+    if deleted.rows_affected == 0 {
+        return Err(YorishiroError::not_found(format!(
+            "schema '{schema_id}' was not found"
+        )));
+    }
     Ok(())
 }
 
