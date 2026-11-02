@@ -556,13 +556,10 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await;
         created.assert_status(StatusCode::CREATED);
         let record = created.json::<Value>();
-        assert!(
-            record["grant"]["workspace_id"].is_null(),
-            "response: {record:?}"
-        );
-        assert_eq!(record["grant"]["scope"], "write");
-        assert_eq!(record["grant"]["effective_scope"], "write");
-        assert_eq!(record["grant"]["tenant_id"], tenant.tenant_id.to_string());
+        assert!(record["workspace_id"].is_null(), "response: {record:?}");
+        assert_eq!(record["scope"], "write");
+        assert_eq!(record["effective_scope"], "write");
+        assert_eq!(record["tenant_id"], tenant.tenant_id.to_string());
 
         // A non-admin member cannot issue tenant-scoped keys.
         let txn = ctx.db.begin().await.unwrap();

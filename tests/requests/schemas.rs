@@ -6,6 +6,24 @@ use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{TenantArgs, TestTenant};
 
+/// Creates the next schema version from the definition and returns its id.
+async fn create_schema_version(
+    request: &loco_rs::TestServer,
+    key: &str,
+    definition: &serde_json::Value,
+) -> String {
+    let response = request
+        .post("/api/schemas")
+        .add_header("Authorization", format!("Bearer {key}"))
+        .json(definition)
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    response.json::<serde_json::Value>()["schema"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 #[tokio::test]
 async fn schema_deletion_refuses_active_versions_and_references() {
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -26,49 +44,43 @@ async fn schema_deletion_refuses_active_versions_and_references() {
                 }
             }
         });
-        let v1 = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&definition)
-            .await;
-        v1.assert_status(StatusCode::CREATED);
-        let v1_id = v1.json::<serde_json::Value>()["schema"]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        // The workspace binds to the first version it activates and keeps that binding.
+        let v1_id = create_schema_version(&request, &key, &definition).await;
+        let v2_id = create_schema_version(&request, &key, &definition).await;
+        let v3_id = create_schema_version(&request, &key, &definition).await;
 
         // An active version cannot be deleted.
         request
-            .delete(&format!("/api/schemas/{v1_id}"))
+            .delete(&format!("/api/schemas/{v3_id}"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await
             .assert_status(StatusCode::CONFLICT);
 
-        // A second version archives the first.
-        let v2 = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&definition)
-            .await;
-        v2.assert_status(StatusCode::CREATED);
-        let v2_id = v2.json::<serde_json::Value>()["schema"]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-
-        // An archived version with no references is deleted.
-        request
+        // v1 is archived but the workspace still binds it, so it is refused with the blocker named.
+        let bound = request
             .delete(&format!("/api/schemas/{v1_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        bound.assert_status(StatusCode::CONFLICT);
+        assert!(
+            bound.text().contains("workspaces"),
+            "response: {:?}",
+            bound.text()
+        );
+
+        // v2 is archived and unbound, so it is deleted.
+        request
+            .delete(&format!("/api/schemas/{v2_id}"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await
             .assert_status(StatusCode::NO_CONTENT);
         request
-            .get(&format!("/api/schemas/{v1_id}"))
+            .get(&format!("/api/schemas/{v2_id}"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await
             .assert_status(StatusCode::NOT_FOUND);
 
-        // Entities referencing v2 block its deletion after it is archived.
+        // Entities referencing a version block its deletion after it is archived.
         let entity = request
             .post("/api/entities")
             .add_header("Authorization", format!("Bearer {key}"))
@@ -83,14 +95,9 @@ async fn schema_deletion_refuses_active_versions_and_references() {
             .as_str()
             .unwrap()
             .to_owned();
-        request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&definition)
-            .await
-            .assert_status(StatusCode::CREATED);
+        create_schema_version(&request, &key, &definition).await;
         let blocked = request
-            .delete(&format!("/api/schemas/{v2_id}"))
+            .delete(&format!("/api/schemas/{v3_id}"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
         blocked.assert_status(StatusCode::CONFLICT);
