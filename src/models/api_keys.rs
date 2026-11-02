@@ -338,9 +338,9 @@ impl Entity {
             if let Some(requested) = requested
                 && requested != workspace_id
             {
-                return Err(YorishiroError::ValidationFailed {
+                // A foreign workspace is a scope denial, not a malformed request: the header itself is well formed, the pairing is not.
+                return Err(YorishiroError::ScopeInsufficient {
                     message: format!("{WORKSPACE_HEADER} names a workspace this key cannot act on"),
-                    details: Vec::new(),
                     hint: "this key is scoped to a single workspace; omit the header, or use a \
                             tenant-scoped key to choose a workspace per request"
                         .into(),
@@ -352,9 +352,9 @@ impl Entity {
             let tenant =
                 crate::models::workspace_workspaces::get_workspace_tenant(conn, requested).await?;
             if tenant != tenant_id {
-                return Err(YorishiroError::ValidationFailed {
+                // The key simply cannot act on another tenant's workspace; report it as a scope denial so a well-formed request is not logged as a validation failure.
+                return Err(YorishiroError::ScopeInsufficient {
                     message: format!("{WORKSPACE_HEADER} names a workspace this key cannot act on"),
-                    details: Vec::new(),
                     hint: "the named workspace belongs to another tenant; send a workspace this \
                             key can act on"
                         .into(),

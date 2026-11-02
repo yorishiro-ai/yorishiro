@@ -183,6 +183,16 @@ pub async fn update(
     input: UpdateEntityInput,
 ) -> Result<EntityRecord, YorishiroError> {
     let existing = get(conn, workspace_id, input.id).await?;
+    if let Some(expected) = input.expected_updated_at
+        && existing.updated_at != expected
+    {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "entity '{}' changed while it was being edited (it is now {}); re-read it and retry",
+                input.id, existing.updated_at
+            ),
+        });
+    }
     let schema =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;

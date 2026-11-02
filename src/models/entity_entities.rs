@@ -205,6 +205,8 @@ pub struct UpdateEntityInput {
     pub id: Uuid,
     pub data: Value,
     pub updated_by: Option<Uuid>,
+    /// The `updated_at` the client read before editing; a mismatch is a conflict, so a stale writer cannot clobber a newer write.
+    pub expected_updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Default)]

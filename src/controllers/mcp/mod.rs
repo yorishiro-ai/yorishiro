@@ -1,6 +1,7 @@
 mod api_keys;
 mod audit_log;
 pub mod entities;
+mod export;
 mod import;
 mod invites;
 mod members;
@@ -163,6 +164,7 @@ pub fn scope_requirement(scope: ApiKeyScope) -> rmcp::model::MetaObject {
 pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([
         YorishiroMcpServer::tool_router_entities(),
+        YorishiroMcpServer::tool_router_export(),
         YorishiroMcpServer::tool_router_import(),
         YorishiroMcpServer::tool_router_invites(),
         YorishiroMcpServer::tool_router_members(),
@@ -319,6 +321,10 @@ pub(crate) async fn authorize(
         Err(YorishiroError::Unauthenticated) => {
             return Err(ErrorData::invalid_request("authentication failed", None));
         }
+        // A well-formed request with a value the credential cannot use (such as a malformed `x-workspace-id`) is the client's, not the server's, failure.
+        Err(YorishiroError::ValidationFailed { message, .. }) => {
+            return Err(ErrorData::invalid_params(message, None));
+        }
         Err(error) => return Err(crate::error::mcp_internal(error)),
     };
     if let Err(error) = auth::require_scope(&current, required) {
@@ -338,6 +344,9 @@ pub(crate) async fn authorize(
         }
         Err(YorishiroError::Unauthenticated) => {
             Err(ErrorData::invalid_request("authentication failed", None))
+        }
+        Err(YorishiroError::ValidationFailed { message, .. }) => {
+            Err(ErrorData::invalid_params(message, None))
         }
         Err(err) => Err(crate::error::mcp_internal(err)),
     }
@@ -375,6 +384,9 @@ pub(crate) async fn verify(
         }
         Err(YorishiroError::Unauthenticated) => {
             Err(ErrorData::invalid_request("authentication failed", None))
+        }
+        Err(YorishiroError::ValidationFailed { message, .. }) => {
+            Err(ErrorData::invalid_params(message, None))
         }
         Err(err) => Err(crate::error::mcp_internal(err)),
     }

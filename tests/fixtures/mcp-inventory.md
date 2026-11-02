@@ -506,6 +506,19 @@ Input schema:
 }
 ```
 
+### `export_jsonl`
+
+Export every schema, entity, and relation in the selected workspace as newline-delimited JSON (requires read scope); one {"kind":"schema"|"entity"|"relation","record":{...}} object per line, the same format import_jsonl reads back. The result can be large for a busy workspace.
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
 ### `fill_defaults`
 
 Enqueue a fill-defaults job (requires migration scope). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log.
@@ -1692,7 +1705,7 @@ Input schema:
 
 ### `update_entity`
 
-Replace the data of an existing entity (requires write scope)
+Replace the data of an existing entity (requires write scope); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between
 
 Input schema:
 
@@ -1702,6 +1715,14 @@ Input schema:
   "properties": {
     "data": {
       "description": "Replacement entity body.\nValidated against the schema version in effect when the entity was created."
+    },
+    "expected_updated_at": {
+      "description": "The entity's `updated_at` as the client read it; a mismatch is refused with a conflict so a stale writer cannot clobber a newer write.",
+      "format": "date-time",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "id": {
       "format": "uuid",

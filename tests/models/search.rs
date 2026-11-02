@@ -1054,6 +1054,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 id: rec.id,
                 data: serde_json::json!({ "title": "quarterly board meeting notes" }),
                 updated_by: None,
+                expected_updated_at: None,
             },
         )
         .await

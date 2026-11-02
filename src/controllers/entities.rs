@@ -69,6 +69,7 @@ pub(crate) async fn update_entity(
             id,
             data: body.data,
             updated_by,
+            expected_updated_at: body.expected_updated_at,
         },
     )
     .await?;

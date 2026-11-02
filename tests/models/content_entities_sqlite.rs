@@ -80,6 +80,7 @@ async fn content_entities_crud_on_sqlite() {
                 id: created.id,
                 data: serde_json::json!({"title": "second"}),
                 updated_by: None,
+                expected_updated_at: None,
             },
         )
         .await
@@ -131,6 +132,7 @@ async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
                 id: created.id,
                 data: serde_json::json!({"title": "changed"}),
                 updated_by: None,
+                expected_updated_at: None,
             },
         )
         .await
@@ -264,6 +266,7 @@ async fn token_rotation_does_not_duplicate_fts_rows_on_sqlite() {
                 id: created.id,
                 data: serde_json::json!({"title": "second"}),
                 updated_by: None,
+                expected_updated_at: None,
             },
         )
         .await
