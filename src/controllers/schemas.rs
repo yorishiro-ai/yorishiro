@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use serde_json::Value;
@@ -25,6 +25,16 @@ pub(crate) async fn archive_schema(
         schema_schemas::archive(authorized.txn(), authorized.ctx.workspace_id, schema_id).await?;
     authorized.commit().await?;
     Ok(Json(schema))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 204, description = "Schema version deleted"), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
+pub(crate) async fn delete_schema(
+    authorized: Authorized<SchemaScope>,
+    Path(schema_id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    schema_schemas::delete(authorized.txn(), authorized.ctx.workspace_id, schema_id).await?;
+    authorized.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::schema_schemas::SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
@@ -155,6 +165,7 @@ pub fn routes() -> Routes {
         .add("/", post(create_schema))
         .add("/active/{name}", get(get_active_schema))
         .add("/{schema_id}", get(get_schema_by_id))
+        .add("/{schema_id}", delete(delete_schema))
         .add("/{schema_id}/archive", post(archive_schema))
         .add(
             "/active/{name}/entity-types/{entity_type}/json-schema",
@@ -175,6 +186,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_list_schemas),
         super::route_inventory::path_doc(__path_create_schema),
         super::route_inventory::path_doc(__path_archive_schema),
+        super::route_inventory::path_doc(__path_delete_schema),
         super::route_inventory::path_doc(__path_get_active_schema),
         super::route_inventory::path_doc(__path_get_schema_by_id),
         super::route_inventory::path_doc(__path_get_entity_type_json_schema),

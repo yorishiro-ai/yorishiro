@@ -95,6 +95,39 @@ impl YorishiroMcpServer {
         }
     }
     #[tool(
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
+        description = "Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema scope)"
+    )]
+    pub(crate) async fn delete_schema(
+        &self,
+        Parameters(args): Parameters<GetSchemaByIdArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = match super::authorize(
+            self.app_context(),
+            &parts,
+            self.required_scope("delete_schema")?,
+        )
+        .await?
+        {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match schema_schemas::delete(
+            authorized.txn(),
+            authorized.ctx.workspace_id,
+            args.schema_id,
+        )
+        .await
+        {
+            Ok(()) => {
+                authorized.commit().await?;
+                ok_json(serde_json::json!({ "deleted": true }))
+            }
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+    #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "List summaries of all schemas registered for the workspace (all \
                            versions, including archived). Use this to discover what schemas \

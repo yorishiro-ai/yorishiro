@@ -7,6 +7,115 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use super::fixtures::{TenantArgs, TestTenant};
 
 #[tokio::test]
+async fn schema_deletion_refuses_active_versions_and_references() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let TestTenant { api_key: key, .. } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let definition = serde_json::json!({
+            "name": "delete-history",
+            "entity_types": {
+                "note": {
+                    "fields": { "title": { "type": "string" } }
+                }
+            }
+        });
+        let v1 = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&definition)
+            .await;
+        v1.assert_status(StatusCode::CREATED);
+        let v1_id = v1.json::<serde_json::Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // An active version cannot be deleted.
+        request
+            .delete(&format!("/api/schemas/{v1_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+
+        // A second version archives the first.
+        let v2 = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&definition)
+            .await;
+        v2.assert_status(StatusCode::CREATED);
+        let v2_id = v2.json::<serde_json::Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // An archived version with no references is deleted.
+        request
+            .delete(&format!("/api/schemas/{v1_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        request
+            .get(&format!("/api/schemas/{v1_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+
+        // Entities referencing v2 block its deletion after it is archived.
+        let entity = request
+            .post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({
+                "schema_name": "delete-history",
+                "entity_type": "note",
+                "data": { "title": "kept" }
+            }))
+            .await;
+        entity.assert_status(StatusCode::CREATED);
+        let entity_id = entity.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&definition)
+            .await
+            .assert_status(StatusCode::CREATED);
+        let blocked = request
+            .delete(&format!("/api/schemas/{v2_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        blocked.assert_status(StatusCode::CONFLICT);
+        assert!(
+            blocked.text().contains("entities"),
+            "response: {:?}",
+            blocked.text()
+        );
+        request
+            .get(&format!("/api/entities/{entity_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status_ok();
+
+        // An unknown id is a 404, not a conflict.
+        request
+            .delete(&format!("/api/schemas/{}", uuid::Uuid::new_v4()))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn create_schema_from_a_builtin_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant { api_key: key, .. } = TestTenant::create(
