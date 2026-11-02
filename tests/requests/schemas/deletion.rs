@@ -95,7 +95,8 @@ async fn schema_deletion_sees_incoming_forks_outside_the_selected_workspace() {
         let source: Uuid = create_schema_version(&request, &tenant.api_key, &definition).await.parse().unwrap();
         create_schema_version(&request, &tenant.api_key, &definition).await;
         let txn = ctx.db.begin().await.unwrap();
-        let destination = tenancy::create_workspace(&txn, tenant.tenant_id, "incoming-fork-target", None, None).await.unwrap();
+        let destination_name = format!("incoming-fork-target-{}", Uuid::now_v7());
+        let destination = tenancy::create_workspace(&txn, tenant.tenant_id, &destination_name, None, None).await.unwrap();
         let target = schema_schemas::create_schema(&txn, tenant.tenant_id, destination.id,
             serde_json::from_value(definition).unwrap(), None, None).await.unwrap();
         workspace_schema_forks::ActiveModel {

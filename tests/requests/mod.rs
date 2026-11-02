@@ -82,7 +82,7 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
         db.identity.close().await;
         db.tenant.pool().close().await;
     }
-    ctx.db.get_postgres_connection_pool().close().await;
+    ctx.db.clone().close().await.expect("close test database");
     if let Some(path) = sqlite_queue_path(&ctx.config) {
         remove_sqlite_files(&path);
     }

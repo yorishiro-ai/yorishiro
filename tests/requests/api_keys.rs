@@ -645,7 +645,8 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         // The new key names its workspace per request and appears in the listing.
         let full_key = record["full_key"].as_str().unwrap().to_owned();
         let txn = ctx.db.begin().await.unwrap();
-        let second = tenancy::create_workspace(&txn, tenant.tenant_id, "second-key-target", None, None).await.unwrap();
+        let second_name = format!("second-key-target-{}", uuid::Uuid::now_v7());
+        let second = tenancy::create_workspace(&txn, tenant.tenant_id, &second_name, None, None).await.unwrap();
         txn.commit().await.unwrap();
         request.get("/api/whoami")
             .add_header("Authorization", format!("Bearer {full_key}"))
