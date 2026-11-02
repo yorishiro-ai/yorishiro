@@ -1,6 +1,8 @@
 use std::io::{self, Write};
 
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -33,51 +35,76 @@ pub(crate) async fn export_jsonl(
     };
 
     let mut output = ExportBuffer::default();
-    let schemas = schema_schemas::Entity::find()
-        .filter(schemas::Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(schemas::Column::Id)
-        .paginate(conn, PAGE_SIZE);
-    let mut page = 0;
+    let mut schema_cursor: Option<(String, i32)> = None;
     loop {
-        let rows = schemas.fetch_page(page).await.internal()?;
+        let mut query = schema_schemas::Entity::find()
+            .filter(schemas::Column::WorkspaceId.eq(workspace_id))
+            .order_by_asc(schemas::Column::Name)
+            .order_by_asc(schemas::Column::Version)
+            .limit(PAGE_SIZE);
+        if let Some((name, version)) = &schema_cursor {
+            query = query.filter(
+                Condition::any()
+                    .add(schemas::Column::Name.gt(name.clone()))
+                    .add(
+                        Condition::all()
+                            .add(schemas::Column::Name.eq(name.clone()))
+                            .add(schemas::Column::Version.gt(*version)),
+                    ),
+            );
+        }
+        let rows = query.all(conn).await.internal()?;
         if rows.is_empty() {
             break;
         }
         for row in rows {
+            let cursor = (row.name.clone(), row.version);
             output.append(&ExportRecord::Schema(row.try_into()?))?;
+            schema_cursor = Some(cursor);
         }
-        page += 1;
     }
-    let entities = entity_entities::Entity::find()
-        .filter(entities::Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(entities::Column::Id)
-        .into_model::<EntityRecord>()
-        .paginate(conn, PAGE_SIZE);
-    page = 0;
+    // Keyset pages do not shift when an earlier row is deleted between reads.
+    let mut entity_cursor = None;
     loop {
-        let rows = entities.fetch_page(page).await.internal()?;
+        let mut query = entity_entities::Entity::find()
+            .filter(entities::Column::WorkspaceId.eq(workspace_id))
+            .order_by_asc(entities::Column::Id)
+            .limit(PAGE_SIZE);
+        if let Some(id) = entity_cursor {
+            query = query.filter(entities::Column::Id.gt(id));
+        }
+        let rows = query
+            .into_model::<EntityRecord>()
+            .all(conn)
+            .await
+            .internal()?;
         if rows.is_empty() {
             break;
         }
         for row in rows {
+            let id = row.id;
             output.append(&ExportRecord::Entity(row))?;
+            entity_cursor = Some(id);
         }
-        page += 1;
     }
-    let relations = entity_relations::Entity::find()
-        .filter(relations::Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(relations::Column::Id)
-        .paginate(conn, PAGE_SIZE);
-    page = 0;
+    let mut relation_cursor = None;
     loop {
-        let rows = relations.fetch_page(page).await.internal()?;
+        let mut query = entity_relations::Entity::find()
+            .filter(relations::Column::WorkspaceId.eq(workspace_id))
+            .order_by_asc(relations::Column::Id)
+            .limit(PAGE_SIZE);
+        if let Some(id) = relation_cursor {
+            query = query.filter(relations::Column::Id.gt(id));
+        }
+        let rows = query.all(conn).await.internal()?;
         if rows.is_empty() {
             break;
         }
         for row in rows {
+            let id = row.id;
             output.append(&ExportRecord::Relation(row.try_into()?))?;
+            relation_cursor = Some(id);
         }
-        page += 1;
     }
     String::from_utf8(output.bytes).internal()
 }

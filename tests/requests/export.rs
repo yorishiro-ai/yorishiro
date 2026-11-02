@@ -13,6 +13,40 @@ use super::{
 };
 
 #[tokio::test]
+async fn export_orders_schema_history_by_name_and_version_across_pages() {
+    use yorishiro::models::schema_schemas;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut ids: Vec<_> = (0..67).map(|_| Uuid::now_v7()).collect();
+        ids.sort_by(|a, b| b.cmp(a));
+        let expected: Vec<_> = std::iter::once(("a-first", 1))
+            .chain((1..=65).map(|version| ("history", version)))
+            .chain(std::iter::once(("z-last", 1)))
+            .collect();
+        // Deliberately reverse ID order so UUID ordering cannot stand in for version ordering.
+        schema_schemas::Entity::insert_many(expected.iter().zip(ids).map(|(&(name, version), id)| {
+            schema_schemas::ActiveModel {
+                id: Set(id), tenant_id: Set(tenant.tenant_id), workspace_id: Set(tenant.workspace_id),
+                name: Set(name.into()), version: Set(version), status: Set("archived".into()),
+                origin_status: Set("detached".into()),
+                definition: Set(json!({"name":name,"entity_types":{"note":{"fields":{"title":{"type":"string"}}}}})),
+                ..Default::default()
+            }
+        })).exec(&ctx.db).await.unwrap();
+        let response = request.get("/api/export.jsonl")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        response.assert_status(StatusCode::OK);
+        let rows: Vec<Value> = response.text().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let actual: Vec<_> = rows.iter().map(|row| {
+            assert_eq!(row["kind"], "schema");
+            (row["record"]["name"].as_str().unwrap(), row["record"]["version"].as_i64().unwrap() as i32)
+        }).collect();
+        assert_eq!(actual, expected);
+    }).await;
+}
+
+#[tokio::test]
 async fn export_pages_all_rows_and_rejects_byte_and_record_overflow() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
