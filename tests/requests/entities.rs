@@ -273,11 +273,13 @@ async fn list_entities_with_filter_returns_501_on_sqlite() {
 }
 
 /// A writer that passes the `updated_at` it read is refused with a conflict when another write lands in between, and a retry with the fresh value succeeds.
+///
+/// Runs on the shared test database: everything it touches is scoped to its own workspace, so a throwaway database would only trip the shared-suite DDL gate.
 #[tokio::test]
 async fn entity_update_refuses_a_stale_expected_updated_at() {
     use axum::http::StatusCode;
 
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::from_value(serde_json::json!({
             "name": "note",
