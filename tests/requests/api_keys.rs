@@ -624,7 +624,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
                 .any(|key| key["id"] == record["id"])
         );
         request
-            .delete(&format!("/api/api-keys/{}", record["id"]))
+            .delete(&format!("/api/api-keys/{}", record["id"].as_str().unwrap()))
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await
