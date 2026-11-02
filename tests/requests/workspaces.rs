@@ -612,3 +612,59 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
     })
     .await;
 }
+
+/// A new workspace waits for its first schema, and the first schema creation activates it and records the version.
+///
+/// Runs on the shared test database: everything it touches belongs to its own fresh workspace, so no database is created.
+#[tokio::test]
+async fn a_new_workspace_becomes_active_on_first_schema() {
+    use serde_json::Value;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+
+        let listed = request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        listed.assert_status(StatusCode::OK);
+        let row = listed
+            .json::<Vec<Value>>()
+            .into_iter()
+            .find(|workspace| workspace["id"] == serde_json::json!(tenant.workspace_id))
+            .expect("the new workspace is listed");
+        assert_eq!(row["status"], "schema_pending", "row: {row:?}");
+        assert!(row["schema_id"].is_null(), "row: {row:?}");
+
+        let definition = serde_json::json!({
+            "name": "lifecycle",
+            "entity_types": {
+                "note": { "fields": { "title": { "type": "string" } } }
+            }
+        });
+        let created = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&definition)
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let schema_id = created.json::<Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let listed = request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
+        listed.assert_status(StatusCode::OK);
+        let row = listed
+            .json::<Vec<Value>>()
+            .into_iter()
+            .find(|workspace| workspace["id"] == serde_json::json!(tenant.workspace_id))
+            .expect("the new workspace is listed");
+        assert_eq!(row["status"], "active", "row: {row:?}");
+        assert_eq!(row["schema_id"], schema_id, "row: {row:?}");
+    })
+    .await;
+}

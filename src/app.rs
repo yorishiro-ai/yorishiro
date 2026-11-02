@@ -63,6 +63,22 @@ pub(crate) async fn boot<H: Hooks>(
     // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
     // The call site in main.rs already covers all CLI subcommands.
     crate::db::register_sqlite_extensions();
+    if config.database.auto_migrate {
+        // Run the automatic migrations here rather than inside `create_app` so that
+        // concurrently starting services serialize on the advisory lock while the
+        // pools and initializers still start in parallel.
+        // Loco is told to skip them once the lock is released.
+        let lock = crate::db::BootMigrationLock::acquire(&config.database).await?;
+        crate::db::run_auto_migrations(&config.database).await?;
+        if let Some(lock) = lock {
+            lock.release().await.map_err(|error| {
+                loco_rs::Error::Message(format!(
+                    "failed to close the boot-migration lock connection: {error}"
+                ))
+            })?;
+        }
+        config.database.auto_migrate = false;
+    }
     create_app::<H, Migrator>(mode, environment, config).await
 }
 

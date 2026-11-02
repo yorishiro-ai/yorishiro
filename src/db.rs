@@ -8,6 +8,7 @@ use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
 use sqlite_vec::sqlite3_vec_init;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// Common backend predicates for request and service code.
@@ -671,6 +672,114 @@ pub async fn acquire_workspace_reindex_lock(
     Ok(WorkspaceReindexLockGuard {
         conn: Some(detached),
     })
+}
+
+/// Serializes the automatic boot migrations across concurrently starting services on one PostgreSQL cluster.
+///
+/// Every service (server, worker, scheduler) auto-migrates at boot, so a release that adds a migration and starts several units at once would otherwise race on catalog DDL.
+/// The lock is session-scoped and held on a dedicated connection that belongs to no pool, so a one-connection pool cannot deadlock waiting for the migration to finish.
+/// `release()` closes the connection, which ends the session and releases the lock.
+/// `Drop` is only a panic-unwind backstop, as in [`WorkspaceReindexLockGuard`].
+pub struct BootMigrationLock {
+    conn: Option<sea_orm::sqlx::PgConnection>,
+}
+
+impl BootMigrationLock {
+    /// Waits for the lock and holds it until the guard is released or dropped.
+    ///
+    /// Returns `None` on SQLite, which a single writer already serializes.
+    ///
+    /// # Errors
+    /// Returns an error if the dedicated connection cannot be opened or the lock cannot be taken.
+    pub async fn acquire(database: &loco_rs::config::Database) -> loco_rs::Result<Option<Self>> {
+        if !database.uri.starts_with("postgres") {
+            return Ok(None);
+        }
+        let options = sea_orm::sqlx::postgres::PgConnectOptions::from_str(&database.uri).map_err(
+            |error| {
+                loco_rs::Error::Message(format!(
+                    "failed to parse the database uri for the boot-migration lock: {error}"
+                ))
+            },
+        )?;
+        let mut conn = sea_orm::sqlx::postgres::PgConnection::connect_with(&options)
+            .await
+            .map_err(|error| {
+                loco_rs::Error::Message(format!(
+                    "failed to open the boot-migration lock connection: {error}"
+                ))
+            })?;
+        tracing::info!("waiting for the boot-migration lock");
+        sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
+            .bind(BOOT_MIGRATION_LOCK_KEY)
+            .execute(&mut conn)
+            .await
+            .map_err(|error| {
+                loco_rs::Error::Message(format!("failed to take the boot-migration lock: {error}"))
+            })?;
+        tracing::info!("acquired the boot-migration lock");
+        Ok(Some(Self { conn: Some(conn) }))
+    }
+
+    /// Closes the dedicated connection, ending the session and releasing the lock.
+    ///
+    /// # Errors
+    /// Returns an error if the connection cannot be closed.
+    pub async fn release(mut self) -> Result<(), sea_orm::sqlx::Error> {
+        if let Some(conn) = self.conn.take() {
+            let result = conn.close().await;
+            if let Err(error) = &result {
+                tracing::error!(%error, "failed to close the boot-migration lock connection");
+            }
+            result
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for BootMigrationLock {
+    fn drop(&mut self) {
+        // This path runs only if a caller panicked between `acquire` and `release`.
+        if let Some(conn) = self.conn.take()
+            && let Ok(handle) = tokio::runtime::Handle::try_current()
+        {
+            handle.spawn(async move {
+                let _ = conn.close().await;
+            });
+        }
+        // Without a runtime handle the server releases the lock when the socket dies.
+    }
+}
+
+/// The advisory lock key that serializes the automatic boot migrations.
+const BOOT_MIGRATION_LOCK_KEY: &str = "yorishiro:boot-migrations";
+
+/// Runs every pending migration on the configured database.
+///
+/// The boot path calls this instead of leaving the migration to Loco's `create_app`, so the call can be serialized across concurrently starting services.
+///
+/// # Errors
+/// Returns an error if the database cannot be reached or a migration fails.
+pub(crate) async fn run_auto_migrations(
+    database: &loco_rs::config::Database,
+) -> loco_rs::Result<()> {
+    use migration::MigratorTrait;
+
+    let conn = sea_orm::Database::connect(&database.uri)
+        .await
+        .map_err(|error| {
+            loco_rs::Error::Message(format!(
+                "failed to connect for the automatic migrations: {error}"
+            ))
+        })?;
+    let outcome = migration::Migrator::up(&conn, None).await.map_err(|error| {
+        loco_rs::Error::Message(format!("failed to run the automatic migrations: {error}"))
+    });
+    if let Err(error) = conn.close().await {
+        tracing::error!(%error, "failed to close the automatic-migration connection");
+    }
+    outcome
 }
 
 /// Runs a reindex with the backend's workspace serialization policy.
