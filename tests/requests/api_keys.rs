@@ -577,6 +577,14 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         .await
         .unwrap();
         txn.commit().await.unwrap();
+        // A tenant membership alone grants no workspace access, so the workspace-bound key below needs an explicit workspace grant.
+        fixtures::grant_workspace(
+            &ctx,
+            tenant.workspace_id,
+            member.id,
+            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
+        )
+        .await;
         // Member role caps key scope at write; that is enough to attempt (and be refused) tenant-scoped issuance.
         let member_key = fixtures::issue_api_key(
             &ctx,
