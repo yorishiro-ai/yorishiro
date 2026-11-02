@@ -234,6 +234,38 @@ pub async fn resolve_login_workspace(
     })
 }
 
+/// The workspaces a tenant-scoped key can act on for this tenant: the attributed user's accessible workspaces, or every workspace in the tenant for a service key.
+///
+/// # Errors
+/// Returns an error when membership or workspace discovery fails.
+pub(crate) async fn reachable_workspace_ids(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    user_id: Option<Uuid>,
+) -> Result<Vec<Uuid>, YorishiroError> {
+    match user_id {
+        Some(user_id) => Ok(login_options(conn, user_id)
+            .await?
+            .1
+            .into_iter()
+            .filter(|workspace| workspace.tenant_id == tenant_id)
+            .map(|workspace| workspace.workspace_id)
+            .collect()),
+        None => {
+            use crate::models::_entities::workspace_workspaces;
+            let workspaces = workspace_workspaces::Entity::find()
+                .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
+                .all(conn)
+                .await
+                .internal()?;
+            Ok(workspaces
+                .into_iter()
+                .map(|workspace| workspace.id)
+                .collect())
+        }
+    }
+}
+
 /// Discovers recovery options only after the caller has verified credentials.
 ///
 /// # Errors

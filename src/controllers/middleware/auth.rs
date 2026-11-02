@@ -12,7 +12,8 @@ use sea_orm::DatabaseTransaction;
 
 use crate::db::{AppContextBackend, DbHandle};
 use crate::error::YorishiroError;
-use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity};
+use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity, WORKSPACE_HEADER};
+use uuid::Uuid;
 
 /// Copies readable request headers into the authenticator input shape.
 pub(crate) fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
@@ -68,8 +69,29 @@ pub trait Authenticator: Send + Sync {
     ) -> Result<AuthContext, YorishiroError>;
 }
 
-/// This crate's own rule: a key is bound to exactly one workspace, recorded on the key itself, and the request's headers do not affect which one it resolves to.
+/// This crate's own rule: a workspace-scoped key resolves to the workspace recorded on it, and a tenant-scoped key resolves the workspace named in the `WORKSPACE_HEADER` request header, or the single workspace it can reach.
 pub(crate) struct DefaultAuthenticator;
+
+/// Reads the workspace a request asks a tenant-scoped key to act on.
+/// A present-but-unparseable value is a validation error, never "not sent": treating it as absent would send a request meant for one workspace to whichever one the key happens to resolve to.
+fn requested_workspace(headers: &[(String, String)]) -> Result<Option<Uuid>, YorishiroError> {
+    let Some(value) = headers
+        .iter()
+        .find(|(name, _)| name == WORKSPACE_HEADER)
+        .map(|(_, value)| value.trim())
+    else {
+        return Ok(None);
+    };
+    Uuid::parse_str(value)
+        .map(Some)
+        .map_err(|_| YorishiroError::ValidationFailed {
+            message: format!("{WORKSPACE_HEADER} is not a valid UUID"),
+            details: Vec::new(),
+            hint: "send the workspace's UUID, or omit the header to use a \
+                workspace-scoped key"
+                .into(),
+        })
+}
 
 #[async_trait]
 impl Authenticator for DefaultAuthenticator {
@@ -77,16 +99,17 @@ impl Authenticator for DefaultAuthenticator {
         &self,
         app: &AppContext,
         presented_key: &str,
-        _headers: &[(String, String)],
+        headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
+        let requested = requested_workspace(headers)?;
         if app.is_sqlite() {
-            Entity::authenticate_sqlite(&app.db, presented_key).await
+            Entity::authenticate_sqlite(&app.db, presented_key, requested).await
         } else {
             let db = app
                 .shared_store
                 .get::<DbHandle>()
                 .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-            Entity::authenticate(&db, presented_key).await
+            Entity::authenticate(&db, presented_key, requested).await
         }
     }
 }

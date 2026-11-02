@@ -811,8 +811,10 @@ async fn actor(
 ) -> yorishiro::models::api_keys::AuthContext {
     use yorishiro::models::api_keys::Entity;
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
-        Entity::authenticate(&db, key).await.unwrap()
+        Entity::authenticate(&db, key, None).await.unwrap()
     } else {
-        Entity::authenticate_sqlite(&ctx.db, key).await.unwrap()
+        Entity::authenticate_sqlite(&ctx.db, key, None)
+            .await
+            .unwrap()
     }
 }

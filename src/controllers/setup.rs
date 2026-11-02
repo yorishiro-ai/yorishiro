@@ -1,6 +1,7 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
 //!
-//! Creates the deployment's first tenant, workspace and owner account.
+//! Creates the deployment's first tenant, workspace and owner account, then issues a tenant-scoped admin key for that owner.
+//! The key is not bound to the default workspace: it can act on every workspace of the tenant and names the target per request.
 //! The resolved edition tenant cap controls whether first-run setup is available.
 //! An unlimited cap disables the wizard; the source default is one tenant.
 
@@ -55,12 +56,14 @@ pub async fn setup(
         body.display_name.as_deref(),
     )
     .await?;
-    let created = IdentityApiKeys::create_api_key(
+    // Operator bootstrap, not user self-service: this is the one path besides the `create_api_key` CLI task that may create an audit-reading key.
+    let created = IdentityApiKeys::create_tenant_api_key(
         &ctx.db,
-        account.workspace_id,
+        account.tenant_id,
         MembershipRole::Owner.max_scope(),
         Some(account.user_id),
-        false,
+        true,
+        "initial-admin",
     )
     .await?;
 

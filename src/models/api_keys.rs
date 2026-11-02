@@ -9,6 +9,9 @@ use crate::error::{ResultExt, YorishiroError};
 const KEY_PREFIX_LENGTH: usize = 12;
 const KEY_SECRET_LENGTH: usize = 48;
 
+/// The request header that names which workspace a tenant-scoped key acts on.
+pub const WORKSPACE_HEADER: &str = "x-workspace-id";
+
 /// Secret-free grant metadata for credential administration.
 #[derive(serde::Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -83,7 +86,14 @@ impl Model {
                     )
                     .await?
                     .map(|access| scope.min(access.max_scope)),
-                    None => None,
+                    // A tenant-scoped key acts as the attributed user, so its ceiling is the tenant role, not a workspace grant.
+                    None => crate::models::tenant_memberships::get_membership_role(
+                        conn,
+                        self.tenant_id,
+                        user_id,
+                    )
+                    .await?
+                    .map(|role| crate::models::access::effective_scope(scope, role)),
                 },
             }
         };
@@ -201,6 +211,13 @@ pub struct CreatedApiKey {
     pub plaintext: String,
 }
 
+/// A freshly issued tenant-scoped key.
+/// The plaintext exists only here: only its hash is stored.
+pub struct CreatedTenantApiKey {
+    pub id: Uuid,
+    pub plaintext: String,
+}
+
 /// Hashes a presented key into the form stored in `api_keys.key_hash`.
 pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
@@ -236,17 +253,21 @@ impl Entity {
     ///
     /// SeaQuery calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only id/workspace_id/tenant_id/scope/user_id/audit, never key_hash itself.
     ///
+    /// A workspace-scoped key always resolves to the workspace recorded on it.
+    /// A tenant-scoped key resolves `requested_workspace`, or the single workspace it can reach when no header is sent.
+    ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
     pub async fn authenticate(
         db: &DbHandle,
         presented_key: &str,
+        requested_workspace: Option<Uuid>,
     ) -> Result<AuthContext, YorishiroError> {
         use sea_orm::sea_query::{Alias, Expr, Func, Query};
         #[derive(sea_orm::FromQueryResult)]
         struct Credential {
             id: uuid::Uuid,
-            workspace_id: uuid::Uuid,
+            workspace_id: Option<uuid::Uuid>,
             tenant_id: uuid::Uuid,
             scope: String,
             user_id: Option<uuid::Uuid>,
@@ -278,9 +299,17 @@ impl Entity {
             .internal()?;
 
         let row = row.ok_or(YorishiroError::Unauthenticated)?;
+        let workspace_id = Self::resolve_key_workspace(
+            &db.identity_connection(),
+            row.workspace_id,
+            row.tenant_id,
+            row.user_id,
+            requested_workspace,
+        )
+        .await?;
         AuthContext {
             api_key_id: row.id,
-            workspace_id: row.workspace_id,
+            workspace_id,
             tenant_id: row.tenant_id,
             scope: stored_scope(&row.scope)?,
             user_id: row.user_id,
@@ -290,10 +319,70 @@ impl Entity {
         .await
     }
 
+    /// Chooses which workspace a verified credential acts on.
+    ///
+    /// A workspace-scoped key always acts on its own workspace, and a header naming another one is refused.
+    /// A tenant-scoped key acts on the requested workspace when it belongs to the same tenant, and otherwise on the single workspace the caller can reach, when there is exactly one.
+    ///
+    /// # Errors
+    /// Returns an error when the key has no workspace it can act on, or the request is ambiguous.
+    async fn resolve_key_workspace(
+        conn: &impl ConnectionTrait,
+        key_workspace: Option<Uuid>,
+        tenant_id: Uuid,
+        user_id: Option<Uuid>,
+        requested: Option<Uuid>,
+    ) -> Result<Uuid, YorishiroError> {
+        if let Some(workspace_id) = key_workspace {
+            if let Some(requested) = requested
+                && requested != workspace_id
+            {
+                return Err(YorishiroError::ValidationFailed {
+                    message: format!("{WORKSPACE_HEADER} names a workspace this key cannot act on"),
+                    details: Vec::new(),
+                    hint: "this key is scoped to a single workspace; omit the header, or use a \
+                            tenant-scoped key to choose a workspace per request"
+                        .into(),
+                });
+            }
+            return Ok(workspace_id);
+        }
+        if let Some(requested) = requested {
+            let tenant =
+                crate::models::workspace_workspaces::get_workspace_tenant(conn, requested).await?;
+            if tenant != tenant_id {
+                return Err(YorishiroError::ValidationFailed {
+                    message: format!("{WORKSPACE_HEADER} names a workspace this key cannot act on"),
+                    details: Vec::new(),
+                    hint: "the named workspace belongs to another tenant; send a workspace this \
+                            key can act on"
+                        .into(),
+                });
+            }
+            return Ok(requested);
+        }
+        let reachable =
+            crate::models::tenancy::reachable_workspace_ids(conn, tenant_id, user_id).await?;
+        match reachable.as_slice() {
+            [workspace_id] => Ok(*workspace_id),
+            [] => Err(YorishiroError::ScopeInsufficient {
+                message: "this key has no workspace it can act on".into(),
+                hint: "create a workspace in this tenant, or send its UUID".into(),
+            }),
+            _ => Err(YorishiroError::ValidationFailed {
+                message: format!(
+                    "this tenant key can act on more than one workspace, so {WORKSPACE_HEADER} is required"
+                ),
+                details: Vec::new(),
+                hint: "send the workspace's UUID to choose one".into(),
+            }),
+        }
+    }
+
     /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
     ///
     /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the SeaORM entity API.
-    /// Matches the SQL function's single-argument overload exactly: only a workspace-scoped key (`workspace_id` set) resolves; a tenant-scoped key matches nothing here either, same as on Postgres.
+    /// Workspace resolution follows the same rules as the Postgres path, for both workspace-scoped and tenant-scoped keys.
     ///
     /// The default authenticator selects this implementation for SQLite.
     ///
@@ -302,15 +391,23 @@ impl Entity {
     pub async fn authenticate_sqlite(
         conn: &impl ConnectionTrait,
         presented_key: &str,
+        requested_workspace: Option<Uuid>,
     ) -> Result<AuthContext, YorishiroError> {
-        let (key, tenant_id) = Self::find_sqlite_auth_context(conn, hash_key(presented_key))
+        let key = Self::find_sqlite_auth_context(conn, hash_key(presented_key))
             .await?
             .ok_or(YorishiroError::Unauthenticated)?;
-        let workspace_id = key.workspace_id.ok_or(YorishiroError::Unauthenticated)?;
+        let workspace_id = Self::resolve_key_workspace(
+            conn,
+            key.workspace_id,
+            key.tenant_id,
+            key.user_id,
+            requested_workspace,
+        )
+        .await?;
         AuthContext {
             api_key_id: key.id,
             workspace_id,
-            tenant_id,
+            tenant_id: key.tenant_id,
             scope: stored_scope(&key.scope)?,
             user_id: key.user_id,
             audit: key.audit,
@@ -384,7 +481,7 @@ impl Entity {
     pub(crate) async fn find_sqlite_auth_context(
         conn: &impl ConnectionTrait,
         key_hash: Vec<u8>,
-    ) -> Result<Option<(Model, uuid::Uuid)>, YorishiroError> {
+    ) -> Result<Option<Model>, YorishiroError> {
         use crate::models::_entities::api_keys::Column;
 
         let Some(key) = Entity::find()
@@ -398,15 +495,18 @@ impl Entity {
         if !key.is_active() {
             return Ok(None);
         }
-        let Some(workspace_id) = key.workspace_id else {
-            return Ok(None);
-        };
-        let tenant_id = crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
-            .one(conn)
-            .await
-            .internal()?
-            .map(|workspace| workspace.tenant_id);
-        Ok(tenant_id.map(|tenant_id| (key, tenant_id)))
+        if let Some(workspace_id) = key.workspace_id {
+            // Mirrors the SQL join: a workspace-scoped key authenticates only while its workspace still belongs to its stored tenant.
+            return Ok(
+                crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
+                    .one(conn)
+                    .await
+                    .internal()?
+                    .filter(|workspace| workspace.tenant_id == key.tenant_id)
+                    .map(|_| key),
+            );
+        }
+        Ok(Some(key))
     }
 
     pub(crate) async fn touch_last_used(conn: &impl ConnectionTrait, api_key_id: uuid::Uuid) {
@@ -452,6 +552,57 @@ impl Entity {
         .await
     }
 
+    /// Issues a key without a workspace, so it acts on the caller's tenant and names its workspace per request.
+    /// The role cap is the same one command applies: a key attributed to a user may not exceed what that user's tenant role permits, since the key can act as them.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
+    pub async fn create_tenant_api_key(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        scope: ApiKeyScope,
+        user_id: Option<uuid::Uuid>,
+        audit: bool,
+        name: &str,
+    ) -> Result<CreatedTenantApiKey, YorishiroError> {
+        use crate::models::_entities::tenant_tenants;
+
+        let txn = crate::db::begin_write(db).await.internal()?;
+        let name = validate_key_name(name)?;
+        let exists = tenant_tenants::Entity::find_by_id(tenant_id)
+            .count(&txn)
+            .await
+            .internal()?
+            > 0;
+        if !exists {
+            return Err(YorishiroError::not_found(format!(
+                "tenant '{tenant_id}' does not exist"
+            )));
+        }
+        crate::models::access::require_attributed_key_grant(&txn, tenant_id, user_id, scope)
+            .await?;
+        let (prefix, plaintext) = generate_key();
+        let inserted = ActiveModel {
+            tenant_id: ActiveValue::Set(tenant_id),
+            workspace_id: ActiveValue::Set(None),
+            user_id: ActiveValue::Set(user_id),
+            key_hash: ActiveValue::Set(hash_key(&plaintext)),
+            key_prefix: ActiveValue::Set(prefix),
+            name: ActiveValue::Set(name),
+            scope: ActiveValue::Set(scope.as_db_str().to_string()),
+            audit: ActiveValue::Set(audit),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .internal()?;
+        txn.commit().await.internal()?;
+        Ok(CreatedTenantApiKey {
+            id: inserted.id,
+            plaintext,
+        })
+    }
+
     pub(crate) async fn create_delegated_api_key(
         db: &sea_orm::DatabaseConnection,
         issuer: &AuthContext,
@@ -488,20 +639,7 @@ impl Entity {
         use crate::models::_entities::workspace_workspaces;
 
         let txn = crate::db::begin_write(db).await.internal()?;
-        let name = name.trim();
-        if name.is_empty() || name.chars().count() > 100 {
-            return Err(YorishiroError::ValidationFailed {
-                message: "name must be between 1 and 100 characters".into(),
-                details: vec![crate::error::ValidationDetail {
-                    field: "name".into(),
-                    problem: "name must not be empty and must be at most 100 characters".into(),
-                    code: crate::error::ValidationErrorCode::EmptyRequired,
-                    expected: Some("1-100 characters".into()),
-                    actual: Some(name.chars().count().to_string()),
-                }],
-                hint: "provide a non-empty API key name".into(),
-            });
-        }
+        let name = validate_key_name(name)?;
         if expires_at.is_some_and(|expires| expires <= crate::time::now()) {
             return Err(YorishiroError::ValidationFailed {
                 message: "key expiry must be in the future".into(),
@@ -819,6 +957,25 @@ impl Entity {
             Ok(())
         }
     }
+}
+
+/// Trims a key name and enforces its 1 to 100 character bound.
+fn validate_key_name(name: &str) -> Result<String, YorishiroError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(YorishiroError::ValidationFailed {
+            message: "name must be between 1 and 100 characters".into(),
+            details: vec![crate::error::ValidationDetail {
+                field: "name".into(),
+                problem: "name must not be empty and must be at most 100 characters".into(),
+                code: crate::error::ValidationErrorCode::EmptyRequired,
+                expected: Some("1-100 characters".into()),
+                actual: Some(name.chars().count().to_string()),
+            }],
+            hint: "provide a non-empty API key name".into(),
+        });
+    }
+    Ok(name.to_owned())
 }
 
 /// A stored scope this crate does not define is a corrupt row, not a missing scope.

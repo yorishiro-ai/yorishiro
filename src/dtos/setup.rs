@@ -22,7 +22,9 @@ pub struct SetupResponse {
     pub user_id: Uuid,
     pub email: String,
     pub tenant_id: Uuid,
+    /// The default workspace created for the tenant.
+    /// The returned key is not bound to it: it is tenant-scoped and names its workspace per request.
     pub workspace_id: Uuid,
-    /// A freshly issued API key, scoped to the new owner account: shown only here, same as `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
+    /// A freshly issued tenant-scoped admin key, scoped to the new owner account: shown only here, same as `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
     pub api_key: String,
 }
