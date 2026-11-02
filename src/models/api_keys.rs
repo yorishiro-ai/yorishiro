@@ -200,7 +200,8 @@ impl AuthContext {
 
 pub struct CreatedApiKey {
     pub id: Uuid,
-    pub workspace_id: Uuid,
+    /// `None` for tenant-scoped keys, which name their workspace per request instead.
+    pub workspace_id: Option<Uuid>,
     pub scope: ApiKeyScope,
     pub(crate) grant: KeyGrant,
     pub(crate) key_prefix: String,
@@ -624,6 +625,91 @@ impl Entity {
         .await
     }
 
+    /// Issues a tenant-scoped key on the issuer's behalf: no workspace binding, per-request workspace selection, tenant Admin or Owner only.
+    /// A workspace-bound issuer cannot mint one, since its authority never left that workspace.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
+    pub(crate) async fn create_delegated_tenant_api_key(
+        db: &sea_orm::DatabaseConnection,
+        issuer: &AuthContext,
+        scope: ApiKeyScope,
+        audit: bool,
+        name: &str,
+        expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    ) -> Result<CreatedApiKey, YorishiroError> {
+        let txn = crate::db::begin_write(db).await.internal()?;
+        let name = validate_key_name(name)?;
+        if expires_at.is_some_and(|expires| expires <= crate::time::now()) {
+            return Err(YorishiroError::ValidationFailed {
+                message: "key expiry must be in the future".into(),
+                details: vec![],
+                hint: "choose a future expires_at or omit it".into(),
+            });
+        }
+
+        let current = Model::current_context(&txn, issuer).await?;
+        crate::models::access::require_tenant_admin(&txn, issuer.tenant_id, issuer.user_id).await?;
+        crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
+        let issuer_key = Entity::find_by_id(issuer.api_key_id)
+            .one(&txn)
+            .await
+            .internal()?
+            .ok_or(YorishiroError::Unauthenticated)?;
+        if issuer_key.workspace_id.is_some() {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: "a tenant-scoped key can only be issued with a tenant-scoped credential"
+                    .into(),
+                hint: "issue it from a key without a workspace binding".into(),
+            });
+        }
+        if let Some(limit) = issuer_key.expires_at
+            && expires_at.is_none_or(|expiry| expiry > limit)
+        {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: "requested expiry exceeds the issuing key's lifetime".into(),
+                hint: "set expires_at no later than the issuing key's expiry".into(),
+            });
+        }
+        crate::models::access::require_attributed_key_grant(
+            &txn,
+            issuer.tenant_id,
+            issuer.user_id,
+            scope,
+        )
+        .await?;
+
+        let (prefix, plaintext) = generate_key();
+        let inserted = ActiveModel {
+            tenant_id: ActiveValue::Set(issuer.tenant_id),
+            workspace_id: ActiveValue::Set(None),
+            user_id: ActiveValue::Set(issuer.user_id),
+            key_hash: ActiveValue::Set(hash_key(&plaintext)),
+            key_prefix: ActiveValue::Set(prefix),
+            name: ActiveValue::Set(name),
+            scope: ActiveValue::Set(scope.as_db_str().to_string()),
+            audit: ActiveValue::Set(audit),
+            expires_at: ActiveValue::Set(expires_at),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .internal()?;
+        let grant = inserted.grant_metadata(&txn).await?;
+        txn.commit().await.internal()?;
+
+        Ok(CreatedApiKey {
+            id: inserted.id,
+            workspace_id: None,
+            scope,
+            grant,
+            key_prefix: inserted.key_prefix,
+            name: inserted.name,
+            created_at: inserted.created_at,
+            plaintext,
+        })
+    }
+
     /// Issues a key and validates attribution while holding the membership fence.
     #[allow(clippy::too_many_arguments)]
     async fn create_named_api_key(
@@ -721,7 +807,7 @@ impl Entity {
 
         Ok(CreatedApiKey {
             id: inserted.id,
-            workspace_id,
+            workspace_id: Some(workspace_id),
             scope,
             grant,
             key_prefix: inserted.key_prefix,
@@ -916,7 +1002,7 @@ impl Entity {
         txn.commit().await.internal()?;
         Ok(CreatedApiKey {
             id: inserted.id,
-            workspace_id: old.workspace_id.unwrap_or(actor.workspace_id),
+            workspace_id: old.workspace_id,
             scope,
             grant,
             key_prefix: inserted.key_prefix,

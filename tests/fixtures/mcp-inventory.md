@@ -73,7 +73,7 @@ Input schema:
 
 ### `create_api_key`
 
-Issue a workspace-bound API key and return its secret once; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
+Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (per-request X-Workspace-Id) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
 
 Input schema:
 
@@ -125,6 +125,11 @@ Input schema:
           "type": "null"
         }
       ]
+    },
+    "tenant_scoped": {
+      "default": false,
+      "description": "Issue a tenant-scoped key (no workspace binding, per-request `X-Workspace-Id`) instead of a workspace-bound one.\nRequires tenant Admin or Owner and a tenant-scoped issuing credential.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -392,6 +397,28 @@ Input schema:
   },
   "required": [
     "id"
+  ],
+  "type": "object"
+}
+```
+
+### `delete_schema`
+
+Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "schema_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id"
   ],
   "type": "object"
 }

@@ -517,3 +517,106 @@ async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::{api_keys, tenancy};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+
+        // A workspace-bound key cannot mint a tenant-scoped one.
+        let denied = request
+            .post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"name": "from-bound", "tenant_scoped": true}))
+            .await;
+        denied.assert_status(StatusCode::FORBIDDEN);
+
+        // A tenant-scoped admin key can, and the new key carries no workspace binding.
+        let issuer = api_keys::Entity::create_tenant_api_key(
+            &ctx.db,
+            tenant.tenant_id,
+            api_keys::ApiKeyScope::Migration,
+            Some(tenant.owner_id),
+            true,
+            "initial-admin",
+        )
+        .await
+        .expect("bootstrap tenant-scoped key");
+        let created = request
+            .post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .json(&serde_json::json!({
+                "name": "tenant-scoped",
+                "scope": "write",
+                "tenant_scoped": true,
+            }))
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let record = created.json::<Value>();
+        assert!(
+            record["grant"]["workspace_id"].is_null(),
+            "response: {record:?}"
+        );
+        assert_eq!(record["grant"]["scope"], "write");
+        assert_eq!(record["grant"]["effective_scope"], "write");
+        assert_eq!(record["grant"]["tenant_id"], tenant.tenant_id.to_string());
+
+        // A non-admin member cannot issue tenant-scoped keys.
+        let txn = ctx.db.begin().await.unwrap();
+        let member = tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &super::fixtures::unique_email("tenant-scoped-member"),
+            "hunter2-hunter2",
+            None,
+            yorishiro::models::tenant_memberships::MembershipRole::Member,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let member_key = fixtures::issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            member.id,
+            api_keys::ApiKeyScope::Migration,
+            false,
+        )
+        .await;
+        request
+            .post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {member_key}"))
+            .json(&serde_json::json!({"name": "member-tenant", "tenant_scoped": true}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+
+        // The new key resolves the tenant's single workspace and appears in the listing.
+        let full_key = record["full_key"].as_str().unwrap().to_owned();
+        request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {full_key}"))
+            .await
+            .assert_status(StatusCode::OK);
+        let listed = request
+            .get("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .await;
+        listed.assert_status(StatusCode::OK);
+        let keys = listed.json::<Value>();
+        assert!(
+            keys["keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|key| key["id"] == record["id"])
+        );
+        request
+            .delete(&format!("/api/api-keys/{}", record["id"]))
+            .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+    })
+    .await;
+}
