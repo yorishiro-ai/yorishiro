@@ -3,6 +3,7 @@ use chrono::{Offset, TimeZone};
 use serde_json::Value;
 use uuid::Uuid;
 use yorishiro::App;
+use yorishiro::models::api_keys::WORKSPACE_HEADER;
 
 use super::fixtures::{self, TenantArgs, TestTenant};
 use super::{boot_request, boot_request_with_timezone};
@@ -545,9 +546,11 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         )
         .await
         .expect("bootstrap tenant-scoped key");
+        // A tenant-scoped key names its workspace per request; the shared test tenant can hold several.
         let created = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({
                 "name": "tenant-scoped",
                 "scope": "write",
@@ -574,11 +577,12 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         .await
         .unwrap();
         txn.commit().await.unwrap();
+        // Member role caps key scope at write; that is enough to attempt (and be refused) tenant-scoped issuance.
         let member_key = fixtures::issue_api_key(
             &ctx,
             tenant.workspace_id,
             member.id,
-            api_keys::ApiKeyScope::Migration,
+            api_keys::ApiKeyScope::Write,
             false,
         )
         .await;
@@ -589,16 +593,18 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await
             .assert_status(StatusCode::FORBIDDEN);
 
-        // The new key resolves the tenant's single workspace and appears in the listing.
+        // The new key names its workspace per request and appears in the listing.
         let full_key = record["full_key"].as_str().unwrap().to_owned();
         request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {full_key}"))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await
             .assert_status(StatusCode::OK);
         let listed = request
             .get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await;
         listed.assert_status(StatusCode::OK);
         let keys = listed.json::<Value>();
@@ -612,6 +618,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         request
             .delete(&format!("/api/api-keys/{}", record["id"]))
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await
             .assert_status(StatusCode::NO_CONTENT);
     })
