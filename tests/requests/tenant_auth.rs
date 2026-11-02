@@ -6,7 +6,7 @@ use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::controllers::middleware::auth::WORKSPACE_HEADER;
 use yorishiro::edition::ee::models::api_keys::create_tenant_api_key;
 
-/// Installing `TenantScopedAuthenticator` (`App::after_context`) must not break a workspace-scoped key on a route base itself defines.
+/// Enterprise edition composition must not break a workspace-scoped key on a route base itself defines.
 #[tokio::test]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     if !super::super::require_postgres_backend() {
@@ -30,7 +30,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     .await;
 }
 
-/// A tenant-scoped key (`workspace_id` NULL) names its workspace per request with `X-Workspace-Id`, and is rejected without one.
+/// A tenant-scoped key (`workspace_id` NULL) names its workspace per request with `X-Workspace-Id`, and without the header it resolves the tenant's single workspace.
 #[tokio::test]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
     if !super::super::require_postgres_backend() {
@@ -72,14 +72,14 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             plaintext: replacement["full_key"].as_str().unwrap().to_owned(),
         };
 
-        // Without the header, `authenticate_api_key(hash, NULL)` finds no workspace to resolve against, so this reaches the caller as an ordinary authentication failure, not a validation error naming the header.
+        // Without the header the key resolves the tenant's single workspace, so this is a normal authorized request, not a validation error naming the header.
         let no_header = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .await;
         assert_eq!(
             no_header.status_code(),
-            401,
+            200,
             "response: {:?}",
             no_header.text()
         );
@@ -109,7 +109,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .await;
-        assert_eq!(missing_target.status_code(), 401);
+        assert_eq!(missing_target.status_code(), 200);
         let response = request
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -128,16 +128,17 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
         assert!(!response.text().contains(&tenant_key.plaintext));
         assert!(!response.text().contains("key_hash"));
+        // Over MCP the header and the single-workspace resolution agree on the same identity.
         let session = super::mcp::initialize(&request).await;
-        for (id, target) in [(2, Some(workspace_id)), (3, None)] {
+        for (id, with_header) in [(2u64, true), (3, false)] {
             let mut call = request
                 .post("/mcp")
                 .add_header("Accept", "application/json, text/event-stream")
                 .add_header("MCP-Session-Id", session.clone())
                 .add_header("MCP-Protocol-Version", "2025-03-26")
                 .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext));
-            if let Some(target) = target {
-                call = call.add_header(WORKSPACE_HEADER, target.to_string());
+            if with_header {
+                call = call.add_header(WORKSPACE_HEADER, workspace_id.to_string());
             }
             let response = call
                 .json(&serde_json::json!({
@@ -147,15 +148,11 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 .await;
             assert_eq!(response.status_code(), 200, "{}", response.text());
             let body = super::mcp::rpc_body(&response.text());
-            if target.is_some() {
-                assert_ne!(body["result"]["isError"], true, "{body}");
-                let mcp: serde_json::Value =
-                    serde_json::from_str(body["result"]["content"][0]["text"].as_str().unwrap())
-                        .unwrap();
-                assert_eq!(mcp, identity);
-            } else {
-                assert_eq!(body["error"]["message"], "authentication failed", "{body}");
-            }
+            assert_ne!(body["result"]["isError"], true, "{body}");
+            let mcp: serde_json::Value =
+                serde_json::from_str(body["result"]["content"][0]["text"].as_str().unwrap())
+                    .unwrap();
+            assert_eq!(mcp, identity);
             assert!(!response.text().contains(&tenant_key.plaintext));
             assert!(!response.text().contains("key_hash"));
         }
@@ -212,4 +209,57 @@ async fn tenant_key_rechecks_direct_workspace_grants_after_revocation() {
             assert!(api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
         }
     }).await;
+}
+
+/// A tenant-scoped key cannot retarget another tenant's workspace through the header, even though the key itself is valid.
+#[tokio::test]
+async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let caller = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let foreign = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+
+        let db = ctx.shared_store.get::<DbHandle>().unwrap();
+        let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
+        let tenant_key =
+            create_tenant_api_key(&identity, caller.tenant_id, "read", Some(caller.owner_id))
+                .await
+                .expect("issuing a tenant-scoped key");
+
+        // The key works in its own tenant's workspace.
+        let own = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, caller.workspace_id.to_string())
+            .await;
+        assert_eq!(own.status_code(), 200, "{}", own.text());
+
+        // Naming a workspace that belongs to another tenant is refused, not resolved.
+        let foreign_target = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, foreign.workspace_id.to_string())
+            .await;
+        assert_eq!(
+            foreign_target.status_code(),
+            422,
+            "{}",
+            foreign_target.text()
+        );
+
+        // The same header is valid for a key of the foreign tenant, proving the refusal is about the pairing, not the workspace.
+        let foreign_key =
+            create_tenant_api_key(&identity, foreign.tenant_id, "read", Some(foreign.owner_id))
+                .await
+                .expect("issuing a second tenant-scoped key");
+        let valid = request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", foreign_key.plaintext))
+            .add_header(WORKSPACE_HEADER, foreign.workspace_id.to_string())
+            .await;
+        assert_eq!(valid.status_code(), 200, "{}", valid.text());
+    })
+    .await;
 }
