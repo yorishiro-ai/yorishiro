@@ -75,13 +75,17 @@ def rpc_document(text, request_id):
     return matches[0]
 
 
-def tool_value(document):
+def tool_text(document):
     require("error" not in document, f"RPC error: {document}")
     result = document["result"]
     require(not result.get("isError", False), f"tool error: {result}")
     texts = [item["text"] for item in result.get("content", []) if item["type"] == "text"]
-    require(len(texts) == 1, "expected one tool JSON text block")
-    return json.loads(texts[0])
+    require(len(texts) == 1, "expected one tool text block")
+    return texts[0]
+
+
+def tool_value(document):
+    return json.loads(tool_text(document))
 
 
 def tool_error(document):
@@ -120,6 +124,7 @@ class App:
         self.secrets = []
         self.events = []
         self.server = None
+        self.worker = None
         self.server_files = []
         self.logs = contextlib.ExitStack()
         self.sequence = 0
@@ -195,6 +200,7 @@ class App:
     def boot(self):
         self.cli("db", "migrate")
         tenant = output_field(self.task("create_tenant", name="blackbox"), "tenant id", True)
+        self.tenant = tenant
         workspace = output_field(self.task("create_workspace", tenant_id=tenant, name="blackbox"),
                                  "workspace id", True)
         key_id, key = self.issue(workspace, "schema")
@@ -218,7 +224,9 @@ class App:
             time.sleep(0.1)
         raise AssertionError("server readiness deadline exceeded")
 
-    def http(self, method, path, body=None, key=None, headers=None, rpc_id=None, timeout=10):
+    def http(self, method, path, body=None, key=None, headers=None, rpc_id=None, timeout=10,
+             raw_body=None):
+        require(body is None or raw_body is None, "JSON and raw request bodies are exclusive")
         self.remaining()
         connection = http.client.HTTPConnection("127.0.0.1", self.port,
                                                 timeout=self.remaining(timeout))
@@ -230,39 +238,48 @@ class App:
         request_headers.update(headers or {})
         raw = b""
         status = None
+        until = time.monotonic() + self.remaining(timeout)
         try:
-            connection.request(method, path, json.dumps(body) if body is not None else None,
+            connection.request(method, path, raw_body if raw_body is not None else
+                               json.dumps(body) if body is not None else None,
                                request_headers)
+            response_socket = connection.sock
             response = connection.getresponse()
             status = response.status
             response_headers = dict(response.getheaders())
-            if "text/event-stream" in response.getheader("Content-Type", ""):
-                # Stop after the matching event rather than waiting for an SSE connection to close.
-                until = time.monotonic() + self.remaining(timeout)
-                event = b""
-                while time.monotonic() < until and len(raw) <= MAX_BODY:
-                    if connection.sock is not None:
-                        connection.sock.settimeout(max(0.001, until - time.monotonic()))
-                    line = response.readline(MAX_BODY + 1)
-                    if not line:
-                        break
-                    raw += line
-                    event += line
-                    if line in (b"\n", b"\r\n"):
-                        try:
-                            rpc_document(event.decode(), rpc_id)
-                            break
-                        except AssertionError:
-                            event = b""
-                else:
-                    raise AssertionError("SSE deadline or size limit exceeded")
-            else:
-                raw = response.read(MAX_BODY + 1)
-            require(len(raw) <= MAX_BODY, "HTTP body size limit exceeded")
+            sse = "text/event-stream" in response.getheader("Content-Type", "")
+            pending, event = b"", b""
+            matched = False
+            while not matched:
+                remaining = min(self.remaining(timeout), until - time.monotonic())
+                require(remaining > 0, "HTTP response deadline exceeded")
+                if response_socket is not None:
+                    response_socket.settimeout(remaining)
+                # read1 returns available bytes, so a trickled partial line cannot reset the deadline.
+                chunk = response.read1(min(65536, MAX_BODY + 1 - len(raw)))
+                self.remaining()
+                require(time.monotonic() < until, "HTTP response deadline exceeded")
+                if not chunk:
+                    break
+                raw += chunk
+                require(len(raw) <= MAX_BODY, "HTTP body size limit exceeded")
+                if sse:
+                    pending += chunk
+                    while b"\n" in pending:
+                        line, _, pending = pending.partition(b"\n")
+                        event += line + b"\n"
+                        if line in (b"", b"\r"):
+                            try:
+                                rpc_document(event.decode(), rpc_id)
+                                matched = True
+                                raw = raw[:len(raw) - len(pending)]
+                                break
+                            except AssertionError:
+                                event = b""
             return status, response_headers, raw.decode("utf-8")
         finally:
             connection.close()
-            self.events.append({"http": [method, path], "request": body, "status": status,
+            self.events.append({"http": [method, path], "request": raw_body if raw_body is not None else body, "status": status,
                                 "response": raw.decode("utf-8", "replace")})
 
     def rest(self, method, path, body=None, status=200, key=None):
@@ -286,9 +303,15 @@ class App:
             process.wait()
 
     def close(self):
-        if self.server is not None:
-            self.stop(self.server)
-        self.logs.close()
+        try:
+            if self.worker is not None:
+                self.stop(self.worker)
+        finally:
+            try:
+                if self.server is not None:
+                    self.stop(self.server)
+            finally:
+                self.logs.close()
 
     def artifacts(self, failure):
         destination = self.args.artifacts / f"{self.args.edition}-{self.args.suite}"
@@ -300,7 +323,7 @@ class App:
                 raise ValueError(f"artifact symlink refused: {path}")
             path.write_text(redact(text, self.secrets), encoding="utf-8")
         write("transcript.json", json.dumps(self.events, indent=2))
-        for name in ("server.stdout", "server.stderr"):
+        for name in ("server.stdout", "server.stderr", "worker.stdout", "worker.stderr"):
             path = self.directory / name
             write(name + ".log", path.read_text(errors="replace") if path.exists() else "")
         write("failure.log", failure or "")
@@ -316,6 +339,25 @@ class App:
         report_path = self.args.artifacts / "results.json"
         require(not report_path.is_symlink(), "report symlink refused")
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    @contextlib.contextmanager
+    def job_worker(self):
+        require(self.worker is None, "worker already started")
+        previous_deadline = self.deadline
+        self.deadline = min(previous_deadline, time.monotonic() + 60)
+        try:
+            files = [self.logs.enter_context((self.directory / name).open("wb"))
+                     for name in ("worker.stdout", "worker.stderr")]
+            self.worker = subprocess.Popen(
+                [str(self.args.binary), "--environment", "test_sqlite", "start",
+                 "--worker=job-target:shared", "--no-banner"],
+                cwd=ROOT, env=self.env, stdout=files[0], stderr=files[1], start_new_session=True)
+            yield self.worker
+        finally:
+            self.deadline = previous_deadline
+            if self.worker is not None:
+                self.stop(self.worker)
+                self.worker = None
 
 
 class MCP:
@@ -422,6 +464,190 @@ def crud(app, surface):
     app.checks.append(f"{surface} schema create/read/archive/delete and entity CRUD; cross-surface reads")
 
 
+class GraphAPI:
+    """Only the common operations used by the relation/import scenario."""
+
+    def __init__(self, app, surface, key):
+        self.app, self.surface, self.key = app, surface, key
+        self.client = MCP(app, key)
+
+    def call(self, name, arguments=None):
+        arguments = arguments or {}
+        if self.surface == "mcp":
+            return self.client.call(name, arguments)
+        routes = {
+            "create_schema": ("POST", "/api/schemas", arguments.get("definition"), 201),
+            "create_entity": ("POST", "/api/entities", arguments, 201),
+            "create_relation": ("POST", "/api/relations", arguments, 201),
+            "delete_relation": ("DELETE", f"/api/relations/{arguments.get('id')}", None, 204),
+            "set_relation_status": ("PUT", f"/api/relations/{arguments.get('id')}/status",
+                                    {"status": arguments.get("status")}, 200),
+            "list_schemas": ("GET", "/api/schemas", None, 200),
+            "list_entities": ("GET", "/api/entities", None, 200),
+            "list_relations": ("GET", "/api/relations", None, 200),
+            "import_job_status": ("GET", f"/api/import-jobs/{arguments.get('job_id')}", None, 200),
+        }
+        method, path, body, status = routes[name]
+        return self.app.rest(method, path, body, status=status, key=self.key)
+
+    def export(self):
+        if self.surface == "mcp":
+            return tool_text(self.client.rpc("tools/call", {"name": "export_jsonl", "arguments": {}}))
+        status, headers, text = self.app.http("GET", "/api/export.jsonl", key=self.key)
+        require(status == 200, f"export failed: {status}: {text}")
+        content_type = next((value for name, value in headers.items()
+                             if name.lower() == "content-type"), "")
+        require(content_type == "application/x-ndjson", "export is not raw NDJSON")
+        return text
+
+    def submit(self, text):
+        if self.surface == "mcp":
+            return self.client.call("import_jsonl", {"jsonl": text})
+        status, _, body = self.app.http("POST", "/api/import.jsonl", key=self.key,
+                                       headers={"Content-Type": "application/x-ndjson"}, raw_body=text)
+        require(status == 202, f"import was not accepted: {status}: {body}")
+        return json.loads(body)
+
+
+def relation_export_import_worker(app, surface):
+    def workspace(name):
+        value = output_field(app.task("create_workspace", tenant_id=app.tenant, name=name),
+                             "workspace id", True)
+        _, key = app.issue(value, "schema")
+        return value, key
+
+    source_id, source_key = workspace("graph-source")
+    source = GraphAPI(app, surface, source_key)
+    peer = GraphAPI(app, "mcp" if surface == "rest" else "rest", source_key)
+    definition = {"name": "graph", "entity_types": {"person": {"fields": {
+        "name": {"type": "string", "required": True}}}},
+        "relation_types": {"knows": {"source": "person", "target": "person"}}}
+    schema_id = source.call("create_schema", {"definition": definition})["schema"]["id"]
+    people = [source.call("create_entity", {"schema_name": "graph", "entity_type": "person",
+                                         "data": {"name": name}}) for name in ("Alice", "Bob")]
+    payload = {"source_id": people[0]["id"], "target_id": people[1]["id"], "relation_type": "knows"}
+
+    def read_relation(relation):
+        rest = app.rest("GET", f"/api/relations/{relation['id']}", key=source_key)
+        mcp = source.client.call("get_relation", {"id": relation["id"]})
+        require(rest == mcp == relation, "relation readback differs across surfaces")
+        for api in (source, peer):
+            require(api.call("list_relations") == [relation], "relation list differs across surfaces")
+
+    relation = source.call("create_relation", payload)
+    require(relation["properties"] == {} and relation["status"] == "active",
+            "omitted relation properties/status defaults changed")
+    read_relation(relation)
+    _, read_key = app.issue(source_id, "read")
+    app.rest("POST", "/api/relations", payload, status=403, key=read_key)
+    denied = MCP(app, read_key).call("create_relation", payload, error=True)
+    require(denied.get("result", {}).get("isError") is True
+            and "scope_insufficient" in json.dumps(denied), "wrong relation scope tool error")
+    status, _, _ = app.http("POST", "/api/relations", payload)
+    require(status == 401, "relation creation accepted missing auth")
+    unauthenticated = source.client.call("create_relation", payload, error=True, key="")
+    require(unauthenticated.get("error", {}).get("code") == -32600, "wrong MCP missing-auth error")
+    status, _, text = app.http("PUT", f"/api/relations/{relation['id']}/status",
+                               {"status": "invalid"}, key=source_key)
+    require(status == 422 and "invalid" in text, "wrong invalid relation status rejection")
+    invalid = source.client.call("set_relation_status", {"id": relation["id"], "status": "invalid"}, error=True)
+    require(invalid.get("result", {}).get("isError") is True
+            and "not a relation status" in json.dumps(invalid), "wrong MCP relation status error")
+    missing = {**payload, "target_id": str(uuid.uuid4())}
+    app.rest("POST", "/api/relations", missing, status=404, key=source_key)
+    rejected = source.client.call("create_relation", missing, error=True)
+    require(rejected.get("result", {}).get("isError") is True
+            and "not found" in json.dumps(rejected), "wrong MCP missing-entity error")
+    for state in ("deprecated", "archived", "active"):
+        relation = source.call("set_relation_status", {"id": relation["id"], "status": state})
+        require(relation["status"] == state, "relation status update ignored")
+        read_relation(relation)
+    source.call("delete_relation", {"id": relation["id"]})
+    app.rest("GET", f"/api/relations/{relation['id']}", status=404, key=source_key)
+    source.client.call("get_relation", {"id": relation["id"]}, error=True)
+    require(source.call("list_relations") == peer.call("list_relations") == [], "deleted relation still listed")
+    relation = source.call("create_relation", {**payload, "properties": {"since": 2026}})
+    relation = source.call("set_relation_status", {"id": relation["id"], "status": "deprecated"})
+    require(relation["properties"] == {"since": 2026} and relation["status"] == "deprecated",
+            "relation properties or deprecated status lost")
+    read_relation(relation)
+    exported = source.export()
+    require(exported == peer.export(), "REST/MCP raw export text differs")
+    records = [json.loads(line) for line in exported.splitlines()]
+    require([item["kind"] for item in records] == ["schema", "entity", "entity", "relation"],
+            "export record counts or kind order differs")
+    schema = app.rest("GET", f"/api/schemas/{schema_id}", key=source_key)
+    expected = [schema, *sorted(people, key=lambda person: person["id"]), relation]
+    require([item["record"] for item in records] == expected, "export changed IDs/data/properties/status")
+
+    destination_id, destination_key = workspace("graph-destination")
+    destination = GraphAPI(app, surface, destination_key)
+    destination_peer = GraphAPI(app, peer.surface, destination_key)
+    job_id = destination.submit(exported)["job_id"]
+    require(str(uuid.UUID(job_id)) == job_id, "import returned noncanonical job ID")
+    for api in (destination, destination_peer):
+        job = api.call("import_job_status", {"job_id": job_id})
+        require(job == {"job_id": job_id, "job_name": "import", "status": "queued", "result": None},
+                "import was not queued before worker startup")
+        for name in ("list_schemas", "list_entities", "list_relations"):
+            require(api.call(name) == [], "import mutated destination before worker startup")
+    with app.job_worker() as worker:
+        while True:
+            app.remaining()
+            require(worker.poll() is None, "import worker exited before completion")
+            require(app.server.poll() is None, "server exited during import")
+            job = destination.call("import_job_status", {"job_id": job_id})
+            app.remaining()
+            require(job["job_id"] == job_id and job["job_name"] == "import", "wrong import job identity")
+            require(job["status"] in ("queued", "running", "completed"), f"import failed: {job}")
+            if job["status"] == "completed":
+                require(worker.poll() is None, "import worker exited at completion")
+                break
+            time.sleep(min(0.1, app.remaining()))
+        require(destination_peer.call("import_job_status", {"job_id": job_id}) == job,
+                "completed import status differs across surfaces")
+        require(job["result"] == {"job_id": job_id, "schemas": 1, "entities": 2, "relations": 1},
+                "wrong completed import counts")
+
+    restored = {}
+    for name, count in (("list_schemas", 1), ("list_entities", 2), ("list_relations", 1)):
+        rows = destination.call(name)
+        require(rows == destination_peer.call(name) and len(rows) == count,
+                f"restored {name} differs across surfaces or has wrong count")
+        if name != "list_schemas":
+            require(all(row["workspace_id"] == destination_id for row in rows), "wrong destination ownership")
+        restored[name] = rows
+    new_schema_id = restored["list_schemas"][0]["id"]
+    new_schema = app.rest("GET", f"/api/schemas/{new_schema_id}", key=destination_key)
+    require(new_schema == destination.client.call("get_schema_by_id", {"schema_id": new_schema_id}),
+            "restored schema readback differs")
+    require(new_schema["id"] != schema_id and new_schema["workspace_id"] == destination_id
+            and new_schema["tenant_id"] == app.tenant
+            and new_schema["definition"] == schema["definition"] and new_schema["status"] == "active",
+            "import did not recreate the schema")
+    new_people = {row["data"]["name"]: row for row in restored["list_entities"]}
+    require(set(new_people) == {"Alice", "Bob"}, "import changed entity data")
+    old_ids = {row["id"] for row in people}
+    for name, row in new_people.items():
+        require(row["id"] not in old_ids and row["schema_id"] == new_schema["id"]
+                and row["schema_version"] == new_schema["version"] and row["entity_type"] == "person"
+                and row["data"] == {"name": name}, "import did not remap entity IDs/schema/data")
+        require(app.rest("GET", f"/api/entities/{row['id']}", key=destination_key)
+                == destination.client.call("get_entity", {"id": row["id"]}) == row,
+                "restored entity readback differs")
+    new_relation = restored["list_relations"][0]
+    require(new_relation["id"] != relation["id"]
+            and new_relation["source_id"] == new_people["Alice"]["id"]
+            and new_relation["target_id"] == new_people["Bob"]["id"]
+            and new_relation["relation_type"] == "knows" and new_relation["properties"] == {"since": 2026}
+            and new_relation["status"] == "active", "import did not restore/remap the active relation")
+    require(app.rest("GET", f"/api/relations/{new_relation['id']}", key=destination_key)
+            == destination.client.call("get_relation", {"id": new_relation["id"]}) == new_relation,
+            "restored relation readback differs")
+    require(source.export() == peer.export() == exported, "import mutated the source graph")
+    app.checks.append(f"{surface} relation CRUD/status, exact raw export parity, queued import -> real worker -> restored graph")
+
+
 def rest_suite(app):
     _, read_key = app.issue(app.workspace, "read")
     app.rest("POST", "/api/schemas", SCHEMA, status=403, key=read_key)
@@ -491,8 +717,10 @@ def scenarios(suite):
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
     focused = {
         "rest": [("rest.schema-entity-crud", lambda app: crud(app, "rest")),
+                 ("rest.relation-export-import-worker", lambda app: relation_export_import_worker(app, "rest")),
                  ("rest.auth-scope-input", rest_suite)],
         "mcp": [("mcp.schema-entity-crud", lambda app: crud(app, "mcp")),
+                ("mcp.relation-export-import-worker", lambda app: relation_export_import_worker(app, "mcp")),
                 ("mcp.discovery-auth-scope-input", mcp_suite)],
         "cli": [("cli.arguments-tasks-stdout-effects", cli_suite)],
     }

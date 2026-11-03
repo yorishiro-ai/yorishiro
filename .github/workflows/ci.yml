@@ -693,6 +693,66 @@ jobs:
           tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C "$RUNNER_TEMP/binary"
           python3 scripts/check_blackbox_reports.py --edition ce --binary "$RUNNER_TEMP/binary/yorishiro" --reports "$RUNNER_TEMP/reports"
 
+  test-inventory:
+    name: Inventory compiled tests (${{ matrix.edition }})
+    needs: changes
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [ce, ee]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/rust-setup
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: inventory-${{ matrix.edition }}-debug
+      - name: Build and enumerate exact workspace test executables
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          set -euo pipefail
+          features=community
+          if [[ "$EDITION" == ee ]]; then features=enterprise; fi
+          cargo test --locked --no-default-features --features "$features" --workspace --no-run --message-format=json > "$RUNNER_TEMP/cargo-tests.jsonl"
+          python3 scripts/test_assignments.py collect --cargo-messages "$RUNNER_TEMP/cargo-tests.jsonl" --edition "$EDITION" --output "$RUNNER_TEMP/inventory-$EDITION.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-inventory-${{ matrix.edition }}
+          path: ${{ runner.temp }}/inventory-${{ matrix.edition }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  test-assignment-verify:
+    name: Verify compiled test assignment
+    needs: [changes, test-inventory]
+    if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise assignment failure guards
+        run: python3 tests/ci/test_assignments.py
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: test-inventory-*
+          path: ${{ runner.temp }}/inventories
+          merge-multiple: true
+      - name: Join both compiled editions to reviewed responsibilities
+        run: >-
+          python3 scripts/test_assignments.py verify
+          --ce "$RUNNER_TEMP/inventories/inventory-ce.json"
+          --ee "$RUNNER_TEMP/inventories/inventory-ee.json"
+          --output "$RUNNER_TEMP/test-assignments.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-assignments
+          path: ${{ runner.temp }}/test-assignments.json
+          if-no-files-found: error
+          retention-days: 7
+
   package-validation:
     name: Package validation
     needs: [changes, package-build]
@@ -752,7 +812,7 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [changes, ce, check, msrv, prepare-embedding, test, public-contract-build, public-contract, public-contract-verify, package-build, package-validation]
+    needs: [changes, ce, check, msrv, prepare-embedding, test, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, package-build, package-validation]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
@@ -769,6 +829,8 @@ jobs:
           PUBLIC_BUILD: ${{ needs.public-contract-build.result }}
           PUBLIC: ${{ needs.public-contract.result }}
           PUBLIC_VERIFY: ${{ needs.public-contract-verify.result }}
+          INVENTORY: ${{ needs.test-inventory.result }}
+          ASSIGNMENT: ${{ needs.test-assignment-verify.result }}
           PACKAGE_RESULT: ${{ needs.package-validation.result }}
           PACKAGE_BUILD: ${{ needs.package-build.result }}
           CHANGES: ${{ needs.changes.result }}
@@ -793,6 +855,8 @@ jobs:
             require_success PUBLIC_BUILD "$PUBLIC_BUILD" true
             require_success PUBLIC "$PUBLIC" true
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" true
+            require_success INVENTORY "$INVENTORY" true
+            require_success ASSIGNMENT "$ASSIGNMENT" true
           else
             require_success CE "$CE" false
             require_success EE "$EE" false
@@ -802,6 +866,8 @@ jobs:
             require_success PUBLIC_BUILD "$PUBLIC_BUILD" false
             require_success PUBLIC "$PUBLIC" false
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" false
+            require_success INVENTORY "$INVENTORY" false
+            require_success ASSIGNMENT "$ASSIGNMENT" false
           fi
           require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"
           require_success PACKAGE "$PACKAGE_RESULT" "$PACKAGE"

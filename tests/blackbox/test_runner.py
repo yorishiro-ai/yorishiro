@@ -44,6 +44,19 @@ class ProtocolTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 run.tool_value(failure)
 
+    def test_export_tool_text_is_raw_jsonl_not_a_json_string(self):
+        text = '{"kind":"schema","record":{"id":"one"}}\n{"kind":"entity","record":{}}\n'
+        document = {"result": {"content": [{"type": "text", "text": text}]}}
+        self.assertEqual(run.tool_text(document), text)
+        api = run.GraphAPI.__new__(run.GraphAPI)
+        api.surface = "mcp"
+        api.client = Mock()
+        api.client.rpc.return_value = document
+        self.assertEqual(api.export(), text)
+        api.client.call.return_value = {"job_id": "job"}
+        self.assertEqual(api.submit(text), {"job_id": "job"})
+        api.client.call.assert_called_once_with("import_jsonl", {"jsonl": text})
+
 
 class RedactionTests(unittest.TestCase):
     def test_known_unknown_and_bearer_secrets(self):
@@ -164,6 +177,130 @@ class ArgumentTests(unittest.TestCase):
         self.assertEqual(kill.call_args_list[0].args, (123, run.signal.SIGTERM))
         self.assertEqual(kill.call_args_list[1].args, (123, run.signal.SIGKILL))
         self.assertEqual(process.wait.call_count, 2)
+
+    def test_rest_import_sends_unquoted_raw_jsonl(self):
+        args = run.parse_args(self.arguments())
+        text = '{"kind":"schema","record":{}}\n{"kind":"entity","record":{}}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            app = run.App(args, directory)
+            response = Mock(status=202)
+            response.getheaders.return_value = [("Content-Type", "application/json")]
+            response.getheader.return_value = "application/json"
+            response.read1.side_effect = [b'{"job_id":"job"}', b""]
+            connection = Mock()
+            connection.getresponse.return_value = response
+            api = run.GraphAPI.__new__(run.GraphAPI)
+            api.app, api.surface, api.key = app, "rest", "credential"
+            with patch("run.http.client.HTTPConnection", return_value=connection):
+                self.assertEqual(api.submit(text), {"job_id": "job"})
+            request = connection.request.call_args.args
+            self.assertEqual(request[:3], ("POST", "/api/import.jsonl", text))
+            self.assertEqual(request[3]["Content-Type"], "application/x-ndjson")
+            self.assertEqual(app.events[-1]["request"], text)
+            connection.close.assert_called_once()
+            app.close()
+
+    def test_trickled_partial_body_cannot_extend_response_deadline(self):
+        args = run.parse_args(self.arguments())
+        for content_type in ("text/event-stream", "application/json"):
+            with self.subTest(content_type=content_type), tempfile.TemporaryDirectory() as directory:
+                app = run.App(args, directory)
+                clock = [run.time.monotonic()]
+                response = Mock(status=200)
+                response.getheaders.return_value = [("Content-Type", content_type)]
+                response.getheader.return_value = content_type
+
+                def trickle(_size, clock=clock):
+                    clock[0] += 0.4
+                    return b'data: {"partial"'  # No newline or EOF.
+
+                response.read1.side_effect = trickle
+                connection = Mock()
+                connection.getresponse.return_value = response
+                with patch("run.http.client.HTTPConnection", return_value=connection), \
+                        patch("run.time.monotonic", side_effect=lambda clock=clock: clock[0]), \
+                        self.assertRaisesRegex(AssertionError, "response deadline exceeded"):
+                    app.http("POST", "/mcp", timeout=1, rpc_id=7)
+                self.assertEqual(response.read1.call_count, 3)
+                timeouts = [call.args[0] for call in connection.sock.settimeout.call_args_list]
+                self.assertEqual(len(timeouts), 3)
+                self.assertGreater(timeouts[0], timeouts[1])
+                self.assertGreater(timeouts[1], timeouts[2])
+                connection.close.assert_called_once()
+                app.close()
+
+    def test_chunked_sse_preserves_priming_events_and_strict_json(self):
+        args = run.parse_args(self.arguments())
+        cases = [([b'data:\r\n\r\ndata: {"jsonrpc":"2.0","id":',
+                   b'7,"result":{}}\r', b'\n\r\ndata: {incomplete'], None),
+                 ([b'data: {broken}\n\n'], json.JSONDecodeError)]
+        for chunks, error in cases:
+            with self.subTest(chunks=chunks), tempfile.TemporaryDirectory() as directory:
+                app = run.App(args, directory)
+                response = Mock(status=200)
+                response.getheaders.return_value = [("Content-Type", "text/event-stream")]
+                response.getheader.return_value = "text/event-stream"
+                response.read1.side_effect = chunks
+                connection = Mock()
+                connection.getresponse.return_value = response
+                with patch("run.http.client.HTTPConnection", return_value=connection):
+                    if error:
+                        with self.assertRaises(error):
+                            app.http("POST", "/mcp", rpc_id=7)
+                    else:
+                        _, _, text = app.http("POST", "/mcp", rpc_id=7)
+                        self.assertEqual(run.rpc_document(text, 7)["result"], {})
+                self.assertEqual(response.read1.call_count, len(chunks))
+                connection.close.assert_called_once()
+                app.close()
+
+    def test_worker_timeout_stops_escalates_reaps_and_restores_deadline(self):
+        args = run.parse_args(self.arguments())
+        with tempfile.TemporaryDirectory() as directory:
+            app = run.App(args, directory)
+            deadline = app.deadline
+            worker = Mock(pid=123)
+            worker.poll.return_value = None
+            worker.wait.side_effect = [run.subprocess.TimeoutExpired("worker", 5), 0]
+            with patch("run.subprocess.Popen", return_value=worker) as popen, \
+                    patch("run.os.killpg") as kill, \
+                    self.assertRaisesRegex(AssertionError, "deadline exceeded"), app.job_worker() as process:
+                self.assertIs(process, worker)
+                self.assertLessEqual(app.deadline, deadline)
+                app.deadline = 0
+                app.remaining()
+            self.assertEqual(popen.call_args.args[0], [str(args.binary), "--environment", "test_sqlite",
+                                                      "start", "--worker=job-target:shared", "--no-banner"])
+            self.assertIs(popen.call_args.kwargs["env"], app.env)
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+            self.assertEqual([call.args for call in kill.call_args_list],
+                             [(123, run.signal.SIGTERM), (123, run.signal.SIGKILL)])
+            self.assertEqual(worker.wait.call_count, 2)
+            self.assertIsNone(app.worker)
+            self.assertEqual(app.deadline, deadline)
+            app.close()
+
+    def test_worker_failure_reaps_already_exited_child(self):
+        args = run.parse_args(self.arguments())
+        with tempfile.TemporaryDirectory() as directory:
+            app = run.App(args, directory)
+            worker = Mock()
+            worker.poll.return_value = 1
+            with patch("run.subprocess.Popen", return_value=worker), patch("run.os.killpg") as kill, \
+                    self.assertRaisesRegex(AssertionError, "worker exited"), app.job_worker() as process:
+                run.require(process.poll() is None, "worker exited")
+            worker.wait.assert_called_once_with()
+            kill.assert_not_called()
+            app.close()
+
+    def test_worker_cleanup_failure_still_stops_server_and_closes_logs(self):
+        app = run.App.__new__(run.App)
+        app.worker, app.server, app.logs = Mock(), Mock(), Mock()
+        with patch.object(app, "stop", side_effect=[run.subprocess.TimeoutExpired("worker", 5), None]) as stop, \
+                self.assertRaises(run.subprocess.TimeoutExpired):
+            app.close()
+        self.assertEqual([call.args for call in stop.call_args_list], [(app.worker,), (app.server,)])
+        app.logs.close.assert_called_once()
 
 
 if __name__ == "__main__":

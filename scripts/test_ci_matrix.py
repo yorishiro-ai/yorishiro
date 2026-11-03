@@ -19,6 +19,19 @@ def main() -> int:
     assert "FROM almalinux:10" in (ROOT / ".github/packaging/Dockerfile").read_text()
     package_action = (ROOT / ".github/actions/build-and-package/action.yml").read_text()
     assert 'RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"' in package_action
+    inventory = workflow.split("\n  test-inventory:\n", 1)[1].split("\n  test-assignment-verify:\n", 1)[0]
+    assert "edition: [ce, ee]" in inventory
+    assert '--workspace --no-run --message-format=json' in inventory
+    assert "scripts/test_assignments.py collect" in inventory
+    assignment = workflow.split("\n  test-assignment-verify:\n", 1)[1].split("\n  package-validation:\n", 1)[0]
+    assert "always()" in assignment
+    assert "scripts/test_assignments.py verify" in assignment
+    assert 'inventory-ce.json' in assignment and 'inventory-ee.json' in assignment
+    required_check = workflow.split("\n  required-check:\n", 1)[1]
+    assert 'needs.test-inventory.result' in required_check
+    assert 'needs.test-assignment-verify.result' in required_check
+    assert 'require_success INVENTORY "$INVENTORY" true' in required_check
+    assert 'require_success ASSIGNMENT "$ASSIGNMENT" true' in required_check
     ddl_window = workflow.split("      - name: Verify shared requests models and workers do not create databases\n", 1)[1].split("      - name: Upload ordinary request DDL evidence\n", 1)[0]
     assert "-- requests:: models:: workers::" in ddl_window
     assert "--skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept" in ddl_window
