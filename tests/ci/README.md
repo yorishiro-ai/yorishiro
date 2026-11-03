@@ -10,9 +10,15 @@ GHA builds CE and EE workspace test targets with Cargo's JSON message format, lo
 New, missing, stale or ambiguous assignments must fail rather than silently select zero tests.
 An inventory receipt proves classification, not execution of the classified test.
 
-This additive stage deliberately keeps the legacy matrix.
-Mixed common/backend tests must be split and assignment-driven execution verified before that matrix is removed.
+This proving stage deliberately keeps the legacy matrix until assignment-driven execution passes GHA.
+Mixed common/backend tests now have separate identities, including distinct-tenant assertions in the PostgreSQL cases.
+CE and EE test executables are built once per edition and archived with the main binary for native Ubuntu 26.04 consumers.
+Public contracts reuse the CE main binary instead of rebuilding it.
+`assigned-tests.yml` provisions only the selected PostgreSQL or Redis service and runs the exact selected identities.
+`run_assigned_tests.py` checks binary hashes and listing completeness before execution, then requires successful execution receipts for every assigned identity/topology.
+Assigned backend/provider mismatches fail instead of returning a green test with no assertions.
 Known resource-dependent tests and subprocess helpers must remain visible in the inventory rather than disappear through a broad ignore rule.
+Pinned E5 model and reference contracts are mandatory; the pre-existing private live-endpoint smoke remains explicitly opt-in and is never counted as passed by ordinary CI.
 
 ## Runtime policy
 

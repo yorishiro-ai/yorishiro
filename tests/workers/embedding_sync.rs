@@ -1311,6 +1311,7 @@ mod conflict {
                 ctx_a.config.queue,
                 Some(loco_rs::config::QueueConfig::Sqlite(_))
             ) {
+                crate::reject_assigned_skip("independent embedding limits require SQLite queues");
                 return;
             }
             let (workspace, entity) = seed(&request, &ctx_a).await;

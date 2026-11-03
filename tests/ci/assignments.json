@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "notes": [
-    "Source-backed proposal joined to BOTH compiled inventories; not compiled truth or execution coverage.",
+    "Reviewed responsibilities joined to BOTH compiled inventories; classification alone is not execution coverage.",
     "Common rules match the exact declaring module and file, never an ancestor prefix.",
     "Whole Rust source-tree fingerprints include test helpers and production dependencies; any edit requires renewed review, not an automatic fingerprint refresh.",
     "Native Linux GHA builds are reviewed; arbitrary cfg expressions, macro-generated identities and cross compilation require source-resolution review.",
-    "Known mixed identities remain pending, and external resources remain required but not executed by this guard.",
+    "Mixed contracts have separate test identities; pinned E5 assets are required, and the pre-existing private live-endpoint smoke remains explicitly opt-in.",
     "Zero-test workspace lib/bin artifacts are legal but still mandatory; any future nonzero identity needs explicit classification."
   ],
   "source_guard": {
     ".cargo/config.toml": "0e69d92faa2874685d4439f53254384399e451afa5b406c41e4747ff66d0ae38",
-    "tests": "a543ed894fa883f7edd7c4755a244357b7da3e6b684f5a506628c76fa5d09677",
+    "tests": "ae300803172353fc301c23adf38096437530ead52e036dd83f5e365245244c9d",
     "src": "914f4f5739ec44d2c3a22917aecd2a3ced85a8f09854c1f82f7ac704c97c3f82",
     "ee": "a5ce61c6336818f89efd0d8ec46022830f93d9538dffe0534ece6fd44992192b",
     "migration": "bfc33b13174b657b728299c0d4c0e7eef9b3035014e1073bf81840d29adf7918",
@@ -33,8 +33,8 @@
     "queue-postgres":{"database":"postgres","queue":"postgres","signed_licence":false},
     "redis":{"database":"sqlite","queue":"redis","signed_licence":false},
     "postgres-redis":{"database":"postgres","queue":"redis","signed_licence":false},
-    "resource-e5":{"database":"sqlite","queue":"sqlite","status":"required-external-not-executed","requires":"pinned local E5 model/tokenizer assets and reference vectors; fail if absent"},
-    "resource-live":{"database":"sqlite","queue":"sqlite","status":"required-external-not-executed","requires":"configured live embedding endpoint; fail if absent"}
+    "resource-e5":{"database":"sqlite","queue":"sqlite","signed_licence":false,"requires":"pinned local E5 model/tokenizer assets and reference vectors; fail if absent"},
+    "resource-live":{"database":"sqlite","queue":"sqlite","manual_external":true,"status":"opt-in-not-required","requires":"Explicitly configured private live endpoint; retained opt-in ignored coverage, never reported as passed by ordinary CI."}
   },
   "common_modules": [
     {"module":"config::load","source":"tests/config/load.rs"},
@@ -156,6 +156,7 @@
     {"module":"workers::target_routing","source":"tests/workers/target_routing.rs"}
   ],
   "ee_delta": [
+    {"name":"requests::api_keys::api_key_lifecycle_rejects_non_admin","jobs":["common-sqlite"],"reason":"EE authentication and membership policy adapter must retain the non-admin refusal after extracting foreign-tenant cases."},
     {"name":"models::search::sqlite_document_embed_persist_and_search","jobs":["common-sqlite"],"reason":"Shared identity includes enterprise ANN benchmark assertions at tests/models/search.rs:1179-1220; CE ownership does not execute that block."},
     {"name":"tasks::tenant_reindex_scheduler::community_task_scans_mismatch_without_constructing_a_provider","jobs":["common-sqlite"],"reason":"configure_deployment_metadata installs EE unlicensed state through a shared helper; retain EE task coverage."},
     {"name":"tasks::tenant_reindex_scheduler::enqueue_rejection_is_workspace_scoped_and_scan_continues","jobs":["common-sqlite"],"reason":"Shared task uses the EE-specific configure_deployment_metadata helper branch."},
@@ -210,14 +211,16 @@
   "exceptions": [
     {"name":"requests::official_templates::hooks_seed_creates_the_official_tenant_without_publishing_templates","source":"tests/requests/official_templates.rs","editions":["ee"],"role":"common","jobs":["common-sqlite"],"reason":"Current source adds this ungated Hooks::seed test beyond the older proposal; creates only the official tenant without publishing marketplace versions."},
     {"name":"requests::oauth::find_or_create_refuses_a_new_tenant_past_the_cap","source":"tests/requests/oauth.rs","editions":["ee"],"role":"common","jobs":["common-sqlite"],"reason":"SQLite executes explicit-cap and implicit hard-cap subcases; PG skips the None parameter. Do not claim PG parity without splitting, and no signed boot licence is needed for this direct model call."},
-    {"name":"db::advisory_lock_tests::a_named_lock_excludes_another_transaction_only_on_postgres","source":"tests/db.rs","editions":["ce","ee"],"role":"pending_split","jobs":[],"reason":"Split SQLite named-lock no-op from PostgreSQL exclusion/release."},
-    {"name":"requests::api_keys::api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids","source":"tests/requests/api_keys.rs","editions":["ce","ee"],"role":"pending_split","jobs":[],"reason":"Common member denial plus enterprise cfg PG foreign key revoke/rotate/wrong-ID contract; preserve explicit EE delta after extraction."},
-    {"name":"requests::inference::proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace","source":"tests/requests/inference.rs","editions":["ee"],"role":"pending_split","jobs":[],"reason":"Split signed-licence SQLite lifecycle from signed-licence cross-tenant PG denial."},
-    {"name":"requests::mcp::invite_acceptance_uses_current_human_identity_without_retargeting","source":"tests/requests/mcp.rs","editions":["ee"],"role":"pending_split","jobs":[],"reason":"Split common service/duplicate-member denials from PG current-human foreign tenant acceptance/replay/whoami."},
-    {"name":"requests::mcp::api_key_tools_preserve_history_ceilings_and_revocation","source":"tests/requests/mcp.rs","editions":["ee"],"role":"pending_split","jobs":[],"reason":"Split common MCP/REST lifecycle and history from PG foreign revoke denial."},
-    {"name":"requests::mcp::workspace_member_tools_match_rest_and_revoke_bound_credentials","source":"tests/requests/mcp.rs","editions":["ee"],"role":"pending_split","jobs":[],"reason":"Split PG foreign grant denial, retaining common revoke assertions after the PG block."},
-    {"name":"workers::target::concurrency::tenant_private_jobs_keep_their_key_without_a_default_cap","source":"tests/workers/target.rs","editions":["ce","ee"],"role":"pending_split","jobs":[],"reason":"Current PG guard and two TestTenant calls; CE fixtures share one tenant. Extract CE same-tenant and real EE cross-tenant keys separately."},
-    {"name":"workers::target::concurrency::shared_and_official_jobs_keep_their_keys_without_default_caps","source":"tests/workers/target.rs","editions":["ce","ee"],"role":"pending_split","jobs":[],"reason":"PG guard selects second tenant versus SQLite sibling workspace. Extract common deployment keys and genuine EE cross-tenant delta."},
+    {"name":"db::advisory_lock_tests::sqlite_named_locks_are_noops","source":"tests/db.rs","editions":["ce","ee"],"role":"common","jobs":["common-sqlite"],"reason":"SQLite named-lock no-op, separate from exclusion."},
+    {"name":"db::advisory_lock_tests::postgres_named_locks_exclude_until_transaction_end","source":"tests/db.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL exclusion and release on transaction end."},
+    {"name":"requests::api_keys::api_key_lifecycle_rejects_cross_tenant_ids","source":"tests/requests/api_keys.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Foreign-tenant revoke/rotate refusal with distinct tenants."},
+    {"name":"requests::inference::proposals_can_be_listed_rejected_and_discarded","source":"tests/requests/inference.rs","editions":["ee"],"role":"licensed","jobs":["licensed-sqlite"],"reason":"Signed-licence common proposal lifecycle."},
+    {"name":"requests::inference::proposals_cannot_be_listed_by_another_tenant","source":"tests/requests/inference.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Foreign tenant cannot read proposals."},
+    {"name":"requests::mcp::cross_tenant_invite_acceptance_uses_current_human_identity_without_retargeting","source":"tests/requests/mcp.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Cross-tenant current-human acceptance, replay and whoami."},
+    {"name":"requests::mcp::api_key_tools_reject_cross_tenant_revocation","source":"tests/requests/mcp.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Foreign MCP key revocation refusal."},
+    {"name":"requests::mcp::workspace_member_tools_reject_cross_tenant_grants","source":"tests/requests/mcp.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Foreign MCP workspace grant refusal."},
+    {"name":"workers::target::concurrency::cross_tenant_private_jobs_keep_distinct_keys_without_default_caps","source":"tests/workers/target.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Tenant-private keys remain distinct across production tenants."},
+    {"name":"workers::target::concurrency::cross_tenant_shared_and_official_jobs_keep_deployment_keys_without_default_caps","source":"tests/workers/target.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Deployment-wide keys remain shared across distinct tenants."},
     {"name":"workers::dispatch::a_target_drains_its_own_jobs_behind_a_backlog_of_another_target","source":"tests/workers/dispatch.rs","editions":["ce","ee"],"role":"queue","jobs":["redis"],"reason":"Returns unless Redis; inspects Redis job records using MGET."},
     {"name":"workers::queue::upstream_fixes::redis_claim_refreshes_age_and_fences_reaped_completion_and_failure","source":"tests/workers/queue/upstream_fixes.rs","editions":["ce","ee"],"role":"queue","jobs":["redis"],"reason":"Redis-only claim age mutation and claim-key fencing."},
     {"name":"workers::queue::upstream_fixes::sql_queue_close_releases_pool_and_retained_worker_context","source":"tests/workers/queue/upstream_fixes.rs","editions":["ce","ee"],"role":"queue","jobs":["queue-sqlite","queue-postgres"],"provider_parity":true,"reason":"Returns on Redis; distinct SQLite and PostgreSQL queue pool/context release contracts."},

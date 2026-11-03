@@ -496,7 +496,7 @@ async fn create_completed_proposal(
 }
 
 #[tokio::test]
-async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace() {
+async fn proposals_can_be_listed_rejected_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -558,12 +558,35 @@ async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace(
             discarded.text()
         );
         assert_eq!(discarded.json::<serde_json::Value>()["changed"], 1);
+    })
+    .await;
+}
 
-        // SQLite permits one tenant; cross-tenant authorization belongs to PostgreSQL.
-        if !crate::require_postgres_backend() {
-            return;
-        }
+#[tokio::test]
+async fn proposals_cannot_be_listed_by_another_tenant() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let entity = create_entity(&request, &setup).await;
+        let rejected_job = Uuid::new_v4();
+        create_completed_proposal(
+            &ctx,
+            &setup,
+            entity,
+            rejected_job,
+            serde_json::json!("reject me"),
+        )
+        .await;
+        let rejected = request
+            .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        rejected.assert_status_ok();
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        assert_ne!(setup.tenant_id, other.tenant_id);
         let denied = request
             .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
             .add_header("Authorization", format!("Bearer {}", other.api_key))

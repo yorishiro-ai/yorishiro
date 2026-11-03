@@ -82,7 +82,9 @@ class InventoryGuardTests(unittest.TestCase):
     def test_complete_inventory_is_not_execution_coverage(self):
         report = self.verify()
         self.assertTrue(report["inventory_valid"])
-        self.assertFalse(report["execution_matrix_ready"])
+        self.assertTrue(report["execution_matrix_ready"])
+        self.assertNotIn("execution_receipts", report)
+        self.assertTrue(report["execution_matrix"]["include"])
         owners = [(r["name"], r["owner"], r["role"]) for r in report["assignments"]]
         self.assertIn(("common::ordinary", "ce", "common"), owners)
         self.assertIn(("ee::extra", "ee", "common"), owners)
@@ -147,7 +149,7 @@ class InventoryGuardTests(unittest.TestCase):
         for inventory in (self.ce, self.ee):
             inventory["artifacts"][0]["ignored"] = ["common::ordinary"]
         report = self.verify()
-        self.assertEqual(report["external_contracts"][0]["status"], "required-external-not-executed")
+        self.assertEqual(report["external_contracts"][0]["status"], "required-execution-receipt")
 
     def test_mixed_contract_is_pending_not_guard_failure(self):
         self.manifest["exceptions"].append(self.exact(role="pending_split", jobs=[]))

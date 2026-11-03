@@ -612,18 +612,18 @@ jobs:
 
   public-contract-build:
     name: Build public-contract binary (CE)
-    needs: changes
+    needs: [changes, test-inventory]
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/rust-setup
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
         with:
-          shared-key: public-contract-ce-debug
-      - name: Build the real community binary once
-        run: cargo build --locked --no-default-features --features community --bin yorishiro
+          name: test-executables-ce
+          path: ${{ runner.temp }}/executables
+      - name: Reuse the inventory build's community binary
+        run: tar -xzf "$RUNNER_TEMP/executables/test-executables-ce.tar.gz" target/debug/yorishiro
       - name: Preserve the executable in an archive
         run: tar -C target/debug -czf "$RUNNER_TEMP/public-contract-ce.tar.gz" yorishiro
       - uses: actions/upload-artifact@v7
@@ -718,6 +718,17 @@ jobs:
           if [[ "$EDITION" == ee ]]; then features=enterprise; fi
           cargo test --locked --no-default-features --features "$features" --workspace --no-run --message-format=json > "$RUNNER_TEMP/cargo-tests.jsonl"
           python3 scripts/test_assignments.py collect --cargo-messages "$RUNNER_TEMP/cargo-tests.jsonl" --edition "$EDITION" --output "$RUNNER_TEMP/inventory-$EDITION.json"
+          cargo build --locked --no-default-features --features "$features" --bin yorishiro
+          python3 - "$RUNNER_TEMP/inventory-$EDITION.json" "$RUNNER_TEMP/test-executables-$EDITION.tar.gz" <<'PY'
+          import json, pathlib, sys, tarfile
+          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          root = pathlib.Path.cwd()
+          paths = {pathlib.Path(row['executable']).relative_to(root) for row in inventory['artifacts']}
+          paths.add(pathlib.Path('target/debug/yorishiro'))
+          with tarfile.open(sys.argv[2], 'w:gz') as archive:
+              for path in sorted(paths):
+                  archive.add(path, arcname=str(path))
+          PY
       - uses: actions/upload-artifact@v7
         with:
           name: test-inventory-${{ matrix.edition }}
@@ -725,12 +736,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-executables-${{ matrix.edition }}
+          path: ${{ runner.temp }}/test-executables-${{ matrix.edition }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   test-assignment-verify:
     name: Verify compiled test assignment
     needs: [changes, test-inventory]
     if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
       - name: Exercise assignment failure guards
@@ -741,15 +762,69 @@ jobs:
           path: ${{ runner.temp }}/inventories
           merge-multiple: true
       - name: Join both compiled editions to reviewed responsibilities
+        id: plan
         run: >-
           python3 scripts/test_assignments.py verify
           --ce "$RUNNER_TEMP/inventories/inventory-ce.json"
           --ee "$RUNNER_TEMP/inventories/inventory-ee.json"
           --output "$RUNNER_TEMP/test-assignments.json"
+      - name: Publish responsibility matrix
+        id: matrix
+        run: |
+          python3 - "$RUNNER_TEMP/test-assignments.json" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          plan = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert plan['execution_matrix_ready'], plan['cutover_blockers']
+          with open(sys.argv[2], 'a') as output:
+              output.write('matrix=' + json.dumps(plan['execution_matrix'], separators=(',', ':')) + '\n')
+          PY
       - uses: actions/upload-artifact@v7
         with:
           name: test-assignments
           path: ${{ runner.temp }}/test-assignments.json
+          if-no-files-found: error
+          retention-days: 7
+
+  assigned-tests:
+    name: Responsibility tests
+    needs: [changes, prepare-embedding, test-inventory, test-assignment-verify]
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    uses: ./.github/workflows/assigned-tests.yml
+    with:
+      matrix: ${{ needs.test-assignment-verify.outputs.matrix }}
+    secrets:
+      YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+
+  assigned-test-verify:
+    name: Verify assigned execution receipts
+    needs: [changes, assigned-tests, test-assignment-verify]
+    if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise execution receipt guards
+        run: |
+          python3 tests/ci/test_assigned_execution.py
+          python3 tests/ci/test_assigned_workflow.py
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-assignments
+          path: ${{ runner.temp }}/assignments
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: assigned-test-result-*
+          path: ${{ runner.temp }}/receipts
+      - name: Require every assigned identity and topology
+        run: >-
+          python3 scripts/run_assigned_tests.py verify
+          --assignments "$RUNNER_TEMP/assignments/test-assignments.json"
+          --receipts "$RUNNER_TEMP/receipts"
+          --output "$RUNNER_TEMP/assigned-execution.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: assigned-execution
+          path: ${{ runner.temp }}/assigned-execution.json
           if-no-files-found: error
           retention-days: 7
 
@@ -812,7 +887,7 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [changes, ce, check, msrv, prepare-embedding, test, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, package-build, package-validation]
+    needs: [changes, ce, check, msrv, prepare-embedding, test, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, assigned-tests, assigned-test-verify, package-build, package-validation]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
@@ -831,6 +906,8 @@ jobs:
           PUBLIC_VERIFY: ${{ needs.public-contract-verify.result }}
           INVENTORY: ${{ needs.test-inventory.result }}
           ASSIGNMENT: ${{ needs.test-assignment-verify.result }}
+          ASSIGNED: ${{ needs.assigned-tests.result }}
+          RECEIPTS: ${{ needs.assigned-test-verify.result }}
           PACKAGE_RESULT: ${{ needs.package-validation.result }}
           PACKAGE_BUILD: ${{ needs.package-build.result }}
           CHANGES: ${{ needs.changes.result }}
@@ -857,6 +934,8 @@ jobs:
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" true
             require_success INVENTORY "$INVENTORY" true
             require_success ASSIGNMENT "$ASSIGNMENT" true
+            require_success ASSIGNED "$ASSIGNED" true
+            require_success RECEIPTS "$RECEIPTS" true
           else
             require_success CE "$CE" false
             require_success EE "$EE" false
@@ -868,6 +947,8 @@ jobs:
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" false
             require_success INVENTORY "$INVENTORY" false
             require_success ASSIGNMENT "$ASSIGNMENT" false
+            require_success ASSIGNED "$ASSIGNED" false
+            require_success RECEIPTS "$RECEIPTS" false
           fi
           require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"
           require_success PACKAGE "$PACKAGE_RESULT" "$PACKAGE"

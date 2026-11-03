@@ -618,7 +618,6 @@ async fn postgres_timezone_state_serializes_concurrent_activations_without_dml_n
     if !crate::require_postgres_backend() {
         return;
     }
-    crate::require_sqlite_backend();
     with_timezone_scratch_db(|db, database_url| {
         Box::pin(async move {
             postgres_timezone_state_scenario(db, database_url)

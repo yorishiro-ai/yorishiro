@@ -32,6 +32,14 @@ def main() -> int:
     assert 'needs.test-assignment-verify.result' in required_check
     assert 'require_success INVENTORY "$INVENTORY" true' in required_check
     assert 'require_success ASSIGNMENT "$ASSIGNMENT" true' in required_check
+    assert 'needs.assigned-tests.result' in required_check
+    assert 'needs.assigned-test-verify.result' in required_check
+    for needed in ("true", "false"):
+        assert f'require_success ASSIGNED "$ASSIGNED" {needed}' in required_check
+        assert f'require_success RECEIPTS "$RECEIPTS" {needed}' in required_check
+    assert 'uses: ./.github/workflows/assigned-tests.yml' in workflow
+    assert 'scripts/run_assigned_tests.py verify' in workflow
+    assert 'name: test-executables-${{ matrix.edition }}' in inventory
     ddl_window = workflow.split("      - name: Verify shared requests models and workers do not create databases\n", 1)[1].split("      - name: Upload ordinary request DDL evidence\n", 1)[0]
     assert "-- requests:: models:: workers::" in ddl_window
     assert "--skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept" in ddl_window

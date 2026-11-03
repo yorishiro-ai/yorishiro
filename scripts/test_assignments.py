@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Additive compiled inventory guard, not a test scheduler or an execution receipt.
+"""Join compiled inventories to reviewed execution responsibilities.
 
 Only collect executes binaries, using libtest listing in GitHub Actions after one workspace build.
 The source guard freezes reviewed Rust dependencies conservatively, including all test helpers.
@@ -315,11 +315,17 @@ def verify(ce, ee, manifest, root=ROOT):
         require(all(job in manifest["jobs"] for job in row["jobs"]), f"unknown EE delta job: {name}")
         assignments.append({"package": "yorishiro", "target": "mod", "kind": "test", "name": name, "owner": "ee",
                             "role": "ee_delta", "jobs": row["jobs"], "reason": row["reason"]})
-    return {"schema": 1, "inventory_valid": True, "execution_matrix_ready": False,
-            "cutover_blockers": ["additive inventory only; no execution receipts or runtime topology enforcement"]
-                                + (["mixed contracts require scenario splits"] if pending else []),
+    matrix = []
+    for owner, job in sorted({(entry["owner"], job) for entry in assignments for job in entry["jobs"]
+                              if not manifest["jobs"][job].get("manual_external")}):
+        matrix.append({"edition": owner, "job": job, **manifest["jobs"][job]})
+    return {"schema": 1, "inventory_valid": True, "execution_matrix_ready": not pending,
+             "cutover_blockers": ["mixed contracts require scenario splits"] if pending else [],
+             "execution_matrix": {"include": matrix},
             "pending_splits": pending, "assignments": assignments, "helpers": helpers,
-            "external_contracts": [entry | {"status": "required-external-not-executed"}
+             "external_contracts": [entry | {"status": "opt-in-not-required" if any(
+                                        manifest["jobs"][job].get("manual_external") for job in entry["jobs"]
+                                        ) else "required-execution-receipt"}
                                    for entry in assignments if entry["role"] == "resource"],
             "artifacts": artifact_records, "jobs": manifest["jobs"], "revision": ce["revision"],
             "resource_contracts_are_not_execution_evidence": True}

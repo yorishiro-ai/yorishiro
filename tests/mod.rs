@@ -272,6 +272,15 @@ fn require_backend(expected: &str) -> bool {
     } else {
         "skipped"
     };
+    if crate::env::TestEnv::StrictTopology
+        .read()
+        .is_ok_and(|value| value == "true")
+    {
+        assert_eq!(
+            actual, expected,
+            "assigned test selected the wrong database backend"
+        );
+    }
 
     let reason = if outcome == "executed" {
         format!("selected {expected}-specific test on {actual} backend")
@@ -289,6 +298,16 @@ fn require_backend(expected: &str) -> bool {
     }
 
     actual == expected
+}
+
+/// Assigned contracts fail instead of silently returning on a provider mismatch.
+pub(crate) fn reject_assigned_skip(reason: &str) {
+    assert!(
+        !crate::env::TestEnv::StrictTopology
+            .read()
+            .is_ok_and(|value| value == "true"),
+        "assigned contract skipped its assertions: {reason}"
+    );
 }
 
 /// Returns `true` and records execution only when the active backend is SQLite.
