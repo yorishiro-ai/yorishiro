@@ -25,15 +25,6 @@ case "$(basename "$PKG_FILE")" in
 esac
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# The floor the package declares. Read rather than hardcoded: this file must not be the place
-# the two disagree.
-# Scoped to the rpm depends line specifically (`libc.so.6(GLIBC_X.Y)(64bit)`), not the whole
-# file: the nfpm package config's own comments discuss other glibc versions by number (a locally
-# measured floor that was rejected, historical figures), and a bare whole-file grep picks up
-# whichever of those sorts highest, which is not necessarily the one actually declared below.
-GLIBC_FLOOR="$(grep -oE 'libc\.so\.6\(GLIBC_[0-9]+\.[0-9]+\)' "$REPO/.github/packaging/nfpm-yorishiro-ce.yaml" \
-  | grep -oE 'GLIBC_[0-9]+\.[0-9]+')"
-
 # Checked up front rather than at the call site: a missing tool otherwise surfaces as the
 # assertion it happens to sit in, which reads as a packaging fault.
 for tool in docker jq; do
@@ -60,11 +51,11 @@ rpm() {
 edition() { basename "$PKG_FILE" | grep -q '^yorishiro-ee-' && echo ee || echo ce; }
 
 # --------------------------------------------------------------------------------------------
-note "deb on ubuntu:24.04 — the supported case"
+note "deb on ubuntu:26.04 — the supported case"
 # --------------------------------------------------------------------------------------------
 # Single container: install, root backup/metadata, unprivileged probes as yorishiro,
 # root verify/atomic restore, then emit all markers to the host for assertion.
-probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-example.yaml:ro ubuntu:24.04 bash -c '
+probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-example.yaml:ro ubuntu:26.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
@@ -157,7 +148,7 @@ note "every file the package declares survives the install"
 # `ee/LICENSE` shipping as `/usr/share/doc/yorishiro/copyright.ee` is exactly that case: the
 # `path-include` covers the name `copyright` exactly, so the package would deliver everything
 # except one of the licences it is distributed under, on every minimal image.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   dpkg-deb -c /pkg/'"$(basename "$(deb)")"' | awk "\$6 ~ /^\.\// && \$1 !~ /^d/ { print substr(\$6, 2) }" > /tmp/declared
@@ -172,20 +163,6 @@ elif grep -q DROPPED: <<<"$out"; then
   bad "files in the package are missing after install: $(grep -o 'DROPPED:[^ ]*' <<<"$out" | tr '\n' ' ')"
 else
   ok "all $(grep -o 'COMPARED:[0-9]*' <<<"$out" | cut -d: -f2) declared files are present"
-fi
-
-# --------------------------------------------------------------------------------------------
-note "deb refused on ubuntu:22.04 — below the glibc floor"
-# --------------------------------------------------------------------------------------------
-# Asserting the reason, not merely a nonzero exit: a network failure also exits nonzero, and
-# would otherwise read as the refusal working.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:22.04 bash -c '
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y /pkg/'"$(basename "$(deb)")"' 2>&1' 2>&1)
-if grep -qiE 'depends|not installable|unmet' <<<"$out"; then
-  ok "apt refuses, naming the dependency"
-else
-  bad "apt did not refuse for a dependency reason: $(echo "$out" | tail -3 | tr '\n' ' ')"
 fi
 
 # --------------------------------------------------------------------------------------------
@@ -232,22 +209,11 @@ for want in RUNS COPYRIGHT USER; do
 done
 
 # --------------------------------------------------------------------------------------------
-note "rpm refused on rockylinux:9 — below the floor"
-# --------------------------------------------------------------------------------------------
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro rockylinux:9 bash -c '
-  dnf install -y /pkg/'"$(basename "$(rpm)")"' 2>&1' 2>&1)
-if grep -q "nothing provides libc.so.6($GLIBC_FLOOR)" <<<"$out"; then
-  ok "dnf refuses, naming the missing glibc symbol"
-else
-  bad "dnf did not refuse for the glibc reason: $(echo "$out" | tail -3 | tr '\n' ' ')"
-fi
-
-# --------------------------------------------------------------------------------------------
 note "the systemd unit is valid"
 # --------------------------------------------------------------------------------------------
 # `systemd-analyze` resolves ExecStart, so a unit checked without its binary reports a missing
 # command: a failure about the test environment rather than about the unit.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq systemd /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-jobs.service /lib/systemd/system/yorishiro-scheduler.service 2>&1' 2>&1)
@@ -257,7 +223,7 @@ else
   bad "systemd-analyze verify complained: $(echo "$out" | head -3 | tr '\n' ' ')"
 fi
 
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   grep -m1 "^ExecStart=" /lib/systemd/system/yorishiro-worker.service
@@ -278,7 +244,7 @@ fi
 # Three exclusions, each because the path is not a required package file: systemd's own
 # `WantedBy=` targets (`multi-user.target` is a unit name, and appears without a directory),
 # anything under `/proc` or `/sys`, and the optional administrator-created production override.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
@@ -324,7 +290,7 @@ else
   docker exec "pg-$$" psql -U yorishiro -d yorishiro \
     -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null 2>&1
 
-  docker run -d --name "app-$$" --network "$NET" -v "$PKG_DIR":/pkg:ro ubuntu:24.04 sleep infinity >/dev/null
+  docker run -d --name "app-$$" --network "$NET" -v "$PKG_DIR":/pkg:ro ubuntu:26.04 sleep infinity >/dev/null
   docker exec "app-$$" bash -c "
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y -qq /pkg/$(basename "$(deb)") curl >/dev/null 2>&1

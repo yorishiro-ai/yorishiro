@@ -42,9 +42,9 @@ depends:
 # source, same dependencies. The C library's own headers decide which versioned symbols the
 # compiler selects.
 #
-# `2.39` matches what this project supports: Ubuntu 24.04 and AlmaLinux 10,
-# both of which ship glibc 2.39. Package tests enforce compatibility with both targets even when
-# the GitHub-hosted build runner uses a newer Ubuntu release.
+# The build container uses AlmaLinux 10's glibc 2.39, the older runtime among the supported
+# targets Ubuntu 26.04 and AlmaLinux 10.
+# Package tests enforce compatibility with both targets regardless of the host runner's glibc.
 #
 # Read this from the binary rather than from its symbol table. `objdump -T` shows the two
 # `pidfd` symbols as weak, which reads as "2.39 is optional"; the loader does not consult symbol

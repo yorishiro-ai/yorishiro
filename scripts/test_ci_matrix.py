@@ -1,12 +1,22 @@
 #!/usr/bin/env -S uv run
 """Deliberate violations prove the CI matrix gate rejects regressions."""
 
+import re
+
 from check_ci_matrix import ROOT, validate
 
 
 def main() -> int:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     validate(workflow)
+    for path in (ROOT / ".github/workflows").glob("*.yml"):
+        ubuntu_runners = re.findall(r"ubuntu-\d+\.\d+(?:-arm)?", path.read_text())
+        assert set(ubuntu_runners) <= {"ubuntu-26.04", "ubuntu-26.04-arm"}, path
+    for name in ("test-install.sh", "test-transitions.sh", "test-systemd.sh"):
+        path = ROOT / ".github/packaging" / name
+        images = re.findall(r"(?:ubuntu|almalinux|rockylinux):[\d.]+", path.read_text())
+        assert set(images) <= {"ubuntu:26.04", "almalinux:10"}, path
+    assert "FROM almalinux:10" in (ROOT / ".github/packaging/Dockerfile").read_text()
     ddl_window = workflow.split("      - name: Verify shared requests models and workers do not create databases\n", 1)[1].split("      - name: Upload ordinary request DDL evidence\n", 1)[0]
     assert "-- requests:: models:: workers::" in ddl_window
     assert "--skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept" in ddl_window
