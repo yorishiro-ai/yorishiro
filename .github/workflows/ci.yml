@@ -610,6 +610,89 @@ jobs:
           TOKENIZER_URL: unused
         run: uv run scripts/embedding_cache.py verify
 
+  public-contract-build:
+    name: Build public-contract binary (CE)
+    needs: changes
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/rust-setup
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: public-contract-ce-debug
+      - name: Build the real community binary once
+        run: cargo build --locked --no-default-features --features community --bin yorishiro
+      - name: Preserve the executable in an archive
+        run: tar -C target/debug -czf "$RUNNER_TEMP/public-contract-ce.tar.gz" yorishiro
+      - uses: actions/upload-artifact@v7
+        with:
+          name: public-contract-binary-ce
+          path: ${{ runner.temp }}/public-contract-ce.tar.gz
+          compression-level: 0
+          retention-days: 1
+
+  public-contract:
+    name: Public contracts (SQLite, ${{ matrix.suite }})
+    needs: [changes, public-contract-build]
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [rest, mcp, cli]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: public-contract-binary-ce
+          path: ${{ runner.temp }}/binary
+      - name: Restore the built binary
+        run: tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C "$RUNNER_TEMP/binary"
+      - name: Exercise the public interface through real processes
+        run: >-
+          python3 tests/blackbox/run.py
+          --binary "$RUNNER_TEMP/binary/yorishiro"
+          --suite "${{ matrix.suite }}"
+          --edition ce
+          --artifacts "$RUNNER_TEMP/contracts"
+      - name: Upload redacted logs and scenario results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: public-contract-result-ce-${{ matrix.suite }}
+          path: ${{ runner.temp }}/contracts
+          if-no-files-found: error
+          retention-days: 7
+
+  public-contract-verify:
+    name: Verify public-contract coverage
+    needs: [changes, public-contract-build, public-contract]
+    if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise the report and runner failure guards
+        run: |
+          python3 tests/ci/test_blackbox_reports.py
+          python3 -m unittest discover -s tests/blackbox -p 'test_*.py'
+          python3 tests/blackbox/run.py --self-check
+      - uses: actions/download-artifact@v8
+        with:
+          name: public-contract-binary-ce
+          path: ${{ runner.temp }}/binary
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: public-contract-result-ce-*
+          path: ${{ runner.temp }}/reports
+      - name: Require every assigned scenario on the same binary
+        run: |
+          tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C "$RUNNER_TEMP/binary"
+          python3 scripts/check_blackbox_reports.py --edition ce --binary "$RUNNER_TEMP/binary/yorishiro" --reports "$RUNNER_TEMP/reports"
+
   package-validation:
     name: Package validation
     needs: [changes, package-build]
@@ -669,7 +752,7 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [changes, ce, check, msrv, prepare-embedding, test, package-build, package-validation]
+    needs: [changes, ce, check, msrv, prepare-embedding, test, public-contract-build, public-contract, public-contract-verify, package-build, package-validation]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
@@ -683,6 +766,9 @@ jobs:
           MSRV: ${{ needs.msrv.result }}
           MODEL: ${{ needs.prepare-embedding.result }}
           TEST: ${{ needs.test.result }}
+          PUBLIC_BUILD: ${{ needs.public-contract-build.result }}
+          PUBLIC: ${{ needs.public-contract.result }}
+          PUBLIC_VERIFY: ${{ needs.public-contract-verify.result }}
           PACKAGE_RESULT: ${{ needs.package-validation.result }}
           PACKAGE_BUILD: ${{ needs.package-build.result }}
           CHANGES: ${{ needs.changes.result }}
@@ -704,12 +790,18 @@ jobs:
             require_success MSRV "$MSRV" true
             require_success MODEL "$MODEL" true
             require_success TEST "$TEST" true
+            require_success PUBLIC_BUILD "$PUBLIC_BUILD" true
+            require_success PUBLIC "$PUBLIC" true
+            require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" true
           else
             require_success CE "$CE" false
             require_success EE "$EE" false
             require_success MSRV "$MSRV" false
             require_success MODEL "$MODEL" false
             require_success TEST "$TEST" false
+            require_success PUBLIC_BUILD "$PUBLIC_BUILD" false
+            require_success PUBLIC "$PUBLIC" false
+            require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" false
           fi
           require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"
           require_success PACKAGE "$PACKAGE_RESULT" "$PACKAGE"
