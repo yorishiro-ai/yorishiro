@@ -50,10 +50,9 @@ Restored records must have new IDs, remapped schema/endpoints, destination owner
 Imported relations are active even when exported as deprecated; this is not lossless history restoration.
 No database files are inspected or written directly by the tests.
 
-### Planned retirement
+### Retired request tests
 
-The request tests `relations_are_created_listed_statused_exported_and_deleted_over_rest` and `relation_write_requires_write_scope_and_read_authentication` are planned for replacement by both `rest.relation-export-import-worker` and `mcp.relation-export-import-worker`, pending successful GHA evidence for Write-scoped relation status changes and deletion.
-Both request tests remain until that replacement is proven.
+The request tests `relations_are_created_listed_statused_exported_and_deleted_over_rest` and `relation_write_requires_write_scope_and_read_authentication` were retired after successful GHA run `41693102412`, with replacement coverage in both `rest.relation-export-import-worker` and `mcp.relation-export-import-worker`, including Write-scoped relation status changes and deletion.
 Built-in relation coverage across all templates and existing export limits, history and race tests are retained.
 
 ## Evidence and runner checks
