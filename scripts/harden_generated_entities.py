@@ -7,7 +7,6 @@ import re
 import sys
 from pathlib import Path
 
-
 ENTITY_DIR = Path("src/models/_entities")
 SUSPICIOUS_EXACT_FIELDS = {
     "access_token",

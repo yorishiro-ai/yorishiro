@@ -1,9 +1,9 @@
 #!/usr/bin/env -S uv run
 """Check the deliberately explicit CI test matrix without a YAML dependency."""
 
+import re
 from collections import Counter
 from pathlib import Path
-import re
 
 ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = {("postgres", "postgres"), ("sqlite", "sqlite"), ("postgres", "redis"), ("sqlite", "redis")}

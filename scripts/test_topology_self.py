@@ -1,14 +1,15 @@
 #!/usr/bin/env -S uv run
 """Self-tests for topology marker validation."""
 
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from pathlib import Path
 from subprocess import CompletedProcess
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from test_topology import MISMATCH_TOKEN, main as run_topology, validate_marker_layout
+from test_topology import MISMATCH_TOKEN, validate_marker_layout
+from test_topology import main as run_topology
 
 
 def run_gate(

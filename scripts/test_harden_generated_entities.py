@@ -6,7 +6,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from harden_generated_entities import harden_model
 
-
 UNSAFE_ENTITY = """\
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
