@@ -523,6 +523,9 @@ def relation_export_import_worker(app, surface):
         "name": {"type": "string", "required": True}}}},
         "relation_types": {"knows": {"source": "person", "target": "person"}}}
     schema_id = source.call("create_schema", {"definition": definition})["schema"]["id"]
+    _, write_key = app.issue(source_id, "write")
+    source = GraphAPI(app, surface, write_key)
+    peer = GraphAPI(app, peer.surface, write_key)
     people = [source.call("create_entity", {"schema_name": "graph", "entity_type": "person",
                                          "data": {"name": name}}) for name in ("Alice", "Bob")]
     payload = {"source_id": people[0]["id"], "target_id": people[1]["id"], "relation_type": "knows"}
