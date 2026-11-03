@@ -182,8 +182,8 @@ class App:
                 f"unexpected CLI exit {process.returncode}: {arguments}")
         return out, err
 
-    def task(self, name, **params):
-        return self.cli("task", name, *(f"{key}:{value}" for key, value in params.items()))[0]
+    def task(self, task_name, **params):
+        return self.cli("task", task_name, *(f"{key}:{value}" for key, value in params.items()))[0]
 
     def issue(self, workspace, scope):
         out = self.task("create_api_key", workspace_id=workspace, scope=scope)

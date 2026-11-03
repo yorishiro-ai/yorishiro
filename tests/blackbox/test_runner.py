@@ -117,6 +117,15 @@ class ArgumentTests(unittest.TestCase):
             self.assertIn(str(Path(directory)), app.env["DATABASE_URL"])
             self.assertEqual(app.env["LOCO_CONFIG_FOLDER"], str(Path(directory) / "config"))
 
+    def test_task_name_does_not_conflict_with_name_parameter(self):
+        args = run.parse_args(self.arguments())
+        with tempfile.TemporaryDirectory() as directory:
+            app = run.App(args, directory)
+            with patch.object(app, "cli", return_value=("created", "")) as cli:
+                self.assertEqual(app.task("create_tenant", name="blackbox"), "created")
+                cli.assert_called_once_with("task", "create_tenant", "name:blackbox")
+            app.close()
+
     def test_server_exit_fails_before_readiness_request(self):
         args = run.parse_args(self.arguments())
         with tempfile.TemporaryDirectory() as directory:
