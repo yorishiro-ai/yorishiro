@@ -257,5 +257,33 @@ class InventoryGuardTests(unittest.TestCase):
                 guard.artifacts("\n".join(json.dumps(message) for message in messages), self.manifest, self.root)
 
 
+class SharedTenantFixtureTests(unittest.TestCase):
+    def test_shared_ee_postgres_fixtures_have_licensed_capacity(self):
+        manifest = json.loads((Path(__file__).with_name("assignments.json")).read_text())
+        expected = {
+            "models::query_embedding_requests::a_disabled_tenant_cannot_publish_a_query_embedding",
+            "requests::tenant_auth::a_workspace_scoped_key_still_works_on_a_base_route",
+            "requests::tenant_auth::a_tenant_scoped_key_resolves_the_workspace_named_by_the_header",
+            "requests::tenant_auth::tenant_key_rechecks_direct_workspace_grants_after_revocation",
+            "requests::schema_forks::concurrent_opposite_forks_allow_one_edge_and_reject_the_other",
+            "requests::schema_forks::fork_creation_shares_the_schema_version_lock",
+            "requests::origin::publication_waits_for_merge_revision_lock_and_remains_pending",
+            "requests::inference::terminal_proposal_actions_serialize_against_confirmation",
+            "requests::inference::the_infer_fill_scope_carries_the_workspaces_tenant",
+        }
+        found = set()
+        for group in manifest["exception_groups"]:
+            for name in expected.intersection(group["names"]):
+                with self.subTest(name=name):
+                    self.assertEqual(group["editions"], ["ee"])
+                    self.assertEqual(len(group["jobs"]), 1)
+                    job = manifest["jobs"][group["jobs"][0]]
+                    self.assertEqual(job["database"], "postgres")
+                    self.assertTrue(job["signed_licence"])
+                    self.assertNotIn(name, found)
+                    found.add(name)
+        self.assertEqual(found, expected)
+
+
 if __name__ == "__main__":
     unittest.main()
