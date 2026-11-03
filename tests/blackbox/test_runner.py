@@ -58,6 +58,23 @@ class ProtocolTests(unittest.TestCase):
         api.client.call.assert_called_once_with("import_jsonl", {"jsonl": text})
 
 
+class TemplateFixtureTests(unittest.TestCase):
+    def test_required_data_preserves_template_constraints_and_omits_optional_fields(self):
+        fields = {name: {"required": True, **field} for name, field in {
+            "choice": {"type": "string", "enum": ["first", "second"]},
+            "date": {"type": "string", "format": "date"},
+            "pattern": {"type": "string", "pattern": "[0-9X-]+"},
+            "text": {"type": "string"}, "count": {"type": "integer"},
+            "ratio": {"type": "number"}, "enabled": {"type": "boolean"},
+            "items": {"type": "array"}, "object": {"type": "object"},
+        }.items()}
+        fields["optional"] = {"type": "string"}
+        self.assertEqual(run.template_required_data(fields), {
+            "choice": "first", "date": "2026-01-01", "pattern": "0000-0000-0000-000X",
+            "text": "test", "count": 1, "ratio": 1, "enabled": True, "items": [], "object": {},
+        })
+
+
 class RedactionTests(unittest.TestCase):
     def test_known_unknown_and_bearer_secrets(self):
         text = 'secret-value ysr_prefix_private "Authorization": "Bearer arbitrary-token"'

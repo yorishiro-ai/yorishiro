@@ -270,10 +270,12 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Member)
             .await
             .unwrap();
-        assert!(matches!(
-            tenancy::create_workspace_as(&ctx.db, &actor, "must-not-create", None, None).await,
-            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
-        ));
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&serde_json::json!({"name": "must-not-create"}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
         assert!(matches!(
             tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
             Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
@@ -282,10 +284,12 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             .await
             .unwrap();
         api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
-        assert!(matches!(
-            tenancy::create_workspace_as(&ctx.db, &actor, "must-not-create", None, None).await,
-            Err(yorishiro::YorishiroError::Unauthenticated)
-        ));
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&serde_json::json!({"name": "must-not-create"}))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
         assert!(matches!(
             tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
             Err(yorishiro::YorishiroError::Unauthenticated)

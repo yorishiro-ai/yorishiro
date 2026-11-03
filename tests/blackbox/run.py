@@ -531,6 +531,15 @@ def relation_export_import_worker(app, surface):
     payload = {"source_id": people[0]["id"], "target_id": people[1]["id"], "relation_type": "knows"}
     _, read_key = app.issue(source_id, "read")
     readers = (GraphAPI(app, "rest", read_key), GraphAPI(app, "mcp", read_key))
+    require(len(readers[1].client.call("list_entities", {"entity_type": "person"})) == 2,
+            "filtered MCP entity list changed")
+    invalid_list = readers[1].client.call("list_relations", {"status": "not-a-status"}, error=True)
+    require(invalid_list.get("result", {}).get("isError") is True
+            and "relation status" in invalid_list["result"]["content"][0]["text"],
+            "wrong invalid relation-list status error")
+    missing_entity = readers[1].client.call("get_entity", {"id": str(uuid.uuid4())}, error=True)
+    require(missing_entity.get("result", {}).get("isError") is True
+            and "not found" in missing_entity["result"]["content"][0]["text"], "wrong missing entity error")
 
     def read_relation(relation):
         rest = app.rest("GET", f"/api/relations/{relation['id']}", key=read_key)
@@ -657,6 +666,50 @@ def relation_export_import_worker(app, surface):
     app.checks.append(f"{surface} relation CRUD/status, exact raw export parity, queued import -> real worker -> restored graph")
 
 
+def template_required_data(fields):
+    values = {"integer": 1, "number": 1, "boolean": True, "array": [], "object": {}}
+    formats = {"date": "2026-01-01", "date-time": "2026-01-01T00:00:00Z",
+               "uri": "https://example.com", "email": "test@example.com"}
+    result = {}
+    for name, field in fields.items():
+        if not field.get("required", False):
+            continue
+        if field["type"] != "string":
+            result[name] = values[field["type"]]
+        else:
+            result[name] = formats.get(field.get("format"),
+                                      "0000-0000-0000-000X" if field.get("pattern")
+                                      else next(iter(field.get("enum") or []), "test"))
+    return result
+
+
+def builtin_relations(app):
+    workspace = output_field(app.task("create_workspace", tenant_id=app.tenant, name="builtin-relations"),
+                             "workspace id", True)
+    _, schema_key = app.issue(workspace, "schema")
+    _, write_key = app.issue(workspace, "write")
+    templates = app.rest("GET", "/api/templates", key=schema_key)
+    require(templates, "builtin template inventory is empty")
+    for template in templates:
+        definition = app.rest("GET", f"/api/templates/{template['id']}", key=schema_key)
+        app.rest("POST", "/api/schemas", definition, status=201, key=schema_key)
+
+        def create(entity_type, definition=definition):
+            return app.rest("POST", "/api/entities", {
+                "schema_name": definition["name"], "entity_type": entity_type,
+                "data": template_required_data(definition["entity_types"][entity_type]["fields"]),
+            }, status=201, key=write_key)["id"]
+
+        entities = {name: create(name) for name in definition["entity_types"]}
+        for name, relation in definition.get("relation_types", {}).items():
+            target = create(relation["target"]) if relation["source"] == relation["target"] else entities[relation["target"]]
+            app.rest("POST", "/api/relations", {
+                "source_id": entities[relation["source"]], "target_id": target,
+                "relation_type": name, "properties": {},
+            }, status=201, key=write_key)
+    app.checks.append("every builtin template entity and relation type accepts required fixture data with Write scope")
+
+
 def rest_suite(app):
     _, read_key = app.issue(app.workspace, "read")
     app.rest("POST", "/api/schemas", SCHEMA, status=403, key=read_key)
@@ -726,7 +779,8 @@ def scenarios(suite):
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
     focused = {
         "rest": [("rest.schema-entity-crud", lambda app: crud(app, "rest")),
-                 ("rest.relation-export-import-worker", lambda app: relation_export_import_worker(app, "rest")),
+                  ("rest.relation-export-import-worker", lambda app: relation_export_import_worker(app, "rest")),
+                  ("rest.builtin-template-relations", builtin_relations),
                  ("rest.auth-scope-input", rest_suite)],
         "mcp": [("mcp.schema-entity-crud", lambda app: crud(app, "mcp")),
                 ("mcp.relation-export-import-worker", lambda app: relation_export_import_worker(app, "mcp")),

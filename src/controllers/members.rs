@@ -129,7 +129,7 @@ pub(crate) async fn require_tenant_admin(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn list_members(
+async fn list_members(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
@@ -144,7 +144,7 @@ pub async fn list_members(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn add_member(
+async fn add_member(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Json(body): Json<AddMemberRequest>,

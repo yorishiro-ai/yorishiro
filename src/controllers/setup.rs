@@ -31,7 +31,7 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
+async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
     let setup_required = if max_tenants(&ctx)?.is_some() {
         tenant_tenants::count_tenants(&ctx.db).await? == 0
     } else {
@@ -44,7 +44,7 @@ pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRes
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn setup(
+async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,
 ) -> Result<impl IntoResponse, ApiError> {

@@ -428,24 +428,6 @@ pub(crate) async fn create_workspace_with_quota(
     active.insert(conn).await.internal()
 }
 
-/// Creates a workspace after revalidating tenant administration under the membership fence.
-///
-/// # Errors
-/// Rejects revoked credentials, lost administration, invalid input or workspace limits.
-pub async fn create_workspace_as(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
-    name: &str,
-    max_entities: Option<i32>,
-    schema_id: Option<Uuid>,
-) -> Result<workspace_workspaces::Model, YorishiroError> {
-    let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    let workspace = create_workspace(&txn, actor.tenant_id, name, max_entities, schema_id).await?;
-    txn.commit().await.internal()?;
-    Ok(workspace)
-}
-
 pub(crate) async fn create_workspace_in_context(
     ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,

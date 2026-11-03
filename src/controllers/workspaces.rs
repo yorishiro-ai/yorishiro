@@ -36,7 +36,7 @@ pub(crate) async fn list_workspaces(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn create_workspace(
+async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateWorkspaceRequest>,
@@ -56,7 +56,7 @@ pub async fn create_workspace(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn get_workspace(
+async fn get_workspace(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
     Path(id): Path<Uuid>,

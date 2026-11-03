@@ -1,5 +1,9 @@
 # External black-box checks
 
+`rest.builtin-template-relations` creates every builtin template's entity and relation types through public HTTP using Write credentials after schema creation.
+The graph scenarios also cover Read-scoped MCP entity filtering, invalid relation-list status and missing-entity diagnostics.
+Their internal predecessors remain until this expanded replacement passes GHA.
+
 Requires Python 3.10+ and an already-built SQLite-capable application binary.
 No Python dependencies, database access library, network embedding provider, model download, licence, or running external service is needed.
 The runner reads the repository's `config/test_sqlite.yaml` and copies it into its owned temporary working directory.

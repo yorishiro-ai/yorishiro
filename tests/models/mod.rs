@@ -6,8 +6,6 @@ mod workspace_workspaces;
 
 mod access;
 mod api_keys;
-#[cfg(feature = "enterprise")]
-mod compute_credit_ledger;
 mod content_entities_sqlite;
 mod entities;
 #[cfg(feature = "enterprise")]
