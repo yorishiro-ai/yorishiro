@@ -17,6 +17,8 @@ def main() -> int:
         images = re.findall(r"(?:ubuntu|almalinux|rockylinux):[\d.]+", path.read_text())
         assert set(images) <= {"ubuntu:26.04", "almalinux:10"}, path
     assert "FROM almalinux:10" in (ROOT / ".github/packaging/Dockerfile").read_text()
+    package_action = (ROOT / ".github/actions/build-and-package/action.yml").read_text()
+    assert 'RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"' in package_action
     ddl_window = workflow.split("      - name: Verify shared requests models and workers do not create databases\n", 1)[1].split("      - name: Upload ordinary request DDL evidence\n", 1)[0]
     assert "-- requests:: models:: workers::" in ddl_window
     assert "--skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept" in ddl_window

@@ -35,6 +35,7 @@ runs:
         BUILD_SHA: ${{ inputs.build-tag }}
         EDITION: ${{ inputs.edition }}
       run: |
+        RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
         docker build -f .github/packaging/Dockerfile -t yorishiro-package-builder .github/packaging
         docker run --rm --user "$(id -u):$(id -g)" \
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
