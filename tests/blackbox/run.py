@@ -428,7 +428,9 @@ def rest_suite(app):
     status, _, _ = app.http("GET", "/api/schemas")
     require(status == 401, "REST missing auth accepted")
     app.rest("GET", "/api/schemas", status=401, key="invalid")
-    app.rest("POST", "/api/entities", {"data": {}}, status=422)
+    status, _, text = app.http("POST", "/api/entities", {"data": {}}, key=app.key)
+    require(status == 422 and "schema_name" in text,
+            f"wrong REST extractor rejection: {status}: {text}")
     app.checks.append("REST missing/invalid auth, read-only scope and malformed input")
 
 
@@ -448,7 +450,9 @@ def mcp_suite(app):
     denied = reader.call("create_schema", {"definition": SCHEMA}, error=True)
     require(denied.get("result", {}).get("isError") is True, "scope denial must be a tool error")
     malformed = client.call("get_entity", {"id": "not-a-uuid"}, error=True)
-    require(malformed.get("error", {}).get("code") == -32602, "wrong MCP invalid-params error")
+    require(malformed.get("result", {}).get("isError") is True
+            and "failed to deserialize parameters" in json.dumps(malformed),
+            "wrong MCP argument-deserialization tool error")
     client.call("create_schema", error=True)
     initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
     for headers, expected in (({"Host": "untrusted.invalid", "Accept": "application/json, text/event-stream"}, 403),

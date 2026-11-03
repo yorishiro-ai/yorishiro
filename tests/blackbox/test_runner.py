@@ -117,6 +117,20 @@ class ArgumentTests(unittest.TestCase):
             self.assertIn(str(Path(directory)), app.env["DATABASE_URL"])
             self.assertEqual(app.env["LOCO_CONFIG_FOLDER"], str(Path(directory) / "config"))
 
+    def test_rest_extractor_rejection_is_text_not_json(self):
+        app = Mock(key="credential", workspace="workspace")
+        app.issue.return_value = ("id", "read-key")
+        for status, text, passes in ((422, "missing field `schema_name`", True),
+                                     (200, "missing field `schema_name`", False),
+                                     (422, "unrelated rejection", False)):
+            with self.subTest(status=status, text=text):
+                app.http.side_effect = [(401, {}, "unauthenticated"), (status, {}, text)]
+                if passes:
+                    run.rest_suite(app)
+                else:
+                    with self.assertRaisesRegex(AssertionError, "extractor rejection"):
+                        run.rest_suite(app)
+
     def test_task_name_does_not_conflict_with_name_parameter(self):
         args = run.parse_args(self.arguments())
         with tempfile.TemporaryDirectory() as directory:
