@@ -73,7 +73,7 @@ Input schema:
 
 ### `create_api_key`
 
-Issue a workspace-bound API key and return its secret once; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
+Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (per-request X-Workspace-Id) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
 
 Input schema:
 
@@ -125,6 +125,11 @@ Input schema:
           "type": "null"
         }
       ]
+    },
+    "tenant_scoped": {
+      "default": false,
+      "description": "Issue a tenant-scoped key (no workspace binding, per-request `X-Workspace-Id`) instead of a workspace-bound one.\nRequires tenant Admin or Owner and a tenant-scoped issuing credential.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -397,6 +402,28 @@ Input schema:
 }
 ```
 
+### `delete_schema`
+
+Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema scope)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "schema_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `delete_template_library_item`
 
 Delete an owned tenant template while preserving existing workspace schemas (requires read scope and tenant Admin or Owner)
@@ -469,6 +496,19 @@ Input schema:
 ### `discover_workspaces`
 
 Discover workspace candidates within the current credential's tenant; service credentials list only the selected workspace, and discovery does not grant access (requires read scope)
+
+Input schema:
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
+### `export_jsonl`
+
+Export schemas, entities, and relations in the selected workspace as newline-delimited JSON (requires read scope); one {"kind":"schema"|"entity"|"relation","record":{...}} object per line, the same format import_jsonl reads back. Limited to 8 MiB and 10,000 records; larger workspaces must use paginated list APIs.
 
 Input schema:
 
@@ -1665,7 +1705,7 @@ Input schema:
 
 ### `update_entity`
 
-Replace the data of an existing entity (requires write scope)
+Replace the data of an existing entity (requires write scope); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between
 
 Input schema:
 
@@ -1675,6 +1715,14 @@ Input schema:
   "properties": {
     "data": {
       "description": "Replacement entity body.\nValidated against the schema version in effect when the entity was created."
+    },
+    "expected_updated_at": {
+      "description": "The entity's `updated_at` as the client read it; a mismatch is refused with a conflict so a stale writer cannot clobber a newer write.",
+      "format": "date-time",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "id": {
       "format": "uuid",

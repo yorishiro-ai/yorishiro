@@ -454,6 +454,136 @@ async fn schema_archive_preserves_history_and_version_sequence() {
 }
 
 #[tokio::test]
+async fn delete_schema_tool_removes_only_unreferenced_archived_versions() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let definition = json!({"name":"delete-history","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
+        let v1 = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        v1.assert_status(StatusCode::CREATED);
+        let v1_id = v1.json::<Value>()["schema"]["id"].as_str().unwrap().to_owned();
+        let v2 = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        v2.assert_status(StatusCode::CREATED);
+        let v2_id = v2.json::<Value>()["schema"]["id"].as_str().unwrap().to_owned();
+        let v3 = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        v3.assert_status(StatusCode::CREATED);
+        let v3_id = v3.json::<Value>()["schema"]["id"].as_str().unwrap().to_owned();
+        let read_key = issue_api_key(&ctx, tenant.workspace_id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":v1_id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let bound = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":v1_id}})).await;
+        assert_eq!(bound["result"]["isError"], true);
+        assert!(bound.to_string().contains("workspaces"));
+        let active = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":v3_id}})).await;
+        assert_eq!(active["result"]["isError"], true);
+        assert!(active.to_string().contains("still active"));
+        let deleted = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":v2_id}})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"], true);
+        let listed = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"list_schemas","arguments":{}})).await;
+        let listed = tool_result_json(&listed);
+        let rows = listed.as_array().unwrap();
+        assert!(rows.iter().all(|row| row["id"] != json!(v2_id)));
+        request.get(&format!("/api/schemas/{v2_id}")).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::NOT_FOUND);
+    }).await;
+}
+
+#[tokio::test]
+async fn api_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let denied = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"create_api_key","arguments":{"name":"from-bound","tenant_scoped":true}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        let issuer = yorishiro::models::api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, ApiKeyScope::Migration, Some(tenant.owner_id), true, "initial-admin").await.unwrap();
+        let created = mcp_call(&request, &session, &issuer.plaintext, 3, "tools/call", json!({"name":"create_api_key","arguments":{"name":"tenant-scoped","scope":"write","tenant_scoped":true}})).await;
+        let record = tool_result_json(&created);
+        assert!(record["workspace_id"].is_null(), "record: {record:?}");
+        request.get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", record["full_key"].as_str().unwrap()))
+            .await.assert_status(StatusCode::OK);
+        assert_eq!(record["scope"], "write");
+        assert_eq!(record["effective_scope"], "write");
+        let rest = request.post("/api/api-keys").add_header("Authorization", format!("Bearer {}", issuer.plaintext)).json(&json!({"name":"rest-twin","scope":"write","tenant_scoped":true})).await;
+        rest.assert_status(StatusCode::CREATED);
+        let rest_record = rest.json::<Value>();
+        assert!(rest_record["workspace_id"].is_null());
+        let revoked = mcp_call(&request, &session, &issuer.plaintext, 4, "tools/call", json!({"name":"revoke_api_key","arguments":{"key_id":record["id"].as_str().unwrap()}})).await;
+        assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        let missing = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":Uuid::new_v4()}})).await;
+        assert_eq!(missing["result"]["isError"], true);
+        assert!(missing.to_string().contains("was not found"));
+    }).await;
+}
+
+#[tokio::test]
+async fn update_entity_tool_refuses_a_stale_expected_updated_at() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let definition = json!({"name":"opt-concurrency","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
+        let created_schema = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        created_schema.assert_status(StatusCode::CREATED);
+        let created = request.post("/api/entities").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"schema_name":"opt-concurrency","entity_type":"note","data":{"title":"first"}})).await;
+        created.assert_status(StatusCode::CREATED);
+        let record = created.json::<Value>();
+        let id = record["id"].as_str().unwrap().to_owned();
+        let first_updated = record["updated_at"].as_str().unwrap().to_owned();
+        let fresh = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"update_entity","arguments":{"id":id,"data":{"title":"second"},"expected_updated_at":first_updated}})).await;
+        let fresh = tool_result_json(&fresh);
+        assert_eq!(fresh["id"], id);
+        let second_updated = fresh["updated_at"].as_str().unwrap().to_owned();
+        let stale = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"update_entity","arguments":{"id":id,"data":{"title":"third"},"expected_updated_at":first_updated}})).await;
+        assert_eq!(stale["result"]["isError"], true);
+        assert!(stale.to_string().contains("changed while it was being edited"));
+        let retry = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"update_entity","arguments":{"id":id,"data":{"title":"third"},"expected_updated_at":second_updated}})).await;
+        assert_eq!(tool_result_json(&retry)["id"], id);
+    }).await;
+}
+
+#[tokio::test]
+async fn export_jsonl_tool_matches_the_rest_export() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let definition = json!({"name":"export-history","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
+        let created_schema = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
+        created_schema.assert_status(StatusCode::CREATED);
+        let created = request.post("/api/entities").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"schema_name":"export-history","entity_type":"note","data":{"title":"exported"}})).await;
+        created.assert_status(StatusCode::CREATED);
+        let entity_id = created.json::<Value>()["id"].as_str().unwrap().to_owned();
+
+        let exported = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"export_jsonl","arguments":{}})).await;
+        let text = exported["result"]["content"][0]["text"].as_str().unwrap().to_owned();
+        let mut kinds = std::collections::BTreeMap::new();
+        let mut entity_rows = Vec::new();
+        for line in text.lines() {
+            let row: Value = serde_json::from_str(line).expect("export line is JSON");
+            *kinds.entry(row["kind"].as_str().unwrap().to_owned()).or_insert(0) += 1;
+            if row["record"]["id"] == entity_id {
+                entity_rows.push(row);
+            }
+        }
+        assert!(kinds.get("schema").copied().unwrap_or(0) >= 1, "kinds: {kinds:?}");
+        assert_eq!(kinds.get("entity").copied().unwrap_or(0), 1, "kinds: {kinds:?}");
+        assert_eq!(entity_rows.len(), 1, "kinds: {kinds:?}");
+        assert_eq!(entity_rows[0]["record"]["data"]["title"], "exported");
+
+        // The REST endpoint and the tool return the same lines, in the same order.
+        let rest = request.get("/api/export.jsonl").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(text, rest.text());
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use yorishiro::models::_entities::entity_entities::{Column, Entity};
+        Entity::update_many()
+            .col_expr(Column::Data, sea_orm::sea_query::Expr::value(json!({"title":"x".repeat(8 * 1024 * 1024)})))
+            .filter(Column::Id.eq(entity_id.parse::<Uuid>().unwrap())).exec(&ctx.db).await.unwrap();
+        let overflow = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"export_jsonl","arguments":{}})).await;
+        assert_eq!(overflow["result"]["isError"], true);
+        assert!(overflow.to_string().contains("8 MiB"));
+    }).await;
+}
+
+#[tokio::test]
 async fn audit_tool_preserves_independent_grant_and_rest_parity() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

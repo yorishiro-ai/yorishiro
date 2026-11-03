@@ -6,6 +6,155 @@ use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{TenantArgs, TestTenant};
 
+mod deletion;
+
+/// Creates the next schema version from the definition and returns its id.
+async fn create_schema_version(
+    request: &loco_rs::TestServer,
+    key: &str,
+    definition: &serde_json::Value,
+) -> String {
+    let response = request
+        .post("/api/schemas")
+        .add_header("Authorization", format!("Bearer {key}"))
+        .json(definition)
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    response.json::<serde_json::Value>()["schema"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn schema_deletion_refuses_active_versions_and_references() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let TestTenant {
+            api_key: key,
+            workspace_id,
+            owner_id,
+            ..
+        } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let definition = serde_json::json!({
+            "name": "delete-history",
+            "entity_types": {
+                "note": {
+                    "fields": { "title": { "type": "string" } }
+                }
+            }
+        });
+        // The workspace binds to the first version it activates and keeps that binding.
+        let v1_id = create_schema_version(&request, &key, &definition).await;
+        let v2_id = create_schema_version(&request, &key, &definition).await;
+        let v3_id = create_schema_version(&request, &key, &definition).await;
+
+        request
+            .delete(&format!("/api/schemas/{v2_id}"))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let read_key =
+            super::fixtures::issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false)
+                .await;
+        request
+            .delete(&format!("/api/schemas/{v2_id}"))
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+
+        // An active version cannot be deleted.
+        request
+            .delete(&format!("/api/schemas/{v3_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+
+        // v1 is archived but the workspace still binds it, so it is refused with the blocker named.
+        let bound = request
+            .delete(&format!("/api/schemas/{v1_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        bound.assert_status(StatusCode::CONFLICT);
+        assert!(
+            bound.text().contains("workspaces"),
+            "response: {:?}",
+            bound.text()
+        );
+
+        // v2 is archived and unbound, so it is deleted.
+        let barrier = tokio::sync::Barrier::new(2);
+        let delete = async || {
+            barrier.wait().await;
+            request
+                .delete(&format!("/api/schemas/{v2_id}"))
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await
+        };
+        let (first, second) = tokio::join!(delete(), delete());
+        let mut statuses = [first.status_code().as_u16(), second.status_code().as_u16()];
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            [204, 404],
+            "first: {}, second: {}",
+            first.text(),
+            second.text()
+        );
+        request
+            .get(&format!("/api/schemas/{v2_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+
+        // Entities referencing a version block its deletion after it is archived.
+        let entity = request
+            .post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({
+                "schema_name": "delete-history",
+                "entity_type": "note",
+                "data": { "title": "kept" }
+            }))
+            .await;
+        entity.assert_status(StatusCode::CREATED);
+        let entity_id = entity.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        create_schema_version(&request, &key, &definition).await;
+        let blocked = request
+            .delete(&format!("/api/schemas/{v3_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        blocked.assert_status(StatusCode::CONFLICT);
+        assert!(
+            blocked.text().contains("entities"),
+            "response: {:?}",
+            blocked.text()
+        );
+        request
+            .get(&format!("/api/entities/{entity_id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status_ok();
+
+        // An unknown id is a 404, not a conflict.
+        request
+            .delete(&format!("/api/schemas/{}", uuid::Uuid::new_v4()))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn create_schema_from_a_builtin_template() {
     boot_request::<App, _, _>(|request, ctx| async move {

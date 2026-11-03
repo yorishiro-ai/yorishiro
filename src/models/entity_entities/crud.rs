@@ -102,6 +102,7 @@ pub(crate) async fn create_with_quota(
         });
     }
 
+    crate::models::schema_schemas::lock_version(conn, workspace_id, &input.schema_name).await?;
     let schema =
         crate::models::schema_schemas::get_active_schema(conn, workspace_id, &input.schema_name)
             .await?;
@@ -182,7 +183,26 @@ pub async fn update(
     workspace_id: Uuid,
     input: UpdateEntityInput,
 ) -> Result<EntityRecord, YorishiroError> {
-    let existing = get(conn, workspace_id, input.id).await?;
+    use crate::models::_entities::entity_entities::Column;
+
+    let row = Entity::find_by_id(input.id)
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("entity '{}' was not found", input.id)))?;
+    let current_token = row.embedding_sync_token.clone();
+    let existing = EntityRecord::from(row);
+    if let Some(expected) = input.expected_updated_at
+        && existing.updated_at != expected
+    {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "entity '{}' changed while it was being edited (it is now {}); re-read it and retry",
+                input.id, existing.updated_at
+            ),
+        });
+    }
     let schema =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;
@@ -194,6 +214,28 @@ pub async fn update(
         updated_by: ActiveValue::Set(input.updated_by),
         ..Default::default()
     };
+    if input.expected_updated_at.is_some() {
+        // Bulk updates do not run model hooks, so retain the normal timestamp hook explicitly.
+        let active = active.before_save(conn, false).await.internal()?;
+        let mut rows = Entity::update_many()
+            .set(active)
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Id.eq(input.id))
+            // Compare the same snapshot atomically without SQLite timestamp text-format differences.
+            .filter(Column::EmbeddingSyncToken.eq(current_token))
+            .exec_with_returning(conn)
+            .await
+            .internal()?;
+        return rows
+            .pop()
+            .map(EntityRecord::from)
+            .ok_or_else(|| YorishiroError::Conflict {
+                message: format!(
+                    "entity '{}' changed while it was being edited; re-read it and retry",
+                    input.id
+                ),
+            });
+    }
     active.update(conn).await.internal().map(EntityRecord::from)
 }
 

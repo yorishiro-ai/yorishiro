@@ -25,7 +25,7 @@ pub(crate) struct ApiKeyArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Issue a workspace-bound API key and return its secret once; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)"
+        description = "Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (per-request X-Workspace-Id) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)"
     )]
     pub(crate) async fn create_api_key(
         &self,
@@ -42,16 +42,28 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(auth) => auth,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match IdentityApiKeys::create_delegated_api_key(
-            &self.app_context().db,
-            &auth,
-            args.scope.unwrap_or(ApiKeyScope::Read),
-            args.audit,
-            &args.name,
-            args.expires_at,
-        )
-        .await
-        {
+        let created = if args.tenant_scoped {
+            IdentityApiKeys::create_delegated_tenant_api_key(
+                &self.app_context().db,
+                &auth,
+                args.scope.unwrap_or(ApiKeyScope::Read),
+                args.audit,
+                &args.name,
+                args.expires_at,
+            )
+            .await
+        } else {
+            IdentityApiKeys::create_delegated_api_key(
+                &self.app_context().db,
+                &auth,
+                args.scope.unwrap_or(ApiKeyScope::Read),
+                args.audit,
+                &args.name,
+                args.expires_at,
+            )
+            .await
+        };
+        match created {
             Ok(created) => ok_json(CreateApiKeyResponse {
                 id: created.id,
                 prefix: created.key_prefix,

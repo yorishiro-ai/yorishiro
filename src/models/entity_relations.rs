@@ -316,24 +316,6 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
         .map(|n| n as i64)
 }
 
-/// Fetches every relation for the workspace, with no pagination limit, for a full-workspace data export.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub(crate) async fn export_all(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<Vec<RelationRecord>, YorishiroError> {
-    use crate::models::_entities::entity_relations::Column;
-
-    Entity::find()
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(Column::CreatedAt)
-        .all(conn)
-        .await
-        .internal()
-        .and_then(|rows| rows.into_iter().map(TryInto::try_into).collect())
-}
-
 pub(crate) const MIN_NEIGHBORS_LIMIT: i64 = 1;
 pub(crate) const MAX_NEIGHBORS_LIMIT: i64 = 200;
 pub(crate) const DEFAULT_NEIGHBORS_LIMIT: i64 = 20;

@@ -125,6 +125,7 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
                 id: survivor.id,
                 data: serde_json::json!({ "title": "overwritten" }),
                 updated_by: None,
+                expected_updated_at: None,
             },
         )
         .await
@@ -267,6 +268,96 @@ async fn list_entities_with_filter_returns_501_on_sqlite() {
             body["error"]["code"], "backend_unsupported",
             "response must have backend_unsupported code, body: {body}"
         );
+    })
+    .await;
+}
+
+/// A writer that passes the `updated_at` it read is refused with a conflict when another write lands in between, and a retry with the fresh value succeeds.
+///
+/// Runs on the shared test database: everything it touches is scoped to its own workspace, so a throwaway database would only trip the shared-suite DDL gate.
+#[tokio::test]
+async fn entity_update_refuses_a_stale_expected_updated_at() {
+    use axum::http::StatusCode;
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let definition = serde_json::from_value(serde_json::json!({
+            "name": "note",
+            "entity_types": { "note": { "fields": { "title": { "type": "string" } } } }
+        }))
+        .expect("parse definition");
+        schema_schemas::create_schema(
+            &ctx.db,
+            setup.tenant_id,
+            setup.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .expect("create schema");
+
+        let created = request
+            .post("/api/entities")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({ "schema_name": "note", "entity_type": "note", "data": { "title": "first" } }))
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let record = created.json::<serde_json::Value>();
+        let id = record["id"].as_str().unwrap().to_owned();
+        let first_updated = record["updated_at"].as_str().unwrap().to_owned();
+
+        // A matching token passes and moves the timestamp.
+        let ok = request
+            .put(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({ "data": { "title": "second" }, "expected_updated_at": first_updated }))
+            .await;
+        ok.assert_status(StatusCode::OK);
+        let ok_record = ok.json::<serde_json::Value>();
+        let second_updated = ok_record["updated_at"].as_str().unwrap().to_owned();
+        assert_ne!(second_updated, first_updated);
+
+        // The now-stale token is refused with a conflict naming the change.
+        let stale = request
+            .put(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({ "data": { "title": "third" }, "expected_updated_at": first_updated }))
+            .await;
+        stale.assert_status(StatusCode::CONFLICT);
+        assert!(
+            stale.text().contains("changed while it was being edited"),
+            "response: {:?}",
+            stale.text()
+        );
+
+        // The retry with the fresh token passes, and omitting the token keeps the unconditional replace.
+        let retry = request
+            .put(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({ "data": { "title": "third" }, "expected_updated_at": second_updated }))
+            .await;
+        retry.assert_status(StatusCode::OK);
+        let no_token = request
+            .put(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({ "data": { "title": "fourth" } }))
+            .await;
+        no_token.assert_status(StatusCode::OK);
+
+        let token = no_token.json::<serde_json::Value>()["updated_at"].clone();
+        let barrier = tokio::sync::Barrier::new(2);
+        let write = async |title: &str| {
+            barrier.wait().await;
+            request.put(&format!("/api/entities/{id}"))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .json(&serde_json::json!({"data":{"title":title},"expected_updated_at":token}))
+                .await
+        };
+        let (first, second) = tokio::join!(write("racer-one"), write("racer-two"));
+        let mut statuses = [first.status_code().as_u16(), second.status_code().as_u16()];
+        statuses.sort();
+        assert_eq!(statuses, [200, 409], "first: {}, second: {}", first.text(), second.text());
     })
     .await;
 }

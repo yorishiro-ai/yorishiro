@@ -1,4 +1,5 @@
 use axum::http::request::Parts;
+use chrono::{DateTime, Utc};
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
 use rmcp::handler::server::wrapper::Parameters;
@@ -36,6 +37,8 @@ pub(crate) struct UpdateEntityArgs {
     /// Replacement entity body.
     /// Validated against the schema version in effect when the entity was created.
     pub data: Value,
+    /// The entity's `updated_at` as the client read it; a mismatch is refused with a conflict so a stale writer cannot clobber a newer write.
+    pub expected_updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -178,7 +181,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Replace the data of an existing entity (requires write scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Replace the data of an existing entity (requires write scope); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between")]
     pub(crate) async fn update_entity(
         &self,
         Parameters(args): Parameters<UpdateEntityArgs>,
@@ -204,6 +207,7 @@ impl YorishiroMcpServer {
                 id: args.id,
                 data: args.data,
                 updated_by,
+                expected_updated_at: args.expected_updated_at,
             },
         )
         .await

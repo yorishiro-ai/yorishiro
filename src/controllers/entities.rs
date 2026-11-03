@@ -53,7 +53,7 @@ pub async fn get_entity(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::entities::UpdateEntityRequest, responses((status = 200, body = crate::models::entity_entities::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::entities::UpdateEntityRequest, responses((status = 200, body = crate::models::entity_entities::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
 pub(crate) async fn update_entity(
     State(ctx): State<AppContext>,
     authorized: Authorized<WriteScope>,
@@ -69,6 +69,7 @@ pub(crate) async fn update_entity(
             id,
             data: body.data,
             updated_by,
+            expected_updated_at: body.expected_updated_at,
         },
     )
     .await?;

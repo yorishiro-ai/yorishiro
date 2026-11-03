@@ -220,7 +220,8 @@ pub async fn login(
     Ok(Json(LoginResponse {
         api_key: created.plaintext,
         api_key_id: created.id,
-        workspace_id: created.workspace_id,
+        // Login credentials are always bound to the selected workspace.
+        workspace_id,
         scope: created.scope,
         user_id: user.id,
     })

@@ -262,12 +262,13 @@ async fn setup_key_resolves_the_workspace_per_request() {
             )
             .await
             .unwrap();
+            // A foreign header is a scope denial (403), not a validation failure (422).
             let scoped = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .add_header("x-workspace-id", second_id.to_string())
                 .await;
-            assert_eq!(scoped.status_code(), 422, "{}", scoped.text());
+            assert_eq!(scoped.status_code(), 403, "{}", scoped.text());
             let scoped = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))

@@ -37,15 +37,27 @@ pub(crate) async fn create(
 ) -> Result<impl IntoResponse, ApiError> {
     let scope = body.scope.unwrap_or(ApiKeyScope::Read);
     crate::models::access::require_key_grant(&ctx.db, &auth, scope, body.audit).await?;
-    let created = IdentityApiKeys::create_delegated_api_key(
-        &ctx.db,
-        &auth,
-        scope,
-        body.audit,
-        &body.name,
-        body.expires_at,
-    )
-    .await?;
+    let created = if body.tenant_scoped {
+        IdentityApiKeys::create_delegated_tenant_api_key(
+            &ctx.db,
+            &auth,
+            scope,
+            body.audit,
+            &body.name,
+            body.expires_at,
+        )
+        .await?
+    } else {
+        IdentityApiKeys::create_delegated_api_key(
+            &ctx.db,
+            &auth,
+            scope,
+            body.audit,
+            &body.name,
+            body.expires_at,
+        )
+        .await?
+    };
     Ok((
         StatusCode::CREATED,
         Json(CreateApiKeyResponse {

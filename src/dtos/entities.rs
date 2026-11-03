@@ -1,4 +1,5 @@
 use crate::models::entity_entities::{self};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -35,6 +36,9 @@ pub struct UndoResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateEntityRequest {
     pub data: Value,
+    /// The entity's `updated_at` as the client read it; a mismatch is refused with a 409 conflict.
+    #[serde(default)]
+    pub expected_updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]

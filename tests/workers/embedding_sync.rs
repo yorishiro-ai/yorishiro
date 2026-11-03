@@ -1563,6 +1563,7 @@ mod conflict {
                             id: entity_id,
                             data: serde_json::json!({"title":"changed while embedding"}),
                             updated_by: None,
+                            expected_updated_at: None,
                         },
                     )
                     .await

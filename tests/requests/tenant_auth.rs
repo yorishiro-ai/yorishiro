@@ -236,7 +236,7 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
             .await;
         assert_eq!(own.status_code(), 200, "{}", own.text());
 
-        // Naming a workspace that belongs to another tenant is refused, not resolved.
+        // Naming a workspace that belongs to another tenant is refused as a scope denial, not resolved.
         let foreign_target = request
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -244,7 +244,7 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
             .await;
         assert_eq!(
             foreign_target.status_code(),
-            422,
+            403,
             "{}",
             foreign_target.text()
         );

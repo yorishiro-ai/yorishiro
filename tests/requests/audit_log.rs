@@ -158,6 +158,7 @@ async fn undo_migration_job_is_recorded() {
                 id: entity.id,
                 data: serde_json::json!({ "title": "overwritten" }),
                 updated_by: None,
+                expected_updated_at: None,
             },
         )
         .await

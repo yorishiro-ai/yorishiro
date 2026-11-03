@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr};
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr, Statement};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -90,6 +90,142 @@ pub(crate) async fn archive(
         .await
         .internal()?;
     get_by_id(conn, workspace_id, schema_id).await
+}
+
+/// Deletes one archived schema version that nothing references.
+///
+/// # Errors
+/// Returns an error when the version is still active, when entities, snapshots, proposals, forks or workspaces still point at it, or when persistence fails.
+pub(crate) async fn delete(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+
+    let schema = get_by_id(conn, workspace_id, schema_id).await?;
+    lock_version(conn, workspace_id, &schema.name).await?;
+    // A row lock also fences reference writers that rely on the foreign key rather than the version lock.
+    let row = Entity::find_by_id(schema_id)
+        .filter(crate::models::_entities::schema_schemas::Column::WorkspaceId.eq(workspace_id))
+        .lock_exclusive()
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?;
+    let schema = SchemaRecord::try_from(row)?;
+    if schema.status != SchemaStatus::Archived {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "schema '{}' version {} is still active; archive it before deleting",
+                schema.name, schema.version
+            ),
+        });
+    }
+    // References to a version are retained history, so deletion refuses them with their name instead of cascading.
+    let mut blockers: Vec<&str> = Vec::new();
+    let entities = crate::models::_entities::entity_entities::Entity::find()
+        .filter(crate::models::_entities::entity_entities::Column::SchemaId.eq(schema_id))
+        .count(conn)
+        .await
+        .internal()?;
+    if entities > 0 {
+        blockers.push("entities");
+    }
+    let snapshots = crate::models::_entities::entity_snapshots::Entity::find()
+        .filter(crate::models::_entities::entity_snapshots::Column::SchemaId.eq(schema_id))
+        .count(conn)
+        .await
+        .internal()?;
+    if snapshots > 0 {
+        blockers.push("entity snapshots");
+    }
+    let proposals = crate::models::_entities::inference_proposals::Entity::find()
+        .filter(crate::models::_entities::inference_proposals::Column::SchemaId.eq(schema_id))
+        .count(conn)
+        .await
+        .internal()?;
+    if proposals > 0 {
+        blockers.push("inference proposals");
+    }
+    let workspaces = crate::models::_entities::workspace_workspaces::Entity::find()
+        .filter(
+            crate::models::_entities::workspace_workspaces::Column::SchemaId.eq(Some(schema_id)),
+        )
+        .count(conn)
+        .await
+        .internal()?;
+    if workspaces > 0 {
+        blockers.push("workspaces");
+    }
+    let forks = crate::models::_entities::workspace_schema_forks::Entity::find()
+        .filter(
+            sea_orm::Condition::any()
+                .add(
+                    crate::models::_entities::workspace_schema_forks::Column::SourceSchemaId
+                        .eq(schema_id),
+                )
+                .add(
+                    crate::models::_entities::workspace_schema_forks::Column::ForkSchemaId
+                        .eq(schema_id),
+                ),
+        )
+        .count(conn)
+        .await
+        .internal()?;
+    let fork_heads = crate::models::_entities::workspace_schema_fork_heads::Entity::find()
+        .filter(
+            crate::models::_entities::workspace_schema_fork_heads::Column::SchemaId.eq(schema_id),
+        )
+        .count(conn)
+        .await
+        .internal()?;
+    let (forks, fork_heads) = if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        // Incoming forks can live outside the selected workspace, so ordinary RLS-scoped counts miss them.
+        let row = conn
+            .query_one_raw(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT forks, fork_heads FROM schema_fork_reference_counts($1)",
+                [schema_id.into()],
+            ))
+            .await
+            .internal()?
+            .ok_or_else(|| {
+                YorishiroError::not_found(format!("schema '{schema_id}' was not found"))
+            })?;
+        (
+            row.try_get::<i64>("", "forks").internal()? as u64,
+            row.try_get::<i64>("", "fork_heads").internal()? as u64,
+        )
+    } else {
+        (forks, fork_heads)
+    };
+    if forks > 0 {
+        blockers.push("schema forks");
+    }
+    if fork_heads > 0 {
+        blockers.push("schema fork heads");
+    }
+    if !blockers.is_empty() {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "schema '{}' version {} is still referenced by: {}",
+                schema.name,
+                schema.version,
+                blockers.join(", ")
+            ),
+        });
+    }
+    let deleted = Entity::delete_by_id(schema_id)
+        .exec(conn)
+        .await
+        .internal()?;
+    if deleted.rows_affected == 0 {
+        return Err(YorishiroError::not_found(format!(
+            "schema '{schema_id}' was not found"
+        )));
+    }
+    Ok(())
 }
 
 /// One version of a workspace's schema.

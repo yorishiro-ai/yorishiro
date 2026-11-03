@@ -285,6 +285,7 @@ async fn edited_entities_make_pending_proposals_stale() {
                 id: entity.id,
                 data: json!({"title": "edited", "body": "already filled"}),
                 updated_by: None,
+                expected_updated_at: None,
             },
         )
         .await

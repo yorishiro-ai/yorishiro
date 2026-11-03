@@ -265,6 +265,7 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
                     id: first.id,
                     data: serde_json::json!({"title": "modified concurrently with the reindex"}),
                     updated_by: None,
+                            expected_updated_at: None,
                 },
             ).await.expect("concurrent update");
             release.add_permits(1);
