@@ -317,6 +317,8 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
     output.parent.mkdir(parents=True, exist_ok=True)
     logs = Path(artifacts_dir)
     logs.mkdir(parents=True, exist_ok=False)
+    if env.get("YORISHIRO_REQUEST_TIMING_DIR"):
+        Path(env["YORISHIRO_REQUEST_TIMING_DIR"]).mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_seconds
     started = utc_now()
     receipt = {"schema": 1, **provenance_fields, "edition": edition, "job": job,

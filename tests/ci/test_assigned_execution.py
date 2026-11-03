@@ -77,6 +77,17 @@ class AssignedExecutionTests(unittest.TestCase):
         self.assertEqual({row["name"] for row in receipt["tests"]}, {"a", "b"})
         self.assertEqual(receipt["status"], "passed")
 
+    def test_request_timing_directory_exists_before_test_process_starts(self):
+        timings = self.root / "artifacts" / "timings"
+        self.env["YORISHIRO_REQUEST_TIMING_DIR"] = str(timings)
+        self.assertFalse(timings.exists())
+
+        def checked(argv, env, deadline, log):
+            self.assertTrue(Path(env["YORISHIRO_REQUEST_TIMING_DIR"]).is_dir())
+            return self.fake_process(argv, env, deadline, log)
+
+        self.assertEqual(self.execute(run=checked)["status"], "passed")
+
     def postgres(self):
         self.plan["jobs"]["common-sqlite"].update(database="postgres", queue="postgres")
         self.manifest["postgres_dedicated"] = [{"name": "b", "source": "tests/synthetic.rs"}]
