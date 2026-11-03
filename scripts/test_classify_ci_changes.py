@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Focused contract tests for change-based CI selection."""
 
-from classify_ci_changes import ALL, classify, classify_path, package_build_allowed, selected_job_succeeded
+from classify_ci_changes import (
+    ALL,
+    classify,
+    classify_path,
+    package_build_allowed,
+    selected_job_succeeded,
+)
 
 
 def test_unknown_defaults_to_full() -> None:

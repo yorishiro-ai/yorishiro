@@ -10,15 +10,16 @@
 # The parity test's own >0.999 cosine threshold is what actually absorbs that drift, the same way
 # it already absorbs floating-point op-ordering differences between candle and any reference
 # implementation; it is not claiming exact reproducibility across every dependency in this image.
-FROM python:3.12.7-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
 RUN pip install --no-cache-dir \
-    torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.15.0+cpu --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir \
-    sentence-transformers==3.3.1 \
-    transformers==4.46.3
+    sentence-transformers==6.2.0 \
+    transformers==5.22.1 \
+    && pip check
 
 COPY generate.py .
 

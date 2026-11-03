@@ -30,7 +30,7 @@ run_deb_transition() {
   to_package="$(current_package_id "$to")"
   local old_package="$from_package"
   local base="/pkg/${from_package}-${VERSION}-amd64.deb"
-  docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:26.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
     test ! -e /etc/yorishiro/production.yaml
@@ -74,7 +74,7 @@ run_deb_transition() {
 }
 
 run_deb_colocation_refusal() {
-  docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
     dpkg --unpack /pkg/yorishiro-ee-${VERSION}-amd64.deb || true
@@ -85,7 +85,7 @@ run_deb_colocation_refusal() {
 }
 
 run_deb_current_remove_preserves_admin_config() {
-  docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
     test -f /etc/yorishiro/production.yaml.example
@@ -103,7 +103,7 @@ run_deb_current_remove_preserves_admin_config() {
 }
 
 run_deb_fresh_install_without_admin_config() {
-  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:24.04 bash -eu -c "
+  docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:26.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv /pkg/yorishiro-ce-${VERSION}-amd64.deb
     test ! -e /etc/yorishiro/production.yaml

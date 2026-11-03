@@ -29,9 +29,9 @@ def classify_path(path: str) -> set[str]:
 
     if s.startswith((".github/actions/rust-setup/", ".github/actions/sea-orm-cli/")):
         groups |= RUST_SETUP_CONSUMERS | {"shared"}
-    elif s.startswith(".github/actions/package-tests/") or s.startswith(".github/actions/build-and-package/"):
+    elif s.startswith((".github/actions/package-tests/", ".github/actions/build-and-package/")):
         groups |= PACKAGE_ACTION_CONSUMERS
-    elif s.startswith(".github/actions/build-docker/") or s.startswith(".github/actions/docker-manifest/") or s.startswith(".github/actions/smoke/"):
+    elif s.startswith((".github/actions/build-docker/", ".github/actions/docker-manifest/", ".github/actions/smoke/")):
         groups |= DOCKER_ACTION_CONSUMERS
     elif s.startswith(".github/actions/"):
         return set(ALL)
@@ -50,7 +50,7 @@ def classify_path(path: str) -> set[str]:
         groups |= {"topology", "rust", "ee"}
     if s.startswith(("scripts/classify_ci_changes.py", "scripts/test_classify_ci_changes.py")):
         groups |= {"shared", "rust", "ee"}
-    if s.startswith(".github/packaging/") or s.startswith(".github/actions/package-tests/"):
+    if s.startswith((".github/packaging/", ".github/actions/package-tests/")):
         groups |= {"packaging"}
     if s.startswith(".github/packaging/"):
         groups |= {"rust", "ee"}
@@ -143,8 +143,7 @@ def main() -> int:
     print(payload)
     if args.output:
         with open(args.output, "a", encoding="utf-8") as f:
-            for key, value in selected.items():
-                f.write(f"{key}={str(value).lower()}\n")
+            f.writelines(f"{key}={str(value).lower()}\n" for key, value in selected.items())
             f.write(f"groups={','.join(g for g in GROUPS if selected[g])}\n")
     return 0
 

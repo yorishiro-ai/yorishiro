@@ -8,7 +8,6 @@ import pathlib
 import subprocess
 import sys
 
-
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_FILTER = r"(^|/)src/models/_entities/|(^|/)migration/src/|(^|/)src/bin/"
 

@@ -26,6 +26,8 @@ runs:
         targets: ${{ inputs.target }}
 
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: package-almalinux10-${{ inputs.arch }}-${{ hashFiles('.github/packaging/Dockerfile') }}
 
     - name: Build
       shell: bash
@@ -33,11 +35,22 @@ runs:
         BUILD_SHA: ${{ inputs.build-tag }}
         EDITION: ${{ inputs.edition }}
       run: |
-        if [ "$EDITION" = ce ]; then
-          cargo build --locked --no-default-features --features community --release --bin yorishiro
-        else
-          cargo build --locked --features enterprise --release --bin yorishiro
-        fi
+        RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+        docker build -f .github/packaging/Dockerfile -t yorishiro-package-builder .github/packaging
+        docker run --rm --user "$(id -u):$(id -g)" \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -v "$RUSTUP_HOME:/usr/local/rustup:ro" \
+          -v "$HOME/.cargo/bin:/usr/local/cargo/bin:ro" \
+          -w "$GITHUB_WORKSPACE" \
+          -e RUSTUP_TOOLCHAIN="$(rustup show active-toolchain | cut -d ' ' -f1)" \
+          -e CARGO_HOME -e CARGO_TARGET_DIR -e BUILD_SHA -e EDITION \
+          yorishiro-package-builder bash -euc '
+            if [ "$EDITION" = ce ]; then
+              cargo build --locked --no-default-features --features community --release --bin yorishiro
+            else
+              cargo build --locked --features enterprise --release --bin yorishiro
+            fi
+          '
 
     - uses: ./.github/actions/install-nfpm
 

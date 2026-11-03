@@ -5,12 +5,12 @@ import argparse
 import difflib
 import hashlib
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tarfile
 import tempfile
 import urllib.request
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 VERSION = "1.2.0"
