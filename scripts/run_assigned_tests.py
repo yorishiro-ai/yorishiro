@@ -24,6 +24,8 @@ TARGET = ("package", "target", "kind")
 IDENTITY = (*TARGET, "name")
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 RESULT = re.compile(r"\btest ([^\s]+)(?: - should panic)? \.\.\. ")
+DATABASE_DDL = re.compile(r"\b(CREATE|DROP)\s+DATABASE\s", re.IGNORECASE)
+DDL_PROBE = "CREATE TEMP TABLE assigned_shared_ddl_probe (id integer)"
 
 
 def fingerprint(value):
@@ -51,7 +53,27 @@ def manual_exclusions(plan, manifest):
     return [{**{field: row[field] for field in IDENTITY}, "owner": row["owner"], "job": job,
              "status": "opt-in-not-required", "counted_passed": False}
             for row in plan["assignments"] for job in row["jobs"]
-            if row["role"] == "manual_external" or optional_job(plan, job, manifest)]
+             if row["role"] == "manual_external" or optional_job(plan, job, manifest)]
+
+
+def postgres_dedicated(plan, manifest):
+    """All other PG assignments are reviewed shared fixtures, frozen by source_guard."""
+    entries = manifest.get("postgres_dedicated", [])
+    names = [row["name"] for row in entries]
+    require(len(names) == len(set(names)), "duplicate PostgreSQL dedicated identity")
+    pg_names = {row["name"] for row in plan["assignments"]
+                if any(plan["jobs"][job]["database"] == "postgres" for job in row["jobs"])}
+    require(set(names) <= pg_names, "unknown PostgreSQL dedicated identity")
+    declarations = {(name, row["source"]) for row in manifest.get("exception_groups", []) for name in row["names"]}
+    declarations.update((row["name"], row["source"]) for row in manifest.get("exceptions", []))
+    require(all((row["name"], row["source"]) in declarations for row in entries),
+            "PostgreSQL dedicated identity lacks source classification")
+    require(not pg_names or "postgres_dedicated" in manifest, "missing PostgreSQL fixture classification")
+    return set(names)
+
+
+def fixture_group(row, config, dedicated):
+    return ("dedicated" if row["name"] in dedicated else "shared") if config["database"] == "postgres" else "default"
 
 
 def provenance(plan, manifest):
@@ -88,6 +110,7 @@ def provenance(plan, manifest):
             require(identity not in expected, "duplicate assignment")
             expected[identity] = row
     require(expected, "zero required assignment identities")
+    postgres_dedicated(plan, manifest)
     if "execution_matrix" in plan:
         cells = plan["execution_matrix"]["include"]
         expected_cells = [{"edition": edition, "job": job, **plan["jobs"][job]}
@@ -240,7 +263,30 @@ def helper_evidence(plan, edition, rows):
     return [{"name": helper["name"], "parent": helper["parent"], **{field: helper[field] for field in TARGET},
              "evidence": "reviewed-parent-assertions", "parent_status": "passed"}
             for helper in plan.get("helpers", []) if helper["owner"] == edition and
-            (*key(helper, TARGET), helper["parent"]) in parents]
+             (*key(helper, TARGET), helper["parent"]) in parents]
+
+
+@contextlib.contextmanager
+def shared_ddl_window(env, deadline, logs, index, run_process, evidence):
+    """Observe the entire shared process, including its first OnceCell migration."""
+    container = env.get("POSTGRES_CONTAINER")
+    require(container, "missing POSTGRES_CONTAINER for shared DDL observation")
+    since = utc_now()
+    code, _ = run_process(["docker", "exec", container, "psql", "-v", "ON_ERROR_STOP=1",
+                           "-U", "yorishiro", "-d", "yorishiro", "-c", DDL_PROBE],
+                          env, deadline, logs / f"{index}-ddl-probe.log")
+    evidence.update(probe_exit_code=code, since=since)
+    try:
+        require(code == 0, "PostgreSQL DDL positive probe failed")
+        yield
+    finally:
+        log = logs / f"{index}-shared-ddl.log"
+        code, text = run_process(["docker", "logs", "--since", since, container], env, deadline, log)
+        evidence.update(log=str(log), logs_exit_code=code, status="failed")
+        require(code == 0, "could not collect PostgreSQL DDL logs")
+        require(DDL_PROBE in text, "PostgreSQL DDL logging was not observed")
+        require(not DATABASE_DDL.search(text), "shared PostgreSQL group created or dropped a database")
+        evidence["status"] = "passed" if evidence["probe_exit_code"] == 0 else "failed"
 
 
 def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revision,
@@ -259,9 +305,11 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
         require(env.get("YORISHIRO_EMBEDDING_PROVIDER") == "openai" and
                 env.get("YORISHIRO_EMBEDDING_API_KEY") and env.get("YORISHIRO_EMBEDDING_BASE_URL"),
                 "live provider resource is not configured")
+    dedicated = postgres_dedicated(plan, manifest)
     groups = {}
     for row in selected:
-        groups.setdefault(key(row, TARGET), []).append(row)
+        fixture = fixture_group(row, plan["jobs"][job], dedicated)
+        groups.setdefault((*key(row, TARGET), fixture), []).append(row)
     # Include zero-test artifacts in download verification, but never execute them as coverage.
     binaries = {identity[1:]: relocated_binary(artifact, binary_root)
                 for identity, artifact in artifacts.items() if identity[0] == edition}
@@ -275,23 +323,31 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
                "topology": topology, "started_at": started, "status": "failed", "tests": [],
                "helpers": [], "binaries": []}
     try:
-        for index, (target, rows) in enumerate(sorted(groups.items())):
+        for index, (group, rows) in enumerate(sorted(groups.items())):
+            target, fixture = group[:3], group[3]
             binary = artifacts[(edition, *target)]
             flags = selection_flags(binary, rows)
             prefix = [str(binaries[target]), *flags]
             listing_log, execution_log = logs / f"{index}-list.log", logs / f"{index}-tests.log"
             code, listing = run_process([*prefix, "--list", "--format", "terse"], env, deadline, listing_log)
             names = sorted(row["name"] for row in rows)
-            require(code == 0 and inventory.parse_listing(listing) == names, "filtered listing differs from exact assignment")
             before = utc_now()
-            code, text = run_process([*prefix, "--nocapture", "--test-threads", "4", "--color", "never"],
-                                     env, deadline, execution_log)
+            binary_receipt = {**dict(zip(TARGET, target)), "sha256": binary["sha256"], "fixture": fixture,
+                              "tests": names, "listing_log": str(listing_log), "listing_exit_code": code,
+                              "log": str(execution_log), "started_at": before}
+            receipt["binaries"].append(binary_receipt)
+            require(code == 0 and inventory.parse_listing(listing) == names, "filtered listing differs from exact assignment")
+            observation = binary_receipt.setdefault("ddl_observation", {}) if fixture == "shared" else None
+            window = (shared_ddl_window(env, deadline, logs, index, run_process, observation)
+                      if fixture == "shared" else contextlib.nullcontext())
+            with window:
+                code, text = run_process([*prefix, "--nocapture", "--test-threads", "4", "--color", "never"],
+                                         env, deadline - (15 if fixture == "shared" else 0), execution_log)
+                binary_receipt["exit_code"] = code
+            binary_receipt["finished_at"] = utc_now()
             require(code == 0, f"libtest process failed; see {execution_log}")
             passed_tests(text, names)
             after = utc_now()
-            receipt["binaries"].append({**dict(zip(TARGET, target)), "sha256": binary["sha256"],
-                                        "tests": names, "listing_log": str(listing_log), "log": str(execution_log),
-                                        "started_at": before, "finished_at": after})
             for row in rows:
                 receipt["tests"].append({**{field: row[field] for field in IDENTITY}, "owner": edition,
                                           "job": job, "status": "passed", "sha256": binary["sha256"],
@@ -309,6 +365,7 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
 
 def aggregate(plan, receipts, manifest):
     fields, artifacts, expected = provenance(plan, manifest)
+    dedicated = postgres_dedicated(plan, manifest)
     seen, jobs = set(), set()
     for receipt in receipts:
         require(receipt["schema"] == 1 and receipt["status"] == "passed", "failed execution receipt")
@@ -340,12 +397,21 @@ def aggregate(plan, receipts, manifest):
         binaries = {}
         for binary in receipt["binaries"]:
             target = key(binary, TARGET)
-            require(target not in binaries, "duplicate binary receipt")
-            binaries[target] = binary
+            group = (*target, binary["fixture"])
+            require(group not in binaries, "duplicate binary fixture receipt")
+            binaries[group] = binary
             require(binary["sha256"] == artifacts[(edition, *target)]["sha256"], "binary receipt hash differs")
-            require(binary["tests"] == sorted(row["name"] for row in rows if key(row, TARGET) == target),
+            require(binary["listing_exit_code"] == 0 and binary["exit_code"] == 0, "failed binary receipt")
+            require(binary["tests"] == sorted(row["name"] for row in rows if key(row, TARGET) == target
+                                             and fixture_group(row, config, dedicated) == binary["fixture"]),
                     "binary receipt identities differ")
-        require(set(binaries) == {key(row, TARGET) for row in rows}, "missing binary receipt")
+            if binary["fixture"] == "shared":
+                observation = binary.get("ddl_observation", {})
+                require(observation.get("status") == "passed" and observation.get("probe_exit_code") == 0
+                        and observation.get("logs_exit_code") == 0 and observation.get("log") and observation.get("since"),
+                        "missing/failed PostgreSQL DDL observation")
+        require(set(binaries) == {(*key(row, TARGET), fixture_group(row, config, dedicated)) for row in rows},
+                "missing binary fixture receipt")
     require(seen == set(expected), f"missing execution receipts: {len(set(expected) - seen)}")
     require(not plan.get("pending_splits"), "pending scenario splits block execution success")
     return {"schema": 1, **fields, "status": "passed", "execution_matrix_ready": True,

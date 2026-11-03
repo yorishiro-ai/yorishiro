@@ -1,9 +1,7 @@
 name: CI
 
-# Covers this repository's layout: the root package (`yorishiro`) and `migration/`, with the paid
-# edition compiled in as the `ee/` module rather than a package of its own.
-# Deliberately minimal: cargo check/clippy/fmt-check runs once, then test runs in parallel
-# for postgres and sqlite backends via a matrix.
+# Compile each edition once for inventory, then execute its reviewed responsibilities.
+# Schema regeneration and documentation tests remain separate validation responsibilities.
 
 on:
   pull_request:
@@ -74,7 +72,7 @@ jobs:
         run: make check-ce
       - name: Clippy CE without enterprise code
         run: make clippy-ce
-      # Runtime topology tests run in the shared matrix below for both editions.
+      # Runtime tests consume the inventory binaries through reviewed assignments.
 
   check:
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
@@ -97,9 +95,6 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
-        # TODO: unify cache key convention with test job (which uses matrix-scoped keys).
-        # check currently uses the default key while test splits by backend to avoid
-        # postgres/sqlite artifact collisions.
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -112,6 +107,23 @@ jobs:
 
       - name: Python lint
         run: make python-lint
+
+      - name: Verify topology gate rejects a mismatch without Cargo
+        env:
+          DATABASE_URL: sqlite:///tmp/yorishiro-gate-check.sqlite3?mode=rwc
+          LOCO_ENV: test_sqlite
+        run: |
+          set +e
+          stderr="$RUNNER_TEMP/topology-mismatch.stderr"
+          output=$(python3 scripts/test_topology.py postgres-redis models::maintenance:: 2>"$stderr")
+          status=$?
+          set -e
+          echo "$output"
+          cat "$stderr"
+          if [ "$status" -eq 0 ] || ! grep -Fxq "YORISHIRO_TOPOLOGY_REJECTED" "$stderr"; then
+            echo "ERROR: expected the topology wrapper's mismatch rejection, not success or an unrelated failure"
+            exit 1
+          fi
 
       - name: Check test harness usage
         run: |
@@ -234,196 +246,77 @@ jobs:
             ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
-  test:
-    name: "Test (Edition: ${{ matrix.edition }}, DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})"
-    needs: [changes, prepare-embedding]
+  schema-generation:
+    name: Schema generation (${{ matrix.edition }}, PostgreSQL)
+    needs: [changes, test-inventory]
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - edition: ce
-            db: Postgres
-            backend: postgres
-            queue: Postgres
-            queue_key: postgres
-            # Used by non-harness steps; test_topology.py selects its own config via Environment::Test.
-            loco_env: test_postgres
-            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-            queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          - edition: ce
-            db: SQLite
-            backend: sqlite
-            queue: SQLite
-            queue_key: sqlite
-            loco_env: test_sqlite
-            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-            queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
-          - edition: ce
-            db: Postgres
-            backend: postgres
-            queue: Redis
-            queue_key: redis
-            loco_env: test_postgres_redis
-            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-            queue_url: redis://localhost:6379/15
-          - edition: ce
-            db: SQLite
-            backend: sqlite
-            queue: Redis
-            queue_key: redis
-            loco_env: test_sqlite_redis
-            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-            queue_url: redis://localhost:6379/15
-          - edition: ee
-            db: Postgres
-            backend: postgres
-            queue: Postgres
-            queue_key: postgres
-            # Used by non-harness steps; test_topology.py selects its own config via Environment::Test.
-            loco_env: test_postgres
-            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-            queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          - edition: ee
-            db: SQLite
-            backend: sqlite
-            queue: SQLite
-            queue_key: sqlite
-            loco_env: test_sqlite
-            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-            queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
-          - edition: ee
-            db: Postgres
-            backend: postgres
-            queue: Redis
-            queue_key: redis
-            loco_env: test_postgres_redis
-            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-            queue_url: redis://localhost:6379/15
-          - edition: ee
-            db: SQLite
-            backend: sqlite
-            queue: Redis
-            queue_key: redis
-            loco_env: test_sqlite_redis
-            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-            queue_url: redis://localhost:6379/15
+        edition: [ce, ee]
+    env:
+      DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+      QUEUE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+      LOCO_ENV: test_postgres
+      DB_CONNECT_TIMEOUT: "5000"
     services:
       db:
         image: pgvector/pgvector:pg18
         env:
-          POSTGRES_USER: yorishiro
-          POSTGRES_PASSWORD: yorishiro
-          POSTGRES_DB: yorishiro
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U yorishiro"
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-
-      - name: Install Python tools
-        run: uv sync --locked
-
       - uses: ./.github/actions/rust-setup
         with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
+          components: rustfmt
+      - uses: ./.github/actions/sea-orm-cli
+      - uses: actions/download-artifact@v8
         with:
-          # Separate caches for each matrix entry so postgres and sqlite build artifacts don't
-          # collide across database and queue providers.
-          key: ${{ github.job }}-${{ matrix.backend }}-${{ matrix.queue }}
-
-      - name: Restore multilingual-e5-base cache
-        uses: actions/cache/restore@v6
-        id: embedding-cache
-        with:
-          path: |
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
-          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
-
-      - name: Verify populated multilingual-e5-base cache
+          name: test-executables-${{ matrix.edition }}
+          path: ${{ runner.temp }}/executables
+      - name: Restore the inventory main binary
         env:
-          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
-          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
-          MODEL_URL: unused
-          TOKENIZER_URL: unused
-        run: uv run scripts/embedding_cache.py verify
+          EDITION: ${{ matrix.edition }}
+        run: |
+          tar -xzf "$RUNNER_TEMP/executables/test-executables-$EDITION.tar.gz" target/debug/yorishiro
+          test -x target/debug/yorishiro
 
-      - name: Build workspace
+      - name: Bootstrap PostgreSQL extensions and non-superuser migration identity
         env:
-          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
         run: |
-          if [ "${{ matrix.edition }}" = ce ]; then
-            cargo build --locked --no-default-features --features community --workspace
-          else
-            cargo build --locked --features enterprise --workspace
-          fi
-
-      # Only the entity regeneration check shells out to sea-orm-cli, and that runs on PostgreSQL.
-      - if: matrix.backend == 'postgres'
-        uses: ./.github/actions/sea-orm-cli
-
-      - name: Install pgvector and pg_trgm (postgres only)
-        if: matrix.backend == 'postgres'
-        run: |
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
-            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
-            -c '\c template1' \
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d template1 \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
+            -c 'CREATE DATABASE yorishiro OWNER yorishiro;'
 
-      - name: Configure the matrix Redis service
-        if: matrix.queue_key == 'redis'
-        run: |
-          image="$(docker compose config --format json | jq -r '.services.redis.image')"
-          docker run --detach --name matrix-redis --publish 127.0.0.1:6379:6379 \
-            "$image" valkey-server --databases 65536 --save '' --appendonly no
-          docker exec matrix-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
-
-      - name: Run migrations (postgres)
-        if: matrix.backend == 'postgres'
-        env:
-          DATABASE_URL: ${{ matrix.database_url }}
-          QUEUE_URL: ${{ matrix.queue_url }}
-          LOCO_ENV: ${{ matrix.loco_env }}
-          DB_CONNECT_TIMEOUT: "5000"
-        run: ./target/debug/yorishiro db migrate
-
-      - name: Run migrations (sqlite)
-        if: matrix.backend == 'sqlite'
-        env:
-          DATABASE_URL: ${{ matrix.database_url }}
-          QUEUE_URL: ${{ matrix.queue_url }}
-          LOCO_ENV: ${{ matrix.loco_env }}
+      - name: Run migrations with the inventory binary
         run: ./target/debug/yorishiro db migrate
 
       - name: Verify _entities/ matches a fresh regen
-        if: matrix.backend == 'postgres'
-        env:
-          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          LOCO_ENV: test_postgres
-          DB_CONNECT_TIMEOUT: "5000"
         run: |
           # Diagnose: confirm the migration-created tables actually exist.
           # This is the branching point if db entities ever produces 0 files again.
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro -c '\dt' || true
+          docker exec ${{ job.services.db.id }} psql -U postgres -d yorishiro -c '\dt'
           # Run db entities (the determinism check).
           count_before=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities
-          uv run scripts/harden_generated_entities.py
-          which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
+          python3 scripts/harden_generated_entities.py
           count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           if [ "$count" -lt 10 ]; then
             echo "ERROR: Expected at least 10 entity files, got $count after db entities."
@@ -431,184 +324,6 @@ jobs:
           fi
           echo "Generated $count entity files (had $count_before before)"
           git diff --exit-code -- src/models/_entities
-
-      - name: Require the EE test licence
-        if: matrix.edition == 'ee'
-        env:
-          YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
-        run: |
-          if [ -z "$YORISHIRO_LICENSE_KEY" ]; then
-            echo "::error::Set the YORISHIRO_LICENSE_KEY Actions secret for licensed EE integration tests."
-            exit 1
-          fi
-
-      - name: Verify shared requests models and workers do not create databases
-        if: matrix.backend == 'postgres'
-        env:
-          LOCO_ENV: ${{ matrix.loco_env }}
-          DATABASE_URL: ${{ matrix.database_url }}
-          QUEUE_URL: ${{ matrix.queue_url }}
-          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
-          DB_MAX_CONNECTIONS: 100
-          DB_CONNECT_TIMEOUT: 5000
-          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
-          YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
-        run: |
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
-            -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
-          since=$(date --utc +%Y-%m-%dT%H:%M:%S.%NZ)
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
-            -c 'CREATE TEMP TABLE ordinary_request_ddl_probe (id integer)'
-          # Dedicated deployments exercise global state, worker providers or fault injection.
-          # They still run in the full matrix, outside this shared-suite DDL window.
-          result=0
-          uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- requests:: models:: workers:: \
-            --skip models::maintenance:: \
-            --skip models::inference_jobs::persisted_row_with_unknown_status_returns_internal_error \
-            --skip models::inference_jobs::claim_rejects_stale_and_invalid_rows \
-            --skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept \
-            --skip models::queue_job_dispatch_outbox::record_is_recoverable_until_attempted \
-            --skip models::queue_job_dispatch_outbox::recovery_eligibility_uses_lifecycle_status_and_retry_at \
-            --skip models::queue_job_dispatch_outbox::ordinary_retry_eligibility_uses_retry_at_not_provider_job_id \
-            --skip models::queue_job_lifecycles::timezone_state_changes_without_rewriting_lifecycle_instants \
-            --skip models::queue_job_lifecycles::timezone_state_rejects_invalid_and_missing_singleton_without_inserting \
-            --skip models::search::sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain \
-            --skip models::search::sync_embedding_resolves_the_tenant_dimension_tier \
-            --skip models::tenancy::concurrent_create_workspace_cannot_exceed_the_cap \
-            --skip workers::dispatch:: \
-            --skip workers::startup_reindex:: \
-            --skip workers::embedding_sync::conflict:: \
-            --skip workers::query_embedding:: \
-            --skip workers::target_routing:: \
-            --skip workers::queue::upstream_fixes::redis_claim_refreshes_age_and_fences_reaped_completion_and_failure \
-            --skip ee::workers::infer_fill::relay_dispatches_infer_fill_using_the_registered_worker_class \
-            --skip ee::workers::infer_fill::stalled_provider_enqueue_does_not_block_new_dispatch_records \
-            --skip ee::workers::infer_fill::two_jobs_for_one_workspace_never_run_together \
-            --skip ee::workers::infer_fill::schema_change_during_llm_call_rejects_the_old_schema_proposal \
-            --skip ee::workers::infer_fill::revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider \
-            --skip ee::workers::infer_fill::revocation_during_llm_call_rejects_the_late_proposal \
-            --skip ee::workers::infer_fill::downgrade_during_llm_call_rejects_the_late_proposal \
-            --skip ee::workers::infer_fill::workspace_revocation_during_llm_call_rejects_the_late_proposal \
-            --skip ee::workers::reindex:: \
-            --skip requests::setup:: \
-            --skip requests::ee_setup:: \
-            --skip requests::stripe:: \
-            --skip requests::official_templates:: \
-            --skip requests::queue:: \
-            --skip requests::fill_defaults:: \
-            --skip requests::api_keys::api_key_lifecycle_is_admin_only_and_secret_is_one_time \
-            --skip requests::audit_log::set_maintenance_is_recorded_and_readable_by_an_audit_key \
-            --skip requests::audit_log::undo_migration_job_is_recorded \
-            --skip requests::audit_log::an_audit_key_cannot_read_another_tenants_audit_log \
-            --skip requests::auth::signup_then_login_round_trip \
-            --skip requests::auth::signup_without_invite_creates_its_own_tenant \
-            --skip requests::auth::signup_without_invite_respects_the_tenant_cap \
-            --skip requests::auth::signup_cannot_raise_the_community_tenant_cap_with_configuration \
-            --skip requests::auth::create_tenant_serializes_on_its_advisory_lock \
-            --skip requests::auth::disabled_tenant_invites_cannot_accept_or_register_accounts \
-            --skip requests::entities::undo_restores_snapshotted_entities_and_counts_a_deleted_one \
-            --skip requests::import::concurrent_import_workers_keep_each_apps_database \
-            --skip requests::import::import_resolves_a_pre_existing_schema_for_every_entity_line \
-            --skip requests::inference::an_unlicensed_deployment_answers_the_same_without_a_valid_key \
-            --skip requests::inference::proposals_require_explicit_confirmation_and_undo_reverses_it \
-            --skip requests::inference::infer_fill_dispatch_failure_rolls_back_job \
-            --skip requests::inference::the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant \
-            --skip requests::marketplace::without_a_licence_the_marketplace_is_not_served \
-            --skip requests::members::owner_can_list_and_add_members \
-            --skip requests::members::last_owner_cannot_be_demoted_or_removed_through_any_membership_operation \
-            --skip requests::members::competing_owner_demotion_and_removal_preserve_an_owner \
-            --skip requests::members::role_preview_reports_lost_workspaces_without_keys \
-            --skip requests::entities::entity_plan_quota_expires_but_manual_limit_remains \
-            --skip requests::mcp::fill_defaults_mcp_executes_and_enforces_migration_scope \
-            --skip requests::mcp::mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid \
-            --skip requests::mcp::mcp_search_asks_a_worker_to_embed_the_query \
-            --skip requests::oauth::find_or_create_refuses_a_new_tenant_past_the_cap \
-            --skip requests::oauth::find_or_create_provisions_an_active_workspace_with_a_general_notes_schema \
-            --skip requests::oauth::oauth_provisioning_policy_controls_new_caps \
-            --skip requests::search::search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result \
-            --skip requests::search::search_without_a_worker_times_out_as_service_unavailable_without_a_fallback \
-            --skip requests::search::a_result_for_an_expired_request_is_discarded \
-            --skip requests::search::a_worker_failure_reaches_the_caller_as_service_unavailable \
-            --skip requests::search::a_width_the_workspace_does_not_hold_is_refused_by_the_worker \
-            --skip requests::search::a_disabled_embedding_provider_is_reported_by_the_worker \
-            --skip requests::system::maintenance_is_readable_and_settable_over_rest \
-            --skip requests::system::a_full_lock_entered_over_rest_can_be_left_over_rest \
-            --skip requests::workspaces::owner_can_create_list_view_and_delete_workspaces \
-            --skip requests::workspaces::cannot_delete_a_tenants_only_workspace || result=$?
-          docker logs --since "$since" ${{ job.services.db.id }} > "$RUNNER_TEMP/ordinary-request-ddl.log" 2>&1
-          if ! grep -Fq 'CREATE TEMP TABLE ordinary_request_ddl_probe' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
-            echo '::error::PostgreSQL DDL logging was not observed.'
-            exit 1
-          fi
-          if grep -Ei '(CREATE|DROP)[[:space:]]+DATABASE[[:space:]]' "$RUNNER_TEMP/ordinary-request-ddl.log"; then
-            echo '::error::The shared request/model/worker group created or dropped a database.'
-            exit 1
-          fi
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
-            -c "ALTER SYSTEM RESET log_statement" -c 'SELECT pg_reload_conf()'
-          exit "$result"
-
-      - name: Upload ordinary request DDL evidence
-        if: always() && matrix.backend == 'postgres'
-        uses: actions/upload-artifact@v7
-        with:
-          name: ordinary-request-ddl-${{ matrix.edition }}-${{ matrix.queue_key }}
-          path: ${{ runner.temp }}/ordinary-request-ddl.log
-          if-no-files-found: error
-
-      - name: Run tests
-        id: topology-tests
-        env:
-          LOCO_ENV: ${{ matrix.loco_env }}
-          DATABASE_URL: ${{ matrix.database_url }}
-          QUEUE_URL: ${{ matrix.queue_url }}
-          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
-          DB_MAX_CONNECTIONS: 100
-          DB_CONNECT_TIMEOUT: 5000
-          RUST_BACKTRACE: "1"
-          YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
-          YORISHIRO_REQUEST_TIMING_DIR: ${{ runner.temp }}/request-timings
-          YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && secrets.YORISHIRO_LICENSE_KEY || '' }}
-        run: |
-          mkdir -p "$YORISHIRO_REQUEST_TIMING_DIR"
-          RUSTC_BOOTSTRAP=1 uv run scripts/test_topology.py ${{ matrix.backend }}-${{ matrix.queue_key }} -- -Z unstable-options --report-time
-
-      - name: Upload request phase timings
-        if: always() && (steps.topology-tests.outcome == 'success' || steps.topology-tests.outcome == 'failure')
-        uses: actions/upload-artifact@v7
-        with:
-          name: request-timings-${{ matrix.edition }}-${{ matrix.backend }}-${{ matrix.queue_key }}
-          path: ${{ runner.temp }}/request-timings
-          if-no-files-found: error
-
-      - name: Remove the matrix Redis service
-        if: always() && matrix.queue_key == 'redis'
-        run: docker rm --force matrix-redis
-
-      - name: Verify topology gate rejects a mismatch
-        env:
-          DATABASE_URL: sqlite:///tmp/yorishiro-gate-check.sqlite3?mode=rwc
-          LOCO_ENV: test_sqlite
-        run: |
-          set +e
-          stderr="$RUNNER_TEMP/topology-mismatch.stderr"
-          output=$(uv run scripts/test_topology.py postgres-redis models::maintenance:: 2>"$stderr")
-          status=$?
-          set -e
-          echo "$output"
-          cat "$stderr"
-          if [ "$status" -eq 0 ] || ! grep -Fxq "YORISHIRO_TOPOLOGY_REJECTED" "$stderr"; then
-            echo "ERROR: expected the topology wrapper's mismatch rejection, not success or an unrelated failure"
-            exit 1
-          fi
-
-      - name: Verify embedding artifacts before cache save
-        env:
-          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
-          CACHE_HIT: "true"
-          MODEL_URL: unused
-          TOKENIZER_URL: unused
-        run: uv run scripts/embedding_cache.py verify
 
   public-contract-build:
     name: Build public-contract binary (CE)
@@ -729,6 +444,13 @@ jobs:
               for path in sorted(paths):
                   archive.add(path, arcname=str(path))
           PY
+      - name: Run workspace documentation tests for this edition
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          features=community
+          if [[ "$EDITION" == ee ]]; then features=enterprise; fi
+          cargo test --locked --workspace --doc --no-default-features --features "$features"
       - uses: actions/upload-artifact@v7
         with:
           name: test-inventory-${{ matrix.edition }}
@@ -887,7 +609,7 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [changes, ce, check, msrv, prepare-embedding, test, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, assigned-tests, assigned-test-verify, package-build, package-validation]
+    needs: [changes, ce, check, msrv, prepare-embedding, schema-generation, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, assigned-tests, assigned-test-verify, package-build, package-validation]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
@@ -900,7 +622,7 @@ jobs:
           EE: ${{ needs.check.result }}
           MSRV: ${{ needs.msrv.result }}
           MODEL: ${{ needs.prepare-embedding.result }}
-          TEST: ${{ needs.test.result }}
+          SCHEMA: ${{ needs.schema-generation.result }}
           PUBLIC_BUILD: ${{ needs.public-contract-build.result }}
           PUBLIC: ${{ needs.public-contract.result }}
           PUBLIC_VERIFY: ${{ needs.public-contract-verify.result }}
@@ -928,7 +650,7 @@ jobs:
             require_success EE "$EE" true
             require_success MSRV "$MSRV" true
             require_success MODEL "$MODEL" true
-            require_success TEST "$TEST" true
+            require_success SCHEMA "$SCHEMA" true
             require_success PUBLIC_BUILD "$PUBLIC_BUILD" true
             require_success PUBLIC "$PUBLIC" true
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" true
@@ -941,7 +663,7 @@ jobs:
             require_success EE "$EE" false
             require_success MSRV "$MSRV" false
             require_success MODEL "$MODEL" false
-            require_success TEST "$TEST" false
+            require_success SCHEMA "$SCHEMA" false
             require_success PUBLIC_BUILD "$PUBLIC_BUILD" false
             require_success PUBLIC "$PUBLIC" false
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" false

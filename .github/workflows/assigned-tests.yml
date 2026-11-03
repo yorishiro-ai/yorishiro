@@ -132,6 +132,9 @@ jobs:
           docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
             -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
             -c 'CREATE DATABASE yorishiro OWNER yorishiro;'
+          # The admin configures logging; application probes and tests remain non-superuser.
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
 
       - name: Start Valkey only for Redis assignments
         if: matrix.queue == 'redis'
@@ -148,10 +151,13 @@ jobs:
         run: ./target/debug/yorishiro db migrate
 
       - name: Execute verified exact assignments
+        id: execution
         timeout-minutes: 45
         env:
           EDITION: ${{ matrix.edition }}
           ASSIGNED_JOB: ${{ matrix.job }}
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
+          YORISHIRO_REQUEST_TIMING_DIR: ${{ runner.temp }}/assigned-results/timings
         run: >-
           python3 scripts/run_assigned_tests.py run
           --assignments "$RUNNER_TEMP/assignments/test-assignments.json"
@@ -159,6 +165,15 @@ jobs:
           --job "$ASSIGNED_JOB"
           --output "$RUNNER_TEMP/assigned-results/receipt.json"
           --artifacts "$RUNNER_TEMP/assigned-results/logs"
+
+      - name: Verify embedding assets after execution
+        if: always() && steps.execution.outcome != 'skipped' && steps.execution.outcome != ''
+        env:
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: unused
+          TOKENIZER_URL: unused
+        run: python3 scripts/embedding_cache.py verify
 
       - name: Upload execution receipt and redacted logs
         if: always()

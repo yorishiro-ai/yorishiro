@@ -526,25 +526,31 @@ def relation_export_import_worker(app, surface):
     people = [source.call("create_entity", {"schema_name": "graph", "entity_type": "person",
                                          "data": {"name": name}}) for name in ("Alice", "Bob")]
     payload = {"source_id": people[0]["id"], "target_id": people[1]["id"], "relation_type": "knows"}
+    _, read_key = app.issue(source_id, "read")
+    readers = (GraphAPI(app, "rest", read_key), GraphAPI(app, "mcp", read_key))
 
     def read_relation(relation):
-        rest = app.rest("GET", f"/api/relations/{relation['id']}", key=source_key)
-        mcp = source.client.call("get_relation", {"id": relation["id"]})
+        rest = app.rest("GET", f"/api/relations/{relation['id']}", key=read_key)
+        mcp = readers[1].client.call("get_relation", {"id": relation["id"]})
         require(rest == mcp == relation, "relation readback differs across surfaces")
-        for api in (source, peer):
+        for api in readers:
             require(api.call("list_relations") == [relation], "relation list differs across surfaces")
+        filtered = app.rest("GET", f"/api/relations?source_id={people[0]['id']}", key=read_key)
+        require(filtered == readers[1].call("list_relations", {"source_id": people[0]["id"]}) == [relation],
+                "source-filtered relation list differs across surfaces")
 
     relation = source.call("create_relation", payload)
     require(relation["properties"] == {} and relation["status"] == "active",
             "omitted relation properties/status defaults changed")
     read_relation(relation)
-    _, read_key = app.issue(source_id, "read")
     app.rest("POST", "/api/relations", payload, status=403, key=read_key)
     denied = MCP(app, read_key).call("create_relation", payload, error=True)
     require(denied.get("result", {}).get("isError") is True
             and "scope_insufficient" in json.dumps(denied), "wrong relation scope tool error")
     status, _, _ = app.http("POST", "/api/relations", payload)
     require(status == 401, "relation creation accepted missing auth")
+    status, _, _ = app.http("GET", "/api/relations")
+    require(status == 401, "relation listing accepted missing auth")
     unauthenticated = source.client.call("create_relation", payload, error=True, key="")
     require(unauthenticated.get("error", {}).get("code") == -32600, "wrong MCP missing-auth error")
     status, _, text = app.http("PUT", f"/api/relations/{relation['id']}/status",
@@ -571,8 +577,8 @@ def relation_export_import_worker(app, surface):
     require(relation["properties"] == {"since": 2026} and relation["status"] == "deprecated",
             "relation properties or deprecated status lost")
     read_relation(relation)
-    exported = source.export()
-    require(exported == peer.export(), "REST/MCP raw export text differs")
+    exported = readers[0].export()
+    require(exported == readers[1].export(), "REST/MCP raw export text differs")
     records = [json.loads(line) for line in exported.splitlines()]
     require([item["kind"] for item in records] == ["schema", "entity", "entity", "relation"],
             "export record counts or kind order differs")

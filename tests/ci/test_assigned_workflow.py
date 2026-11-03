@@ -49,6 +49,25 @@ class AssignedWorkflowTests(unittest.TestCase):
             self.assertIn(name, env_source)
             self.assertIn(name, WORKFLOW)
 
+    def test_assigned_execution_owns_shared_postgres_ddl_observation(self):
+        bootstrap = WORKFLOW.split("- name: Bootstrap PostgreSQL extensions and non-superuser migration identity", 1)[1].split("- name: Start Valkey", 1)[0]
+        self.assertIn("if: matrix.database == 'postgres'", bootstrap)
+        self.assertIn("ALTER SYSTEM SET log_statement = 'ddl'", bootstrap)
+        self.assertLess(WORKFLOW.index("ALTER SYSTEM SET log_statement = 'ddl'"), WORKFLOW.index("python3 scripts/run_assigned_tests.py run"))
+        execution = WORKFLOW.split("- name: Execute verified exact assignments", 1)[1].split("- name:", 1)[0]
+        self.assertIn("POSTGRES_CONTAINER: ${{ job.services.db.id }}", execution)
+        self.assertNotIn("scripts/test_topology.py", WORKFLOW)
+        caller = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertNotIn("Verify shared requests models and workers do not create databases", caller)
+        self.assertNotIn("-- requests:: models:: workers::", caller)
+
+    def test_embedding_assets_are_reverified_after_execution(self):
+        verification = WORKFLOW.split("- name: Verify embedding assets after execution", 1)[1].split("- name:", 1)[0]
+        self.assertIn("if: always()", verification)
+        self.assertIn("steps.execution.outcome", verification)
+        self.assertIn("run: python3 scripts/embedding_cache.py verify", verification)
+        self.assertLess(WORKFLOW.index("python3 scripts/run_assigned_tests.py run"), WORKFLOW.index("- name: Verify embedding assets after execution"))
+
     def test_licence_and_always_uploaded_evidence(self):
         self.assertIn("matrix.edition == 'ee' && matrix.signed_licence && secrets.YORISHIRO_LICENSE_KEY || ''", WORKFLOW)
         self.assertIn("if: matrix.signed_licence", WORKFLOW)

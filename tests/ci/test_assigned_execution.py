@@ -43,6 +43,10 @@ class AssignedExecutionTests(unittest.TestCase):
         self.calls.append((argv, env, deadline))
         self.assertEqual(env["YORISHIRO_TEST_STRICT_TOPOLOGY"], "true")
         self.assertGreater(deadline, runner.time.monotonic())
+        if argv[0] == "docker":
+            text = runner.DDL_PROBE if argv[1] == "logs" else "CREATE TABLE\n"
+            Path(log).write_text(text)
+            return 0, text
         skipped = {argv[index + 1] for index, word in enumerate(argv) if word == "--skip"}
         artifact = next(row for row in self.plan["artifacts"] if row["edition"] == env["YORISHIRO_TEST_EDITION"])
         names = sorted(set(artifact["tests"]) - skipped)
@@ -72,6 +76,111 @@ class AssignedExecutionTests(unittest.TestCase):
         self.assertNotIn("--include-ignored", command)
         self.assertEqual({row["name"] for row in receipt["tests"]}, {"a", "b"})
         self.assertEqual(receipt["status"], "passed")
+
+    def postgres(self):
+        self.plan["jobs"]["common-sqlite"].update(database="postgres", queue="postgres")
+        self.manifest["postgres_dedicated"] = [{"name": "b", "source": "tests/synthetic.rs"}]
+        self.manifest["exceptions"] = [{"name": "b", "source": "tests/synthetic.rs"}]
+        self.env.update(DATABASE_URL="postgres://localhost/yorishiro", QUEUE_URL="postgres://localhost/yorishiro",
+                        LOCO_ENV="test_postgres", POSTGRES_CONTAINER="synthetic-postgres")
+
+    def test_postgres_partitions_target_without_duplicate_tests(self):
+        self.postgres()
+        receipts = self.receipts()
+        self.assertEqual([(row["fixture"], row["tests"]) for row in receipts[0]["binaries"]],
+                         [("dedicated", ["b"]), ("shared", ["a"])])
+        commands = [argv for argv, _, _ in self.calls]
+        self.assertEqual(len([argv for argv in commands if "--nocapture" in argv]), 3)
+        self.assertEqual(len([argv for argv in commands if argv[:2] == ["docker", "logs"]]), 2)
+        self.assertEqual(runner.aggregate(self.plan, receipts, self.manifest)["tests_passed"], 3)
+        shared = receipts[0]["binaries"][1]
+        self.assertEqual(shared["ddl_observation"]["status"], "passed")
+        shared.pop("ddl_observation")
+        with self.assertRaisesRegex(ValueError, "DDL observation"):
+            runner.aggregate(self.plan, receipts, self.manifest)
+
+    def test_postgres_dedicated_manifest_rejects_duplicate_unknown_and_wrong_source(self):
+        self.postgres()
+        entry = self.manifest["postgres_dedicated"][0]
+        for entries, message in (([entry, entry], "duplicate"),
+                                 ([entry | {"name": "unknown"}], "unknown"),
+                                 ([entry | {"source": "tests/wrong.rs"}], "source classification")):
+            with self.subTest(entries=entries), self.assertRaisesRegex(ValueError, message):
+                runner.postgres_dedicated(self.plan, self.manifest | {"postgres_dedicated": entries})
+
+    def test_postgres_batches_multiple_shared_and_dedicated_identities(self):
+        self.postgres()
+        self.plan["artifacts"][0]["tests"].extend(["c", "d"])
+        for name in ("c", "d"):
+            self.plan["assignments"].append(self.plan["assignments"][0] | {"name": name})
+        declaration = {"name": "d", "source": "tests/synthetic.rs"}
+        self.manifest["postgres_dedicated"].append(declaration)
+        self.manifest["exceptions"].append(declaration)
+        receipt = self.execute()
+        self.assertEqual([(row["fixture"], row["tests"]) for row in receipt["binaries"]],
+                         [("dedicated", ["b", "d"]), ("shared", ["a", "c"])])
+        self.assertEqual(len([argv for argv, _, _ in self.calls if "--nocapture" in argv]), 2)
+
+    def test_shared_group_observes_first_process_boot_and_preserves_failure_logs(self):
+        self.postgres()
+        def failing(argv, env, deadline, log):
+            skipped = {argv[index + 1] for index, word in enumerate(argv) if word == "--skip"}
+            if "--nocapture" in argv and "b" in skipped:
+                self.assertEqual(self.calls[-1][0][-1], runner.DDL_PROBE)
+                Path(log).write_text("first OnceCell migration failed")
+                return 17, "first OnceCell migration failed"
+            return self.fake_process(argv, env, deadline, log)
+        with self.assertRaisesRegex(ValueError, "libtest process failed"):
+            self.execute(run=failing)
+        receipt = runner.inventory.load(self.root / "ce-common-sqlite.json")
+        shared = receipt["binaries"][-1]
+        self.assertEqual(shared["exit_code"], 17)
+        self.assertEqual(shared["ddl_observation"]["status"], "passed")
+        self.assertEqual(receipt["status"], "failed")
+
+    def test_shared_ddl_rejects_missing_probe_database_ddl_and_log_failure(self):
+        for code, text in ((0, "no logging"), (0, runner.DDL_PROBE + "\nCREATE DATABASE bad;"),
+                           (0, runner.DDL_PROBE + "\ndrop\n DATABASE bad;"), (1, runner.DDL_PROBE)):
+            with self.subTest(code=code, text=text):
+                evidence = {}
+                def fake(argv, env, deadline, log, code=code, text=text):
+                    result = (code, text) if argv[1] == "logs" else (0, "CREATE TABLE")
+                    Path(log).write_text(result[1])
+                    return result
+                with (self.assertRaises(ValueError),
+                      runner.shared_ddl_window({"POSTGRES_CONTAINER": "pg"}, runner.time.monotonic() + 30,
+                                               self.root, "invalid", fake, evidence)):
+                    pass
+                self.assertEqual(evidence["status"], "failed")
+
+    def test_shared_ddl_requires_container_and_successful_probe(self):
+        with (self.assertRaisesRegex(ValueError, "POSTGRES_CONTAINER"),
+              runner.shared_ddl_window({}, runner.time.monotonic() + 30, self.root, "missing",
+                                       self.fake_process, {})):
+            self.fail("must not execute without observation")
+        def fake(argv, env, deadline, log):
+            Path(log).write_text(runner.DDL_PROBE)
+            return (1 if argv[1] == "exec" else 0), runner.DDL_PROBE
+        evidence = {}
+        with (self.assertRaisesRegex(ValueError, "positive probe failed"),
+              runner.shared_ddl_window({"POSTGRES_CONTAINER": "pg"}, runner.time.monotonic() + 30,
+                                       self.root, "probe", fake, evidence)):
+            self.fail("must not execute after failed probe")
+        self.assertEqual(evidence["probe_exit_code"], 1)
+        self.assertEqual(evidence["status"], "failed")
+
+    def test_shared_ddl_collects_logs_when_test_process_raises(self):
+        evidence, calls = {}, []
+        def fake(argv, env, deadline, log):
+            calls.append(argv)
+            Path(log).write_text(runner.DDL_PROBE)
+            return 0, runner.DDL_PROBE
+        with (self.assertRaisesRegex(ValueError, "test deadline"),
+              runner.shared_ddl_window({"POSTGRES_CONTAINER": "pg"}, runner.time.monotonic() + 30,
+                                       self.root, "timeout", fake, evidence)):
+            raise ValueError("test deadline")
+        self.assertEqual(calls[-1][:3], ["docker", "logs", "--since"])
+        self.assertEqual(evidence["status"], "passed")
 
     def test_full_names_skipped_with_exact_not_substring(self):
         self.execute()
