@@ -343,7 +343,8 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
             window = (shared_ddl_window(env, deadline, logs, index, run_process, observation)
                       if fixture == "shared" else contextlib.nullcontext())
             with window:
-                code, text = run_process([*prefix, "--nocapture", "--test-threads", "4", "--color", "never"],
+                # Capture successful fixtures so parallel panic/output cannot corrupt formatter results.
+                code, text = run_process([*prefix, "--test-threads", "4", "--color", "never"],
                                          env, deadline - (15 if fixture == "shared" else 0), execution_log)
                 binary_receipt["exit_code"] = code
             binary_receipt["finished_at"] = utc_now()

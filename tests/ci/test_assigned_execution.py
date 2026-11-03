@@ -71,7 +71,7 @@ class AssignedExecutionTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 2)
         command = self.calls[1][0]
         self.assertIn("--exact", command)
-        self.assertIn("--nocapture", command)
+        self.assertNotIn("--nocapture", command)
         self.assertEqual(command[command.index("--test-threads") + 1], "4")
         self.assertNotIn("--include-ignored", command)
         self.assertEqual({row["name"] for row in receipt["tests"]}, {"a", "b"})
@@ -101,7 +101,7 @@ class AssignedExecutionTests(unittest.TestCase):
         self.assertEqual([(row["fixture"], row["tests"]) for row in receipts[0]["binaries"]],
                          [("dedicated", ["b"]), ("shared", ["a"])])
         commands = [argv for argv, _, _ in self.calls]
-        self.assertEqual(len([argv for argv in commands if "--nocapture" in argv]), 3)
+        self.assertEqual(len([argv for argv in commands if "--test-threads" in argv]), 3)
         self.assertEqual(len([argv for argv in commands if argv[:2] == ["docker", "logs"]]), 2)
         self.assertEqual(runner.aggregate(self.plan, receipts, self.manifest)["tests_passed"], 3)
         shared = receipts[0]["binaries"][1]
@@ -130,13 +130,13 @@ class AssignedExecutionTests(unittest.TestCase):
         receipt = self.execute()
         self.assertEqual([(row["fixture"], row["tests"]) for row in receipt["binaries"]],
                          [("dedicated", ["b", "d"]), ("shared", ["a", "c"])])
-        self.assertEqual(len([argv for argv, _, _ in self.calls if "--nocapture" in argv]), 2)
+        self.assertEqual(len([argv for argv, _, _ in self.calls if "--test-threads" in argv]), 2)
 
     def test_shared_group_observes_first_process_boot_and_preserves_failure_logs(self):
         self.postgres()
         def failing(argv, env, deadline, log):
             skipped = {argv[index + 1] for index, word in enumerate(argv) if word == "--skip"}
-            if "--nocapture" in argv and "b" in skipped:
+            if "--test-threads" in argv and "b" in skipped:
                 self.assertEqual(self.calls[-1][0][-1], runner.DDL_PROBE)
                 Path(log).write_text("first OnceCell migration failed")
                 return 17, "first OnceCell migration failed"
@@ -259,6 +259,12 @@ class AssignedExecutionTests(unittest.TestCase):
         text = "test a - should panic ... provider log\nanother line\nok\ntest b ... ok\n"
         text += "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
         self.assertEqual(runner.passed_tests(text, ["a", "b"]), ["a", "b"])
+
+    def test_corrupted_parallel_result_is_not_inferred_from_success_summary(self):
+        text = "test a ... /rustc/library/core/src/ops/function.rsok:\n250:5\n"
+        text += "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
+        with self.assertRaisesRegex(ValueError, "missing/ambiguous per-test status"):
+            runner.passed_tests(text, ["a"])
 
     def test_ignored_resource_permission_and_flag(self):
         artifact = self.plan["artifacts"][0]
