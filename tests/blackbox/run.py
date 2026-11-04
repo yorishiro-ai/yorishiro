@@ -798,7 +798,9 @@ def human_key_management(app):
                  {"name": "longer", "expires_at": "2090-01-02T00:00:00Z"}):
         app.rest("POST", "/api/api-keys", body, status=403, key=original["full_key"])
         reader.call("create_api_key", body, error=True)
-    app.rest("POST", "/api/api-keys", {"name": "service-denied"}, status=403)
+    _, service = app.issue(app.workspace, "schema")
+    app.rest("GET", "/api/whoami", key=service)
+    app.rest("POST", "/api/api-keys", {"name": "service-denied"}, status=403, key=service)
 
     successor = client.call("rotate_api_key", {"key_id": original["id"]})
     app.secrets.append(successor["full_key"])
