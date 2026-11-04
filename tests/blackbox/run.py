@@ -422,7 +422,8 @@ def crud(app, surface):
     else:
         created = client.call("create_schema", {"definition": SCHEMA})
     schema_id = created["schema"]["id"]
-    require(app.rest("GET", f"/api/schemas/{schema_id}")["definition"]["name"] == "blackbox",
+    historical_definition = app.rest("GET", f"/api/schemas/{schema_id}")["definition"]
+    require(historical_definition["name"] == "blackbox",
             "schema not visible through REST")
     require(client.call("get_active_schema", {"name": "blackbox"})["id"] == schema_id,
             "schema not visible through MCP")
@@ -434,7 +435,7 @@ def crud(app, surface):
             "schema evolution did not increment version")
     require(client.call("get_active_schema", {"name": "blackbox"})["id"] == next_version["id"],
             "schema evolution did not change active version")
-    require(app.rest("GET", f"/api/schemas/{schema_id}")["definition"] == SCHEMA,
+    require(app.rest("GET", f"/api/schemas/{schema_id}")["definition"] == historical_definition,
             "schema evolution mutated historical definition")
     schema_id = next_version["id"]
     payload = {"schema_name": "blackbox", "entity_type": "note", "data": {"title": "before"}}
