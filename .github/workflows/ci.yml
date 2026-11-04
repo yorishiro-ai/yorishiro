@@ -480,7 +480,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/package-tests
         with:
-          version: 0.0.0-${{ github.sha }}
+          version: 0.0.1~pre.${{ github.run_number }}
+          image-tag: ${{ github.sha }}
 
   package-build:
     name: Package build (${{ matrix.edition }}, ${{ matrix.arch }})
@@ -516,7 +517,7 @@ jobs:
           edition: ${{ matrix.edition }}
           target: ${{ matrix.target }}
           arch: ${{ matrix.arch }}
-          version: 0.0.0-${{ github.sha }}
+          version: 0.0.1~pre.${{ github.run_number }}
           build-tag: ${{ github.sha }}
 
   required-check:

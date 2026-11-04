@@ -93,6 +93,21 @@ class AssignedWorkflowTests(unittest.TestCase):
 
 
 class ReleaseSourceTests(unittest.TestCase):
+    def test_prerelease_packages_use_an_ordered_version_not_the_public_image_tag(self):
+        text = (ROOT / ".github/workflows/release_pre.yml").read_text()
+        self.assertIn('scripts/release_version.py "$TAG"', text)
+        self.assertEqual(text.count("version: ${{ needs.prepare.outputs.package-version }}"), 2)
+        self.assertIn("image-tag: ${{ needs.prepare.outputs.tag }}", text)
+        self.assertIn('expect "yorishiro-${edition}-${{ needs.prepare.outputs.package-version }}-${arch}.${ext}"', text)
+        action = (ROOT / ".github/actions/package-tests/action.yml").read_text()
+        self.assertIn("inputs.image-tag || inputs.version", action)
+        transitions = (ROOT / ".github/packaging/test-transitions.sh").read_text()
+        self.assertIn('dpkg --compare-versions "$later" lt "$stable"', transitions)
+        self.assertIn("rpm.vercmp", transitions)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertEqual(ci.count("version: 0.0.1~pre.${{ github.run_number }}"), 2)
+        self.assertIn("image-tag: ${{ github.sha }}", ci)
+
     def test_release_packages_and_docker_use_the_prepared_commit(self):
         for name in ("release.yml", "release_pre.yml"):
             with self.subTest(workflow=name):

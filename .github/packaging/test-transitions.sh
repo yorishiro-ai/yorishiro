@@ -23,6 +23,23 @@ current_package_id() {
   esac
 }
 
+check_prerelease_version_order() {
+  local current earlier later stable
+  current="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["workspace"]["package"]["version"])' "$REPO/Cargo.toml")"
+  earlier="$(cd "$REPO" && python3 scripts/release_version.py 20261104-2)"
+  later="$(cd "$REPO" && python3 scripts/release_version.py 20261104-10)"
+  stable="${earlier%%~*}"
+  dpkg --compare-versions "$current" lt "$earlier"
+  dpkg --compare-versions "$earlier" lt "$later"
+  dpkg --compare-versions "$later" lt "$stable"
+  docker run --rm -e CURRENT="$current" -e EARLIER="$earlier" -e LATER="$later" -e STABLE="$stable" almalinux:10 bash -eu -c '
+    for pair in "$CURRENT $EARLIER" "$EARLIER $LATER" "$LATER $STABLE"; do
+      read -r first second <<< "$pair"
+      test "$(rpm --eval "%{lua:print(rpm.vercmp(\"$first\",\"$second\"))}")" = -1
+    done
+  '
+}
+
 run_deb_transition() {
   local from="$1" to="$2"
   local from_package to_package
@@ -202,6 +219,7 @@ run_rpm_fresh_install_without_admin_config() {
 
 run_deb_transition ce ee
 run_deb_transition ee ce
+check_prerelease_version_order
 run_deb_colocation_refusal
 run_deb_fresh_install_without_admin_config
 run_deb_current_remove_preserves_admin_config

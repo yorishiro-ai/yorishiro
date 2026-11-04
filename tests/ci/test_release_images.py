@@ -13,6 +13,23 @@ SPEC = importlib.util.spec_from_file_location("release_images", Path(__file__).r
 IMAGES = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(IMAGES)
 
+VERSION_SPEC = importlib.util.spec_from_file_location("release_version", Path(__file__).resolve().parents[2] / "scripts/release_version.py")
+VERSIONS = importlib.util.module_from_spec(VERSION_SPEC)
+VERSION_SPEC.loader.exec_module(VERSIONS)
+
+
+class PackageVersionTests(unittest.TestCase):
+    def test_prerelease_targets_the_next_patch_without_changing_the_tag(self):
+        self.assertEqual(VERSIONS.prerelease_package_version("0.100.0", "20261104-2"), "0.100.1~pre.20261104.2")
+        self.assertEqual(VERSIONS.prerelease_package_version("1.2.9", "20261104-10"), "1.2.10~pre.20261104.10")
+
+    def test_invalid_versions_and_tags_fail_instead_of_emitting_package_metadata(self):
+        for current, tag in (("v1.2.3", "20261104-1"), ("01.2.3", "20261104-1"),
+                             ("1.2.3-pre", "20261104-1"), ("1.2.3", "20261104-0"),
+                             ("1.2.3", "20261104-1;echo bad")):
+            with self.subTest(current=current, tag=tag), self.assertRaises(ValueError):
+                VERSIONS.prerelease_package_version(current, tag)
+
 
 class ImageProvenanceTests(unittest.TestCase):
     def setUp(self):

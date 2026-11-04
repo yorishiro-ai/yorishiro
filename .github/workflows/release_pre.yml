@@ -5,6 +5,8 @@ name: Release (prerelease)
 #
 # Prereleases are numbered by date and run: `YYYYMMDD-N`, which is outside SemVer entirely. A
 # prerelease tag has no `v` prefix, so it never looks like a version in a `docker images` listing.
+# Packages use X.Y.(Z+1)~pre.YYYYMMDD.N: newer than the current stable,
+# older than the next patch stable, without changing the public date-based tag.
 #
 # Releases use `vX.Y.Z` and bump `Cargo.toml`; a prerelease does neither. See
 # `.github/workflows/release.yml` for the SemVer release path.
@@ -35,6 +37,7 @@ jobs:
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       ref: ${{ steps.plan.outputs.ref }}
+      package-version: ${{ steps.plan.outputs.package-version }}
 
     steps:
       - name: Check the dispatch ref
@@ -63,6 +66,7 @@ jobs:
             | grep -E "^${DATE}-[0-9]+$" | sed "s|^${DATE}-||" | sort -n | tail -1)"
           TAG="${DATE}-$(( ${existing:-0} + 1 ))"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "package-version=$(python3 scripts/release_version.py "$TAG")" >> "$GITHUB_OUTPUT"
 
           if [ "$DRY_RUN" = "true" ]; then
             echo "dry run: would tag ${TAG}, building from ${GITHUB_SHA}"
@@ -106,7 +110,7 @@ jobs:
           edition: ${{ matrix.edition }}
           target: ${{ matrix.target }}
           arch: ${{ matrix.arch }}
-          version: ${{ needs.prepare.outputs.tag }}
+          version: ${{ needs.prepare.outputs.package-version }}
           build-tag: ${{ needs.prepare.outputs.tag }}
 
   package-tests:
@@ -120,7 +124,8 @@ jobs:
 
       - uses: ./.github/actions/package-tests
         with:
-          version: ${{ needs.prepare.outputs.tag }}
+          version: ${{ needs.prepare.outputs.package-version }}
+          image-tag: ${{ needs.prepare.outputs.tag }}
 
   docker:
     needs: [prepare, package-tests]
@@ -249,7 +254,7 @@ jobs:
           for edition in ce ee; do
             for arch in amd64 arm64; do
               for ext in deb rpm; do
-                expect "yorishiro-${edition}-${{ needs.prepare.outputs.tag }}-${arch}.${ext}" 1
+                expect "yorishiro-${edition}-${{ needs.prepare.outputs.package-version }}-${arch}.${ext}" 1
               done
             done
           done
@@ -313,6 +318,7 @@ jobs:
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           prerelease: true
+          # Asset names use the package-manager version; the release tag stays date-based.
           files: |
             dist/*.deb
             dist/*.rpm
