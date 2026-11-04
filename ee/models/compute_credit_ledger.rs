@@ -13,8 +13,8 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::compute_credit_ledger::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder,
-    QuerySelect,
+    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, ExprTrait,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -102,6 +102,36 @@ async fn insert_row(
     };
     Entity::insert(active).exec(conn).await.internal()?;
     Ok(())
+}
+
+/// Debits the positive actual cost after successful work without permitting an overdraft.
+/// PostgreSQL serializes competing debits through the workspace lock; SQLite rejects a stale write transaction as a whole.
+///
+/// # Errors
+/// Returns an error for nonpositive costs, insufficient balance or persistence failure.
+pub async fn debit_actual(
+    conn: &DatabaseTransaction,
+    workspace_id: Uuid,
+    amount: i64,
+) -> Result<(), YorishiroError> {
+    if amount <= 0 {
+        return Err(YorishiroError::ValidationFailed {
+            message: "actual credit cost must be positive".into(),
+            details: vec![],
+            hint: "debit only the positive cost of successful work".into(),
+        });
+    }
+    crate::db::lock_for_update(conn, &format!("compute-credit:{workspace_id}"))
+        .await
+        .internal()?;
+    if balance(conn, workspace_id).await? < amount {
+        return Err(YorishiroError::ValidationFailed {
+            message: "insufficient compute credits".into(),
+            details: vec![],
+            hint: "earn more compute credits before running this work".into(),
+        });
+    }
+    insert_row(conn, workspace_id, -amount, TransactionType::Spend).await
 }
 
 /// Returns the workspace's current balance: `SUM(amount)` across all rows.
