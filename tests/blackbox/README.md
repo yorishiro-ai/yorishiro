@@ -50,7 +50,10 @@ MCP rotation must preserve grant metadata, invalidate the predecessor through bo
 REST revocation invalidates the successor through both transports and retains terminal history; a second rotation of the predecessor returns HTTP 409.
 These sequential contracts supplement, not replace, the internal issuance/revocation race and deterministic expiry tests.
 
-Schemas are versioned rather than updated in place, so this batch exercises creation, reads, archive and deletion, not schema version evolution.
+Schemas are versioned rather than updated in place.
+Both CRUD scenarios reject active-schema deletion, create an evolved version, check its incremented version and active selection, and retain the historical definition.
+Both reject stale entity updates through REST and MCP and verify unchanged data.
+The human management scenario also creates, renames, caps, grants/revokes membership and deletes a workspace, checking list/get visibility and preservation of the other workspace's credential.
 The shared fixture is an inline schema with one required string field.
 The additional `rest.relation-export-import-worker` and `mcp.relation-export-import-worker` scenarios share one implementation with thin transport adapters.
 Each creates a dedicated source workspace through the public CLI, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through its selected surface.

@@ -426,6 +426,17 @@ def crud(app, surface):
             "schema not visible through REST")
     require(client.call("get_active_schema", {"name": "blackbox"})["id"] == schema_id,
             "schema not visible through MCP")
+    app.rest("DELETE", f"/api/schemas/{schema_id}", status=409)
+    evolved = {**SCHEMA, "entity_types": {"note": {"fields": {
+        **SCHEMA["entity_types"]["note"]["fields"], "extra": {"type": "string"}}}}}
+    next_version = app.rest("POST", "/api/schemas", evolved, status=201)["schema"]
+    require(next_version["version"] == created["schema"]["version"] + 1,
+            "schema evolution did not increment version")
+    require(client.call("get_active_schema", {"name": "blackbox"})["id"] == next_version["id"],
+            "schema evolution did not change active version")
+    require(app.rest("GET", f"/api/schemas/{schema_id}")["definition"] == SCHEMA,
+            "schema evolution mutated historical definition")
+    schema_id = next_version["id"]
     payload = {"schema_name": "blackbox", "entity_type": "note", "data": {"title": "before"}}
     if surface == "rest":
         entity = app.rest("POST", "/api/entities", payload, status=201)
@@ -444,6 +455,9 @@ def crud(app, surface):
     require(app.rest("GET", path)["data"]["title"] == "after", "REST update not visible")
     require(client.call("get_entity", {"id": entity_id})["data"]["title"] == "after",
             "MCP update not visible")
+    app.rest("PUT", path, replacement, status=409)
+    client.call("update_entity", {"id": entity_id, **replacement}, error=True)
+    require(app.rest("GET", path)["data"]["title"] == "after", "stale update changed data")
     require(any(item["id"] == entity_id for item in app.rest("GET", "/api/entities")),
             "REST entity list missing write")
     require(any(item["id"] == entity_id for item in client.call("list_entities")),
@@ -829,6 +843,26 @@ def human_key_management(app):
         require("full_key" not in serialized and "key_hash" not in serialized
                 and all(key["full_key"] not in serialized for key in (original, successor)),
                 "key history exposes secrets")
+
+    workspace = app.rest("POST", "/api/workspaces", {"name": "managed"}, status=201, key=owner)
+    path = f"/api/workspaces/{workspace['id']}"
+    app.rest("PUT", path, {"name": "renamed", "replace_max_entities": True, "max_entities": 5}, key=owner)
+    described = app.rest("GET", path, key=owner)
+    require(described["name"] == "renamed" and described["max_entities"] == 5,
+            "workspace update not persisted")
+    member_path = f"{path}/members/{account['user_id']}"
+    app.rest("PUT", member_path, {"role": "viewer"}, status=204, key=owner)
+    require(any(member["user_id"] == account["user_id"] and member["role"] == "viewer"
+                for member in app.rest("GET", f"{path}/members", key=owner)), "workspace grant missing")
+    app.rest("DELETE", member_path, status=204, key=owner)
+    require(not any(member["user_id"] == account["user_id"]
+                    for member in app.rest("GET", f"{path}/members", key=owner)), "workspace revoke missing")
+    app.rest("DELETE", path, status=204, key=owner)
+    app.rest("GET", path, status=404, key=owner)
+    require(not any(item["id"] == workspace["id"] for item in app.rest("GET", "/api/workspaces", key=owner)),
+            "deleted workspace remains listed")
+    require(app.rest("GET", "/api/whoami", key=owner)["user_id"] == account["user_id"],
+            "workspace deletion invalidated another workspace credential")
 
 
 def scenarios(suite):
