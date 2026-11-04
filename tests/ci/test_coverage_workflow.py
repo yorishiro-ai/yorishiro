@@ -111,6 +111,9 @@ class CoverageOwnershipTests(unittest.TestCase):
             self.assertIn(artifact, source)
         self.assertIn('metric(summary, "branches")', source)
         self.assertIn('"report",', source)
+        report = source.split('    command = [', 1)[1].split('    subprocess.run(command', 1)[0]
+        for option in ('--no-default-features', '--features', '--workspace', '--branch'):
+            self.assertNotIn(option, report)
 
 
 if __name__ == "__main__":
