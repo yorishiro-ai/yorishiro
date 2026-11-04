@@ -158,6 +158,18 @@ pub async fn get(
     Ok(row)
 }
 
+/// Removes scheduling for subsequent ticks without cancelling a tick already in progress.
+pub(crate) async fn clear(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+) -> Result<(), YorishiroError> {
+    Entity::delete_by_id(tenant_id)
+        .exec(conn)
+        .await
+        .internal()?;
+    Ok(())
+}
+
 /// Advances due schedules and dispatches reindex jobs while holding scheduler ownership.
 ///
 /// # Errors

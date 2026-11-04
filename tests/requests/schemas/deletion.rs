@@ -111,5 +111,12 @@ async fn schema_deletion_sees_incoming_forks_outside_the_selected_workspace() {
         response.assert_status(StatusCode::CONFLICT);
         assert!(response.text().contains("schema forks"), "{}", response.text());
         assert!(!response.text().contains(&destination.id.to_string()));
+        let workspace = request.delete(&format!("/api/workspaces/{}", tenant.workspace_id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        workspace.assert_status(StatusCode::CONFLICT);
+        assert!(workspace.text().contains("schema forks"), "{}", workspace.text());
+        assert!(!workspace.text().contains(&destination.id.to_string()));
+        request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::OK);
     }).await;
 }

@@ -13,6 +13,48 @@ use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use crate::EnvGuard;
 
 #[tokio::test]
+async fn workspace_deletion_reports_fork_references_without_exposing_destination() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ModelTrait, TransactionTrait};
+    use yorishiro::models::{_entities::workspace_schema_forks, tenancy};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let definition = json!({"name":"workspace-fork", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
+        let txn = ctx.db.begin().await.unwrap();
+        let destination = tenancy::create_workspace(&txn, tenant.tenant_id,
+            &format!("workspace-fork-{}", Uuid::now_v7()), None, None).await.unwrap();
+        let source = schema_schemas::create_schema(&txn, tenant.tenant_id, tenant.workspace_id,
+            serde_json::from_value(definition.clone()).unwrap(), None, None).await.unwrap().0;
+        let target = schema_schemas::create_schema(&txn, tenant.tenant_id, destination.id,
+            serde_json::from_value(definition).unwrap(), None, None).await.unwrap().0;
+        let fork = workspace_schema_forks::ActiveModel {
+            id: Set(Uuid::now_v7()), tenant_id: Set(tenant.tenant_id), workspace_id: Set(destination.id),
+            source_workspace_id: Set(tenant.workspace_id), source_schema_id: Set(source.id),
+            source_schema_version: Set(1), source_schema_name: Set("workspace-fork".into()),
+            fork_schema_id: Set(target.id), customized: Set(false), ..Default::default()
+        }.insert(&txn).await.unwrap();
+        txn.commit().await.unwrap();
+        let denied = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+            json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        assert!(denied.to_string().contains("schema forks"), "{denied}");
+        assert!(!denied.to_string().contains(&destination.id.to_string()));
+        request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
+        fork.delete(&ctx.db).await.unwrap();
+        let destination_key = issue_api_key(&ctx, destination.id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let deleted = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+            json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"], true);
+        request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
+            .add_header("Authorization", format!("Bearer {destination_key}")).await.assert_status(StatusCode::NOT_FOUND);
+        request.get("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await.assert_status(StatusCode::UNAUTHORIZED);
+    }).await;
+}
+
+#[tokio::test]
 async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

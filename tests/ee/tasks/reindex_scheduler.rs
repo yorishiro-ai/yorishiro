@@ -10,6 +10,106 @@ use yorishiro::edition::ee::models::tenant_reindex_schedules::{
 const TICK: i64 = 1_700_000_000;
 
 #[tokio::test]
+async fn operator_cli_can_configure_replace_inspect_and_disable_a_tenant_schedule() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut config = ctx.config.clone();
+        config.database.auto_migrate = false;
+        std::fs::write(
+            config_dir.path().join("development.yaml"),
+            serde_yaml::to_string(&config).unwrap(),
+        )
+        .unwrap();
+        let run = |args: &[&str]| {
+            let output = tempfile::NamedTempFile::new().unwrap();
+            let log = output.reopen().unwrap();
+            let mut child = Command::new(env!("CARGO_BIN_EXE_yorishiro"))
+                .args([
+                    "--environment",
+                    "development",
+                    "task",
+                    "tenant_reindex_schedule",
+                ])
+                .arg(format!("tenant_id:{}", tenant.tenant_id))
+                .args(args)
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .env(
+                    crate::env::TestEnv::LocoConfigFolder.name(),
+                    config_dir.path(),
+                )
+                .env(crate::env::TestEnv::LocoEnvironment.name(), "development")
+                .stdout(Stdio::from(log.try_clone().unwrap()))
+                .stderr(Stdio::from(log))
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "schedule CLI timed out: {}",
+                        std::fs::read_to_string(output.path()).unwrap()
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            child.wait().unwrap();
+            (
+                status.success(),
+                std::fs::read_to_string(output.path()).unwrap(),
+            )
+        };
+        let inspect = |args: &[&str]| {
+            let (success, text) = run(args);
+            assert!(success, "{text}");
+            text.lines()
+                .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .expect("CLI emits the schedule as JSON")
+        };
+        assert!(inspect(&["action:get"])["schedule"].is_null());
+        let created = inspect(&["action:set", "interval:PT6H", "timezone:UTC"]);
+        assert_eq!(created["tenant_id"], tenant.tenant_id.to_string());
+        assert_eq!(created["schedule"]["interval"], "PT6H");
+        assert_eq!(created["schedule"]["timezone"], "UTC");
+        assert!(created["schedule"]["scheduled_for"].is_string());
+        assert_eq!(inspect(&["action:get"]), created);
+        let replaced = inspect(&["action:set", "interval:P1D"]);
+        assert_eq!(replaced["schedule"]["interval"], "P1D");
+        assert!(replaced["schedule"]["timezone"].is_null());
+        for args in [
+            ["action:set", "interval:PT1M"],
+            ["action:unknown", "interval:P1D"],
+        ] {
+            let (success, text) = run(&args);
+            assert!(!success, "{text}");
+            assert_eq!(inspect(&["action:get"]), replaced);
+        }
+        assert!(inspect(&["action:disable"])["schedule"].is_null());
+        assert!(inspect(&["action:get"])["schedule"].is_null());
+        assert!(inspect(&["action:disable"])["schedule"].is_null());
+        assert!(
+            yorishiro::edition::ee::models::tenant_reindex_schedules::get(
+                &ctx.db,
+                tenant.tenant_id
+            )
+            .await
+            .unwrap()
+            .is_none()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn schedules_validate_timezones_with_the_application_parser() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};

@@ -2,6 +2,7 @@
 
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
+    SqlErr,
 };
 use uuid::Uuid;
 
@@ -76,6 +77,15 @@ pub(crate) async fn delete_workspace(
     Entity::delete_by_id(workspace_id)
         .exec(conn)
         .await
-        .internal()?;
+        .map_err(|err| {
+            // Let the foreign key fence concurrent fork creation instead of racing a preflight count.
+            if matches!(err.sql_err(), Some(SqlErr::ForeignKeyConstraintViolation(_))) {
+                YorishiroError::Conflict {
+                    message: "workspace is still referenced by schema forks; remove those forks before deleting it".into(),
+                }
+            } else {
+                YorishiroError::Internal(err.into())
+            }
+        })?;
     Ok(())
 }
