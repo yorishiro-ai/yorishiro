@@ -102,6 +102,25 @@ class AssignedExecutionTests(unittest.TestCase):
             self.execute()
         self.assertEqual(self.calls, [])
 
+    def test_nightly_native_layout_preserves_path_and_hash_validation(self):
+        artifact = self.plan["artifacts"][0].copy()
+        suffix = "target/debug/build/yorishiro/90b0565b6a1cfbd3/out/mod-90b0565b6a1cfbd3"
+        binary = self.root / suffix
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(self.binary.read_bytes())
+        binary.chmod(0o700)
+        artifact["executable"] = "/old/build/" + suffix
+        self.assertEqual(runner.relocated_binary(artifact, self.root), binary)
+        for path in (suffix.replace("/yorishiro/", "/other/"),
+                     suffix.replace("90b0565b6a1cfbd3", "invalid"),
+                     suffix.replace("/out/", "/elsewhere/"),
+                     suffix.replace("/mod-", "/other-")):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "non-native"):
+                runner.relocated_binary(artifact | {"executable": "/old/build/" + path}, self.root)
+        binary.write_text("different instrumented binary")
+        with self.assertRaisesRegex(ValueError, "binary hash"):
+            runner.relocated_binary(artifact, self.root)
+
     def test_process_binary_is_required_for_both_editions(self):
         self.plan["process_binaries"].pop()
         with self.assertRaisesRegex(ValueError, "process binary editions"):

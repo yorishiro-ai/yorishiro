@@ -183,6 +183,14 @@ def topology_environment(job, edition, env):
 
 def relocated_binary(artifact, root, layout=("target", "debug", "deps")):
     original = Path(artifact["executable"])
+    if layout == ("target", "debug", "deps") and original.parent.parts[-3:] != layout:
+        # Nightly Cargo places native libtest executables under build/<package>/<hash>/out.
+        native = original.parent.parts[-6:]
+        require(len(native) == 6 and native[:3] == ("target", "debug", "build") and
+                native[3] == artifact["package"] and re.fullmatch(r"[0-9a-f]{16}", native[4]) and
+                native[5] == "out" and original.name == f"{artifact['target'].replace('-', '_')}-{native[4]}",
+                "non-native inventory executable path")
+        layout = native
     require(original.parent.parts[-len(layout):] == layout, "non-native inventory executable path")
     root = Path(root).resolve()
     path = (root.joinpath(*layout) / original.name).resolve()
