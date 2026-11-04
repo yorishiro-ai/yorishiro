@@ -8,6 +8,9 @@ inputs:
   image-tag:
     description: Docker-safe validation tag, when the package version contains characters such as tilde
     default: ''
+  docker-validation:
+    description: Run Docker ownership checks here (CI runs them in parallel instead)
+    default: 'true'
 
 runs:
   using: composite
@@ -53,8 +56,10 @@ runs:
         ./.github/packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
 
     - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      if: inputs.docker-validation == 'true'
 
     - name: Test Docker configuration ownership and fallback
+      if: inputs.docker-validation == 'true'
       shell: bash
       run: |
         IMAGE=yorishiro-package-test TAG=${{ inputs.image-tag || inputs.version }} EDITION=ce docker buildx bake -f .github/docker/docker-bake.hcl --load app

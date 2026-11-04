@@ -93,6 +93,22 @@ class AssignedWorkflowTests(unittest.TestCase):
 
 
 class ReleaseSourceTests(unittest.TestCase):
+    def test_ci_docker_checks_run_in_parallel_without_weakening_required_gate(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        package = ci.split("\n  package-validation:\n", 1)[1].split("\n  docker-validation:\n", 1)[0]
+        self.assertIn("docker-validation: 'false'", package)
+        docker = ci.split("\n  docker-validation:\n", 1)[1].split("\n  package-build:\n", 1)[0]
+        self.assertIn("needs: changes", docker)
+        self.assertIn("needs.changes.outputs.package_validation == 'true'", docker)
+        self.assertIn("make package-docker-check", docker)
+        self.assertIn("--load app", docker)
+        gate = ci.split("\n  required-check:\n", 1)[1]
+        self.assertIn("package-validation, docker-validation]", gate)
+        self.assertIn('require_success DOCKER "$DOCKER_RESULT" "$PACKAGE"', gate)
+        action = (ROOT / ".github/actions/package-tests/action.yml").read_text()
+        self.assertIn("default: 'true'", action)
+        self.assertEqual(action.count("if: inputs.docker-validation == 'true'"), 2)
+
     def test_prerelease_packages_use_an_ordered_version_not_the_public_image_tag(self):
         text = (ROOT / ".github/workflows/release_pre.yml").read_text()
         self.assertIn('scripts/release_version.py "$TAG"', text)

@@ -483,6 +483,23 @@ jobs:
         with:
           version: 0.0.1~pre.${{ github.run_number }}
           image-tag: ${{ github.sha }}
+          docker-validation: 'false'
+
+  docker-validation:
+    name: Docker configuration validation
+    needs: changes
+    if: ${{ needs.changes.outputs.package_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Test Docker configuration ownership and fallback
+        run: |
+          IMAGE=yorishiro-package-test TAG=${{ github.sha }} EDITION=ce docker buildx bake -f .github/docker/docker-bake.hcl --load app
+          make package-docker-check IMAGE=yorishiro-package-test:${{ github.sha }}
 
   package-build:
     name: Package build (${{ matrix.edition }}, ${{ matrix.arch }})
@@ -524,7 +541,7 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [changes, ce, check, prepare-embedding, schema-generation, public-contract, public-contract-verify, test-inventory-ce, test-inventory-ee, test-assignment-verify, assigned-tests, assigned-e5-tests, assigned-test-verify, package-build, package-validation]
+    needs: [changes, ce, check, prepare-embedding, schema-generation, public-contract, public-contract-verify, test-inventory-ce, test-inventory-ee, test-assignment-verify, assigned-tests, assigned-e5-tests, assigned-test-verify, package-build, package-validation, docker-validation]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
@@ -548,6 +565,7 @@ jobs:
           HAS_E5: ${{ needs.test-assignment-verify.outputs.has_e5 }}
           RECEIPTS: ${{ needs.assigned-test-verify.result }}
           PACKAGE_RESULT: ${{ needs.package-validation.result }}
+          DOCKER_RESULT: ${{ needs.docker-validation.result }}
           PACKAGE_BUILD: ${{ needs.package-build.result }}
           CHANGES: ${{ needs.changes.result }}
         run: |
@@ -591,6 +609,7 @@ jobs:
           fi
           require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"
           require_success PACKAGE "$PACKAGE_RESULT" "$PACKAGE"
+          require_success DOCKER "$DOCKER_RESULT" "$PACKAGE"
           if selected "$PACKAGE_BUILD_SELECTED" && [[ "$FULL" == true || "$RUST" == true ]]; then
             [[ "$CE" == success && "$EE" == success ]] || {
               echo "package build prerequisites did not succeed" >&2
