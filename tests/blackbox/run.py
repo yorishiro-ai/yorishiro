@@ -847,8 +847,12 @@ def human_key_management(app):
 
     workspace = app.rest("POST", "/api/workspaces", {"name": "managed"}, status=201, key=owner)
     path = f"/api/workspaces/{workspace['id']}"
-    app.rest("PUT", path, {"name": "renamed", "replace_max_entities": True, "max_entities": 5}, key=owner)
-    described = app.rest("GET", path, key=owner)
+    selected = output_field(app.task("create_api_key", workspace_id=workspace["id"], scope="schema",
+                                     user_id=account["user_id"]), "api key (shown once)")
+    app.secrets.append(selected)
+    app.rest("GET", path, key=owner, status=404)
+    app.rest("PUT", path, {"name": "renamed", "replace_max_entities": True, "max_entities": 5}, key=selected)
+    described = app.rest("GET", path, key=selected)
     require(described["name"] == "renamed" and described["max_entities"] == 5,
             "workspace update not persisted")
     member_path = f"{path}/members/{account['user_id']}"
@@ -860,6 +864,7 @@ def human_key_management(app):
                     for member in app.rest("GET", f"{path}/members", key=owner)), "workspace revoke missing")
     app.rest("DELETE", path, status=204, key=owner)
     app.rest("GET", path, status=404, key=owner)
+    app.rest("GET", "/api/whoami", status=401, key=selected)
     require(not any(item["id"] == workspace["id"] for item in app.rest("GET", "/api/workspaces", key=owner)),
             "deleted workspace remains listed")
     require(app.rest("GET", "/api/whoami", key=owner)["user_id"] == account["user_id"],
