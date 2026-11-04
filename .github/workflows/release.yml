@@ -200,6 +200,9 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
 
       - uses: ./.github/actions/package-tests
         with:
@@ -234,6 +237,7 @@ jobs:
         with:
           image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
+          build-sha: ${{ needs.prepare.outputs.ref }}
           arch: ${{ matrix.arch }}
           push: ${{ !inputs.dry_run }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -376,6 +380,6 @@ jobs:
           body: |
             Release ${{ needs.prepare.outputs.tag }} built from `${{ github.ref_name }}`.
 
-            Commit: ${{ github.sha }}
+            Commit: ${{ needs.prepare.outputs.ref }}
 
             CE and EE are published as separate compile-time artifacts.

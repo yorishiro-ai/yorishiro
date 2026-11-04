@@ -43,6 +43,8 @@ RUN python3 patches/loco-rs/verify.py --prepare
 # The edition is selected at build time with EDITION=ce or EDITION=ee. CE does not compile the
 # enterprise module; EE includes it and retains its runtime licence gate.
 ARG EDITION=ee
+ARG BUILD_SHA=dev
+ENV BUILD_SHA=${BUILD_SHA}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target,sharing=locked \
     export RUSTC_WRAPPER= \

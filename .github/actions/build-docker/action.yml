@@ -8,6 +8,10 @@ inputs:
   tag:
     description: Release tag
     required: true
+  build-sha:
+    description: Prepared source commit compiled into the application version
+    required: false
+    default: ''
   arch:
     description: Image architecture, amd64 or arm64
     required: true
@@ -36,6 +40,7 @@ runs:
         IMAGE: ${{ inputs.image }}
         TAG: ${{ inputs.tag }}
         ARCH: ${{ inputs.arch }}
+        BUILD_SHA: ${{ inputs.build-sha || inputs.tag }}
       with:
         source: .
         files: .github/docker/docker-bake.hcl

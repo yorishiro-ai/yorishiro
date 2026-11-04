@@ -92,5 +92,28 @@ class AssignedWorkflowTests(unittest.TestCase):
         self.assertIn("name: assigned-test-result-${{ matrix.edition }}-${{ matrix.job }}", upload)
 
 
+class ReleaseSourceTests(unittest.TestCase):
+    def test_release_packages_and_docker_use_the_prepared_commit(self):
+        for name in ("release.yml", "release_pre.yml"):
+            with self.subTest(workflow=name):
+                text = (ROOT / ".github/workflows" / name).read_text()
+                packages = text.split("\n  package-tests:\n", 1)[1].split("\n  docker:\n", 1)[0]
+                self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", packages)
+                docker = text.split("\n  docker:\n", 1)[1].split("\n  docker-manifest:\n", 1)[0]
+                self.assertIn("build-sha: ${{ needs.prepare.outputs.ref }}", docker)
+        stable = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("Commit: ${{ needs.prepare.outputs.ref }}", stable)
+        self.assertNotIn("Commit: ${{ github.sha }}", stable)
+
+    def test_docker_compilation_receives_the_build_identity(self):
+        action = (ROOT / ".github/actions/build-docker/action.yml").read_text()
+        self.assertIn("BUILD_SHA: ${{ inputs.build-sha || inputs.tag }}", action)
+        bake = (ROOT / ".github/docker/docker-bake.hcl").read_text()
+        self.assertEqual(bake.count("BUILD_SHA = BUILD_SHA"), 2)
+        docker = (ROOT / "Dockerfile").read_text()
+        self.assertIn("ARG BUILD_SHA=dev", docker)
+        self.assertLess(docker.index("ENV BUILD_SHA=${BUILD_SHA}"), docker.index("cargo build --locked"))
+
+
 if __name__ == "__main__":
     unittest.main()
