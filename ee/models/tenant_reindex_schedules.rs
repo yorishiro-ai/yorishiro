@@ -18,7 +18,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_reindex_schedules::{ActiveModel, Column, Entity};
 use loco_rs::prelude::*;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
 
 /// The shortest interval a schedule may name, so a typo cannot make every workspace of a tenant reindex every few seconds.
@@ -168,6 +168,7 @@ pub(crate) async fn tick(
 ) -> Result<()> {
     use crate::db::AppContextBackend;
     use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
+    use crate::models::_entities::tenant_tenants as TenantEntity;
     use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
     use crate::workers::reindex::ReindexArgs;
 
@@ -214,7 +215,11 @@ pub(crate) async fn tick(
             )));
         }
     };
-    let schedules = match ScheduleEntity::Entity::find().all(&txn).await {
+    let schedules = match ScheduleEntity::Entity::find()
+        .order_by_asc(ScheduleEntity::Column::TenantId)
+        .all(&txn)
+        .await
+    {
         Ok(schedules) => schedules,
         Err(err) => {
             let _ = txn.rollback().await;
@@ -232,6 +237,25 @@ pub(crate) async fn tick(
         };
         if !is_due(sched_utc, tick) {
             continue;
+        }
+        // Recheck activity under retirement's fence and hold it until durable dispatch commits.
+        let active = async {
+            crate::db::lock_for_update(&txn, &format!("tenant-membership:{}", schedule.tenant_id))
+                .await?;
+            TenantEntity::Entity::find_by_id(schedule.tenant_id)
+                .filter(TenantEntity::Column::DisabledAt.is_null())
+                .one(&txn)
+                .await
+        }
+        .await;
+        match active {
+            Ok(Some(_)) => {}
+            Ok(None) => continue,
+            Err(err) => {
+                let _ = txn.rollback().await;
+                let _ = release_scheduler_ownership(ownership).await;
+                return Err(Error::Message(err.to_string()));
+            }
         }
         let next = parse_interval(&schedule.interval)
             .filter(|every| every.num_seconds() >= MIN_INTERVAL_SECONDS)

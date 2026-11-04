@@ -55,6 +55,177 @@ fn install_active_licence(ctx: &loco_rs::app::AppContext) {
         })));
 }
 
+#[tokio::test]
+async fn disabled_tenant_retains_schedule_and_history_without_new_dispatches() {
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+
+        install_active_licence(&ctx);
+        let tenant =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        set(&ctx.db, tenant.tenant_id, "PT6H", None).await.unwrap();
+        let first = get(&ctx.db, tenant.tenant_id).await.unwrap().unwrap();
+        TenantReindexScheduler
+            .run_at(
+                &ctx,
+                &Default::default(),
+                first.scheduled_for.unwrap().to_utc(),
+            )
+            .await
+            .unwrap();
+        let history = workspace_dispatch_ids(&ctx.db, tenant.workspace_id).await.0;
+        assert!(
+            !history.is_empty(),
+            "active tenant must dispatch before disablement"
+        );
+        let schedule = get(&ctx.db, tenant.tenant_id).await.unwrap().unwrap();
+        yorishiro::models::tenant_tenants::retirement::disable_by_operator(
+            &ctx.db,
+            tenant.tenant_id,
+            tenant.tenant_id,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            workspace_dispatch_ids(&ctx.db, tenant.workspace_id).await,
+            (history.clone(), vec![])
+        );
+        TenantReindexScheduler
+            .run_at(
+                &ctx,
+                &Default::default(),
+                schedule.scheduled_for.unwrap().to_utc(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            workspace_dispatch_ids(&ctx.db, tenant.workspace_id).await,
+            (history, vec![])
+        );
+        assert_eq!(
+            get(&ctx.db, tenant.tenant_id).await.unwrap().unwrap(),
+            schedule
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn postgres_tick_waits_for_disable_and_rechecks_tenant_activity() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+        use sea_orm::{EntityTrait, QuerySelect, TransactionTrait};
+        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+
+        install_active_licence(&ctx);
+        let tenant =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        set(&ctx.db, tenant.tenant_id, "PT6H", None).await.unwrap();
+        let schedule = get(&ctx.db, tenant.tenant_id).await.unwrap().unwrap();
+        let before = workspace_dispatch_ids(&ctx.db, tenant.workspace_id).await;
+        let row_lock = ctx.db.begin().await.unwrap();
+        yorishiro::models::tenant_tenants::Entity::find_by_id(tenant.tenant_id)
+            .lock_exclusive()
+            .one(&row_lock)
+            .await
+            .unwrap()
+            .unwrap();
+        let fence = format!("tenant-membership:{}", tenant.tenant_id);
+        let disable = yorishiro::models::tenant_tenants::retirement::disable_by_operator(
+            &ctx.db,
+            tenant.tenant_id,
+            tenant.tenant_id,
+        );
+        let tick_after_disable_locks = async {
+            // Disable owns the membership fence but cannot update its tenant until we release the row.
+            wait_for_membership_lock(&ctx.db, &fence, true).await;
+            let vars = Default::default();
+            let tick = TenantReindexScheduler.run_at(
+                &ctx,
+                &vars,
+                schedule.scheduled_for.unwrap().to_utc(),
+            );
+            let release_disable = async {
+                wait_for_membership_lock(&ctx.db, &fence, false).await;
+                row_lock.rollback().await.unwrap();
+            };
+            let (result, ()) = tokio::join!(tick, release_disable);
+            result.unwrap();
+        };
+        let (disabled, ()) = tokio::join!(disable, tick_after_disable_locks);
+        disabled.unwrap();
+        assert!(
+            yorishiro::models::tenant_tenants::Entity::find_by_id(tenant.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .disabled_at
+                .is_some()
+        );
+        assert_eq!(
+            workspace_dispatch_ids(&ctx.db, tenant.workspace_id).await,
+            before
+        );
+        assert_eq!(
+            get(&ctx.db, tenant.tenant_id).await.unwrap().unwrap(),
+            schedule
+        );
+    })
+    .await;
+}
+
+async fn workspace_dispatch_ids(
+    db: &sea_orm::DatabaseConnection,
+    workspace_id: Uuid,
+) -> (Vec<Uuid>, Vec<Uuid>) {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    use yorishiro::models::_entities::{queue_job_dispatch_outbox, queue_job_lifecycles};
+
+    let lifecycles = queue_job_lifecycles::Entity::find()
+        .filter(queue_job_lifecycles::Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(queue_job_lifecycles::Column::Id)
+        .all(db)
+        .await
+        .unwrap();
+    let outbox = queue_job_dispatch_outbox::Entity::find()
+        .filter(queue_job_dispatch_outbox::Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(queue_job_dispatch_outbox::Column::Id)
+        .all(db)
+        .await
+        .unwrap();
+    (
+        lifecycles.into_iter().map(|row| row.id).collect(),
+        outbox.into_iter().map(|row| row.id).collect(),
+    )
+}
+
+async fn wait_for_membership_lock(db: &sea_orm::DatabaseConnection, fence: &str, granted: bool) {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let row = db
+                .query_one_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted = $2 AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS observed",
+                    [fence.into(), granted.into()],
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            if row.try_get::<bool>("", "observed").unwrap() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("expected membership fence holder or waiter was not observed");
+}
+
 #[test]
 fn due_decision_keeps_the_exact_tick_boundary_matrix() {
     for offset in [-301, 0, 1, 300, 301] {
