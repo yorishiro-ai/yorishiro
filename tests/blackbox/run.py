@@ -799,8 +799,10 @@ def human_key_management(app):
         app.rest("POST", "/api/api-keys", body, status=403, key=original["full_key"])
         reader.call("create_api_key", body, error=True)
     _, service = app.issue(app.workspace, "schema")
-    app.rest("GET", "/api/whoami", key=service)
-    app.rest("POST", "/api/api-keys", {"name": "service-denied"}, status=403, key=service)
+    identity = app.rest("GET", "/api/whoami", key=service)
+    require(identity["identity_kind"] == "service" and identity["user_id"] is None,
+            "service credential unexpectedly has human attribution")
+    app.rest("POST", "/api/api-keys", {"name": "service-denied"}, status=401, key=service)
 
     successor = client.call("rotate_api_key", {"key_id": original["id"]})
     app.secrets.append(successor["full_key"])
