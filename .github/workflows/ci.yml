@@ -447,6 +447,7 @@ jobs:
           python3 tests/ci/test_assigned_execution.py
           python3 tests/ci/test_assigned_workflow.py
           python3 tests/ci/test_release_images.py
+          python3 tests/ci/test_coverage_workflow.py
       - uses: actions/download-artifact@v8
         with:
           name: test-assignments

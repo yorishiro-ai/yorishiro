@@ -136,7 +136,8 @@ class App:
             sock.bind(("127.0.0.1", 0))
             self.port = sock.getsockname()[1]
         # Only these ambient values are needed to execute a prebuilt binary.
-        self.env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT") if key in os.environ}
+        # Instrumented GHA binaries need their profile destination; application settings remain isolated.
+        self.env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "LLVM_PROFILE_FILE") if key in os.environ}
         home = self.directory / "home"
         home.mkdir()
         self.env.update({

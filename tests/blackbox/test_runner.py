@@ -138,9 +138,11 @@ class ArgumentTests(unittest.TestCase):
         args = run.parse_args(self.arguments())
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict("os.environ", {"DATABASE_URL": "unsafe", "QUEUE_URL": "unsafe",
-                                          "YORISHIRO_LICENSE_KEY": "secret", "API_TOKEN": "secret"}):
+                                          "YORISHIRO_LICENSE_KEY": "secret", "API_TOKEN": "secret",
+                                          "LLVM_PROFILE_FILE": "/profiles/%m-%p.profraw"}):
                 app = run.App(args, directory)
             self.assertNotIn("API_TOKEN", app.env)
+            self.assertEqual(app.env["LLVM_PROFILE_FILE"], "/profiles/%m-%p.profraw")
             self.assertEqual(app.env["YORISHIRO_LICENSE_KEY"], "")
             self.assertEqual(app.env["YORISHIRO_EMBEDDING_PROVIDER"], "none")
             self.assertNotEqual(app.env["DATABASE_URL"], app.env["QUEUE_URL"])

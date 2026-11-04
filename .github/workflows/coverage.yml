@@ -1,17 +1,16 @@
 name: Coverage
 
-# Coverage reporting is informational rather than a per-PR gate.
-# Running it weekly on develop keeps PR CI fast (postgres leg is
-# 20-40 minutes shorter with no second test run) while still
-# tracking coverage regressions over time.
-
+# Informational weekly report; changes to this execution path also prove it on the PR.
 on:
   schedule:
-    - cron: "0 3 * * 1" # 03:00 UTC Monday
+    - cron: "0 3 * * 1"
   workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/coverage.yml
+      - scripts/coverage_report.py
+      - tests/ci/test_coverage_workflow.py
 
 permissions:
   contents: read
@@ -19,75 +18,120 @@ permissions:
 jobs:
   coverage:
     runs-on: ubuntu-26.04
-    timeout-minutes: 60
-
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_HOME: ${{ github.workspace }}/.cargo-cache
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target
+      COVERAGE_TOOLCHAIN: +nightly
+      RUSTUP_TOOLCHAIN: nightly
+      YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+      DB_MAX_CONNECTIONS: "100"
+      DB_CONNECT_TIMEOUT: "5000"
+      RUST_BACKTRACE: "1"
+      EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
+      EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
+      EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
+      EMBEDDING_MODEL_REMOTE_PATH: model.safetensors
+      EMBEDDING_MODEL_LOCAL_NAME: model.safetensors
+      EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
+      EMBEDDING_MODEL_SIZE: "1112201288"
+      EMBEDDING_TOKENIZER_REMOTE_PATH: tokenizer.json
+      EMBEDDING_TOKENIZER_LOCAL_NAME: tokenizer.json
+      EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
+      EMBEDDING_TOKENIZER_SIZE: "17082660"
     services:
       db:
         image: pgvector/pgvector:pg18
         env:
-          POSTGRES_USER: yorishiro
-          POSTGRES_PASSWORD: yorishiro
-          POSTGRES_DB: yorishiro
-        ports:
-          - 5432:5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: [5432:5432]
         options: >-
-          --health-cmd "pg_isready -U yorishiro"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v7
-
       - uses: ./.github/actions/rust-setup
-        with:
-          components: rustfmt, clippy
-
-      - name: Set up nightly for branch coverage
+      - name: Set up nightly branch instrumentation
         uses: dtolnay/rust-toolchain@nightly
-
+        with:
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        with:
+          key: assigned-coverage-nightly
+      - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-
-      - name: Build workspace
-        run: cargo build --locked --workspace
-
-      - uses: ./.github/actions/sea-orm-cli
-
-      - name: Install pgvector and pg_trgm
+      - name: Require the signed licence for the selected licensed assignments
+        run: test -n "$YORISHIRO_LICENSE_KEY"
+      - name: Bootstrap PostgreSQL without bypassing application RLS
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
         run: |
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
-            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
-            -c '\c template1' \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
-            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
-
-      - name: Run migrations
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d template1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
+            -c 'CREATE DATABASE yorishiro OWNER yorishiro;' \
+            -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
+      - name: Start the selected Redis provider
+        run: |
+          docker run --detach --name coverage-redis --publish 127.0.0.1:6379:6379 \
+            valkey/valkey:9.1.3 valkey-server --databases 65536 --save '' --appendonly no
+          docker exec coverage-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
+      - uses: actions/cache/restore@v6
+        id: embedding-cache
+        with:
+          path: |
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+      - name: Prepare required numeric-reference assets
         env:
-          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          LOCO_ENV: test_postgres
-          DB_CONNECT_TIMEOUT: "5000"
-        run: ./target/debug/yorishiro db migrate
-
-      - name: Run actionable coverage
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
+          TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
+        run: python3 scripts/embedding_cache.py prepare
+      - name: Publish newly verified reference assets
+        if: steps.embedding-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+      - name: Execute exact assigned and public coverage
         env:
-          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          LOCO_ENV: test_postgres
-          DB_MAX_CONNECTIONS: 100
-          DB_CONNECT_TIMEOUT: 5000
-        run: make coverage
-
-      - name: Upload coverage artifacts
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
+        run: |
+          eval "$(cargo +nightly llvm-cov show-env --sh --branch)"
+          cargo +nightly llvm-cov clean --workspace
+          python3 scripts/coverage_report.py
+      - name: Verify numeric-reference assets after execution
+        if: always()
+        env:
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: "true"
+          MODEL_URL: unused
+          TOKENIZER_URL: unused
+        run: python3 scripts/embedding_cache.py verify
+      - name: Upload reports, exact receipts and failure logs
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: actionable-coverage
-          path: coverage/
+          path: |
+            coverage/modules.json
+            coverage/modules.csv
+            coverage/lowest-covered.txt
+            coverage/llvm-cov.json
+            coverage/assignments.json
+            coverage/execution.json
+            coverage/receipts/
+            coverage/public/
+            coverage/timings/
           if-no-files-found: error

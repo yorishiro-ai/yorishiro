@@ -86,3 +86,16 @@ The lock currently selects `axum-test 17.3.0`; adding an incompatible second Tes
 Keep per-group logs, stable identities, exact commit and binary hashes, and timing artifacts.
 Compare total runner cost and wall time only after the replacement covers the legacy guarantees.
 Fast small public scenarios alone are not evidence that the whole suite became faster.
+## Assigned weekly coverage
+
+The informational coverage workflow instruments CE and EE with the same nightly compiler, builds each edition once, and runs the verified assignment plan rather than a PostgreSQL copy of every test.
+It preserves each edition's ordinary CLI binary before the other edition replaces its path.
+The existing assignment runner enforces backend, queue, licence, executable hashes, shared-fixture DDL observations and complete execution receipts.
+Only signed-licence assignments receive the EE secret; only the numeric-reference assignment receives E5 paths.
+The CE REST, MCP and CLI public scenarios also execute with instrumentation and the ordinary report guard.
+The workflow owns PostgreSQL, Redis and pinned reference assets because the complete plan needs those resources.
+It does not require sea-orm-cli or an extra outer migration.
+`cargo llvm-cov show-env --sh --branch` instruments the external processes, then `report` exports coverage without a second test run.
+The uploaded artifacts retain exact receipts, redacted failure logs, module CSV/JSON, branch counts and the lowest-covered module report.
+The private live-provider contract remains explicitly opt-in and is not counted as covered execution.
+This workflow is verified on PRs changing its implementation as well as on its weekly schedule.
