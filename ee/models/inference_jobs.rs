@@ -230,34 +230,6 @@ pub async fn reconcile_attempt(
     Ok(result.rows_affected == 1)
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn complete(
-    conn: &impl ConnectionTrait,
-    id: Uuid,
-    applied: i64,
-    skipped: i64,
-) -> Result<(), YorishiroError> {
-    let result = Entity::update_many()
-        .col_expr(
-            Column::Status,
-            Expr::value(InferenceJobStatus::Completed.as_db_str()),
-        )
-        .col_expr(Column::Applied, Expr::value(applied))
-        .col_expr(Column::Skipped, Expr::value(skipped))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
-        .filter(Column::Id.eq(id))
-        .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
-        .exec(conn)
-        .await
-        .internal()?;
-    if result.rows_affected == 0 {
-        validate_existing_status(conn, id).await?;
-    }
-    Ok(())
-}
-
 /// Completes a proposal-producing job without claiming that entity data was applied.
 ///
 /// # Errors
@@ -288,42 +260,6 @@ pub async fn complete_proposals_attempt(
         validate_existing_status(conn, id).await?;
     }
     Ok(result.rows_affected == 1)
-}
-
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn fail(
-    conn: &impl ConnectionTrait,
-    id: Uuid,
-    message: &str,
-) -> Result<(), YorishiroError> {
-    let result = Entity::update_many()
-        .col_expr(
-            Column::Status,
-            Expr::value(InferenceJobStatus::Failed.as_db_str()),
-        )
-        .col_expr(Column::Error, Expr::value(message))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
-        .filter(Column::Id.eq(id))
-        .filter(Column::Status.is_in([
-            InferenceJobStatus::Queued.as_db_str(),
-            InferenceJobStatus::Running.as_db_str(),
-        ]))
-        .exec(conn)
-        .await
-        .internal()?;
-    if result.rows_affected == 0 {
-        validate_existing_status(conn, id).await?;
-    } else if let Some(row) = Entity::find_by_id(id).one(conn).await.internal()? {
-        crate::edition::ee::models::inference_proposals::discard_pending_for_job(
-            conn,
-            row.workspace_id,
-            id,
-        )
-        .await?;
-    }
-    Ok(())
 }
 
 ///

@@ -257,7 +257,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             )
             .await
             .expect("active schema");
-            yorishiro::edition::ee::models::inference_proposals::record_batch(
+            crate::ee::inference_fixtures::record_batch(
                 &txn,
                 setup.workspace_id,
                 job_id,
@@ -271,7 +271,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             )
             .await
             .expect("record proposal");
-            inference_jobs::complete(&txn, job_id, 0, 0)
+            crate::ee::inference_fixtures::complete(&txn, job_id, 0, 0)
                 .await
                 .expect("complete proposal job");
             txn.commit().await.expect("commit apply");
@@ -421,7 +421,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
             yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
                 .await
                 .expect("active schema");
-        yorishiro::edition::ee::models::inference_proposals::record_batch(
+        crate::ee::inference_fixtures::record_batch(
             &txn,
             setup.workspace_id,
             job_id,
@@ -431,7 +431,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         )
         .await
         .expect("record invalid proposal");
-        inference_jobs::complete(&txn, job_id, 0, 0)
+        crate::ee::inference_fixtures::complete(&txn, job_id, 0, 0)
             .await
             .expect("complete proposal job");
         let report = yorishiro::edition::ee::models::inference_proposals::confirm(
@@ -479,7 +479,7 @@ async fn create_completed_proposal(
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
             .expect("active schema");
-    yorishiro::edition::ee::models::inference_proposals::record_batch(
+    crate::ee::inference_fixtures::record_batch(
         &txn,
         setup.workspace_id,
         job_id,
@@ -489,7 +489,7 @@ async fn create_completed_proposal(
     )
     .await
     .expect("record proposal");
-    inference_jobs::complete(&txn, job_id, 0, 0)
+    crate::ee::inference_fixtures::complete(&txn, job_id, 0, 0)
         .await
         .expect("complete proposal job");
     txn.commit().await.expect("commit proposal");
@@ -734,12 +734,12 @@ async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
         );
 
         // A workspace runs one job at a time, so the first one has to stop before another can start.
-        inference_jobs::fail(&ctx.db, queued_job, "stopped")
+        crate::ee::inference_fixtures::fail(&ctx.db, queued_job, "stopped")
             .await
             .expect("stop the first job");
         let failed_job = Uuid::new_v4();
         create_pending_proposal(&ctx, &setup, entity, failed_job).await;
-        inference_jobs::fail(&ctx.db, failed_job, "provider failed")
+        crate::ee::inference_fixtures::fail(&ctx.db, failed_job, "provider failed")
             .await
             .expect("fail proposal job");
         let failed = request
@@ -780,7 +780,7 @@ async fn create_pending_proposal(
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
             .expect("active schema");
-    yorishiro::edition::ee::models::inference_proposals::record_batch(
+    crate::ee::inference_fixtures::record_batch(
         &txn,
         setup.workspace_id,
         job_id,
@@ -978,7 +978,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
             .await
             .expect("create completed job");
         assert!(inference_jobs::claim(&ctx.db, completed).await.unwrap());
-        inference_jobs::complete(&ctx.db, completed, 3, 1)
+        crate::ee::inference_fixtures::complete(&ctx.db, completed, 3, 1)
             .await
             .expect("complete job");
         jobs.push((completed, InferenceJobStatus::Completed));
@@ -995,7 +995,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
         inference_jobs::create(&ctx.db, failed, setup.workspace_id, "notes")
             .await
             .expect("create failed job");
-        inference_jobs::fail(&ctx.db, failed, "provider failed")
+        crate::ee::inference_fixtures::fail(&ctx.db, failed, "provider failed")
             .await
             .expect("fail job");
         jobs.push((failed, InferenceJobStatus::Failed));
