@@ -4,6 +4,8 @@
 import argparse
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +21,17 @@ VERSION_SPEC.loader.exec_module(VERSIONS)
 
 
 class PackageVersionTests(unittest.TestCase):
+    def test_cli_reads_the_application_version_not_workspace_package_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "Cargo.toml").write_text(
+                '[workspace.package]\nrust-version = "1.99.1"\n[package]\nversion = "1.2.9"\n'
+            )
+            result = subprocess.run(
+                [sys.executable, VERSION_SPEC.origin, "20261104-10"],
+                cwd=directory, capture_output=True, text=True, check=True, timeout=10,
+            )
+            self.assertEqual(result.stdout.strip(), "1.2.10~pre.20261104.10")
+
     def test_prerelease_targets_the_next_patch_without_changing_the_tag(self):
         self.assertEqual(VERSIONS.prerelease_package_version("0.100.0", "20261104-2"), "0.100.1~pre.20261104.2")
         self.assertEqual(VERSIONS.prerelease_package_version("1.2.9", "20261104-10"), "1.2.10~pre.20261104.10")

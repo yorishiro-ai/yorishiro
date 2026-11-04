@@ -17,5 +17,5 @@ def prerelease_package_version(current, tag):
 
 
 if __name__ == "__main__":
-    current = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+    current = tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"]
     print(prerelease_package_version(current, sys.argv[1]))

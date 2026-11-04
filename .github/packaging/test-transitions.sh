@@ -25,7 +25,7 @@ current_package_id() {
 
 check_prerelease_version_order() {
   local current earlier later stable
-  current="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["workspace"]["package"]["version"])' "$REPO/Cargo.toml")"
+  current="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["package"]["version"])' "$REPO/Cargo.toml")"
   earlier="$(cd "$REPO" && python3 scripts/release_version.py 20261104-2)"
   later="$(cd "$REPO" && python3 scripts/release_version.py 20261104-10)"
   stable="${earlier%%~*}"
