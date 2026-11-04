@@ -1,8 +1,8 @@
 //! Workspace reads and lifecycle operations.
 
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
-    SqlErr,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, PaginatorTrait,
+    QueryFilter, RuntimeErr, SqlErr,
 };
 use uuid::Uuid;
 
@@ -79,7 +79,17 @@ pub(crate) async fn delete_workspace(
         .await
         .map_err(|err| {
             // Let the foreign key fence concurrent fork creation instead of racing a preflight count.
-            if matches!(err.sql_err(), Some(SqlErr::ForeignKeyConstraintViolation(_))) {
+            // SQLite RESTRICT uses its trigger code (1811), which SeaORM's foreign-key mapping omits.
+            let restricted_foreign_key = matches!(
+                &err,
+                DbErr::Exec(RuntimeErr::SqlxError(error))
+                    if error.as_database_error().is_some_and(|error|
+                        error.code().as_deref() == Some("1811")
+                            && error.message() == "FOREIGN KEY constraint failed")
+            );
+            if restricted_foreign_key
+                || matches!(err.sql_err(), Some(SqlErr::ForeignKeyConstraintViolation(_)))
+            {
                 YorishiroError::Conflict {
                     message: "workspace is still referenced by schema forks; remove those forks before deleting it".into(),
                 }
