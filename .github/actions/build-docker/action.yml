@@ -36,9 +36,10 @@ runs:
         password: ${{ inputs.token }}
 
     - uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
+      id: bake
       env:
         IMAGE: ${{ inputs.image }}
-        TAG: ${{ inputs.tag }}
+        TAG: candidate-${{ github.run_id }}
         ARCH: ${{ inputs.arch }}
         BUILD_SHA: ${{ inputs.build-sha || inputs.tag }}
       with:
@@ -46,3 +47,24 @@ runs:
         files: .github/docker/docker-bake.hcl
         targets: release
         push: ${{ inputs.push == 'true' }}
+
+    - name: Record immutable build digests
+      if: ${{ inputs.push == 'true' }}
+      shell: bash
+      env:
+        METADATA: ${{ steps.bake.outputs.metadata }}
+        IMAGE: ${{ inputs.image }}
+        SOURCE: ${{ inputs.build-sha }}
+        ARCH: ${{ inputs.arch }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        printf '%s' "$METADATA" > "$RUNNER_TEMP/bake-metadata.json"
+        python3 scripts/release_images.py record --image "$IMAGE" --source "$SOURCE" --run-id "$RUN_ID" --arch "$ARCH" --metadata "$RUNNER_TEMP/bake-metadata.json" --directory "$RUNNER_TEMP/release-images"
+
+    - uses: actions/upload-artifact@v7
+      if: ${{ inputs.push == 'true' }}
+      with:
+        name: release-images-${{ inputs.arch }}
+        path: ${{ runner.temp }}/release-images/*.json
+        if-no-files-found: error
+        overwrite: true

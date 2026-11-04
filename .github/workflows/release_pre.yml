@@ -163,12 +163,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - uses: ./.github/actions/docker-manifest
         with:
           image: ${{ env.IMAGE_NAME }}
-          tag: ${{ needs.prepare.outputs.tag }}
+          source: ${{ needs.prepare.outputs.ref }}
           edition: ${{ matrix.edition }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -200,12 +201,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - uses: ./.github/actions/smoke
         with:
           image: ${{ env.IMAGE_NAME }}
-          tag: ${{ needs.prepare.outputs.tag }}
+          source: ${{ needs.prepare.outputs.ref }}
           edition: ${{ matrix.edition }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -217,10 +219,12 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      packages: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -277,6 +281,34 @@ jobs:
           git tag "$TAG" "$REF"
           git push origin "$TAG"
 
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-manifest-*
+          path: ${{ runner.temp }}/release-images
+          merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-smoke-*
+          path: ${{ runner.temp }}/release-images
+          merge-multiple: true
+
+      - name: Promote only smoke-verified image digests
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}
+          SOURCE: ${{ needs.prepare.outputs.ref }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          RUN_ID: ${{ github.run_id }}
+        run: python3 scripts/release_images.py promote --image "$IMAGE" --source "$SOURCE" --run-id "$RUN_ID" --tag "$TAG" --directory "$RUNNER_TEMP/release-images"
+
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
@@ -288,6 +320,6 @@ jobs:
           body: |
             Prerelease ${{ needs.prepare.outputs.tag }} built from `${{ github.ref_name }}`.
 
-            Commit: ${{ github.sha }}
+            Commit: ${{ needs.prepare.outputs.ref }}
 
             CE and EE are published as separate compile-time artifacts.

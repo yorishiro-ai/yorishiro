@@ -114,6 +114,27 @@ class ReleaseSourceTests(unittest.TestCase):
         self.assertIn("ARG BUILD_SHA=dev", docker)
         self.assertLess(docker.index("ENV BUILD_SHA=${BUILD_SHA}"), docker.index("cargo build --locked"))
 
+    def test_release_candidates_are_digest_bound_until_both_smokes_pass(self):
+        for name in ("release.yml", "release_pre.yml"):
+            text = (ROOT / ".github/workflows" / name).read_text()
+            publisher = text.split("\n  github-release:\n", 1)[1]
+            self.assertIn("needs: [binary, smoke, prepare]", publisher)
+            self.assertIn("pattern: release-manifest-*", publisher)
+            self.assertIn("pattern: release-smoke-*", publisher)
+            self.assertIn("scripts/release_images.py promote", publisher)
+            self.assertLess(publisher.index("scripts/release_images.py promote"), publisher.index("softprops/action-gh-release@"))
+            self.assertEqual(text.count("source: ${{ needs.prepare.outputs.ref }}"), 2)
+        build = (ROOT / ".github/actions/build-docker/action.yml").read_text()
+        self.assertIn("METADATA: ${{ steps.bake.outputs.metadata }}", build)
+        self.assertIn("TAG: candidate-${{ github.run_id }}", build)
+        self.assertIn("scripts/release_images.py record", build)
+        manifest = (ROOT / ".github/actions/docker-manifest/action.yml").read_text()
+        self.assertIn("scripts/release_images.py join", manifest)
+        self.assertNotIn("${TAG}-${EDITION}-amd64", manifest)
+        smoke = (ROOT / ".github/actions/smoke/action.yml").read_text()
+        self.assertIn('"$reference"', smoke)
+        self.assertLess(smoke.index("curl -fsS http://127.0.0.1:5150/_ping ||"), smoke.index("scripts/release_images.py smoked"))
+
 
 if __name__ == "__main__":
     unittest.main()
