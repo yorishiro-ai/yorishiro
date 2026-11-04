@@ -26,6 +26,7 @@ class AssignedExecutionTests(unittest.TestCase):
         self.manifest = {"jobs": {"common-sqlite": {"database": "sqlite", "queue": "sqlite", "signed_licence": False}}}
         self.plan = {"schema": 1, "inventory_valid": True, "revision": "synthetic-revision",
                      "jobs": self.manifest["jobs"], "pending_splits": [], "helpers": [], "assignments": [], "artifacts": []}
+        self.plan["manifest_sha256"] = runner.fingerprint(self.manifest)
         for edition in ("ce", "ee"):
             self.plan["artifacts"].append({"edition": edition, "package": "yorishiro", "target": "mod", "kind": "test",
                                            "executable": "/old/build/target/debug/deps/mod-synthetic",
@@ -59,6 +60,7 @@ class AssignedExecutionTests(unittest.TestCase):
         return 0, text
 
     def execute(self, edition="ce", job="common-sqlite", run=None):
+        self.plan["manifest_sha256"] = runner.fingerprint(self.manifest)
         return runner.execute_job(self.plan, edition, job, self.root / f"{edition}-{job}-logs", self.root / f"{edition}-{job}.json",
                                   self.manifest, self.env, "synthetic-revision", run_process=run or self.fake_process,
                                   binary_root=self.root)
@@ -293,8 +295,15 @@ class AssignedExecutionTests(unittest.TestCase):
         self.plan["execution_matrix"] = {"include": [
             {"edition": edition, "job": "common-sqlite", **self.plan["jobs"]["common-sqlite"]}
             for edition in ("ce", "ee")]}
+        self.plan["manifest_sha256"] = runner.fingerprint(self.manifest)
         with self.assertRaisesRegex(ValueError, "matrix differs"):
             runner.provenance(self.plan, self.manifest)
+
+    def test_missing_or_stale_manifest_hash_is_not_accepted(self):
+        for value in (None, "0" * 64):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "manifest hash"):
+                self.plan["manifest_sha256"] = value
+                runner.provenance(self.plan, self.manifest)
 
     def test_verify_cli_discovers_nested_artifact_receipts(self):
         receipts = self.receipts()
@@ -354,22 +363,18 @@ class AssignedExecutionTests(unittest.TestCase):
             runner.aggregate(self.plan, receipts, self.manifest)
 
     def test_manual_external_disclosed_but_not_required_or_counted_passed(self):
-        self.plan["jobs"]["resource-live"] = {"database": "sqlite", "queue": "sqlite", "status": "opt-in-not-required"}
+        self.plan["jobs"]["resource-live"] = {"database": "sqlite", "queue": "sqlite", "manual_external": True}
         self.plan["assignments"].append(self.plan["assignments"][0] | {
-            "name": "a::nested", "role": "manual_external", "jobs": ["resource-live"]})
+            "name": "a::nested", "role": "resource", "jobs": ["resource-live"]})
         report = runner.aggregate(self.plan, self.receipts(), self.manifest)
         self.assertEqual(report["tests_passed"], 3)
         self.assertEqual(report["excluded_manual_external"][0]["status"], "opt-in-not-required")
         self.assertFalse(report["excluded_manual_external"][0]["counted_passed"])
 
-    def test_manifest_optional_jobs_status_need_not_be_copied_into_plan(self):
-        self.plan["jobs"]["resource-live"] = {"database": "sqlite", "queue": "sqlite"}
-        self.manifest["optional_jobs"] = {"resource-live": {"status": "opt-in-not-required"}}
-        self.plan["assignments"].append(self.plan["assignments"][0] | {
-            "name": "a::nested", "role": "resource", "jobs": ["resource-live"]})
-        report = runner.aggregate(self.plan, self.receipts(), self.manifest)
-        self.assertEqual(report["tests_passed"], 3)
-        self.assertFalse(report["excluded_manual_external"][0]["counted_passed"])
+    def test_unsupported_optional_jobs_cannot_exempt_required_receipts(self):
+        self.manifest["optional_jobs"] = {"common-sqlite": {"status": "opt-in-not-required"}}
+        with self.assertRaisesRegex(ValueError, "unsupported optional-job"):
+            runner.provenance(self.plan, self.manifest)
 
     def test_log_redaction(self):
         env = self.env | {"YORISHIRO_LICENSE_KEY": "private-licence", "API_TOKEN": "private-token"}

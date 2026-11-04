@@ -3,21 +3,25 @@
   "notes": [
     "Reviewed responsibilities joined to BOTH compiled inventories; classification alone is not execution coverage.",
     "Common rules match the exact declaring module and file, never an ancestor prefix.",
-    "Whole Rust source-tree fingerprints include test helpers and production dependencies; any edit requires renewed review, not an automatic fingerprint refresh.",
+    "Reviewed fingerprints include Rust helpers, configuration, fixtures and the verified Loco patch/preparation identity; changes require renewed review, not an automatic fingerprint refresh.",
     "Native Linux GHA builds are reviewed; arbitrary cfg expressions, macro-generated identities and cross compilation require source-resolution review.",
     "Mixed contracts have separate test identities; pinned E5 assets are required, and the pre-existing private live-endpoint smoke remains explicitly opt-in.",
     "Zero-test workspace lib/bin artifacts are legal but still mandatory; any future nonzero identity needs explicit classification.",
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    ".cargo/config.toml": "0e69d92faa2874685d4439f53254384399e451afa5b406c41e4747ff66d0ae38",
     "tests": "4320f49d5bfe1f6b6dc1aea943523b4a83649b1ded17a10ec7dc219927d362c6",
     "src": "c7af8e69f78087280689bea0ce24dae7564b74ed0f9f6d2ba5662f5cab0b3205",
     "ee": "b9cc28a9d21c096f62f0ae5440fedf07a6caea17638c1bbd76e539307eaa490d",
     "migration": "bfc33b13174b657b728299c0d4c0e7eef9b3035014e1073bf81840d29adf7918",
     "Cargo.toml": "c3e03bd1dfa5169fcfc97c1aeb119b4376b31c5ea7ef6ea2eb26c532f5ea0854",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
-    "Cargo.lock": "b99843074f78094d24a2135fc13b52ff16a2c70a62ccd575c8a6c92e509d4702"
+    "Cargo.lock": "b99843074f78094d24a2135fc13b52ff16a2c70a62ccd575c8a6c92e509d4702",
+    ".cargo/config.toml": "0e69d92faa2874685d4439f53254384399e451afa5b406c41e4747ff66d0ae38",
+    "patches/loco-rs/fixes.patch": "625207de3b3d0f2907038b4bfe2b0a000196905f080bc6b4a13325fff6dde9f8",
+    "patches/loco-rs/verify.py": "1db35421ee3fdfa8c4cf142f22d43acbbfce7fbd9dc39b817a61f541e9555e5b",
+    "config": "af575f74f680ea5e3d14d5163cc92784c0272c2ba155f15cc879bcd681a3c6da",
+    "tests/fixtures": "0cb4321fb2b5c2fe7c3f991b8ad2fd6a2e9c0361d1e597f692aa93e7854170d1"
   },
   "targets": [
     {"package":"yorishiro","target":"mod","kind":"test","source":"tests/mod.rs","allow_zero":false},

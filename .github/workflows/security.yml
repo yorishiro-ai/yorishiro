@@ -16,6 +16,8 @@ on:
       - "**/Cargo.toml"
       - ".cargo/audit.toml"
       - "patches/**"
+      - ".github/workflows/security.yml"
+      - ".github/actions/rust-setup/**"
   workflow_dispatch:
 
 concurrency:

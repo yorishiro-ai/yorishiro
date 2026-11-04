@@ -58,6 +58,14 @@ def source_census(root):
         result[directory] = digest(data)
     for name in ("Cargo.toml", "migration/Cargo.toml", "Cargo.lock", ".cargo/config.toml"):
         result[name] = digest((root / name).read_bytes())
+    # The verified patch and its pinned upstream checksum define the ignored Loco source tree.
+    for name in ("patches/loco-rs/fixes.patch", "patches/loco-rs/verify.py"):
+        result[name] = digest((root / name).read_bytes())
+    for directory in ("config", "tests/fixtures"):
+        files = sorted(p for p in (root / directory).rglob("*")
+                       if p.is_file() and "__pycache__" not in p.parts)
+        result[directory] = digest(b"".join(str(p.relative_to(root)).encode() + b"\0" +
+                                          p.read_bytes() + b"\0" for p in files))
     return result
 
 
@@ -320,6 +328,7 @@ def verify(ce, ee, manifest, root=ROOT):
                               if not manifest["jobs"][job].get("manual_external")}):
         matrix.append({"edition": owner, "job": job, **manifest["jobs"][job]})
     return {"schema": 1, "inventory_valid": True, "execution_matrix_ready": not pending,
+             "manifest_sha256": digest(json.dumps(manifest, sort_keys=True).encode()),
              "cutover_blockers": ["mixed contracts require scenario splits"] if pending else [],
              "execution_matrix": {"include": matrix},
             "pending_splits": pending, "assignments": assignments, "helpers": helpers,

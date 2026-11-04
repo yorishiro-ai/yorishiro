@@ -40,20 +40,15 @@ def utc_now():
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-def optional_job(plan, job, manifest):
-    metadata = plan.get("optional_jobs", manifest.get("optional_jobs", {}))
-    if isinstance(metadata, list):
-        metadata = {row["job"]: row for row in metadata}
-    return (plan["jobs"][job].get("manual_external", False) or
-            plan["jobs"][job].get("status") == "opt-in-not-required" or
-            metadata.get(job, {}).get("status") == "opt-in-not-required")
+def optional_job(plan, job):
+    return plan["jobs"][job].get("manual_external", False)
 
 
 def manual_exclusions(plan, manifest):
     return [{**{field: row[field] for field in IDENTITY}, "owner": row["owner"], "job": job,
              "status": "opt-in-not-required", "counted_passed": False}
             for row in plan["assignments"] for job in row["jobs"]
-             if row["role"] == "manual_external" or optional_job(plan, job, manifest)]
+              if optional_job(plan, job)]
 
 
 def postgres_dedicated(plan, manifest):
@@ -79,10 +74,10 @@ def fixture_group(row, config, dedicated):
 def provenance(plan, manifest):
     require(plan["schema"] == 1 and plan["inventory_valid"] is True, "invalid assignment inventory")
     require(plan["jobs"] == manifest["jobs"], "assignment topology differs from manifest")
-    if "optional_jobs" in plan:
-        require(plan["optional_jobs"] == manifest.get("optional_jobs", {}), "optional jobs differ from manifest")
+    require("optional_jobs" not in plan and "optional_jobs" not in manifest,
+            "unsupported optional-job representation")
     manifest_hash = fingerprint(manifest)
-    require(plan.get("manifest_sha256", manifest_hash) == manifest_hash, "assignment manifest hash differs")
+    require(plan.get("manifest_sha256") == manifest_hash, "missing or different assignment manifest hash")
     artifacts = {}
     for row in plan["artifacts"]:
         identity = (row["edition"], *key(row, TARGET))
@@ -104,7 +99,7 @@ def provenance(plan, manifest):
         require(row["name"] in binary["tests"], "assigned identity absent from binary")
         for job in row["jobs"]:
             require(job in plan["jobs"], "unknown responsibility job")
-            if row["role"] == "manual_external" or optional_job(plan, job, manifest):
+            if optional_job(plan, job):
                 continue
             identity = (row["owner"], job, *key(row))
             require(identity not in expected, "duplicate assignment")

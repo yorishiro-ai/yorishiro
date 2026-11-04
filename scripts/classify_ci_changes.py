@@ -61,7 +61,7 @@ def classify_path(path: str) -> set[str]:
     if s in {"Cargo.toml", "Cargo.lock", "migration/Cargo.toml"} or (p.name in {"Cargo.toml", "Cargo.lock"}):
         groups |= {"deps", "rust", "ee"}
     workflow_groups = {
-        ".github/workflows/ci.yml": {"shared", "rust", "ee"},
+        ".github/workflows/ci.yml": {"shared", "rust", "ee", "packaging"},
         ".github/workflows/release.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/release_pre.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/security.yml": {"deps"},

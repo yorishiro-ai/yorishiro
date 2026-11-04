@@ -28,6 +28,10 @@ class InventoryGuardTests(unittest.TestCase):
             "migration/src/lib.rs": "",
             "Cargo.lock": "# synthetic lock\n",
             ".cargo/config.toml": "# synthetic config\n",
+            "patches/loco-rs/fixes.patch": "synthetic framework patch\n",
+            "patches/loco-rs/verify.py": "# pinned upstream checksum\n",
+            "config/test_sqlite.yaml": "database: sqlite\n",
+            "tests/fixtures/example.json": "{}\n",
             "fake-test-executable": "never executed",
         }
         for name, content in files.items():
@@ -84,11 +88,22 @@ class InventoryGuardTests(unittest.TestCase):
         self.assertTrue(report["inventory_valid"])
         self.assertTrue(report["execution_matrix_ready"])
         self.assertNotIn("execution_receipts", report)
+        self.assertEqual(report["manifest_sha256"], self.ce["manifest_sha256"])
         self.assertTrue(report["execution_matrix"]["include"])
         owners = [(r["name"], r["owner"], r["role"]) for r in report["assignments"]]
         self.assertIn(("common::ordinary", "ce", "common"), owners)
         self.assertIn(("ee::extra", "ee", "common"), owners)
         self.assertIn(("common::shared_delta", "ee", "ee_delta"), owners)
+
+    def test_patch_and_fixture_changes_require_ownership_review(self):
+        for name in ("patches/loco-rs/fixes.patch", "patches/loco-rs/verify.py",
+                     "config/test_sqlite.yaml", "tests/fixtures/example.json"):
+            path = self.root / name
+            original = path.read_text()
+            with self.subTest(path=name):
+                path.write_text(original + "\nchanged\n")
+                self.rejects("source guard changed")
+            path.write_text(original)
 
     def test_missing_ee_counterpart(self):
         self.ee["artifacts"][0]["tests"].remove("common::ordinary")
