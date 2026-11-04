@@ -1812,7 +1812,7 @@ mod conflict {
             let mut worker_ctx = ctx.clone();
             let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             assert!(
-                !Entity::has_active(&ctx.db, "startup_reindex", workspace_id)
+                !crate::has_active_job(&ctx.db, "startup_reindex", workspace_id)
                     .await
                     .unwrap()
             );

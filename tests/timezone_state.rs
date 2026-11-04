@@ -10,6 +10,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Barrier;
 
+async fn set_session_timezone(
+    db: &sea_orm::DatabaseConnection,
+    timezone: &str,
+) -> Result<(), sea_orm::DbErr> {
+    db.execute_raw(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT set_config('TimeZone', $1, false)",
+        [timezone.into()],
+    ))
+    .await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn postgres_app_pool_uses_configured_timezone_on_new_and_released_connections() {
     if !crate::require_postgres_backend() {
@@ -659,7 +672,7 @@ async fn postgres_timezone_state_scenario(
         .map_err(|error| error.to_string())?;
     let before = read_zone(db).await;
     let before_instant = read_probe_instant(db).await;
-    yorishiro::db::set_session_timezone(&timestamp_connection, "Asia/Tokyo")
+    set_session_timezone(&timestamp_connection, "Asia/Tokyo")
         .await
         .map_err(|error| error.to_string())?;
     let tokyo_rendered = timestamp_connection
@@ -673,7 +686,7 @@ async fn postgres_timezone_state_scenario(
         .try_get_by_index::<String>(0)
         .unwrap();
     assert!(tokyo_rendered.ends_with("+09"), "{tokyo_rendered}");
-    yorishiro::db::set_session_timezone(&timestamp_connection, "America/New_York")
+    set_session_timezone(&timestamp_connection, "America/New_York")
         .await
         .map_err(|error| error.to_string())?;
     let new_york_rendered = timestamp_connection

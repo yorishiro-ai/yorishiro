@@ -143,35 +143,6 @@ pub async fn get(
         .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
 }
 
-/// [`get`], batched: one query for every id instead of one query per id.
-/// An id with no matching row (deleted, or belonging to another workspace) is simply absent from
-/// the returned map, mirroring `entity_relations::neighbors_batch`'s own no-match-is-no-entry
-/// convention rather than erroring.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn get_batch(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    ids: &[Uuid],
-) -> Result<std::collections::HashMap<Uuid, EntityRecord>, YorishiroError> {
-    use crate::models::_entities::entity_entities::Column;
-
-    if ids.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-
-    let rows = Entity::find()
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .filter(Column::Id.is_in(ids.iter().copied()))
-        .into_model::<EntityRecord>()
-        .all(conn)
-        .await
-        .internal()?;
-
-    Ok(rows.into_iter().map(|row| (row.id, row)).collect())
-}
-
 /// Fully replaces an existing entity's `data`.
 /// Validation is done against the schema version the entity was actually created with (the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
 /// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
@@ -303,27 +274,6 @@ pub async fn list(
         .offset(query.page.offset() as u64);
 
     select
-        .into_model::<EntityRecord>()
-        .all(conn)
-        .await
-        .internal()
-}
-
-/// Fetches every entity for the workspace, with no pagination limit, for a full-workspace data export.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn export_all(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<Vec<EntityRecord>, YorishiroError> {
-    use crate::models::_entities::entity_entities::Column;
-
-    Entity::find()
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(Column::CreatedAt)
         .into_model::<EntityRecord>()
         .all(conn)
         .await

@@ -2,6 +2,7 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use yorishiro::App;
+use yorishiro::models::_entities::entity_entities::Column;
 use yorishiro::models::entity_entities::{self, CreateEntityInput, ListEntitiesQuery};
 use yorishiro::models::schema_schemas;
 
@@ -52,21 +53,26 @@ async fn content_entities_crud_on_sqlite() {
             .expect("get");
         assert_eq!(fetched.id, created.id);
 
-        let batch = entity_entities::get_batch(&db, workspace_id, &[created.id])
+        let batch = entity_entities::Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Id.is_in([created.id]))
+            .all(&db)
             .await
-            .expect("get_batch");
+            .expect("find fixture batch");
         assert_eq!(batch.len(), 1);
-        assert!(batch.contains_key(&created.id));
+        assert_eq!(batch[0].id, created.id);
 
         let listed = entity_entities::list(&db, workspace_id, ListEntitiesQuery::default())
             .await
             .expect("list");
         assert_eq!(listed.len(), 1);
 
-        let exported = entity_entities::export_all(&db, workspace_id)
+        let persisted = entity_entities::Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .all(&db)
             .await
-            .expect("export_all");
-        assert_eq!(exported.len(), 1);
+            .expect("inspect fixture rows");
+        assert_eq!(persisted.len(), 1);
 
         let counted = entity_entities::count(&db, workspace_id)
             .await

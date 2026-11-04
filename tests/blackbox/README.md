@@ -20,6 +20,7 @@ The edition argument labels evidence; it does not infer or verify the binary's c
 The runner exercises only the community surface even when supplied an EE binary, with the enterprise licence explicitly unset.
 
 Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
+The CLI suite first verifies that a real work command fails timezone preparation before migration, then proves migration and normal tasks succeed.
 It starts one server and reuses it for the whole suite.
 Loco 1.2.0 defaults `start --no-banner` to server-only mode.
 REST and MCP additionally start a separate `--environment test_sqlite start --worker=job-target:shared --no-banner` process only after import submission and queued/empty-destination assertions.
@@ -71,7 +72,7 @@ Existing export limits, history, security and race tests remain internal.
 Exit status is zero only when all selected assertions and cleanup pass.
 The aggregate-verifier report is `<artifacts>/results.json`, containing `suite`, `edition`, `binary_sha256`, and `results` with each stable scenario `id`, `status`, and `duration_seconds`.
 An unexecuted scenario is reported as failed with a zero duration, never silently omitted.
-Additional artifacts are written under `<artifacts>/<edition>-<suite>/`: `result.json`, `transcript.json`, separate `server.stdout.log` and `server.stderr.log`, and `failure.log`.
+Additional artifacts are written under `<artifacts>/<edition>-<suite>/`: `transcript.json`, separate `server.stdout.log` and `server.stderr.log`, and `failure.log`.
 Separate redacted `worker.stdout.log` and `worker.stderr.log` capture the import worker when started.
 CLI stdout and stderr remain separate fields in the transcript.
 Credentials are redacted before artifact writes, including credential prefixes and credentials issued immediately before a parsing failure.

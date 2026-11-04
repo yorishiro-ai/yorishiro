@@ -56,7 +56,7 @@ async fn scenario(
 }
 
 async fn queued(ctx: &AppContext, workspace: Uuid) -> bool {
-    Lifecycles::has_active(&ctx.db, "startup_reindex", workspace)
+    crate::has_active_job(&ctx.db, "startup_reindex", workspace)
         .await
         .expect("find admitted reindex")
 }

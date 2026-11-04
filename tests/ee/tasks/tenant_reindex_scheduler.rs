@@ -188,13 +188,9 @@ async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider
             .await
             .unwrap();
         assert!(
-            yorishiro::models::queue_job_lifecycles::Entity::has_active(
-                &ctx.db,
-                "startup_reindex",
-                fixture.workspace_id,
-            )
-            .await
-            .unwrap()
+            crate::has_active_job(&ctx.db, "startup_reindex", fixture.workspace_id,)
+                .await
+                .unwrap()
         );
         let before = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
             .filter(

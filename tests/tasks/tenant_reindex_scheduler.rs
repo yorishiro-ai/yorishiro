@@ -136,13 +136,9 @@ async fn community_task_scans_mismatch_without_constructing_a_provider() {
         assert_eq!(repeated_lifecycle_count, 1);
         assert_eq!(repeated_outbox_count, 1);
         assert!(
-            yorishiro::models::queue_job_lifecycles::Entity::has_active(
-                &ctx.db,
-                "startup_reindex",
-                fixture.workspace_id
-            )
-            .await
-            .unwrap()
+            crate::has_active_job(&ctx.db, "startup_reindex", fixture.workspace_id)
+                .await
+                .unwrap()
         );
     })
     .await;
@@ -201,10 +197,10 @@ async fn enqueue_rejection_is_workspace_scoped_and_scan_continues() {
             .await.expect_err("targeted outbox rejection must be returned");
         let diagnostic = error.to_string();
         assert!(diagnostic.contains(&failed.to_string()), "{diagnostic}");
-        assert!(yorishiro::models::queue_job_lifecycles::Entity::has_active(
+        assert!(crate::has_active_job(
             &ctx.db, "startup_reindex", succeeds
         ).await.unwrap());
-        assert!(!yorishiro::models::queue_job_lifecycles::Entity::has_active(
+        assert!(!crate::has_active_job(
             &ctx.db, "startup_reindex", failed
         ).await.unwrap());
         let good_outbox = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
@@ -256,7 +252,7 @@ async fn all_enqueue_failures_are_aggregated_with_each_workspace_id() {
         assert!(diagnostic.contains(&first.workspace_id.to_string()), "{diagnostic}");
         assert!(diagnostic.contains(&second_workspace.id.to_string()), "{diagnostic}");
         for workspace_id in [first.workspace_id, second_workspace.id] {
-            assert!(!yorishiro::models::queue_job_lifecycles::Entity::has_active(
+            assert!(!crate::has_active_job(
                 &ctx.db, "startup_reindex", workspace_id,
             ).await.unwrap());
         }

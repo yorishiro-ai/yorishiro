@@ -130,7 +130,6 @@ class App:
         self.sequence = 0
         self.started = time.monotonic()
         self.deadline = self.started + 240
-        self.checks = []
         self.results = [{"id": name, "status": "failed", "duration_seconds": 0,
                          "detail": "not executed"} for name, _ in scenarios(args.suite)]
         with socket.socket() as sock:
@@ -198,6 +197,9 @@ class App:
         return output_field(out, "api key id", True), key
 
     def boot(self):
+        if self.args.suite == "cli":
+            out, err = self.cli("task", "create_tenant", "name:before-migrate", ok=False)
+            require("timezone_state" in (out + err), "unmigrated task must fail timezone preparation")
         self.cli("db", "migrate")
         tenant = output_field(self.task("create_tenant", name="blackbox"), "tenant id", True)
         self.tenant = tenant
@@ -217,7 +219,6 @@ class App:
             try:
                 status, _, _ = self.http("GET", "/api/schemas", key=key, timeout=1)
                 if status == 200:
-                    self.checks.append("authenticated server readiness")
                     return
             except (OSError, http.client.HTTPException):
                 pass
@@ -327,9 +328,6 @@ class App:
             path = self.directory / name
             write(name + ".log", path.read_text(errors="replace") if path.exists() else "")
         write("failure.log", failure or "")
-        write("result.json", json.dumps({"suite": self.args.suite, "edition": self.args.edition,
-              "passed": failure is None, "checks": self.checks,
-              "duration_seconds": round(time.monotonic() - self.started, 2)}, indent=2))
         digest = hashlib.sha256()
         with self.args.binary.open("rb") as binary:
             for chunk in iter(lambda: binary.read(1024 * 1024), b""):
@@ -411,7 +409,6 @@ def vertical_slice(app):
     require("error" in document and document["error"]["code"] == -32600,
             "revoked MCP credential must produce an authentication protocol error")
     _, app.key = app.issue(app.workspace, "schema")
-    app.checks.append("CLI key issuance -> REST/MCP authentication -> CLI revoke -> both reject")
 
 
 def crud(app, surface):
@@ -461,7 +458,6 @@ def crud(app, surface):
     client.call("get_entity", {"id": entity_id}, error=True)
     app.rest("GET", f"/api/schemas/{schema_id}", status=404)
     client.call("get_schema_by_id", {"schema_id": schema_id}, error=True)
-    app.checks.append(f"{surface} schema create/read/archive/delete and entity CRUD; cross-surface reads")
 
 
 class GraphAPI:
@@ -663,7 +659,6 @@ def relation_export_import_worker(app, surface):
             == destination.client.call("get_relation", {"id": new_relation["id"]}) == new_relation,
             "restored relation readback differs")
     require(source.export() == peer.export() == exported, "import mutated the source graph")
-    app.checks.append(f"{surface} relation CRUD/status, exact raw export parity, queued import -> real worker -> restored graph")
 
 
 def template_required_data(fields):
@@ -707,7 +702,6 @@ def builtin_relations(app):
                 "source_id": entities[relation["source"]], "target_id": target,
                 "relation_type": name, "properties": {},
             }, status=201, key=write_key)
-    app.checks.append("every builtin template entity and relation type accepts required fixture data with Write scope")
 
 
 def rest_suite(app):
@@ -719,7 +713,6 @@ def rest_suite(app):
     status, _, text = app.http("POST", "/api/entities", {"data": {}}, key=app.key)
     require(status == 422 and "schema_name" in text,
             f"wrong REST extractor rejection: {status}: {text}")
-    app.checks.append("REST missing/invalid auth, read-only scope and malformed input")
 
 
 def mcp_suite(app):
@@ -748,7 +741,6 @@ def mcp_suite(app):
                               ({"Accept": "application/json"}, 406)):
         status, _, _ = app.http("POST", "/mcp", initialize, headers=headers)
         require(status == expected, f"MCP transport guard expected {expected}, got {status}")
-    app.checks.append("MCP initialize/session/initialized/tools list; auth, scope, input errors")
 
 
 def cli_suite(app):
@@ -771,7 +763,6 @@ def cli_suite(app):
     history = app.task("list_api_keys", workspace_id=app.workspace)
     require(key_id in history and key not in history, "CLI listing lost grant history or leaked credential")
     app.rest("GET", "/api/schemas", key=key, status=401)
-    app.checks.append("CLI registered tasks, argument failures, exits/diagnostics, stdout IDs/key, listing/revoke")
 
 
 def scenarios(suite):

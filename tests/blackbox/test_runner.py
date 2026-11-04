@@ -185,6 +185,25 @@ class ArgumentTests(unittest.TestCase):
                 http.assert_not_called()
             app.close()
 
+    def test_cli_boot_proves_timezone_preparation_before_migration(self):
+        args = run.parse_args(self.arguments())
+        args.suite = "cli"
+        for diagnostic, accepted in (("no such table: timezone_state", True), ("unrelated error", False)):
+            with self.subTest(diagnostic=diagnostic), tempfile.TemporaryDirectory() as directory:
+                app = run.App(args, directory)
+                with patch.object(app, "cli", side_effect=[("", diagnostic), RuntimeError("migration reached")]) as cli:
+                    if accepted:
+                        with self.assertRaisesRegex(RuntimeError, "migration reached"):
+                            app.boot()
+                        self.assertEqual(cli.call_args_list[1].args, ("db", "migrate"))
+                    else:
+                        with self.assertRaisesRegex(AssertionError, "timezone preparation"):
+                            app.boot()
+                        self.assertEqual(cli.call_count, 1)
+                    self.assertEqual(cli.call_args_list[0].args, ("task", "create_tenant", "name:before-migrate"))
+                    self.assertEqual(cli.call_args_list[0].kwargs, {"ok": False})
+                app.close()
+
     def test_cleanup_escalates_and_reaps_timed_out_process(self):
         process = Mock(pid=123)
         process.poll.return_value = None
