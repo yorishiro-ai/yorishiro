@@ -50,8 +50,8 @@ jobs:
       YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue == 'redis' && 'redis://localhost:6379/15' || '' }}
       YORISHIRO_TEST_REDIS_BASE_URL: ${{ matrix.queue == 'redis' && 'redis://localhost:6379/15' || '' }}
       YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && matrix.signed_licence && secrets.YORISHIRO_LICENSE_KEY || '' }}
-      YORISHIRO_TEST_E5_MODEL: ${{ github.workspace }}/models/multilingual-e5-base/model.safetensors
-      YORISHIRO_TEST_E5_TOKENIZER: ${{ github.workspace }}/models/multilingual-e5-base/tokenizer.json
+      YORISHIRO_TEST_E5_MODEL: ${{ matrix.requires_e5_cache && format('{0}/models/multilingual-e5-base/model.safetensors', github.workspace) || '' }}
+      YORISHIRO_TEST_E5_TOKENIZER: ${{ matrix.requires_e5_cache && format('{0}/models/multilingual-e5-base/tokenizer.json', github.workspace) || '' }}
       DB_MAX_CONNECTIONS: "100"
       DB_CONNECT_TIMEOUT: "5000"
       RUST_BACKTRACE: "1"
@@ -102,8 +102,8 @@ jobs:
             exit 1
           fi
 
-      # shortcut: shared tests can boot local providers, so restore assets for all jobs until their resource ownership is split.
       - name: Restore multilingual-e5-base cache
+        if: matrix.requires_e5_cache
         uses: actions/cache/restore@v6
         id: embedding-cache
         with:
@@ -113,6 +113,7 @@ jobs:
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
       - name: Verify required embedding assets before execution
+        if: matrix.requires_e5_cache
         env:
           CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
@@ -146,10 +147,6 @@ jobs:
             "$image" valkey-server --databases 65536 --save '' --appendonly no
           docker exec assigned-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
 
-      - name: Migrate once with the borrowed main binary
-        timeout-minutes: 5
-        run: ./target/debug/yorishiro db migrate
-
       - name: Execute verified exact assignments
         id: execution
         timeout-minutes: 45
@@ -167,7 +164,7 @@ jobs:
           --artifacts "$RUNNER_TEMP/assigned-results/logs"
 
       - name: Verify embedding assets after execution
-        if: always() && steps.execution.outcome != 'skipped' && steps.execution.outcome != ''
+        if: always() && matrix.requires_e5_cache && steps.execution.outcome != 'skipped' && steps.execution.outcome != ''
         env:
           CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}

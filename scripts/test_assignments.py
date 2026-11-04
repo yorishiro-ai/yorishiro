@@ -326,11 +326,17 @@ def verify(ce, ee, manifest, root=ROOT):
     matrix = []
     for owner, job in sorted({(entry["owner"], job) for entry in assignments for job in entry["jobs"]
                               if not manifest["jobs"][job].get("manual_external")}):
-        matrix.append({"edition": owner, "job": job, **manifest["jobs"][job]})
+        requirements = manifest["jobs"][job]
+        require(isinstance(requirements.get("requires_e5_cache", False), bool), "invalid E5 cache requirement")
+        require(not requirements.get("requires_e5_cache") or job == "resource-e5", "unreviewed E5 cache consumer")
+        require(job != "resource-e5" or requirements.get("requires_e5_cache"), "E5 contract lacks cache requirement")
+        matrix.append({"edition": owner, "job": job, **requirements})
     return {"schema": 1, "inventory_valid": True, "execution_matrix_ready": not pending,
              "manifest_sha256": digest(json.dumps(manifest, sort_keys=True).encode()),
              "cutover_blockers": ["mixed contracts require scenario splits"] if pending else [],
-             "execution_matrix": {"include": matrix},
+              "execution_matrix": {"include": matrix},
+              "core_matrix": {"include": [row for row in matrix if not row.get("requires_e5_cache", False)]},
+              "e5_matrix": {"include": [row for row in matrix if row.get("requires_e5_cache", False)]},
             "pending_splits": pending, "assignments": assignments, "helpers": helpers,
              "external_contracts": [entry | {"status": "opt-in-not-required" if any(
                                         manifest["jobs"][job].get("manual_external") for job in entry["jobs"]

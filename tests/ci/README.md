@@ -39,6 +39,19 @@ The assignment join produces `test-assignments/test-assignments.json` with the e
 Each consumer writes `assigned-test-result-<edition>-<job>` with its execution receipt and redacted logs.
 The required aggregate compares all receipts with that complete plan; classification alone cannot satisfy it.
 
+Only `resource-e5` declares `requires_e5_cache`.
+The assignment join partitions the complete matrix into disjoint ordinary and E5 consumers without changing identity ownership.
+Ordinary consumers do not wait for model preparation or restore model files.
+E5 consumers wait for the pinned-cache producer, restore the exact cache, and verify it before and after execution.
+The complete receipt aggregate still requires both populations and rejects missing or duplicate identities.
+Reference-generator Python imports have a separate path-selected and weekly workflow; building that image does not produce the Rust tests' pinned model cache.
+
+Internal consumers let their fixtures own migrations rather than migrating an unrelated outer database first.
+Shared PostgreSQL fixtures migrate their existing database through their process-local bootstrap; isolated deployments migrate their own databases.
+Raw scheduler-lock consumers use advisory locks without schema tables, and E5 consumers need no database schema.
+PostgreSQL role/extension provisioning and the shared-fixture database-DDL observation remain mandatory.
+Public CLI bootstrap and schema regeneration still exercise the actual migration command.
+
 To reproduce a selected responsibility inside its prepared GHA topology:
 
 ```sh

@@ -204,16 +204,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-
-      - name: Install Python tools
-        run: uv sync --locked
-
-      - name: Verify reference generator dependencies
-        run: |
-          docker build -t yorishiro-e5-reference tests/fixtures/generate_e5_reference
-          docker run --rm --entrypoint python yorishiro-e5-reference -c 'from sentence_transformers import SentenceTransformer; import torch; assert not torch.version.cuda'
-
       - name: Restore multilingual-e5-base cache
         uses: actions/cache/restore@v6
         id: embedding-cache
@@ -226,7 +216,7 @@ jobs:
       - name: Reject an uncacheable fork pull request miss
         if: steps.embedding-cache.outputs.cache-hit != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         run: |
-          echo "::error::The immutable embedding cache is unavailable and fork pull requests cannot save GitHub Actions caches. Re-run after the cache is populated from a trusted branch."
+          echo "::error::Repository policy requires a trusted-branch embedding cache for fork pull requests. Re-run after that cache is populated."
           exit 1
 
       - name: Prepare and verify multilingual-e5-base artifacts
@@ -235,7 +225,7 @@ jobs:
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
           MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
           TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
-        run: uv run scripts/embedding_cache.py prepare
+        run: python3 scripts/embedding_cache.py prepare
 
       - name: Save verified multilingual-e5-base cache
         if: steps.embedding-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -474,6 +464,10 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      core_matrix: ${{ steps.matrix.outputs.core_matrix }}
+      e5_matrix: ${{ steps.matrix.outputs.e5_matrix }}
+      has_core: ${{ steps.matrix.outputs.has_core }}
+      has_e5: ${{ steps.matrix.outputs.has_e5 }}
     steps:
       - uses: actions/checkout@v7
       - name: Exercise assignment failure guards
@@ -498,7 +492,10 @@ jobs:
           plan = json.loads(pathlib.Path(sys.argv[1]).read_text())
           assert plan['execution_matrix_ready'], plan['cutover_blockers']
           with open(sys.argv[2], 'a') as output:
-              output.write('matrix=' + json.dumps(plan['execution_matrix'], separators=(',', ':')) + '\n')
+               output.write('matrix=' + json.dumps(plan['execution_matrix'], separators=(',', ':')) + '\n')
+               for name in ('core_matrix', 'e5_matrix'):
+                   output.write(name + '=' + json.dumps(plan[name], separators=(',', ':')) + '\n')
+                   output.write('has_' + name.removesuffix('_matrix') + '=' + str(bool(plan[name]['include'])).lower() + '\n')
           PY
       - uses: actions/upload-artifact@v7
         with:
@@ -509,17 +506,27 @@ jobs:
 
   assigned-tests:
     name: Responsibility tests
-    needs: [changes, prepare-embedding, test-inventory, test-assignment-verify]
-    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    needs: [changes, test-assignment-verify]
+    if: ${{ needs.changes.outputs.rust_validation == 'true' && needs.test-assignment-verify.outputs.has_core == 'true' }}
     uses: ./.github/workflows/assigned-tests.yml
     with:
-      matrix: ${{ needs.test-assignment-verify.outputs.matrix }}
+      matrix: ${{ needs.test-assignment-verify.outputs.core_matrix }}
+    secrets:
+      YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+
+  assigned-e5-tests:
+    name: E5 resource tests
+    needs: [changes, prepare-embedding, test-assignment-verify]
+    if: ${{ needs.changes.outputs.rust_validation == 'true' && needs.test-assignment-verify.outputs.has_e5 == 'true' }}
+    uses: ./.github/workflows/assigned-tests.yml
+    with:
+      matrix: ${{ needs.test-assignment-verify.outputs.e5_matrix }}
     secrets:
       YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
 
   assigned-test-verify:
     name: Verify assigned execution receipts
-    needs: [changes, assigned-tests, test-assignment-verify]
+    needs: [changes, assigned-tests, assigned-e5-tests, test-assignment-verify]
     if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -609,7 +616,7 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [changes, ce, check, msrv, prepare-embedding, schema-generation, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, assigned-tests, assigned-test-verify, package-build, package-validation]
+    needs: [changes, ce, check, msrv, prepare-embedding, schema-generation, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, assigned-tests, assigned-e5-tests, assigned-test-verify, package-build, package-validation]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
@@ -629,6 +636,9 @@ jobs:
           INVENTORY: ${{ needs.test-inventory.result }}
           ASSIGNMENT: ${{ needs.test-assignment-verify.result }}
           ASSIGNED: ${{ needs.assigned-tests.result }}
+          E5: ${{ needs.assigned-e5-tests.result }}
+          HAS_CORE: ${{ needs.test-assignment-verify.outputs.has_core }}
+          HAS_E5: ${{ needs.test-assignment-verify.outputs.has_e5 }}
           RECEIPTS: ${{ needs.assigned-test-verify.result }}
           PACKAGE_RESULT: ${{ needs.package-validation.result }}
           PACKAGE_BUILD: ${{ needs.package-build.result }}
@@ -656,7 +666,8 @@ jobs:
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" true
             require_success INVENTORY "$INVENTORY" true
             require_success ASSIGNMENT "$ASSIGNMENT" true
-            require_success ASSIGNED "$ASSIGNED" true
+            require_success ASSIGNED "$ASSIGNED" "$HAS_CORE"
+            require_success E5 "$E5" "$HAS_E5"
             require_success RECEIPTS "$RECEIPTS" true
           else
             require_success CE "$CE" false
@@ -670,6 +681,7 @@ jobs:
             require_success INVENTORY "$INVENTORY" false
             require_success ASSIGNMENT "$ASSIGNMENT" false
             require_success ASSIGNED "$ASSIGNED" false
+            require_success E5 "$E5" false
             require_success RECEIPTS "$RECEIPTS" false
           fi
           require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"

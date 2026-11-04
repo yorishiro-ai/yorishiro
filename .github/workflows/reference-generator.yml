@@ -1,0 +1,25 @@
+name: Reference generator dependencies
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - tests/fixtures/generate_e5_reference/**
+      - .github/workflows/reference-generator.yml
+  schedule:
+    - cron: "31 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the reference generator imports with the CPU backend
+        run: |
+          docker build -t yorishiro-e5-reference tests/fixtures/generate_e5_reference
+          docker run --rm --entrypoint python yorishiro-e5-reference -c 'from sentence_transformers import SentenceTransformer; import torch; assert not torch.version.cuda'

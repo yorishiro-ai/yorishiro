@@ -105,6 +105,23 @@ class InventoryGuardTests(unittest.TestCase):
                 self.rejects("source guard changed")
             path.write_text(original)
 
+    def test_only_reviewed_e5_contracts_wait_for_model_cache(self):
+        self.manifest["jobs"]["resource-e5"] = {"database": "sqlite", "queue": "sqlite", "requires_e5_cache": True}
+        self.manifest["exceptions"] = [self.exact(role="resource", jobs=["resource-e5"])]
+        self.sync_manifest_hash()
+        report = self.verify()
+        self.assertEqual([row["job"] for row in report["e5_matrix"]["include"]], ["resource-e5"])
+        self.assertTrue(all(row["job"] == "common-sqlite" for row in report["core_matrix"]["include"]))
+        self.assertCountEqual(report["execution_matrix"]["include"], report["core_matrix"]["include"] + report["e5_matrix"]["include"])
+        self.manifest["jobs"]["resource-e5"]["requires_e5_cache"] = False
+        self.sync_manifest_hash()
+        self.rejects("E5 contract lacks cache requirement")
+
+    def test_common_contract_cannot_gain_an_unreviewed_model_dependency(self):
+        self.manifest["jobs"]["common-sqlite"]["requires_e5_cache"] = True
+        self.sync_manifest_hash()
+        self.rejects("unreviewed E5 cache consumer")
+
     def test_missing_ee_counterpart(self):
         self.ee["artifacts"][0]["tests"].remove("common::ordinary")
         self.rejects("missing source-declared test")

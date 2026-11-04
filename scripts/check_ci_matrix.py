@@ -49,7 +49,17 @@ def validate(workflow: str, assigned_workflow: str) -> None:
     assert "assert plan['execution_matrix_ready'], plan['cutover_blockers']" in assignment
     assigned = job(workflow, "assigned-tests")
     assert "uses: ./.github/workflows/assigned-tests.yml" in assigned
-    assert "matrix: ${{ needs.test-assignment-verify.outputs.matrix }}" in assigned
+    assert "matrix: ${{ needs.test-assignment-verify.outputs.core_matrix }}" in assigned
+    assert "prepare-embedding" not in assigned, "ordinary tests must not wait for model artifacts"
+    e5 = job(workflow, "assigned-e5-tests")
+    assert "needs: [changes, prepare-embedding, test-assignment-verify]" in e5
+    assert "matrix: ${{ needs.test-assignment-verify.outputs.e5_matrix }}" in e5
+    assert "outputs.has_core == 'true'" in assigned and "outputs.has_e5 == 'true'" in e5
+    assert "if: matrix.requires_e5_cache" in assigned_workflow
+    assert "always() && matrix.requires_e5_cache" in assigned_workflow
+    models = job(workflow, "prepare-embedding")
+    assert "docker build" not in models and "setup-uv" not in models
+    assert "python3 scripts/embedding_cache.py prepare" in models
     assert "matrix: ${{ fromJSON(inputs.matrix) }}" in assigned_workflow
     assert "POSTGRES_CONTAINER: ${{ job.services.db.id }}" in assigned_workflow
     assert "ALTER SYSTEM SET log_statement = 'ddl'" in assigned_workflow, "assigned execution owns PostgreSQL DDL evidence"
@@ -62,8 +72,11 @@ def validate(workflow: str, assigned_workflow: str) -> None:
     assert "needs.schema-generation.result" in required
     assert "needs.test.result" not in required and "require_success TEST " not in required
     for selected in ("true", "false"):
-        for label in ("SCHEMA", "INVENTORY", "ASSIGNMENT", "ASSIGNED", "RECEIPTS"):
+        for label in ("SCHEMA", "INVENTORY", "ASSIGNMENT", "RECEIPTS"):
             assert f'require_success {label} "${label}" {selected}' in required
+    for label, flag in (("ASSIGNED", "HAS_CORE"), ("E5", "HAS_E5")):
+        assert f'require_success {label} "${label}" "${flag}"' in required
+        assert f'require_success {label} "${label}" false' in required
 
 
 def main() -> int:

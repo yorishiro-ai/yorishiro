@@ -38,7 +38,7 @@
     "queue-postgres":{"database":"postgres","queue":"postgres","signed_licence":false},
     "redis":{"database":"sqlite","queue":"redis","signed_licence":false},
     "postgres-redis":{"database":"postgres","queue":"redis","signed_licence":false},
-    "resource-e5":{"database":"sqlite","queue":"sqlite","signed_licence":false,"requires":"pinned local E5 model/tokenizer assets and reference vectors; fail if absent"},
+    "resource-e5":{"database":"sqlite","queue":"sqlite","signed_licence":false,"requires_e5_cache":true,"requires":"pinned local E5 model/tokenizer assets and reference vectors; fail if absent"},
     "resource-live":{"database":"sqlite","queue":"sqlite","manual_external":true,"status":"opt-in-not-required","requires":"Explicitly configured private live endpoint; retained opt-in ignored coverage, never reported as passed by ordinary CI."}
   },
   "postgres_dedicated": [

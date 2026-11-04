@@ -36,8 +36,9 @@ def main() -> int:
     assert 'needs.assigned-tests.result' in required_check
     assert 'needs.assigned-test-verify.result' in required_check
     for needed in ("true", "false"):
-        assert f'require_success ASSIGNED "$ASSIGNED" {needed}' in required_check
         assert f'require_success RECEIPTS "$RECEIPTS" {needed}' in required_check
+    assert 'require_success ASSIGNED "$ASSIGNED" "$HAS_CORE"' in required_check
+    assert 'require_success E5 "$E5" "$HAS_E5"' in required_check
     assert 'uses: ./.github/workflows/assigned-tests.yml' in workflow
     assert 'scripts/run_assigned_tests.py verify' in workflow
     assert 'name: test-executables-${{ matrix.edition }}' in inventory
@@ -82,7 +83,9 @@ def main() -> int:
         workflow.replace("-d template1", "-d postgres", 1),
         workflow.replace("--workspace --doc --no-default-features", "--workspace --no-default-features", 1),
         workflow.replace("assert plan['execution_matrix_ready'], plan['cutover_blockers']", "pass", 1),
-        workflow.replace("matrix: ${{ needs.test-assignment-verify.outputs.matrix }}", "matrix: unverified", 1),
+        workflow.replace("matrix: ${{ needs.test-assignment-verify.outputs.core_matrix }}", "matrix: unverified", 1),
+        workflow.replace("needs: [changes, test-assignment-verify]\n", "needs: [changes, prepare-embedding, test-assignment-verify]\n", 1),
+        workflow.replace("matrix: ${{ needs.test-assignment-verify.outputs.e5_matrix }}", "matrix: unverified", 1),
         workflow.replace('require_success SCHEMA "$SCHEMA" true', 'require_success SCHEMA "$SCHEMA" false', 1),
         workflow.replace("prepare-embedding, schema-generation, public-contract-build", "prepare-embedding, public-contract-build", 1),
         workflow.replace('require_success RECEIPTS "$RECEIPTS" true', 'echo skip-receipts', 1),
