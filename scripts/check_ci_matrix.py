@@ -13,23 +13,28 @@ def job(workflow: str, name: str) -> str:
     return match[1]
 
 
-def validate(workflow: str, assigned_workflow: str) -> None:
+def validate(workflow: str, assigned_workflow: str, build_workflow: str | None = None) -> None:
+    if build_workflow is None:
+        build_workflow = (ROOT / ".github/workflows/test-build.yml").read_text()
     assert "\n  test:\n" not in workflow, "legacy full-suite matrix must not return"
     assert workflow.count("scripts/test_topology.py") == 1, "only the cheap mismatch probe may use the full-suite wrapper"
     check = job(workflow, "check")
     assert "python3 scripts/test_topology.py postgres-redis models::maintenance::" in check
     assert "DATABASE_URL: sqlite:" in check and 'grep -Fxq "YORISHIRO_TOPOLOGY_REJECTED"' in check
+    assert "minimum == configured == actual" in check, "validation must compile on the declared minimum compiler"
+    assert "\n  msrv:\n" not in workflow and "make check-ee" not in check
+    assert "make check-ce" not in job(workflow, "ce")
+    assert check.count("cargo clippy") == 1 and "--force-warn clippy::cognitive_complexity" in check
 
     schema = job(workflow, "schema-generation")
-    assert "${{ matrix.edition }}" in schema.splitlines()[0], "schema jobs must identify the edition"
-    assert "      matrix:\n        edition: [ce, ee]\n    env:" in schema, "schema generation has only an edition axis"
+    assert "matrix:" not in schema, "edition-neutral migrations need one PostgreSQL regeneration"
     for text in (
-        "needs: [changes, test-inventory]",
+        "needs: [changes, test-inventory-ce]",
         "needs.changes.outputs.rust_validation == 'true'",
         "DATABASE_URL: postgres://", "QUEUE_URL: postgres://", "LOCO_ENV: test_postgres",
         "image: pgvector/pgvector:pg18", "uses: ./.github/actions/rust-setup", "components: rustfmt",
-        "uses: ./.github/actions/sea-orm-cli", "name: test-executables-${{ matrix.edition }}",
-        'tar -xzf "$RUNNER_TEMP/executables/test-executables-$EDITION.tar.gz" target/debug/yorishiro',
+        "uses: ./.github/actions/sea-orm-cli", "name: test-executables-ce",
+        'tar -xzf "$RUNNER_TEMP/executables/test-executables-ce.tar.gz" target/debug/yorishiro',
         "NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE", "-d template1",
         "CREATE EXTENSION IF NOT EXISTS vector", "CREATE EXTENSION IF NOT EXISTS pg_trgm",
         "run: ./target/debug/yorishiro db migrate", "./target/debug/yorishiro db entities",
@@ -40,11 +45,20 @@ def validate(workflow: str, assigned_workflow: str) -> None:
     assert not re.search(r"redis|valkey|cargo (build|test|run)", schema, re.IGNORECASE), "schema generation must not run a runtime suite or rebuild the app"
     assert schema.index("-d template1") < schema.index("CREATE DATABASE yorishiro") < schema.index("run: ./target/debug/yorishiro db migrate") < schema.index("./target/debug/yorishiro db entities")
 
-    inventory = job(workflow, "test-inventory")
-    assert "edition: [ce, ee]" in inventory
-    assert 'cargo test --locked --workspace --doc --no-default-features --features "$features"' in inventory
-    assert 'features=community' in inventory and 'features=enterprise' in inventory
+    for edition in ("ce", "ee"):
+        inventory = job(workflow, f"test-inventory-{edition}")
+        assert "uses: ./.github/workflows/test-build.yml" in inventory
+        assert f"edition: {edition}" in inventory
+    assert 'cargo test --locked --workspace --doc --no-default-features --features "$features"' in build_workflow
+    assert "features=community" in build_workflow and "features=enterprise" in build_workflow
+    assert build_workflow.index("cargo build") < build_workflow.index("scripts/test_assignments.py collect")
+    assert "public-contract-binary-ce" in build_workflow and "if: inputs.edition == 'ce'" in build_workflow
+    assert "process_binary" in build_workflow
+    assert "\n  public-contract-build:\n" not in workflow
+    for consumer in ("public-contract", "schema-generation"):
+        assert "needs: [changes, test-inventory-ce]" in job(workflow, consumer), "CE consumers must not wait for EE"
     assignment = job(workflow, "test-assignment-verify")
+    assert "needs: [changes, test-inventory-ce, test-inventory-ee]" in assignment
     assert "scripts/test_assignments.py verify" in assignment
     assert "assert plan['execution_matrix_ready'], plan['cutover_blockers']" in assignment
     assigned = job(workflow, "assigned-tests")
@@ -72,7 +86,7 @@ def validate(workflow: str, assigned_workflow: str) -> None:
     assert "needs.schema-generation.result" in required
     assert "needs.test.result" not in required and "require_success TEST " not in required
     for selected in ("true", "false"):
-        for label in ("SCHEMA", "INVENTORY", "ASSIGNMENT", "RECEIPTS"):
+        for label in ("SCHEMA", "INVENTORY_CE", "INVENTORY_EE", "ASSIGNMENT", "RECEIPTS"):
             assert f'require_success {label} "${label}" {selected}' in required
     for label, flag in (("ASSIGNED", "HAS_CORE"), ("E5", "HAS_E5")):
         assert f'require_success {label} "${label}" "${flag}"' in required
@@ -81,7 +95,7 @@ def validate(workflow: str, assigned_workflow: str) -> None:
 
 def main() -> int:
     validate((ROOT / ".github/workflows/ci.yml").read_text(), (ROOT / ".github/workflows/assigned-tests.yml").read_text())
-    print("CI responsibilities: verified exact assignments, CE/EE schema generation and documentation tests")
+    print("CI responsibilities: verified edition builds, shared schema, exact execution and resource dependencies")
     return 0
 
 

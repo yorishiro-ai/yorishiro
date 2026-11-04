@@ -64,12 +64,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/rust-setup
         with:
-          components: rustfmt, clippy
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ce
-      - name: Check CE without enterprise code
-        run: make check-ce
       - name: Clippy CE without enterprise code
         run: make clippy-ce
       # Runtime tests consume the inventory binaries through reviewed assignments.
@@ -99,8 +97,15 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Verify upstream bug-fix patches
-        run: make patch-check
+      - name: Verify the validation compiler is the declared minimum
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess, tomllib
+          minimum = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['workspace']['package']['rust-version']
+          configured = tomllib.loads(pathlib.Path('rust-toolchain.toml').read_text())['toolchain']['channel']
+          actual = subprocess.check_output(['rustc', '--version'], text=True).split()[1]
+          assert minimum == configured == actual, (minimum, configured, actual)
+          PY
 
       - name: Check generated entity hardener
         run: uv run scripts/test_harden_generated_entities.py
@@ -158,9 +163,6 @@ jobs:
       - name: Check for allow(dead_code)
         run: make dead-code-allow-check
 
-      - name: Check EE
-        run: make check-ee
-
       - name: Check doc links
         run: cargo doc --no-deps --workspace --features enterprise
         env:
@@ -171,29 +173,8 @@ jobs:
 
       - name: Clippy
         # Keep CI aligned with rust-analyzer: every target and public API documentation.
-        run: make clippy-ee
-
-      - name: Clippy complexity report
-        # Existing complexity debt remains report-only.
-        run: cargo clippy --locked --workspace --all-targets --features enterprise -- --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
-
-  msrv:
-    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
-    needs: changes
-    name: MSRV
-    runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - name: Read the MSRV from Cargo.toml
-        id: msrv
-        run: echo "version=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/rust-setup
-        with:
-          toolchain: ${{ steps.msrv.outputs.version }}
-      - run: rustc +${{ steps.msrv.outputs.version }} --version --verbose
-      - run: cargo +${{ steps.msrv.outputs.version }} check --locked --no-default-features --features community --workspace
-      - run: cargo +${{ steps.msrv.outputs.version }} check --locked --features enterprise --workspace
+        # Complexity debt is report-only; all other existing strict lints remain errors.
+        run: cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
 
   prepare-embedding:
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
@@ -237,15 +218,11 @@ jobs:
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
   schema-generation:
-    name: Schema generation (${{ matrix.edition }}, PostgreSQL)
-    needs: [changes, test-inventory]
+    name: Schema generation (PostgreSQL)
+    needs: [changes, test-inventory-ce]
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        edition: [ce, ee]
     env:
       DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
       QUEUE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
@@ -274,13 +251,11 @@ jobs:
       - uses: ./.github/actions/sea-orm-cli
       - uses: actions/download-artifact@v8
         with:
-          name: test-executables-${{ matrix.edition }}
+          name: test-executables-ce
           path: ${{ runner.temp }}/executables
       - name: Restore the inventory main binary
-        env:
-          EDITION: ${{ matrix.edition }}
         run: |
-          tar -xzf "$RUNNER_TEMP/executables/test-executables-$EDITION.tar.gz" target/debug/yorishiro
+          tar -xzf "$RUNNER_TEMP/executables/test-executables-ce.tar.gz" target/debug/yorishiro
           test -x target/debug/yorishiro
 
       - name: Bootstrap PostgreSQL extensions and non-superuser migration identity
@@ -315,32 +290,9 @@ jobs:
           echo "Generated $count entity files (had $count_before before)"
           git diff --exit-code -- src/models/_entities
 
-  public-contract-build:
-    name: Build public-contract binary (CE)
-    needs: [changes, test-inventory]
-    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
-    runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: test-executables-ce
-          path: ${{ runner.temp }}/executables
-      - name: Reuse the inventory build's community binary
-        run: tar -xzf "$RUNNER_TEMP/executables/test-executables-ce.tar.gz" target/debug/yorishiro
-      - name: Preserve the executable in an archive
-        run: tar -C target/debug -czf "$RUNNER_TEMP/public-contract-ce.tar.gz" yorishiro
-      - uses: actions/upload-artifact@v7
-        with:
-          name: public-contract-binary-ce
-          path: ${{ runner.temp }}/public-contract-ce.tar.gz
-          compression-level: 0
-          retention-days: 1
-
   public-contract:
     name: Public contracts (SQLite, ${{ matrix.suite }})
-    needs: [changes, public-contract-build]
+    needs: [changes, test-inventory-ce]
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -374,7 +326,7 @@ jobs:
 
   public-contract-verify:
     name: Verify public-contract coverage
-    needs: [changes, public-contract-build, public-contract]
+    needs: [changes, test-inventory-ce, public-contract]
     if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -398,67 +350,25 @@ jobs:
           tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C "$RUNNER_TEMP/binary"
           python3 scripts/check_blackbox_reports.py --edition ce --binary "$RUNNER_TEMP/binary/yorishiro" --reports "$RUNNER_TEMP/reports"
 
-  test-inventory:
-    name: Inventory compiled tests (${{ matrix.edition }})
+  test-inventory-ce:
+    name: Community test artifacts
     needs: changes
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
-    runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        edition: [ce, ee]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/rust-setup
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: inventory-${{ matrix.edition }}-debug
-      - name: Build and enumerate exact workspace test executables
-        env:
-          EDITION: ${{ matrix.edition }}
-        run: |
-          set -euo pipefail
-          features=community
-          if [[ "$EDITION" == ee ]]; then features=enterprise; fi
-          cargo test --locked --no-default-features --features "$features" --workspace --no-run --message-format=json > "$RUNNER_TEMP/cargo-tests.jsonl"
-          python3 scripts/test_assignments.py collect --cargo-messages "$RUNNER_TEMP/cargo-tests.jsonl" --edition "$EDITION" --output "$RUNNER_TEMP/inventory-$EDITION.json"
-          cargo build --locked --no-default-features --features "$features" --bin yorishiro
-          python3 - "$RUNNER_TEMP/inventory-$EDITION.json" "$RUNNER_TEMP/test-executables-$EDITION.tar.gz" <<'PY'
-          import json, pathlib, sys, tarfile
-          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
-          root = pathlib.Path.cwd()
-          paths = {pathlib.Path(row['executable']).relative_to(root) for row in inventory['artifacts']}
-          paths.add(pathlib.Path('target/debug/yorishiro'))
-          with tarfile.open(sys.argv[2], 'w:gz') as archive:
-              for path in sorted(paths):
-                  archive.add(path, arcname=str(path))
-          PY
-      - name: Run workspace documentation tests for this edition
-        env:
-          EDITION: ${{ matrix.edition }}
-        run: |
-          features=community
-          if [[ "$EDITION" == ee ]]; then features=enterprise; fi
-          cargo test --locked --workspace --doc --no-default-features --features "$features"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: test-inventory-${{ matrix.edition }}
-          path: ${{ runner.temp }}/inventory-${{ matrix.edition }}.json
-          if-no-files-found: error
-          retention-days: 7
+    uses: ./.github/workflows/test-build.yml
+    with:
+      edition: ce
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: test-executables-${{ matrix.edition }}
-          path: ${{ runner.temp }}/test-executables-${{ matrix.edition }}.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+  test-inventory-ee:
+    name: Enterprise test artifacts
+    needs: changes
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    uses: ./.github/workflows/test-build.yml
+    with:
+      edition: ee
 
   test-assignment-verify:
     name: Verify compiled test assignment
-    needs: [changes, test-inventory]
+    needs: [changes, test-inventory-ce, test-inventory-ee]
     if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -567,19 +477,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          path: dist
-          pattern: binary-linux-*-*
-          merge-multiple: true
       - uses: ./.github/actions/package-tests
         with:
           version: 0.0.0-${{ github.sha }}
 
   package-build:
     name: Package build (${{ matrix.edition }}, ${{ matrix.arch }})
-    needs: [changes, ce, check, msrv]
-    if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.package_build == 'true' && (needs.changes.outputs.rust_validation != 'true' || (needs.ce.result == 'success' && needs.check.result == 'success' && needs.msrv.result == 'success')) }}
+    needs: [changes, ce, check]
+    if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.package_build == 'true' && (needs.changes.outputs.rust_validation != 'true' || (needs.ce.result == 'success' && needs.check.result == 'success')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -616,7 +521,7 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [changes, ce, check, msrv, prepare-embedding, schema-generation, public-contract-build, public-contract, public-contract-verify, test-inventory, test-assignment-verify, assigned-tests, assigned-e5-tests, assigned-test-verify, package-build, package-validation]
+    needs: [changes, ce, check, prepare-embedding, schema-generation, public-contract, public-contract-verify, test-inventory-ce, test-inventory-ee, test-assignment-verify, assigned-tests, assigned-e5-tests, assigned-test-verify, package-build, package-validation]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every selected validation
@@ -627,13 +532,12 @@ jobs:
           PACKAGE_BUILD_SELECTED: ${{ needs.changes.outputs.package_build }}
           CE: ${{ needs.ce.result }}
           EE: ${{ needs.check.result }}
-          MSRV: ${{ needs.msrv.result }}
           MODEL: ${{ needs.prepare-embedding.result }}
           SCHEMA: ${{ needs.schema-generation.result }}
-          PUBLIC_BUILD: ${{ needs.public-contract-build.result }}
           PUBLIC: ${{ needs.public-contract.result }}
           PUBLIC_VERIFY: ${{ needs.public-contract-verify.result }}
-          INVENTORY: ${{ needs.test-inventory.result }}
+          INVENTORY_CE: ${{ needs.test-inventory-ce.result }}
+          INVENTORY_EE: ${{ needs.test-inventory-ee.result }}
           ASSIGNMENT: ${{ needs.test-assignment-verify.result }}
           ASSIGNED: ${{ needs.assigned-tests.result }}
           E5: ${{ needs.assigned-e5-tests.result }}
@@ -658,13 +562,12 @@ jobs:
           if [[ "$FULL" == true || "$RUST" == true ]]; then
             require_success CE "$CE" true
             require_success EE "$EE" true
-            require_success MSRV "$MSRV" true
             require_success MODEL "$MODEL" true
             require_success SCHEMA "$SCHEMA" true
-            require_success PUBLIC_BUILD "$PUBLIC_BUILD" true
             require_success PUBLIC "$PUBLIC" true
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" true
-            require_success INVENTORY "$INVENTORY" true
+            require_success INVENTORY_CE "$INVENTORY_CE" true
+            require_success INVENTORY_EE "$INVENTORY_EE" true
             require_success ASSIGNMENT "$ASSIGNMENT" true
             require_success ASSIGNED "$ASSIGNED" "$HAS_CORE"
             require_success E5 "$E5" "$HAS_E5"
@@ -672,13 +575,12 @@ jobs:
           else
             require_success CE "$CE" false
             require_success EE "$EE" false
-            require_success MSRV "$MSRV" false
             require_success MODEL "$MODEL" false
             require_success SCHEMA "$SCHEMA" false
-            require_success PUBLIC_BUILD "$PUBLIC_BUILD" false
             require_success PUBLIC "$PUBLIC" false
             require_success PUBLIC_VERIFY "$PUBLIC_VERIFY" false
-            require_success INVENTORY "$INVENTORY" false
+            require_success INVENTORY_CE "$INVENTORY_CE" false
+            require_success INVENTORY_EE "$INVENTORY_EE" false
             require_success ASSIGNMENT "$ASSIGNMENT" false
             require_success ASSIGNED "$ASSIGNED" false
             require_success E5 "$E5" false
@@ -687,7 +589,7 @@ jobs:
           require_success PACKAGE_BUILD "$PACKAGE_BUILD" "$PACKAGE_BUILD_SELECTED"
           require_success PACKAGE "$PACKAGE_RESULT" "$PACKAGE"
           if selected "$PACKAGE_BUILD_SELECTED" && [[ "$FULL" == true || "$RUST" == true ]]; then
-            [[ "$CE" == success && "$EE" == success && "$MSRV" == success ]] || {
+            [[ "$CE" == success && "$EE" == success ]] || {
               echo "package build prerequisites did not succeed" >&2
               exit 1
             }

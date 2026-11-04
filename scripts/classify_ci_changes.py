@@ -112,12 +112,12 @@ def selected_job_succeeded(result: str, selected: bool) -> bool:
     return result == ("success" if selected else "skipped")
 
 
-def package_build_allowed(package_selected: bool, rust_selected: bool, changes_result: str, ce_result: str, ee_result: str, msrv_result: str) -> bool:
+def package_build_allowed(package_selected: bool, rust_selected: bool, changes_result: str, ce_result: str, ee_result: str) -> bool:
     """Select package builds independently, but require Rust checks when both groups apply."""
     return (
         changes_result == "success"
         and package_selected
-        and (not rust_selected or (ce_result == ee_result == msrv_result == "success"))
+        and (not rust_selected or (ce_result == ee_result == "success"))
     )
 
 

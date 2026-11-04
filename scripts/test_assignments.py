@@ -196,8 +196,11 @@ def collect(messages, edition, manifest, root=ROOT, run=command):
     host = re.search(r"^host: (\S+)$", rustc, re.MULTILINE)
     require(host is not None, "missing rustc host triple")
     require(os.environ.get("CARGO_BUILD_TARGET", host[1]) == host[1], "inventory collection supports native builds only")
+    binary = (root / "target/debug/yorishiro").resolve()
+    require(binary.is_file() and os.access(binary, os.X_OK), "missing/non-executable process binary")
     return {"schema": 1, "edition": edition, "revision": run(["git", "rev-parse", "HEAD"]).strip(),
-            "rustc": rustc, "target_triple": host[1], "source_guard": manifest["source_guard"],
+             "rustc": rustc, "target_triple": host[1], "source_guard": manifest["source_guard"],
+             "process_binary": {"executable": str(binary), "sha256": file_digest(binary)},
             "manifest_sha256": digest(json.dumps(manifest, sort_keys=True).encode()), "artifacts": compiled}
 
 
@@ -233,10 +236,16 @@ def verify(ce, ee, manifest, root=ROOT):
             and ce["target_triple"] == ee["target_triple"], "CE/EE build provenance differs")
     inventories = {}
     artifact_records = []
+    process_binaries = []
     for edition, inventory in (("ce", ce), ("ee", ee)):
         require(inventory["schema"] == 1 and inventory["edition"] == edition, "wrong inventory edition/schema")
         require(inventory["source_guard"] == manifest["source_guard"], "inventory source guard differs")
         require(inventory["manifest_sha256"] == digest(json.dumps(manifest, sort_keys=True).encode()), "inventory manifest differs")
+        binary = inventory.get("process_binary", {})
+        require(re.fullmatch(r"[0-9a-f]{64}", binary.get("sha256", "")) and
+                Path(binary.get("executable", "")).parts[-3:] == ("target", "debug", "yorishiro"),
+                "missing/invalid process binary provenance")
+        process_binaries.append({"edition": edition, **binary})
         seen_targets = set()
         names = {}
         for artifact in inventory["artifacts"]:
@@ -342,7 +351,8 @@ def verify(ce, ee, manifest, root=ROOT):
                                         manifest["jobs"][job].get("manual_external") for job in entry["jobs"]
                                         ) else "required-execution-receipt"}
                                    for entry in assignments if entry["role"] == "resource"],
-            "artifacts": artifact_records, "jobs": manifest["jobs"], "revision": ce["revision"],
+             "artifacts": artifact_records, "process_binaries": process_binaries,
+             "jobs": manifest["jobs"], "revision": ce["revision"],
             "resource_contracts_are_not_execution_evidence": True}
 
 

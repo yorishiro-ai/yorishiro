@@ -23,10 +23,16 @@ class AssignedExecutionTests(unittest.TestCase):
         self.binary.parent.mkdir(parents=True)
         self.binary.write_text("not an executable test program")
         self.binary.chmod(0o700)
+        self.program = self.root / "target/debug/yorishiro"
+        self.program.write_text("synthetic CLI, never executed")
+        self.program.chmod(0o700)
         self.manifest = {"jobs": {"common-sqlite": {"database": "sqlite", "queue": "sqlite", "signed_licence": False}}}
         self.plan = {"schema": 1, "inventory_valid": True, "revision": "synthetic-revision",
                      "jobs": self.manifest["jobs"], "pending_splits": [], "helpers": [], "assignments": [], "artifacts": []}
         self.plan["manifest_sha256"] = runner.fingerprint(self.manifest)
+        self.plan["process_binaries"] = [
+            {"edition": edition, "executable": "/old/build/target/debug/yorishiro",
+             "sha256": runner.inventory.file_digest(self.program)} for edition in ("ce", "ee")]
         for edition in ("ce", "ee"):
             self.plan["artifacts"].append({"edition": edition, "package": "yorishiro", "target": "mod", "kind": "test",
                                            "executable": "/old/build/target/debug/deps/mod-synthetic",
@@ -89,6 +95,17 @@ class AssignedExecutionTests(unittest.TestCase):
             return self.fake_process(argv, env, deadline, log)
 
         self.assertEqual(self.execute(run=checked)["status"], "passed")
+
+    def test_process_binary_hash_is_checked_before_any_test_process(self):
+        self.program.write_text("different CLI")
+        with self.assertRaisesRegex(ValueError, "binary hash"):
+            self.execute()
+        self.assertEqual(self.calls, [])
+
+    def test_process_binary_is_required_for_both_editions(self):
+        self.plan["process_binaries"].pop()
+        with self.assertRaisesRegex(ValueError, "process binary editions"):
+            self.execute()
 
     def postgres(self):
         self.plan["jobs"]["common-sqlite"].update(database="postgres", queue="postgres")

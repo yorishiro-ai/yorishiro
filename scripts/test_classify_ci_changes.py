@@ -109,10 +109,11 @@ def test_package_and_docker_groups_are_independent() -> None:
 
 
 def test_package_build_prerequisite_selection() -> None:
-    assert package_build_allowed(True, False, "success", "skipped", "skipped", "skipped")
-    assert not package_build_allowed(True, True, "success", "success", "failure", "success")
-    assert not package_build_allowed(True, False, "cancelled", "skipped", "skipped", "skipped")
-    assert not package_build_allowed(False, False, "success", "skipped", "skipped", "skipped")
+    assert package_build_allowed(True, False, "success", "skipped", "skipped")
+    assert package_build_allowed(True, True, "success", "success", "success")
+    assert not package_build_allowed(True, True, "success", "success", "failure")
+    assert not package_build_allowed(True, False, "cancelled", "skipped", "skipped")
+    assert not package_build_allowed(False, False, "success", "skipped", "skipped")
 
 
 if __name__ == "__main__":

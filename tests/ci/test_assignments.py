@@ -33,11 +33,13 @@ class InventoryGuardTests(unittest.TestCase):
             "config/test_sqlite.yaml": "database: sqlite\n",
             "tests/fixtures/example.json": "{}\n",
             "fake-test-executable": "never executed",
+            "target/debug/yorishiro": "synthetic process binary",
         }
         for name, content in files.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
+        (self.root / "target/debug/yorishiro").chmod(0o700)
         self.manifest = {
             "targets": [
                 {"package": "yorishiro", "target": "mod", "kind": "test", "source": "tests/mod.rs", "allow_zero": False},
@@ -65,6 +67,7 @@ class InventoryGuardTests(unittest.TestCase):
                             "sha256": "0" * 64, "profile": {"test": True},
                             "tests": names[:] if target["kind"] == "test" else [], "ignored": []})
         return {"schema": 1, "edition": edition, "revision": "synthetic-revision", "rustc": "synthetic-rustc", "target_triple": "synthetic-host",
+                "process_binary": {"executable": str(self.root / "target/debug/yorishiro"), "sha256": "1" * 64},
                 "source_guard": self.manifest["source_guard"],
                 "manifest_sha256": guard.digest(json.dumps(self.manifest, sort_keys=True).encode()), "artifacts": records}
 
@@ -89,6 +92,7 @@ class InventoryGuardTests(unittest.TestCase):
         self.assertTrue(report["execution_matrix_ready"])
         self.assertNotIn("execution_receipts", report)
         self.assertEqual(report["manifest_sha256"], self.ce["manifest_sha256"])
+        self.assertEqual([row["edition"] for row in report["process_binaries"]], ["ce", "ee"])
         self.assertTrue(report["execution_matrix"]["include"])
         owners = [(r["name"], r["owner"], r["role"]) for r in report["assignments"]]
         self.assertIn(("common::ordinary", "ce", "common"), owners)
@@ -138,6 +142,12 @@ class InventoryGuardTests(unittest.TestCase):
     def test_wrong_artifact_features(self):
         self.ce["artifacts"][0]["features"].append("enterprise")
         self.rejects("wrong artifact edition")
+
+    def test_process_binary_provenance_is_mandatory(self):
+        for binary in ({}, {"sha256": "1" * 64, "executable": "/tmp/other"}):
+            with self.subTest(binary=binary):
+                self.ce["process_binary"] = binary
+                self.rejects("process binary provenance")
 
     def test_unknown_compiled_identity_under_common_prefix(self):
         self.ce["artifacts"][0]["tests"].append("common::unknown")
@@ -277,6 +287,7 @@ class InventoryGuardTests(unittest.TestCase):
 
         result = guard.collect(messages, "ce", self.manifest, self.root, fake_run)
         self.assertEqual(len(result["artifacts"]), 3)
+        self.assertEqual(result["process_binary"]["sha256"], guard.digest(b"synthetic process binary"))
         self.assertEqual(result["artifacts"][0]["sha256"], guard.digest(b"never executed"))
         self.assertEqual(sum("--list" in argv for argv in calls), 6)
         self.assertEqual(sum("--ignored" in argv for argv in calls), 3)

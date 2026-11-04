@@ -14,8 +14,14 @@ Assignment-driven execution passed GHA at `5730011b` before retiring the legacy 
 Mixed common/backend tests now have separate identities, including distinct-tenant assertions in the PostgreSQL cases.
 CE and EE test executables are built once per edition and archived with the main binary for native Ubuntu 26.04 consumers.
 Public contracts reuse the CE main binary instead of rebuilding it.
+Independent CE and EE producers share `test-build.yml`, but CE public contracts and schema regeneration do not wait for the EE build.
+The CE producer publishes the small public binary archive directly, without a download/repack job.
+Migration definitions have no edition features, so one PostgreSQL regeneration checks their shared schema while SQLite migration contracts remain assigned tests.
+CE and EE strict Clippy both compile on the declared minimum compiler; validation rejects disagreement between that compiler and `rust-toolchain.toml` instead of repeating identical MSRV builds.
 `assigned-tests.yml` provisions only the selected PostgreSQL or Redis service and runs the exact selected identities.
 `run_assigned_tests.py` checks binary hashes and listing completeness before execution, then requires successful execution receipts for every assigned identity/topology.
+Both inventories also record the ordinary CLI executable hash.
+Consumers verify that main binary before launching any test, including tests that spawn it through `CARGO_BIN_EXE_yorishiro`.
 Assigned backend/provider mismatches fail instead of returning a green test with no assertions.
 Known resource-dependent tests and subprocess helpers must remain visible in the inventory rather than disappear through a broad ignore rule.
 Pinned E5 model and reference contracts are mandatory; the pre-existing private live-endpoint smoke remains explicitly opt-in and is never counted as passed by ordinary CI.

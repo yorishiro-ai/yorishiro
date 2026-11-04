@@ -20,8 +20,7 @@ def main() -> int:
     assert "FROM almalinux:10" in (ROOT / ".github/packaging/Dockerfile").read_text()
     package_action = (ROOT / ".github/actions/build-and-package/action.yml").read_text()
     assert 'RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"' in package_action
-    inventory = workflow.split("\n  test-inventory:\n", 1)[1].split("\n  test-assignment-verify:\n", 1)[0]
-    assert "edition: [ce, ee]" in inventory
+    inventory = (ROOT / ".github/workflows/test-build.yml").read_text()
     assert '--workspace --no-run --message-format=json' in inventory
     assert "scripts/test_assignments.py collect" in inventory
     assignment = workflow.split("\n  test-assignment-verify:\n", 1)[1].split("\n  package-validation:\n", 1)[0]
@@ -29,9 +28,11 @@ def main() -> int:
     assert "scripts/test_assignments.py verify" in assignment
     assert 'inventory-ce.json' in assignment and 'inventory-ee.json' in assignment
     required_check = workflow.split("\n  required-check:\n", 1)[1]
-    assert 'needs.test-inventory.result' in required_check
+    assert 'needs.test-inventory-ce.result' in required_check
+    assert 'needs.test-inventory-ee.result' in required_check
     assert 'needs.test-assignment-verify.result' in required_check
-    assert 'require_success INVENTORY "$INVENTORY" true' in required_check
+    for edition in ("CE", "EE"):
+        assert f'require_success INVENTORY_{edition} "$INVENTORY_{edition}" true' in required_check
     assert 'require_success ASSIGNMENT "$ASSIGNMENT" true' in required_check
     assert 'needs.assigned-tests.result' in required_check
     assert 'needs.assigned-test-verify.result' in required_check
@@ -41,7 +42,7 @@ def main() -> int:
     assert 'require_success E5 "$E5" "$HAS_E5"' in required_check
     assert 'uses: ./.github/workflows/assigned-tests.yml' in workflow
     assert 'scripts/run_assigned_tests.py verify' in workflow
-    assert 'name: test-executables-${{ matrix.edition }}' in inventory
+    assert 'name: test-executables-${{ inputs.edition }}' in inventory
     assert "Verify shared requests models and workers do not create databases" not in workflow
     assert "-- requests:: models:: workers::" not in workflow
     assert "ALTER SYSTEM SET log_statement = 'ddl'" in assigned_workflow
@@ -71,9 +72,9 @@ def main() -> int:
     assert 'PR_NUMBER: ${{ github.event.pull_request.number }}' in job
     violations = [
         workflow + "\n  test:\n    name: Legacy full suite\n",
-        workflow.replace("        edition: [ce, ee]", "        edition: [ce]", 1),
-        workflow.replace("        edition: [ce, ee]", "        edition: [ce, ee]\n        queue: [postgres, redis]", 1),
-        workflow.replace("Schema generation (${{ matrix.edition }}", "Schema generation (hidden-edition", 1),
+        workflow.replace("      edition: ee", "      edition: ce", 1),
+        workflow.replace("    name: Schema generation (PostgreSQL)", "    matrix: [ce, ee]\n    name: Schema generation (PostgreSQL)", 1),
+        workflow.replace("minimum == configured == actual", "True", 1),
         workflow.replace("uses: ./.github/actions/sea-orm-cli", "uses: missing-cli", 1),
         workflow.replace("components: rustfmt\n", "components: clippy\n", 1),
         workflow.replace('if [ "$count" -lt 10 ]', 'if [ "$count" -lt 0 ]', 1),
@@ -81,13 +82,12 @@ def main() -> int:
         workflow.replace("git diff --exit-code -- src/models/_entities", "echo skip-diff", 1),
         workflow.replace("NOSUPERUSER NOBYPASSRLS", "SUPERUSER BYPASSRLS", 1),
         workflow.replace("-d template1", "-d postgres", 1),
-        workflow.replace("--workspace --doc --no-default-features", "--workspace --no-default-features", 1),
         workflow.replace("assert plan['execution_matrix_ready'], plan['cutover_blockers']", "pass", 1),
         workflow.replace("matrix: ${{ needs.test-assignment-verify.outputs.core_matrix }}", "matrix: unverified", 1),
         workflow.replace("needs: [changes, test-assignment-verify]\n", "needs: [changes, prepare-embedding, test-assignment-verify]\n", 1),
         workflow.replace("matrix: ${{ needs.test-assignment-verify.outputs.e5_matrix }}", "matrix: unverified", 1),
         workflow.replace('require_success SCHEMA "$SCHEMA" true', 'require_success SCHEMA "$SCHEMA" false', 1),
-        workflow.replace("prepare-embedding, schema-generation, public-contract-build", "prepare-embedding, public-contract-build", 1),
+        workflow.replace("prepare-embedding, schema-generation, public-contract", "prepare-embedding, public-contract", 1),
         workflow.replace('require_success RECEIPTS "$RECEIPTS" true', 'echo skip-receipts', 1),
         workflow.replace('grep -Fxq "YORISHIRO_TOPOLOGY_REJECTED"', 'grep -Fxq "unrelated-error"', 1),
         workflow + "\n# python3 scripts/test_topology.py postgres-postgres\n",
@@ -98,6 +98,16 @@ def main() -> int:
         except AssertionError:
             continue
         raise AssertionError("CI responsibility gate accepted a deliberate violation")
+    for invalid in (
+        inventory.replace("--workspace --doc --no-default-features", "--workspace --no-default-features", 1),
+        inventory.replace("public-contract-binary-ce", "missing-binary", 1),
+        inventory.replace("if: inputs.edition == 'ce'", "if: inputs.edition == 'ee'"),
+    ):
+        try:
+            validate(workflow, assigned_workflow, invalid)
+        except AssertionError:
+            continue
+        raise AssertionError("CI gate accepted invalid edition artifact production")
     for invalid in (
         assigned_workflow.replace("matrix: ${{ fromJSON(inputs.matrix) }}", "matrix: unverified", 1),
         assigned_workflow.replace("POSTGRES_CONTAINER: ${{ job.services.db.id }}", "POSTGRES_CONTAINER: missing"),

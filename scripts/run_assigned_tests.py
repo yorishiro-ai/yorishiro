@@ -105,6 +105,13 @@ def provenance(plan, manifest):
             require(identity not in expected, "duplicate assignment")
             expected[identity] = row
     require(expected, "zero required assignment identities")
+    programs = plan.get("process_binaries", [])
+    require(len(programs) == 2 and {row["edition"] for row in programs} == {"ce", "ee"},
+            "missing/duplicate process binary editions")
+    for program in programs:
+        require(re.fullmatch(r"[0-9a-f]{64}", program["sha256"]) and
+                Path(program["executable"]).parts[-3:] == ("target", "debug", "yorishiro"),
+                "invalid process binary provenance")
     postgres_dedicated(plan, manifest)
     if "execution_matrix" in plan:
         cells = plan["execution_matrix"]["include"]
@@ -117,7 +124,8 @@ def provenance(plan, manifest):
         require(any(row["owner"] == helper["owner"] and key(row, TARGET) == key(helper, TARGET)
                     and row["name"] == helper["parent"] for row in plan["assignments"]), "helper parent not assigned")
     return {"revision": plan["revision"], "assignments_sha256": fingerprint(plan),
-            "manifest_sha256": manifest_hash,
+             "manifest_sha256": manifest_hash,
+             "process_binaries_sha256": fingerprint(programs),
             "inventory_sha256": fingerprint(plan["artifacts"])}, artifacts, expected
 
 
@@ -173,11 +181,11 @@ def topology_environment(job, edition, env):
                  "loco_env": expected_env, "strict": True}
 
 
-def relocated_binary(artifact, root):
+def relocated_binary(artifact, root, layout=("target", "debug", "deps")):
     original = Path(artifact["executable"])
-    require(original.parent.parts[-3:] == ("target", "debug", "deps"), "non-native inventory executable path")
+    require(original.parent.parts[-len(layout):] == layout, "non-native inventory executable path")
     root = Path(root).resolve()
-    path = (root / "target/debug/deps" / original.name).resolve()
+    path = (root.joinpath(*layout) / original.name).resolve()
     require(path.is_relative_to(root), "artifact escapes download directory")
     require(path.is_file() and os.access(path, os.X_OK), "missing/non-executable downloaded binary")
     require(inventory.file_digest(path) == artifact["sha256"], "downloaded binary hash differs")
@@ -308,6 +316,8 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
     # Include zero-test artifacts in download verification, but never execute them as coverage.
     binaries = {identity[1:]: relocated_binary(artifact, binary_root)
                 for identity, artifact in artifacts.items() if identity[0] == edition}
+    program = next(row for row in plan["process_binaries"] if row["edition"] == edition)
+    relocated_binary(program, binary_root, ("target", "debug"))
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     logs = Path(artifacts_dir)
