@@ -1,7 +1,7 @@
 use futures::FutureExt;
 use loco_rs::app::Hooks;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement};
+use sea_orm::{ConnectionTrait, Database, DatabaseBackend, EntityTrait, Statement};
 use yorishiro::App;
 
 async fn race_migrations(url: &str) {
@@ -57,11 +57,19 @@ async fn concurrent_first_sqlite_migrations_serialize_before_reading_versions() 
     }
     yorishiro::db::register_sqlite_extensions();
     let directory = tempfile::tempdir().unwrap();
-    race_migrations(&format!(
+    let uri = format!(
         "sqlite://{}?mode=rwc",
         directory.path().join("migrations.sqlite").display()
-    ))
-    .await;
+    );
+    race_migrations(&uri).await;
+    let db = Database::connect(&uri).await.unwrap();
+    let state = yorishiro::models::timezone_state::Entity::find_by_id(1)
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("migration seeds the timezone singleton");
+    assert_eq!(state.active_timezone, "UTC");
+    db.close().await.unwrap();
 }
 
 #[tokio::test]

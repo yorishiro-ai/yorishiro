@@ -64,21 +64,3 @@ where
     }
     false
 }
-
-/// Checks whether a work command may proceed with the persisted active timezone.
-///
-/// # Errors
-/// Returns an error when a gated command has no persisted timezone state.
-pub fn cli_timezone_gate_result<I, T>(args: I, active_timezone: Option<&str>) -> Result<()>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString>,
-{
-    if cli_requires_timezone_gate(args) && active_timezone.is_none() {
-        return Err(loco_rs::Error::Message(
-            "timezone_state singleton missing; run `db migrate` before executing tasks or workers"
-                .into(),
-        ));
-    }
-    Ok(())
-}
