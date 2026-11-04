@@ -43,6 +43,13 @@ Every suite checks CLI key issuance, REST and MCP acceptance, CLI revocation, an
 | `mcp` | Same CRUD through MCP, cross-checked through REST; initialize/session header/initialized notification, tool discovery, authentication protocol errors, scope tool errors, invalid UUID argument-deserialization tool error, missing schema arguments |
 | `cli` | Registered bootstrap/key tasks, unknown flag/task, missing/invalid/malformed arguments, success/failure exits and diagnostics, UUID and one-time credential stdout, key listing without plaintext, revoked ID retained in listing and REST rejection |
 
+`cli.human-key-management` creates an Owner invite through the CLI, accepts it through public signup and issues a user-attributed Schema key through the CLI.
+REST and MCP identity readback must name that human.
+An expiring delegated Read key cannot raise scope, add audit, omit its expiry ceiling or extend it through either transport; an unattributed service key cannot delegate management credentials.
+MCP rotation must preserve grant metadata, invalidate the predecessor through both transports and retain its successor link in secret-free REST/MCP history.
+REST revocation invalidates the successor through both transports and retains terminal history; a second rotation of the predecessor returns HTTP 409.
+These sequential contracts supplement, not replace, the internal issuance/revocation race and deterministic expiry tests.
+
 Schemas are versioned rather than updated in place, so this batch exercises creation, reads, archive and deletion, not schema version evolution.
 The shared fixture is an inline schema with one required string field.
 The additional `rest.relation-export-import-worker` and `mcp.relation-export-import-worker` scenarios share one implementation with thin transport adapters.

@@ -40,6 +40,7 @@ def redact(text, secrets=()):
     for secret in sorted(filter(None, secrets), key=len, reverse=True):
         text = text.replace(secret, "[REDACTED]")
     text = re.sub(r"ysr_[A-Za-z0-9_-]+", "[REDACTED]", text)
+    text = re.sub(r"(invite token \(shown once\):\s*)[^\s\\]+", r"\1[REDACTED]", text)
     text = re.sub(r"(?i)(Bearer\s+)[^\s\"'\\,}]+", r"\1[REDACTED]", text)
     return text
 
@@ -766,6 +767,66 @@ def cli_suite(app):
     app.rest("GET", "/api/schemas", key=key, status=401)
 
 
+def human_key_management(app):
+    password = "blackbox-owned-password"
+    app.secrets.append(password)
+    invitation = app.task("create_invite", tenant_id=app.tenant,
+                          email="owner@example.invalid", role="owner")
+    token = output_field(invitation, "invite token (shown once)")
+    app.secrets.append(token)
+    account = app.rest("POST", "/auth/signup", {"invite_token": token, "password": password}, status=201)
+    require(account["tenant_id"] == app.tenant and account["role"] == "owner", "invite attribution lost")
+    issued = app.task("create_api_key", workspace_id=app.workspace, scope="schema",
+                      user_id=account["user_id"])
+    owner = output_field(issued, "api key (shown once)")
+    app.secrets.append(owner)
+    client = MCP(app, owner)
+    for identity in (app.rest("GET", "/api/whoami", key=owner), client.call("whoami")):
+        require(identity["user_id"] == account["user_id"] and identity["identity_kind"] == "user",
+                "CLI credential is not attributed to the invited human")
+
+    expiry = "2090-01-01T00:00:00Z"
+    original = app.rest("POST", "/api/api-keys", {
+        "name": "bounded-read", "scope": "read", "expires_at": expiry,
+    }, status=201, key=owner)
+    app.secrets.append(original["full_key"])
+    reader = MCP(app, original["full_key"])
+    require(reader.call("whoami")["user_id"] == account["user_id"], "delegated key lost attribution")
+    for body in ({"name": "scope-escalation", "scope": "write", "expires_at": expiry},
+                 {"name": "audit-escalation", "audit": True, "expires_at": expiry},
+                 {"name": "unlimited"},
+                 {"name": "longer", "expires_at": "2090-01-02T00:00:00Z"}):
+        app.rest("POST", "/api/api-keys", body, status=403, key=original["full_key"])
+        reader.call("create_api_key", body, error=True)
+    app.rest("POST", "/api/api-keys", {"name": "service-denied"}, status=403)
+
+    successor = client.call("rotate_api_key", {"key_id": original["id"]})
+    app.secrets.append(successor["full_key"])
+    require(successor["id"] != original["id"] and successor["full_key"] != original["full_key"],
+            "rotation did not replace the credential")
+    for field in ("scope", "audit", "workspace_id", "tenant_id", "user_id", "expires_at"):
+        require(original[field] == successor[field], f"rotation changed {field}")
+    app.rest("GET", "/api/whoami", key=original["full_key"], status=401)
+    reader.call("whoami", error=True)
+    successor_client = MCP(app, successor["full_key"])
+    require(successor_client.call("whoami")["scope"] == "read", "successor is unusable")
+    app.rest("POST", f"/api/api-keys/{original['id']}/rotate", status=409, key=owner)
+    app.rest("DELETE", f"/api/api-keys/{successor['id']}", status=204, key=owner)
+    app.rest("GET", "/api/whoami", key=successor["full_key"], status=401)
+    successor_client.call("whoami", error=True)
+    for history in (app.rest("GET", "/api/api-keys", key=owner)["keys"], client.call("list_api_keys")["keys"]):
+        records = {record["id"]: record for record in history}
+        require(records[original["id"]]["replaced_by_id"] == successor["id"], "rotation history missing")
+        for key in (original, successor):
+            record = records[key["id"]]
+            require(record["state"] == "revoked" and record["effective_scope"] is None,
+                    "revoked key history is not terminal")
+        serialized = json.dumps(history)
+        require("full_key" not in serialized and "key_hash" not in serialized
+                and all(key["full_key"] not in serialized for key in (original, successor)),
+                "key history exposes secrets")
+
+
 def scenarios(suite):
     common = [("server.bootstrap", lambda app: app.boot()),
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
@@ -777,7 +838,8 @@ def scenarios(suite):
         "mcp": [("mcp.schema-entity-crud", lambda app: crud(app, "mcp")),
                 ("mcp.relation-export-import-worker", lambda app: relation_export_import_worker(app, "mcp")),
                 ("mcp.discovery-auth-scope-input", mcp_suite)],
-        "cli": [("cli.arguments-tasks-stdout-effects", cli_suite)],
+        "cli": [("cli.arguments-tasks-stdout-effects", cli_suite),
+                ("cli.human-key-management", human_key_management)],
     }
     return common + focused[suite]
 

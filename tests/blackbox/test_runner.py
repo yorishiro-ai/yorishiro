@@ -93,6 +93,10 @@ class RedactionTests(unittest.TestCase):
     def test_nonsecret_text_unchanged(self):
         self.assertEqual(run.redact("HTTP 401 schema not found"), "HTTP 401 schema not found")
 
+    def test_invite_stdout_redacted_before_parsing_registers_secret(self):
+        for text in ("invite token (shown once): opaque-token\n", json.dumps({"stdout": "invite token (shown once): opaque-token\n"})):
+            self.assertNotIn("opaque-token", run.redact(text))
+
 
 class ArgumentTests(unittest.TestCase):
     def arguments(self, binary=None):
