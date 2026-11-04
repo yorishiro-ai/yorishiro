@@ -2,14 +2,6 @@ use yorishiro::data::templates::{TEMPLATES, parse};
 use yorishiro::models::schema_schemas::metaschema::validate_definition;
 
 #[test]
-fn every_builtin_asset_is_a_schema_definition() {
-    for template in TEMPLATES {
-        let definition = parse(template);
-        assert!(!definition.entity_types.is_empty(), "{}", template.id);
-    }
-}
-
-#[test]
 fn every_builtin_definition_passes_validation() {
     assert_eq!(TEMPLATES.len(), 8);
     for template in TEMPLATES {

@@ -11,9 +11,9 @@
   ],
   "source_guard": {
     ".cargo/config.toml": "0e69d92faa2874685d4439f53254384399e451afa5b406c41e4747ff66d0ae38",
-    "tests": "95b549b9bae53dc5a0a0244e655c69ba1ea5c21540514ac5e98e2e1ba9da0ff9",
-    "src": "c986625f1178badb5e016feb5a8e9d784b87693f2a2937e21da6085864489213",
-    "ee": "7e874a987fbc5d99c92f030bf360fe2ddf620d84f631266e1cb60f251206fe34",
+    "tests": "4320f49d5bfe1f6b6dc1aea943523b4a83649b1ded17a10ec7dc219927d362c6",
+    "src": "c7af8e69f78087280689bea0ce24dae7564b74ed0f9f6d2ba5662f5cab0b3205",
+    "ee": "b9cc28a9d21c096f62f0ae5440fedf07a6caea17638c1bbd76e539307eaa490d",
     "migration": "bfc33b13174b657b728299c0d4c0e7eef9b3035014e1073bf81840d29adf7918",
     "Cargo.toml": "c3e03bd1dfa5169fcfc97c1aeb119b4376b31c5ea7ef6ea2eb26c532f5ea0854",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
@@ -38,6 +38,7 @@
     "resource-live":{"database":"sqlite","queue":"sqlite","manual_external":true,"status":"opt-in-not-required","requires":"Explicitly configured private live endpoint; retained opt-in ignored coverage, never reported as passed by ordinary CI."}
   },
   "postgres_dedicated": [
+    {"name":"ee::tasks::reindex_scheduler::postgres_tick_waits_for_disable_and_rechecks_tenant_activity","source":"tests/ee/tasks/reindex_scheduler.rs"},
     {"name":"db::migrations::concurrent_first_postgres_migrations_use_one_connection_each","source":"tests/db/migrations.rs"},
     {"name":"initializers::shutdown::shutdown_hook_keeps_database_available_until_loco_drains_workers","source":"tests/initializers/shutdown.rs"},
     {"name":"timezone_state::postgres_app_pool_uses_configured_timezone_on_new_and_released_connections","source":"tests/timezone_state.rs"},
@@ -58,6 +59,7 @@
     {"name":"requests::queue::configured_queue_orders_competing_jobs_by_priority","source":"tests/requests/queue.rs"}
   ],
   "common_modules": [
+    {"module":"models::compute_credit_ledger","source":"tests/models/compute_credit_ledger.rs"},
     {"module":"config::load","source":"tests/config/load.rs"},
     {"module":"config::local_embedding_resolution","source":"tests/config/local_embedding_resolution.rs"},
     {"module":"config::validate","source":"tests/config/validate.rs"},
@@ -139,7 +141,6 @@
     {"module":"requests::openapi","source":"tests/requests/openapi.rs"},
     {"module":"requests::origin","source":"tests/requests/origin.rs"},
     {"module":"requests::queue","source":"tests/requests/queue.rs"},
-    {"module":"requests::relations","source":"tests/requests/relations.rs"},
     {"module":"requests::schema_forks","source":"tests/requests/schema_forks.rs"},
     {"module":"requests::schemas","source":"tests/requests/schemas.rs"},
     {"module":"requests::schemas::deletion","source":"tests/requests/schemas/deletion.rs"},
@@ -184,6 +185,7 @@
     {"name":"tasks::tenant_reindex_scheduler::missing_lifecycle_table_returns_workspace_lookup_error","jobs":["common-sqlite"],"reason":"Shared task uses the EE-specific configure_deployment_metadata helper branch."}
   ],
   "exception_groups": [
+    {"source":"tests/ee/tasks/reindex_scheduler.rs","editions":["ee"],"role":"postgres","jobs":["postgres"],"reason":"Retirement and scheduler contend on the real membership advisory fence in an owned deployment database.","names":["ee::tasks::reindex_scheduler::postgres_tick_waits_for_disable_and_rechecks_tenant_activity"]},
     {"source":"tests/db/migrations.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL first-migration concurrency guard.","names":["db::migrations::concurrent_first_postgres_migrations_use_one_connection_each"]},
     {"source":"tests/initializers/shutdown.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL identity/tenant pools during worker draining.","names":["initializers::shutdown::shutdown_hook_keeps_database_available_until_loco_drains_workers"]},
     {"source":"tests/timezone_state.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL connection/session settings and concurrent activation; ignored SQLite marker call is not SQLite ownership.","names":["timezone_state::postgres_app_pool_uses_configured_timezone_on_new_and_released_connections","timezone_state::postgres_pool_replacement_keeps_uri_settings_without_replaying_startup","timezone_state::postgres_timezone_state_serializes_concurrent_activations_without_dml_noop"]},

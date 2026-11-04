@@ -26,7 +26,7 @@ pub struct ListRelationsParams {
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct SetRelationStatusRequest {
+pub(crate) struct SetRelationStatusRequest {
     /// `active`, `deprecated` or `archived`.
     pub(crate) status: RelationStatus,
 }

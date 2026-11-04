@@ -2,7 +2,7 @@
 
 `rest.builtin-template-relations` creates every builtin template's entity and relation types through public HTTP using Write credentials after schema creation.
 The graph scenarios also cover Read-scoped MCP entity filtering, invalid relation-list status and missing-entity diagnostics.
-Their internal predecessors remain until this expanded replacement passes GHA.
+Their internal predecessors were retired after the expanded replacement passed GHA run `41735414722` at commit `d5e1982291eda5a4bbcdad29790af5d699f2e60f`.
 
 Requires Python 3.10+ and an already-built SQLite-capable application binary.
 No Python dependencies, database access library, network embedding provider, model download, licence, or running external service is needed.
@@ -57,7 +57,14 @@ No database files are inspected or written directly by the tests.
 ### Retired request tests
 
 The request tests `relations_are_created_listed_statused_exported_and_deleted_over_rest` and `relation_write_requires_write_scope_and_read_authentication` were retired after successful GHA run `41693102412`, with replacement coverage in both `rest.relation-export-import-worker` and `mcp.relation-export-import-worker`, including Write-scoped relation status changes and deletion.
-Built-in relation coverage across all templates and existing export limits, history and race tests are retained.
+GHA run `41735414722` at commit `d5e1982291eda5a4bbcdad29790af5d699f2e60f` also proved the following replacements before retirement:
+
+| Retired Rust test | Retained black-box assertions |
+| --- | --- |
+| `requests::relations::every_builtin_relation_type_can_be_created` | `rest.builtin-template-relations` creates each builtin schema and every entity/relation type with required fixture data, separate endpoints for same-type relations, Schema-scoped schema creation and Write-scoped entity/relation creation, asserting HTTP 201 throughout |
+| `requests::mcp::community_mcp_entities_relations_and_schema_tools_execute_over_protocol` | `mcp.relation-export-import-worker` creates the graph schema, two entities and a relation, lists exactly two `person` entities with Read scope, checks invalid relation-list status and missing-entity tool errors and their diagnostics, and persists archived relation status for Read-scoped readback; successful MCP calls reject tool errors |
+
+Existing export limits, history, security and race tests remain internal.
 
 ## Evidence and runner checks
 

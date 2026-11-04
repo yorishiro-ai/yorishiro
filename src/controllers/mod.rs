@@ -15,14 +15,14 @@ pub mod relations;
 pub mod route_inventory;
 pub mod schemas;
 pub mod search;
-pub mod setup;
+pub(crate) mod setup;
 pub mod swagger;
-pub mod system;
+pub(crate) mod system;
 pub mod template_library;
-pub mod users;
-pub mod whoami;
+pub(crate) mod users;
+pub(crate) mod whoami;
 pub mod workspaces;
 
 pub use error::ApiError;
 
-pub mod tenants;
+pub(crate) mod tenants;

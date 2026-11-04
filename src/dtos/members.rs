@@ -4,52 +4,52 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct PreviewRoleRequest {
-    pub role: MembershipRole,
+pub(crate) struct PreviewRoleRequest {
+    pub(crate) role: MembershipRole,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct TransferOwnershipRequest {
-    pub successor_user_id: uuid::Uuid,
+pub(crate) struct TransferOwnershipRequest {
+    pub(crate) successor_user_id: uuid::Uuid,
 }
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct AddMemberRequest {
+pub(crate) struct AddMemberRequest {
     /// Must already have an account (created via `/auth/signup`): this endpoint attaches an *existing* user to the caller's tenant, it never creates one.
     /// To bring in someone with no account yet, issue them an invite instead.
-    pub email: String,
-    pub role: MembershipRole,
+    pub(crate) email: String,
+    pub(crate) role: MembershipRole,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct CreateInviteRequest {
-    pub email: String,
-    pub role: MembershipRole,
-    pub expires_at: chrono::DateTime<chrono::Utc>,
+pub(crate) struct CreateInviteRequest {
+    pub(crate) email: String,
+    pub(crate) role: MembershipRole,
+    pub(crate) expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ReissueInviteRequest {
-    pub expires_at: chrono::DateTime<chrono::Utc>,
+pub(crate) struct ReissueInviteRequest {
+    pub(crate) expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct InviteRecord {
-    pub id: uuid::Uuid,
-    pub tenant_id: uuid::Uuid,
-    pub email: String,
-    pub role: String,
-    pub expires_at: chrono::DateTime<crate::time::Timezone>,
-    pub used_at: Option<chrono::DateTime<crate::time::Timezone>>,
-    pub created_at: chrono::DateTime<crate::time::Timezone>,
+pub(crate) struct InviteRecord {
+    pub(crate) id: uuid::Uuid,
+    pub(crate) tenant_id: uuid::Uuid,
+    pub(crate) email: String,
+    pub(crate) role: String,
+    pub(crate) expires_at: chrono::DateTime<crate::time::Timezone>,
+    pub(crate) used_at: Option<chrono::DateTime<crate::time::Timezone>>,
+    pub(crate) created_at: chrono::DateTime<crate::time::Timezone>,
 }
 
 impl InviteRecord {
@@ -71,17 +71,17 @@ impl InviteRecord {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct CreateInviteResponse {
+pub(crate) struct CreateInviteResponse {
     #[serde(flatten)]
-    pub invite: InviteRecord,
-    pub token: String,
+    pub(crate) invite: InviteRecord,
+    pub(crate) token: String,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct MemberAccessResponse {
+pub(crate) struct MemberAccessResponse {
     #[serde(flatten)]
-    pub member: crate::models::tenant_memberships::MembershipRecord,
+    pub(crate) member: crate::models::tenant_memberships::MembershipRecord,
     /// Snapshot of existing attributed keys at the role update, not a key-issuance fence.
-    pub keys: Vec<crate::models::tenant_memberships::MembershipKeyAccess>,
+    pub(crate) keys: Vec<crate::models::tenant_memberships::MembershipKeyAccess>,
 }

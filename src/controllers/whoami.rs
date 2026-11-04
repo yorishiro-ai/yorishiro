@@ -26,6 +26,6 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![super::route_inventory::path_doc(__path_whoami)]
 }
 
-pub fn routes() -> Routes {
+pub(crate) fn routes() -> Routes {
     Routes::new().prefix("api/whoami").add("/", get(whoami))
 }

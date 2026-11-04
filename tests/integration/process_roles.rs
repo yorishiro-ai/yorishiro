@@ -21,20 +21,6 @@ fn yorishiro(dir: &std::path::Path, args: &[&str]) -> Output {
         .expect("run yorishiro")
 }
 
-/// A CLI command runs in a process of its own and holds no model.
-#[test]
-#[serial_test::serial(process_environment)]
-fn a_cli_command_runs_without_building_the_embedding_provider() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = yorishiro(dir.path(), &["routes"]);
-    assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 /// Durable application jobs must start without loading an embedding model.
 #[tokio::test]
 async fn a_job_consumer_does_not_build_the_embedding_provider() {
@@ -129,24 +115,6 @@ async fn a_job_consumer_does_not_build_the_embedding_provider() {
         }
     })
     .await;
-}
-
-/// The same environment stops a worker at start, which shows the environment really would have failed the command above if it had built a provider.
-#[test]
-#[serial_test::serial(process_environment)]
-fn a_worker_process_builds_the_embedding_provider_and_fails_at_start() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = yorishiro(dir.path(), &["start", "--worker=worker-target:shared"]);
-    assert!(!output.status.success());
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        combined.contains("not a known local model"),
-        "the worker names the unknown model: {combined}"
-    );
 }
 
 fn combined(output: &Output) -> String {

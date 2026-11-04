@@ -31,7 +31,7 @@ async fn update_current_user(
     )))
 }
 
-pub fn routes() -> Routes {
+pub(crate) fn routes() -> Routes {
     Routes::new().prefix("api/users").add(
         "/me",
         axum::routing::get(get_current_user).put(update_current_user),
