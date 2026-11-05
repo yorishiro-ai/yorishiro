@@ -799,6 +799,7 @@ def human_key_management(app):
     for identity in (app.rest("GET", "/api/whoami", key=owner), client.call("whoami")):
         require(identity["user_id"] == account["user_id"] and identity["identity_kind"] == "user",
                 "CLI credential is not attributed to the invited human")
+    app.management_key = owner
 
     expiry = "2090-01-01T00:00:00Z"
     original = app.rest("POST", "/api/api-keys", {
@@ -871,6 +872,38 @@ def human_key_management(app):
             "workspace deletion invalidated another workspace credential")
 
 
+def template_library_lifecycle(app):
+    owner = app.management_key
+    client = MCP(app, owner)
+    definition = {**SCHEMA, "name": "library-contract"}
+    created = client.call("create_template_library_item", {
+        "name": "library-contract", "definition": definition, "tags": ["blackbox"],
+    })
+    template_id = created["id"]
+    path = f"/api/template-library/{template_id}"
+    require(app.rest("GET", path, key=owner)["name"] == "library-contract",
+            "MCP template creation not visible through REST")
+    app.rest("PUT", path, {"name": "renamed-library", "tags": ["updated"]}, key=owner)
+    require(client.call("get_template_library_item", {"id": template_id})["tags"] == ["updated"],
+            "REST template update not visible through MCP")
+    require(any(item["id"] == template_id for item in client.call("list_template_library")),
+            "template not listed")
+    schema = client.call("create_schema", {"template_id": template_id})["schema"]
+    fork = client.call("fork_template_library_item", {"id": template_id, "name": "library-copy"})
+    require(fork["id"] != template_id, "template fork reused source identity")
+    client.call("update_template_library_item", {"id": template_id, "description": "changed after adoption"})
+    retained = app.rest("GET", f"/api/schemas/{schema['id']}", key=owner)
+    require(retained["definition"] == schema["definition"], "library edit mutated adopted schema")
+    client.call("delete_template_library_item", {"id": template_id})
+    app.rest("GET", path, status=404, key=owner)
+    client.call("get_template_library_item", {"id": template_id}, error=True)
+    require(app.rest("GET", f"/api/schemas/{schema['id']}", key=owner)["definition"] == retained["definition"],
+            "template deletion removed adopted schema")
+    app.rest("DELETE", f"/api/template-library/{fork['id']}", status=204, key=owner)
+    require(not any(item["id"] in (template_id, fork["id"])
+                    for item in client.call("list_template_library")), "deleted templates remain listed")
+
+
 def scenarios(suite):
     common = [("server.bootstrap", lambda app: app.boot()),
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
@@ -883,7 +916,8 @@ def scenarios(suite):
                 ("mcp.relation-export-import-worker", lambda app: relation_export_import_worker(app, "mcp")),
                 ("mcp.discovery-auth-scope-input", mcp_suite)],
         "cli": [("cli.arguments-tasks-stdout-effects", cli_suite),
-                ("cli.human-key-management", human_key_management)],
+                ("cli.human-key-management", human_key_management),
+                ("mcp.template-library-lifecycle", template_library_lifecycle)],
     }
     return common + focused[suite]
 

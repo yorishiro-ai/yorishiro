@@ -35,6 +35,10 @@ Cleanup terminates the process group, escalates to kill after five seconds, wait
 
 ## Implemented coverage
 
+These scenarios cover selected workflows, not the entire advertised MCP surface.
+Public coverage remains incomplete for migration/undo, search/recall, schema fork/merge, broader membership/tenant administration and explicit EE settings workflows.
+Scenario counts alone are not a public-tool completeness guarantee.
+
 Every suite checks CLI key issuance, REST and MCP acceptance, CLI revocation, and immediate rejection by both surfaces using the existing server and MCP session.
 
 | Suite | Additional checks |
