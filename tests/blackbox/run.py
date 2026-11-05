@@ -1006,6 +1006,9 @@ def membership_retirement_lifecycle(app):
         "invite_token": invitation["token"], "password": password,
     }, status=201)
     user_id = account["user_id"]
+    client.call("grant_workspace_member", {
+        "workspace_id": app.workspace, "user_id": user_id, "role": "viewer",
+    })
     issued = app.task("create_api_key", workspace_id=app.workspace, scope="schema", user_id=user_id)
     key = output_field(issued, "api key (shown once)")
     app.secrets.append(key)
