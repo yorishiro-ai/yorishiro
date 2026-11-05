@@ -1043,9 +1043,14 @@ def audit_history_lifecycle(app):
     require(capabilities["audit"] and "schema" not in capabilities["scopes"],
             "audit grant incorrectly elevated ordinary scope")
     auditor.call("create_schema", {"definition": {**SCHEMA, "name": "audit-denied"}}, error=True)
+    _, migration_key = app.issue(app.workspace, "migration")
+    migration = MCP(app, migration_key)
+    migration.call("reindex_workspace")
     records = auditor.call("list_audit_log", {"page": 1, "page_size": 50})
     require(records and records == app.rest("GET", "/api/audit-log?page=1&page_size=50", key=key),
             "audit history empty or differs across transports")
+    require(any(row["action"] == "reindex_embeddings" for row in records),
+            "queued reindex did not leave its audit record")
     require(all(row["workspace_id"] == app.workspace and row["tenant_id"] == app.tenant for row in records),
             "audit history crossed workspace or tenant boundary")
     serialized = json.dumps(records)
