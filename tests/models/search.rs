@@ -54,6 +54,25 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
         assert_eq!(rare_hits[0].entity.id, rare.unwrap(), "vector rank21 plus text rank1 must lead RRF");
         assert_eq!(rare_hits.len(),10);
         assert_eq!(rare_hits.iter().map(|h|h.entity.id).collect::<std::collections::HashSet<_>>().len(),10);
+        let text_fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(&ctx.db, text_fixture.tenant_id, text_fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
+        let mut first = None;
+        for i in 0..21 {
+            if i == 20 {
+                let hits = search::search_by_vector(&ctx.db, text_fixture.workspace_id, vec![1.0,0.0], "境界 boundary", query()).await.unwrap();
+                assert_eq!(hits.len(), 10, "exactly 20 matches must enable text-only results");
+                assert_eq!(hits[0].entity.id, first.unwrap(), "closest literal text must rank first");
+                assert!(hits.iter().all(|hit| hit.distance.is_none()));
+            }
+            let title = if i == 0 { "境界 boundary".to_string() } else { format!("境界 boundary {}", "unrelated filler ".repeat(20)) };
+            let entity = entity_entities::create(&ctx.db, text_fixture.workspace_id, entity_entities::CreateEntityInput {
+                schema_name:"note".into(), entity_type:"note".into(), data:serde_json::json!({"title":title})
+            }, None).await.unwrap();
+            if i == 0 { first = Some(entity.id); }
+        }
+        let gated = search::search_by_vector(&ctx.db, text_fixture.workspace_id, vec![1.0,0.0], "境界 boundary", query()).await.unwrap();
+        assert!(gated.is_empty(), "exactly 21 text-only matches must disable the text list");
     }).await;
 }
 
