@@ -13,6 +13,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SUITES = ("rest", "mcp", "cli")
+EE_OWNED_COMMON_TOOLS = {"accept_invite", "search_entities"}
+
+
+def require_owned_successes(reviewed: dict, edition: str, calls: list[dict]) -> set[str]:
+    common, additions = set(reviewed["ce"]), set(reviewed["ee_additions"])
+    if not EE_OWNED_COMMON_TOOLS <= common or common & additions:
+        raise ValueError("invalid public-tool ownership partition")
+    owned = (additions | EE_OWNED_COMMON_TOOLS) if edition == "ee" else common - EE_OWNED_COMMON_TOOLS
+    succeeded = {call["tool"] for call in calls if call["outcome"] == "succeeded"}
+    missing = owned - succeeded
+    if missing:
+        raise ValueError(f"missing successful owned MCP calls: {sorted(missing)}")
+    return owned
 
 
 def load_reports(directory: Path) -> list[dict]:
@@ -82,15 +95,17 @@ def main() -> int:
                                     if call["tool"] == name and call["outcome"] == outcome})
                      for outcome in ("succeeded", "rejected")} for name in sorted(inventory)}
     gaps = [name for name, outcomes in census.items() if not outcomes["succeeded"]]
+    owned = require_owned_successes(reviewed, args.edition, calls)
     (args.reports / "tool-coverage.json").write_text(json.dumps({
         "binary_sha256": digest, "edition": args.edition, "tools": census,
+        "owned_tools": sorted(owned), "owned_tools_without_success": [],
         "without_successful_mcp_call": gaps,
         "ee_additions_not_executed": [name for name in reviewed["ee_additions"]
                                      if args.edition == "ce" or name in gaps],
         "complete_public_behavior_coverage": False,
     }, indent=2) + "\n")
-    print(f"Public MCP census: {len(inventory) - len(gaps)}/{len(inventory)} tools called successfully; "
-          f"{len(gaps)} without successful calls, {len(reviewed['ee_additions'])} EE additions not executed")
+    print(f"Public MCP census: {len(owned)}/{len(owned)} owned tools called successfully; "
+          f"{len(gaps)} tools without successful calls in this edition's suites")
     print(f"Public contracts: {len(reports)} suites, {sum(map(len, expected.values()))} assigned scenarios passed on {digest}")
     return 0
 
