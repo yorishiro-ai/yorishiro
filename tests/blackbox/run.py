@@ -568,6 +568,18 @@ def relation_export_import_worker(app, surface):
     require(relation["properties"] == {} and relation["status"] == "active",
             "omitted relation properties/status defaults changed")
     read_relation(relation)
+    recall = readers[1].client.call("recall_context", {"entity_id": people[0]["id"], "full": True})
+    require(recall["entity"] == people[0] and len(recall["relations"]) == 1
+            and recall["relations"][0]["neighbor"] == people[1]
+            and recall["relations"][0]["hop_distance"] == 1
+            and recall["relations"][0]["relation_type"] == "knows" and not recall["truncated"],
+            "recall did not return the connected full neighbor")
+    shallow = readers[1].client.call("recall_context", {"entity_id": people[0]["id"]})
+    require(shallow["entity"] == people[0] and shallow["relations"][0]["neighbor"]["data"] == {},
+            "default recall exposed non-embedding neighbor fields")
+    readers[1].client.call("recall_context", {"entity_id": str(uuid.uuid4())}, error=True)
+    _, isolated_key = app.issue(app.workspace, "read")
+    MCP(app, isolated_key).call("recall_context", {"entity_id": people[0]["id"]}, error=True)
     app.rest("POST", "/api/relations", payload, status=403, key=read_key)
     denied = MCP(app, read_key).call("create_relation", payload, error=True)
     require(denied.get("result", {}).get("isError") is True
@@ -597,6 +609,8 @@ def relation_export_import_worker(app, surface):
     app.rest("GET", f"/api/relations/{relation['id']}", status=404, key=source_key)
     source.client.call("get_relation", {"id": relation["id"]}, error=True)
     require(source.call("list_relations") == peer.call("list_relations") == [], "deleted relation still listed")
+    require(readers[1].client.call("recall_context", {"entity_id": people[0]["id"]})["relations"] == [],
+            "recall retained a deleted relation")
     relation = source.call("create_relation", {**payload, "properties": {"since": 2026}})
     relation = source.call("set_relation_status", {"id": relation["id"], "status": "deprecated"})
     require(relation["properties"] == {"since": 2026} and relation["status"] == "deprecated",
