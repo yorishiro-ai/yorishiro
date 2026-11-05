@@ -3,10 +3,10 @@
 //! Embeddings live in the separate `entity_embeddings` table, so every query here
 //! joins `entity_entities e` to that table when searching by vector.
 //!
-//! Vector search runs first, followed by a literal text fallback for unembedded entities.
+//! PostgreSQL fuses vector and selective literal-text ranks using gated RRF.
 //! PostgreSQL uses NFKC-normalized ILIKE with a trigram expression index.
 //! SQLite uses quoted FTS5 trigram terms and cannot match terms shorter than three characters.
-//! The two halves are merged in Rust.
+//! SQLite keeps vector-first results and fills remaining slots from unembedded text matches.
 //!
 //! Embedding generation follows two paths.
 //! Document embedding is asynchronous: the embedding sync worker (`workers::embedding_sync`) generates and stores vectors after entity writes.
@@ -352,7 +352,12 @@ async fn search_vectors(
     Ok(hits)
 }
 
-fn postgres_rrf_query(
+/// Builds the final PostgreSQL gated RRF query for execution and plan diagnostics.
+/// Input text must already be NFKC-normalized and trimmed.
+///
+/// # Errors
+/// Returns an error when the query vector is invalid.
+pub fn postgres_rrf_query(
     workspace_id: Uuid,
     vector: Vec<f32>,
     text: &str,

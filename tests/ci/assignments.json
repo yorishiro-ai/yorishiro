@@ -10,8 +10,8 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "9efe60253bb186a87c876adab35a7c37906f3846cae17dd75e973a485f146eaa",
-    "src": "536eb33b89b543277ac652f5a517ebe1f6b794fba5161e15193e368abe128a5c",
+    "tests": "9125a5fadefda3ac3b754892accd3b90333d3917817241aac4c4137bbdb9547d",
+    "src": "96872948148b99bc3e2e5cc721a78998ec35bd65297e9196186a7beceba4ca39",
     "ee": "7562bfb365b0b9cf8cafe4028068c07c818f3b1dfdad4bcbd7e560500219287f",
     "migration": "c464d3395f6eba139f7d7fe0378f3c3a3583a565df3780acd907c40300bb3188",
     "Cargo.toml": "c3e03bd1dfa5169fcfc97c1aeb119b4376b31c5ea7ef6ea2eb26c532f5ea0854",
@@ -21,7 +21,7 @@
     "patches/loco-rs/fixes.patch": "625207de3b3d0f2907038b4bfe2b0a000196905f080bc6b4a13325fff6dde9f8",
     "patches/loco-rs/verify.py": "1db35421ee3fdfa8c4cf142f22d43acbbfce7fbd9dc39b817a61f541e9555e5b",
     "config": "1b15dbaa216cda9678d86988abfbe25c772e3c9f2d85ed802b70483d23c6b3bd",
-    "tests/fixtures": "eb615ffb4a1a8f49598251f932b49da578f6044a993b2bf49e12619cc3d5fc1c"
+    "tests/fixtures": "615a19063b342c7fccf29f64a3b4b5cae603a7a0ad1eb8743495d508d83d38e7"
   },
   "targets": [
     {"package":"yorishiro","target":"mod","kind":"test","source":"tests/mod.rs","allow_zero":false},

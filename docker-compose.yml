@@ -41,6 +41,7 @@ x-yorishiro: &yorishiro
 services:
   db:
     image: &postgres-image pgvector/pgvector:pg18
+    shm_size: 1gb
     # Reap orphan children outside PostgreSQL so their exit cannot trigger cluster recovery.
     init: true
     container_name: db
@@ -61,6 +62,7 @@ services:
 
   testdb:
     image: *postgres-image
+    shm_size: 1gb
     init: true
     container_name: testdb
     environment:

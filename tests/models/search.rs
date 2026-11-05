@@ -86,6 +86,15 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         workspace.embedding_dimensions=Set(Some(7)); workspace.embedding_model=Set(Some("fixture".into()));
         workspace.update(&ctx.db).await.unwrap();
         let index = format!("ysr_hnsw_{}_d7", fixture.workspace_id.simple());
+        // A second maintainer must skip while the real session lock is held.
+        use sea_orm::sqlx::Connection as _;
+        let mut lock = ctx.db.get_postgres_connection_pool().acquire().await.unwrap().detach();
+        sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended('embedding-index-maintenance',0))")
+            .execute(&mut lock).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), entity_embeddings::maintain_workspace_indexes(&ctx.db)).await.unwrap().unwrap();
+        let present: Option<String> = sea_orm::sqlx::query_scalar("SELECT to_regclass($1)::text").bind(&index).fetch_one(&mut lock).await.unwrap();
+        assert!(present.is_none(), "a competing maintenance session must not create the index");
+        lock.close().await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         let exists = |name: String| sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres, "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)", [name.into()]));
@@ -96,8 +105,8 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         txn.execute_unprepared("SET LOCAL plan_cache_mode=force_custom_plan; SET LOCAL hnsw.ef_search=200; SET LOCAL hnsw.iterative_scan=relaxed_order").await.unwrap();
         let query = search::SearchQuery { limit: 200, ..Default::default() };
         let vector = vec![1.0_f32;7];
-        let statement = ctx.db.get_database_backend().build(&search::vector_candidates_query(
-            ctx.db.get_database_backend(), fixture.workspace_id, vector.clone(), &query).unwrap());
+        let statement = ctx.db.get_database_backend().build(&search::postgres_rrf_query(
+            fixture.workspace_id, vector.clone(), "", &query).unwrap());
         let mut explain = statement.clone();
         explain.sql = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {}", explain.sql);
         let plan = txn.query_one_raw(explain).await.unwrap().unwrap().try_get::<serde_json::Value>("", "QUERY PLAN").unwrap();
@@ -119,6 +128,17 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let recall = hits.iter().filter(|hit| exact_ids.contains(&hit.entity.id)).count() as f64 / 200.0;
         assert!(recall >= 0.95, "production recall@200={recall}; plan={plan}");
         txn.rollback().await.unwrap();
+        // Publication in progress must retain the old graph even if metadata is changing.
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingReindexing,
+            sea_orm::sea_query::Expr::value(true)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        let publication = ctx.db.begin().await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(13)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&publication).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), entity_embeddings::maintain_workspace_indexes(&ctx.db)).await.unwrap().unwrap();
+        assert!(exists(index.clone()).await.unwrap().is_some());
+        publication.rollback().await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingReindexing,
+            sea_orm::sea_query::Expr::value(false)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         // A valid graph survives shrinkage and repeated maintenance.
         vectors::Entity::delete_many().filter(vectors::Column::EntityId.eq(ids[0])).exec(&ctx.db).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
@@ -141,7 +161,14 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(exists(bad).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "invalid promoted graph is rebuilt");
         // Deleting workspace metadata leaves no owned graph after the sweep.
         sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE INDEX CONCURRENTLY \"{index}\" ON {partition}(workspace_id)")).await.unwrap();
-        workspace_workspaces::Entity::delete_by_id(fixture.workspace_id).exec(&ctx.db).await.unwrap();
+        let deletion = ctx.db.begin().await.unwrap();
+        workspace_workspaces::Entity::delete_by_id(fixture.workspace_id).exec(&deletion).await.unwrap();
+        let (maintenance, committed) = tokio::join!(
+            entity_embeddings::maintain_workspace_indexes(&ctx.db),
+            deletion.commit(),
+        );
+        committed.unwrap();
+        maintenance.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         assert!(exists(index).await.unwrap().is_none());
     }).await;
@@ -1174,7 +1201,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
     .await;
 }
 
-/// The trigram fallback surfaces an entity with no embedding at all, when its data fuzzy-matches `query_text`; an entity with neither an embedding nor a fuzzy match must not appear.
+/// Gated PostgreSQL literal text search includes an unembedded entity when its data contains `query_text`; a nonmatching entity must not appear.
 #[tokio::test]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
     if !super::super::require_postgres_backend() {
@@ -1215,7 +1242,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
         )
         .await
         .expect("create unrelated entity");
-        // Neither entity has an embedding: both rely entirely on the trigram fallback.
+        // Neither entity has an embedding: both rely entirely on selective literal text matches.
 
         let hits = search::search_by_vector(
             &ctx.db,
@@ -1237,7 +1264,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
     .await;
 }
 
-/// The FTS5 fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text`, when
+/// The FTS5 fallback on SQLite surfaces an entity whose `data` matches quoted FTS5 terms from `query_text`, when
 /// the entity has no embedding; an entity with neither an embedding nor a MATCH match must not
 /// appear.
 ///

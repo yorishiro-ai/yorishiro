@@ -1519,7 +1519,7 @@ Input schema:
 
 ### `search_entities`
 
-Vector similarity search over entities using a natural-language query (requires read scope)
+Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope)
 
 Input schema:
 
@@ -1545,7 +1545,7 @@ Input schema:
       ]
     },
     "query_text": {
-      "description": "Natural-language query text.\nVectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.\nAlso used, as-is, for an auxiliary pg_trgm fuzzy text match against entities that have no embedding.",
+      "description": "Natural-language query text.\nVectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.\nPostgreSQL also fuses NFKC-normalized literal text matches when at most 20 entities match.\nSQLite fills remaining slots from unembedded entities using quoted FTS5 terms of at least three characters.",
       "type": "string"
     }
   },
