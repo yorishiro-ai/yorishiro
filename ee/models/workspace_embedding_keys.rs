@@ -31,6 +31,24 @@ pub(crate) async fn configure(
             && old.send_dimensions_param == request.send_dimensions_param
             && old.document_prefix == request.document_prefix
     });
+    if query_only {
+        // SQLite fires BEFORE INSERT even for an upsert conflict; avoid document invalidation.
+        Entity::update_many()
+            .col_expr(
+                Column::QueryInstruction,
+                sea_orm::sea_query::Expr::value(request.query_instruction),
+            )
+            .col_expr(
+                Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(crate::time::now()),
+            )
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .exec(&txn)
+            .await
+            .internal()?;
+        txn.commit().await.internal()?;
+        return Ok(());
+    }
     set_with_instructions(
         &txn,
         workspace_id,
@@ -43,11 +61,9 @@ pub(crate) async fn configure(
         &request.document_prefix,
     )
     .await?;
-    if !query_only {
-        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
-            .await
-            .internal()?;
-    }
+    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+        .await
+        .internal()?;
     txn.commit().await.internal()?;
     Ok(())
 }
