@@ -207,7 +207,11 @@ pub async fn search_by_vector(
 ) -> Result<Vec<SearchHit>, YorishiroError> {
     if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
         let txn = conn.begin().await.internal()?;
-        let ef_search = std::cmp::max(query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT), 200);
+        let ef_search = if vector.len() > 2000 {
+            1000
+        } else {
+            std::cmp::max(query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT), 200)
+        };
         // SeaORM cannot express transaction-local PostgreSQL settings.
         txn.execute_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
@@ -496,7 +500,7 @@ pub fn vector_candidates_query(
             .cast_as(Alias::new(format!("vector({dimensions})")))
             .binary(
                 PgBinOper::CosineDistance,
-                Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
+                Expr::val(sea_orm::entity::prelude::PgVector::from(vector.clone())),
             )
     };
     let mut knn = scoped_search(workspace_id, query);
@@ -514,5 +518,34 @@ pub fn vector_candidates_query(
         .and_where(embedding.clone().is_not_null())
         .order_by_expr(distance, Order::Asc)
         .limit(limit as u64);
+    let degenerate =
+        vector.iter().all(|value| *value > 0.0) || vector.iter().all(|value| *value <= 0.0);
+    if !sqlite && dimensions > 2000 && degenerate {
+        tracing::warn!(
+            dimensions,
+            "sign-degenerate query uses exact cosine search to avoid binary candidate collapse"
+        );
+    }
+    if !sqlite && dimensions > 2000 && !degenerate {
+        let binary = |value: Expr| {
+            Func::cust(Alias::new("binary_quantize"))
+                .arg(value)
+                .cast_as(Alias::new(format!("bit({dimensions})")))
+        };
+        let hamming = binary(embedding).binary(
+            sea_orm::sea_query::BinOper::Custom("<~>"),
+            binary(Expr::val(sea_orm::entity::prelude::PgVector::from(vector))),
+        );
+        knn.clear_order_by()
+            .order_by_expr(hamming, Order::Asc)
+            .limit(1000);
+        let mut reranked = Query::select();
+        reranked
+            .column((Alias::new("candidates"), sea_orm::sea_query::Asterisk))
+            .from_subquery(knn, Alias::new("candidates"))
+            .order_by(Alias::new("distance"), Order::Asc)
+            .limit(limit as u64);
+        return Ok(reranked);
+    }
     Ok(knn)
 }

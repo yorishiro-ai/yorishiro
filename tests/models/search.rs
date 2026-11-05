@@ -52,6 +52,13 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
                 fixture.workspace_id, vec![1.0,0.0], text, &query()).unwrap());
             assert_eq!(statement.sql.contains("word_similarity"), eligible, "{text}: {}", statement.sql);
         }
+        let mut signed = vec![1.0_f32;4096]; signed[0] = -1.0;
+        let binary = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
+        let sql = ctx.db.get_database_backend().build(&binary).sql;
+        assert!(sql.contains("binary_quantize") && sql.contains("<~>"));
+        let positive = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4096], &query()).unwrap();
+        assert!(!ctx.db.get_database_backend().build(&positive).sql.contains("<~>"), "sign-degenerate queries need exact safety fallback");
+        assert!(search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4097], &query()).is_err());
         let baseline = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "", query()).await.unwrap();
         let common = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "common", query()).await.unwrap();
         assert_eq!(baseline.iter().map(|h|h.entity.id).collect::<Vec<_>>(),common.iter().map(|h|h.entity.id).collect::<Vec<_>>(), "21+ matches must disable text list");
@@ -1742,7 +1749,7 @@ async fn reindex_switches_between_arbitrary_widths() {
         entity_embeddings::reindex_workspace(&ctx.db, other_workspace.id, &other_provider)
             .await
             .unwrap();
-        for width in [7, 13, 7] {
+        for width in [7, 4096, 13, 7] {
             let (provider, _server) = fixed_width_provider(width).await;
             let outcome =
                 entity_embeddings::reindex_workspace(&ctx.db, fixture.workspace_id, &provider)

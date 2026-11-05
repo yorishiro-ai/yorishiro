@@ -22,6 +22,10 @@ pub fn deployment_embedding_metadata(
     settings: &crate::data::settings::Settings,
 ) -> anyhow::Result<Option<EmbeddingMetadata>> {
     let config = &settings.embedding;
+    anyhow::ensure!(
+        (1..=4096).contains(&config.dimensions),
+        "embedding dimensions must be between 1 and 4096"
+    );
     if let (Some(_), Some(model)) = (&config.base_url, &config.model) {
         return Ok(Some(EmbeddingMetadata {
             model: model.clone(),
@@ -192,6 +196,10 @@ pub async fn build_embedding_provider(
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let config = &config.embedding;
     let dimensions = config.dimensions;
+    anyhow::ensure!(
+        (1..=4096).contains(&dimensions),
+        "embedding dimensions must be between 1 and 4096"
+    );
 
     // Check base_url/model presence before PROVIDER so that the documented
     // shape (PROVIDER unset, base_url+model set) reaches the OpenAI-compatible

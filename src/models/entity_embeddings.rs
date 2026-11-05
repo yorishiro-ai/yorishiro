@@ -24,6 +24,7 @@ pub(super) fn validate_vector(
     expected_dimensions: usize,
 ) -> Result<(), crate::YorishiroError> {
     if vector.is_empty()
+        || vector.len() > 4096
         || vector.len() != expected_dimensions
         || vector.iter().any(|value| !value.is_finite())
     {

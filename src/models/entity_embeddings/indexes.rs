@@ -41,7 +41,7 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 }
                 continue;
             }
-            let Some(dimensions @ 1..=2000) = workspace.embedding_dimensions else { continue; };
+            let Some(dimensions @ 1..=4096) = workspace.embedding_dimensions else { continue; };
             let name = format!("ysr_hnsw_{}_d{dimensions}", workspace.id.simple());
             let valid = existing.iter().any(|(index, valid)| index == &name && *valid);
             let count = entity_embeddings::Entity::find()
@@ -65,7 +65,12 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 let suffix = partition.strip_prefix("entity_embeddings_p").and_then(|s| s.parse::<u32>().ok());
                 if !suffix.is_some_and(|n| n < 64) { return Err(YorishiroError::Internal(anyhow::anyhow!("unexpected embedding partition"))); }
                 sea_orm::sqlx::query("SET max_parallel_maintenance_workers=0").execute(&mut conn).await.internal()?;
-                sea_orm::sqlx::query(AssertSqlSafe(format!("CREATE INDEX CONCURRENTLY \"{name}\" ON public.\"{partition}\" USING hnsw ((embedding::vector({dimensions})) vector_cosine_ops) WITH (m=32, ef_construction=128) WHERE workspace_id='{}'::uuid AND vector_dims(embedding)={dimensions}", workspace.id)))
+                let expression = if dimensions > 2000 {
+                    format!("(binary_quantize(embedding)::bit({dimensions})) bit_hamming_ops")
+                } else {
+                    format!("(embedding::vector({dimensions})) vector_cosine_ops")
+                };
+                sea_orm::sqlx::query(AssertSqlSafe(format!("CREATE INDEX CONCURRENTLY \"{name}\" ON public.\"{partition}\" USING hnsw ({expression}) WITH (m=32, ef_construction=128) WHERE workspace_id='{}'::uuid AND vector_dims(embedding)={dimensions}", workspace.id)))
                     .execute(&mut conn).await.internal()?;
             }
         }

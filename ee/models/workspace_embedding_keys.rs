@@ -160,9 +160,9 @@ async fn set_with_instructions(
 ) -> Result<(), YorishiroError> {
     let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
 
-    if dimensions <= 0 {
+    if !(1..=4096).contains(&dimensions) {
         return Err(YorishiroError::ValidationFailed {
-            message: "dimensions must be a positive integer".into(),
+            message: "dimensions must be between 1 and 4096".into(),
             details: vec![],
             hint: "set it to the embedding model's own output width".into(),
         });

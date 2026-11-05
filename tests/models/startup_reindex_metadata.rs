@@ -23,6 +23,15 @@ fn deployment_metadata_matches_provider_resolution_without_loading_provider() {
     assert_eq!(metadata.model, "external-model");
     assert_eq!(metadata.dimensions, 1024);
     assert_eq!(metadata.document_prefix, "passage: ");
+    for (dimensions, valid) in [(0, false), (4096, true), (4097, false)] {
+        let settings = config_with_embedding(serde_json::json!({
+            "provider":"openai", "dimensions":dimensions,
+            "base_url":"http://embedding.test", "model":"external-model"
+        }))
+        .settings::<yorishiro::data::settings::Settings>()
+        .unwrap();
+        assert_eq!(deployment_embedding_metadata(&settings).is_ok(), valid);
+    }
 }
 
 #[test]
