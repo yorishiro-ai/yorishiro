@@ -1048,7 +1048,8 @@ def workspace_key_lifecycle(app):
     workspace_id = workspace["id"]
     require(any(row["id"] == workspace_id for row in client.call("list_workspaces")),
             "MCP-created workspace not listed")
-    require(any(row["id"] == workspace_id for row in client.call("discover_workspaces")),
+    require(any(row["workspace_id"] == workspace_id and row["tenant_id"] == app.tenant
+                for row in client.call("discover_workspaces")),
             "human discovery omitted tenant workspace")
     issued = app.task("create_api_key", workspace_id=workspace_id, scope="schema", user_id=identity["user_id"])
     selected_key = output_field(issued, "api key (shown once)")
