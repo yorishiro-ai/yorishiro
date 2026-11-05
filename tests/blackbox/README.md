@@ -28,6 +28,8 @@ The EE MCP delta suite checks edition discovery and entity-column and worker-cla
 Both editions run with the enterprise licence explicitly unset; licensed capabilities need separate ownership.
 The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or under-scoped writes.
 It uses reserved invalid provider URLs without starting workers, so it proves configuration and enqueue admission, not external inference or reindex completion.
+The EE composition scenario adopts a library template, changes its upstream definition, previews and applies a merge, and checks immutable schema history.
+It then creates a second-workspace fork, checks scoped visibility and stale-head rejection, updates and deletes the fork without changing source history.
 
 Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
 The CLI suite first verifies that a real work command fails timezone preparation before migration, then proves migration and normal tasks succeed.

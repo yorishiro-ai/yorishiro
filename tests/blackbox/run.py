@@ -1369,13 +1369,67 @@ def enterprise_providers(app):
         app.rest("GET", path, status=404)
 
 
+def enterprise_schema_composition(app):
+    client = MCP(app, app.key)
+    _, read_key = app.issue(app.workspace, "read")
+    reader = MCP(app, read_key)
+    definition = json.loads(json.dumps(SCHEMA))
+    definition["name"] = "upstream-note"
+    template = client.call("create_template_library_item", {"name": "upstream-note", "definition": definition})
+    source = client.call("create_schema", {"template_id": template["id"]})["schema"]
+    original = client.call("get_schema_by_id", {"schema_id": source["id"]})
+    evolved = json.loads(json.dumps(definition))
+    evolved["entity_types"]["note"]["fields"]["category"] = {"type": "string"}
+    client.call("update_template_library_item", {"id": template["id"], "definition": evolved})
+    changes = reader.call("list_upstream_changes")
+    require(len(changes) == 1 and changes == app.rest("GET", "/api/schemas/upstream-changes"),
+            "upstream discovery differs across transports")
+    preview = reader.call("merge_preview", {"schema_id": source["id"]})
+    require(preview["summary"]["auto_add"] == 1
+            and preview == app.rest("GET", f"/api/schemas/{source['id']}/merge-preview"),
+            "merge preview differs across transports")
+    reader.call("merge_apply", {"schema_id": source["id"]}, error=True)
+    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == original, "preview or denial mutated source")
+    merged = client.call("merge_apply", {"schema_id": source["id"]})["schema"]
+    require(merged["version"] == source["version"] + 1, "merge did not create a new schema version")
+    require(reader.call("list_upstream_changes") == [], "merged origin still reports pending changes")
+    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == original, "merge changed immutable history")
+
+    target = output_field(app.task("create_workspace", tenant_id=app.tenant, name="fork-target"),
+                          "workspace id", True)
+    _, key = app.issue(target, "schema")
+    _, target_read = app.issue(target, "read")
+    owner, viewer = MCP(app, key), MCP(app, target_read)
+    input_ = {"source_workspace_id": app.workspace, "source_schema_id": merged["id"]}
+    viewer.call("create_schema_fork", input_, error=True)
+    fork = owner.call("create_schema_fork", input_)
+    path = f"/api/schema-forks/{fork['id']}"
+    require(fork == app.rest("GET", path, key=key), "fork differs across transports")
+    require(viewer.call("list_schema_forks") == [fork], "fork missing from target list")
+    client.call("get_schema_fork", {"fork_id": fork["id"]}, error=True)
+    update = {"fork_id": fork["id"], "definition": fork["definition"],
+              "expected_fork_schema_id": "00000000-0000-0000-0000-000000000001"}
+    owner.call("update_schema_fork", update, error=True)
+    require(owner.call("get_schema_fork", {"fork_id": fork["id"]}) == fork, "stale update mutated fork")
+    update["expected_fork_schema_id"] = fork["fork_schema_id"]
+    updated = owner.call("update_schema_fork", update)
+    require(updated["id"] == fork["id"] and updated == app.rest("GET", path, key=key),
+            "updated fork differs across transports")
+    viewer.call("delete_schema_fork", {"fork_id": fork["id"]}, error=True)
+    require(owner.call("delete_schema_fork", {"fork_id": fork["id"]})["deleted"], "fork deletion failed")
+    app.rest("GET", path, status=404, key=key)
+    require(viewer.call("list_schema_forks") == [], "deleted fork remains visible")
+    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == original, "fork lifecycle changed source history")
+
+
 def scenarios(suite, edition="ce"):
     if edition == "ee":
         require(suite == "mcp", "EE owns only its dedicated MCP delta suite")
         return [("server.bootstrap", lambda app: app.boot()),
                 ("ee.discovery-auth-scope-input", mcp_suite),
                 ("ee.column-worker-settings-lifecycle", enterprise_settings),
-                ("ee.provider-settings-lifecycle", enterprise_providers)]
+                ("ee.provider-settings-lifecycle", enterprise_providers),
+                ("ee.schema-fork-upstream-merge", enterprise_schema_composition)]
     common = [("server.bootstrap", lambda app: app.boot()),
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
     focused = {

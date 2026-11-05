@@ -17,7 +17,8 @@ class ToolInventoryTests(unittest.TestCase):
     def test_enterprise_scenarios_are_an_explicit_delta_not_a_common_replay(self):
         ids = [name for name, _ in run.scenarios("mcp", "ee")]
         self.assertEqual(ids, ["server.bootstrap", "ee.discovery-auth-scope-input",
-                               "ee.column-worker-settings-lifecycle", "ee.provider-settings-lifecycle"])
+                               "ee.column-worker-settings-lifecycle", "ee.provider-settings-lifecycle",
+                               "ee.schema-fork-upstream-merge"])
         with self.assertRaises(AssertionError):
             run.scenarios("rest", "ee")
 
