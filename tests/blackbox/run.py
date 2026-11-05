@@ -950,6 +950,40 @@ def user_profile_lifecycle(app):
     require(client.call("get_current_user") == cleared, "service credential changed a human profile")
 
 
+def tenant_settings_lifecycle(app):
+    owner = app.management_key
+    client = MCP(app, owner)
+    path = "/api/tenants/current"
+    original = client.call("get_tenant")
+    require(original["id"] == app.tenant and app.rest("GET", path, key=owner) == original,
+            "tenant metadata differs across transports or tenant boundary")
+    updated = client.call("update_tenant", {
+        "name": "  Contract Tenant  ", "replace_max_workspaces": True, "max_workspaces": 100,
+    })
+    require(updated["name"] == "Contract Tenant" and updated["max_workspaces"] == 100
+            and updated["id"] == original["id"] and updated["created_at"] == original["created_at"],
+            "tenant update changed identity or ignored metadata")
+    require(app.rest("GET", path, key=owner) == updated, "MCP tenant update not visible to REST")
+    renamed = app.rest("PUT", path, {"name": "Renamed Tenant"}, key=owner)
+    require(renamed["max_workspaces"] == 100 and client.call("get_tenant") == renamed,
+            "name-only update cleared cap or was not visible to MCP")
+    for body in ({"name": "   "}, {"name": "x" * 101}, {"max_workspaces": 3},
+                 {"replace_max_workspaces": True, "max_workspaces": -1}):
+        app.rest("PUT", path, body, status=409, key=owner)
+        client.call("update_tenant", body, error=True)
+    require(client.call("get_tenant") == renamed, "invalid tenant update changed stored metadata")
+    cleared = app.rest("PUT", path, {"replace_max_workspaces": True, "max_workspaces": None}, key=owner)
+    require(cleared["max_workspaces"] is None and client.call("get_tenant") == cleared,
+            "explicit tenant cap clear failed")
+    _, service = app.issue(app.workspace, "read")
+    service_client = MCP(app, service)
+    app.rest("GET", path, status=401, key=service)
+    app.rest("PUT", path, {"name": "service"}, status=401, key=service)
+    service_client.call("get_tenant", error=True)
+    service_client.call("update_tenant", {"name": "service"}, error=True)
+    require(client.call("get_tenant") == cleared, "service credential changed tenant metadata")
+
+
 def migration_lifecycle(app):
     _, key = app.issue(app.workspace, "migration")
     client = MCP(app, key)
@@ -1023,6 +1057,7 @@ def scenarios(suite):
         "cli": [("cli.arguments-tasks-stdout-effects", cli_suite),
                 ("cli.human-key-management", human_key_management),
                 ("mcp.user-profile-lifecycle", user_profile_lifecycle),
+                ("mcp.tenant-settings-lifecycle", tenant_settings_lifecycle),
                 ("mcp.template-library-lifecycle", template_library_lifecycle)],
     }
     return common + focused[suite]
