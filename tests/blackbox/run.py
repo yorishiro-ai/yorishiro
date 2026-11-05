@@ -991,12 +991,40 @@ def invite_lifecycle(app):
     app.rest("POST", "/auth/signup", {"invite_token": cancelled["token"], "password": password}, status=422)
     require(any(row["id"] == cancelled["id"] and row["used_at"] is None for row in client.call("list_invites")),
             "cancelled invitation history was deleted")
+    existing = client.call("create_invite", {
+        "email": "owner@example.invalid", "role": "owner", "expires_at": "2090-01-01T00:00:00Z",
+    })
+    app.secrets.append(existing["token"])
+    refreshed = client.call("reissue_invite", {
+        "invite_id": existing["id"], "expires_at": "2090-01-02T00:00:00Z",
+    })
+    app.secrets.append(refreshed["token"])
+    require(refreshed["id"] == existing["id"] and refreshed["token"] != existing["token"],
+            "MCP invite reissue failed to replace the token")
+    identity = client.call("whoami")
+    client.call("accept_invite", {"invite_token": existing["token"]}, error=True)
+    _, service = app.issue(app.workspace, "read")
+    MCP(app, service).call("accept_invite", {"invite_token": refreshed["token"]}, error=True)
+    redemption = client.call("accept_invite", {"invite_token": refreshed["token"]})
+    require(redemption == {"user_id": identity["user_id"], "tenant_id": app.tenant, "role": "owner"},
+            "authenticated invite acceptance changed account or tenant attribution")
+    require(client.call("whoami") == identity, "invite acceptance changed selected workspace or credentials")
+    client.call("accept_invite", {"invite_token": refreshed["token"]}, error=True)
+    require(next(row for row in client.call("list_invites") if row["id"] == existing["id"])["used_at"] is not None,
+            "authenticated acceptance did not consume the invite")
 
 
 def membership_retirement_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
     owner_id = client.call("whoami")["user_id"]
+    for name, args in (("preview_member_removal", {"user_id": owner_id}),
+                       ("preview_member_role_change", {"user_id": owner_id, "role": "admin"})):
+        require(client.call(name, args)["blocked_by_last_owner"], "preview missed last-owner protection")
+    client.call("remove_member", {"user_id": owner_id}, error=True)
+    client.call("set_member_role", {"user_id": owner_id, "role": "admin"}, error=True)
+    require(next(row for row in client.call("list_members") if row["user_id"] == owner_id)["role"] == "owner",
+            "rejected last-owner change altered membership")
     invitation = client.call("create_invite", {
         "email": "successor@example.invalid", "role": "admin", "expires_at": "2090-01-01T00:00:00Z",
     })
