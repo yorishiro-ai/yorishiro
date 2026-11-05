@@ -1,12 +1,14 @@
 """Deliberate report violations must fail the required public-contract gate."""
 
 import copy
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from check_blackbox_reports import SUITES, validate_reports
+from check_blackbox_reports import SUITES, load_reports, validate_reports
 
 
 class ReportGateTests(unittest.TestCase):
@@ -37,6 +39,21 @@ class ReportGateTests(unittest.TestCase):
             validate_reports({"mcp": ["mcp.one"]}, [], "ee", self.digest)
         with self.assertRaises(ValueError):
             validate_reports(self.expected, [report], "ee", self.digest)
+
+    def test_single_and_multiple_artifact_layouts_preserve_duplicate_detection(self):
+        report = copy.deepcopy(self.reports[1])
+        report["edition"] = "ee"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "results.json").write_text(json.dumps(report))
+            validate_reports({"mcp": ["mcp.one"]}, load_reports(root), "ee", self.digest)
+            nested = root / "artifact"
+            nested.mkdir()
+            (nested / "results.json").write_text(json.dumps(report))
+            with self.assertRaises(ValueError):
+                validate_reports({"mcp": ["mcp.one"]}, load_reports(root), "ee", self.digest)
+            (root / "results.json").unlink()
+            validate_reports({"mcp": ["mcp.one"]}, load_reports(root), "ee", self.digest)
 
     def test_missing_duplicate_unknown_and_empty_suites_fail(self):
         for reports in (self.reports[:-1], self.reports + [self.reports[0]], []):

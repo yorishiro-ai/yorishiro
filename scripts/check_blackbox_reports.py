@@ -15,6 +15,11 @@ ROOT = Path(__file__).resolve().parent.parent
 SUITES = ("rest", "mcp", "cli")
 
 
+def load_reports(directory: Path) -> list[dict]:
+    paths = [*directory.glob("results.json"), *directory.glob("*/results.json")]
+    return [json.loads(path.read_text()) for path in sorted(paths)]
+
+
 def validate_reports(expected: dict[str, list[str]], reports: list[dict], edition: str, binary_sha256: str) -> None:
     if set(expected) != ({"mcp"} if edition == "ee" else set(SUITES)):
         raise ValueError("expected assignments must include REST, MCP and CLI")
@@ -56,7 +61,7 @@ def main() -> int:
             text=True,
         )
         expected[suite] = json.loads(output)
-    reports = [json.loads(path.read_text()) for path in sorted(args.reports.glob("*/results.json"))]
+    reports = load_reports(args.reports)
     with args.binary.open("rb") as binary:
         digest = hashlib.file_digest(binary, "sha256").hexdigest()
     validate_reports(expected, reports, args.edition, digest)
