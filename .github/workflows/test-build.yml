@@ -1,0 +1,73 @@
+name: Compile test artifacts
+
+on:
+  workflow_call:
+    inputs:
+      edition:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Inventory compiled tests (${{ inputs.edition }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo-cache
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
+      EDITION: ${{ inputs.edition }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/rust-setup
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: inventory-${{ inputs.edition }}-debug
+      - name: Build and enumerate exact workspace test executables
+        run: |
+          set -euo pipefail
+          case "$EDITION" in ce) features=community ;; ee) features=enterprise ;; *) exit 1 ;; esac
+          cargo test --locked --no-default-features --features "$features" --workspace --no-run --message-format=json > "$RUNNER_TEMP/cargo-tests.jsonl"
+          cargo build --locked --no-default-features --features "$features" --bin yorishiro
+          python3 scripts/test_assignments.py collect --cargo-messages "$RUNNER_TEMP/cargo-tests.jsonl" --edition "$EDITION" --output "$RUNNER_TEMP/inventory-$EDITION.json"
+          python3 - "$RUNNER_TEMP/inventory-$EDITION.json" "$RUNNER_TEMP/test-executables-$EDITION.tar.gz" <<'PY'
+          import json, pathlib, sys, tarfile
+          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          root = pathlib.Path.cwd()
+          paths = {pathlib.Path(row['executable']).relative_to(root) for row in inventory['artifacts']}
+          paths.add(pathlib.Path(inventory['process_binary']['executable']).relative_to(root))
+          with tarfile.open(sys.argv[2], 'w:gz') as archive:
+              for path in sorted(paths):
+                  archive.add(path, arcname=str(path))
+          PY
+      - name: Run workspace documentation tests for this edition
+        run: |
+          features=community
+          if [[ "$EDITION" == ee ]]; then features=enterprise; fi
+          cargo test --locked --workspace --doc --no-default-features --features "$features"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-inventory-${{ inputs.edition }}
+          path: ${{ runner.temp }}/inventory-${{ inputs.edition }}.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-executables-${{ inputs.edition }}
+          path: ${{ runner.temp }}/test-executables-${{ inputs.edition }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Publish the small public-contract binary directly
+        run: tar -C target/debug -czf "$RUNNER_TEMP/public-contract-$EDITION.tar.gz" yorishiro
+      - uses: actions/upload-artifact@v7
+        with:
+          name: public-contract-binary-${{ inputs.edition }}
+          path: ${{ runner.temp }}/public-contract-${{ inputs.edition }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

@@ -73,7 +73,7 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     ]
 }
 
-pub fn routes() -> Routes {
+pub(crate) fn routes() -> Routes {
     Routes::new()
         .prefix("api/system")
         .add("/maintenance", get(get_maintenance))

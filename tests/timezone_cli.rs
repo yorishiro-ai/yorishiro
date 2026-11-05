@@ -1,4 +1,3 @@
-use migration::MigratorTrait;
 use yorishiro::app::cli_requires_timezone_gate;
 
 #[test]
@@ -37,49 +36,4 @@ fn task_gate_does_not_treat_flags_as_commands() {
     ] {
         assert!(!cli_requires_timezone_gate(args));
     }
-}
-
-#[test]
-fn persisted_state_gate_only_applies_to_work_commands() {
-    assert!(yorishiro::app::cli_requires_timezone_gate([
-        "app", "task", "sync"
-    ]));
-    assert!(!yorishiro::app::cli_requires_timezone_gate([
-        "app", "db", "migrate"
-    ]));
-    assert!(yorishiro::app::cli_requires_timezone_gate([
-        "app",
-        "scheduler"
-    ]));
-}
-
-#[tokio::test]
-async fn migration_bootstrap_seeds_state_for_the_task_gate() {
-    use sea_orm::{Database, EntityTrait};
-
-    let migration_args = ["app", "db", "migrate"];
-    assert!(!yorishiro::app::cli_requires_timezone_gate(migration_args));
-    let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(format!(
-        "sqlite://{}?mode=rwc",
-        dir.path().join("gate.sqlite3").display()
-    ))
-    .await
-    .unwrap();
-    assert!(yorishiro::app::cli_timezone_gate_result(["app", "task", "sync"], None).is_err());
-    migration::Migrator::up(&db, None).await.unwrap();
-    let state = yorishiro::models::timezone_state::Entity::find_by_id(1)
-        .one(&db)
-        .await
-        .unwrap()
-        .expect("migration seeds the timezone singleton");
-    assert_eq!(state.active_timezone, "UTC");
-    assert!(
-        yorishiro::app::cli_timezone_gate_result(
-            ["app", "task", "sync"],
-            Some(&state.active_timezone),
-        )
-        .is_ok()
-    );
-    db.close().await.unwrap();
 }

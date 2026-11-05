@@ -224,9 +224,6 @@ async fn model_provider(
 /// A workspace stamped with a dimension count (`workspace_workspaces.embedding_dimensions`) must refuse a sync whose provider produces a different width, rather than writing a vector that would silently break every future search over that workspace with a dimension-mismatch error naming neither the entity nor the write that caused it.
 #[tokio::test]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let crate::requests::fixtures::TestTenant {
             tenant_id,
@@ -332,9 +329,6 @@ async fn gated_model_provider(
 /// A workspace stamped with a model name (`workspace_workspaces.embedding_model`) must refuse a sync whose provider reports a different model, even though both produce 768-dimensional vectors and the dimension check above cannot see any difference: this is exactly the nomic/multilingual-e5-base coexistence `entity_entities.embedding vector(768)` allows, and the case that check exists to catch.
 #[tokio::test]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let crate::requests::fixtures::TestTenant {
             tenant_id,

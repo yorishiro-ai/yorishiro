@@ -20,7 +20,7 @@ use crate::models::template_templates::{
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn list_templates(
+async fn list_templates(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
@@ -34,7 +34,7 @@ pub async fn list_templates(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn get_template(
+async fn get_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,
@@ -47,7 +47,7 @@ pub async fn get_template(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn create_template(
+async fn create_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateTemplateRequest>,
@@ -72,7 +72,7 @@ pub async fn create_template(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn update_template(
+async fn update_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,
@@ -108,7 +108,7 @@ pub(crate) async fn delete_template(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn fork_template(
+async fn fork_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,

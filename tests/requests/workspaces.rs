@@ -226,7 +226,30 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 #[tokio::test]
 async fn workspace_mutations_recheck_stale_administrator_contexts() {
     use sea_orm::TransactionTrait;
+    use std::sync::Arc;
+    use yorishiro::controllers::middleware::auth::Authenticator;
     use yorishiro::models::{api_keys, tenancy, workspace_memberships::WorkspaceRole};
+
+    struct PausedAuthentication {
+        inner: Arc<dyn Authenticator>,
+        resolved: Arc<tokio::sync::Notify>,
+        resume: Arc<tokio::sync::Notify>,
+    }
+
+    #[loco_rs::prelude::async_trait]
+    impl Authenticator for PausedAuthentication {
+        async fn authenticate(
+            &self,
+            app: &loco_rs::app::AppContext,
+            key: &str,
+            headers: &[(String, String)],
+        ) -> Result<api_keys::AuthContext, yorishiro::YorishiroError> {
+            let actor = self.inner.authenticate(app, key, headers).await?;
+            self.resolved.notify_one();
+            self.resume.notified().await;
+            Ok(actor)
+        }
+    }
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -267,13 +290,33 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             scope: api_keys::ApiKeyScope::Read,
             audit: false,
         };
-        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Member)
+        let resolved = Arc::new(tokio::sync::Notify::new());
+        let resume = Arc::new(tokio::sync::Notify::new());
+        ctx.shared_store.insert(Arc::new(PausedAuthentication {
+            inner: ctx.shared_store.get::<Arc<dyn Authenticator>>().unwrap(),
+            resolved: resolved.clone(),
+            resume: resume.clone(),
+        }) as Arc<dyn Authenticator>);
+        let create = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&serde_json::json!({"name": "must-not-create"}));
+        let demote_after_authentication = async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), resolved.notified())
+                .await
+                .expect("request must authenticate before demotion");
+            tenant_memberships::add_member(
+                &ctx.db,
+                tenant.tenant_id,
+                admin.id,
+                MembershipRole::Member,
+            )
             .await
             .unwrap();
-        assert!(matches!(
-            tenancy::create_workspace_as(&ctx.db, &actor, "must-not-create", None, None).await,
-            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
-        ));
+            resume.notify_one();
+        };
+        let (response, ()) = tokio::join!(async { create.await }, demote_after_authentication);
+        response.assert_status(StatusCode::FORBIDDEN);
         assert!(matches!(
             tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
             Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
@@ -281,11 +324,19 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
             .await
             .unwrap();
-        api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
-        assert!(matches!(
-            tenancy::create_workspace_as(&ctx.db, &actor, "must-not-create", None, None).await,
-            Err(yorishiro::YorishiroError::Unauthenticated)
-        ));
+        let create = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .json(&serde_json::json!({"name": "must-not-create"}));
+        let revoke_after_authentication = async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), resolved.notified())
+                .await
+                .expect("request must authenticate before revocation");
+            api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+            resume.notify_one();
+        };
+        let (response, ()) = tokio::join!(async { create.await }, revoke_after_authentication);
+        response.assert_status(StatusCode::UNAUTHORIZED);
         assert!(matches!(
             tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
             Err(yorishiro::YorishiroError::Unauthenticated)

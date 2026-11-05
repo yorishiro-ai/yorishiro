@@ -6,15 +6,15 @@ use serde::{Deserialize, Serialize};
 // `MaintenanceState` is the repository's own type and is not serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is declared here rather than reused directly.
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct MaintenanceResponse {
+pub(crate) struct MaintenanceResponse {
     /// `off`, `read-only` or `full-lock`.
     #[cfg_attr(feature = "openapi", schema(value_type = MaintenanceMode))]
-    pub mode: String,
+    pub(crate) mode: String,
     /// Seconds a refused caller is told to wait, sent as `Retry-After` on the refusal itself.
-    pub retry_after: u32,
+    pub(crate) retry_after: u32,
     /// Why, when whoever set it said.
     /// Absent when nothing was given.
-    pub reason: Option<String>,
+    pub(crate) reason: Option<String>,
 }
 
 impl From<MaintenanceState> for MaintenanceResponse {
@@ -38,14 +38,14 @@ where
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct SetMaintenanceRequest {
+pub(crate) struct SetMaintenanceRequest {
     /// `off`, `read-only` or `full-lock`, spelled as the CLI spells them.
     #[serde(deserialize_with = "deserialize_maintenance_mode")]
-    pub mode: MaintenanceMode,
+    pub(crate) mode: MaintenanceMode,
     /// Defaults to the same 300 seconds the CLI uses.
     #[serde(default)]
-    pub retry_after: Option<u32>,
+    pub(crate) retry_after: Option<u32>,
     /// Shown to refused callers instead of the generic message.
     #[serde(default)]
-    pub reason: Option<String>,
+    pub(crate) reason: Option<String>,
 }

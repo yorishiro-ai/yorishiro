@@ -34,6 +34,7 @@ class EnvConfigTest(unittest.TestCase):
             "YORISHIRO_TEST_E5_MODEL",
             "YORISHIRO_TEST_E5_TOKENIZER",
             "YORISHIRO_TEST_REDIS_BASE_URL",
+            "YORISHIRO_TEST_STRICT_TOPOLOGY",
             "YORISHIRO_TOPOLOGY_MARKER_DIR",
         }
         self.assertEqual(registry - config_keys - direct - harness, set())

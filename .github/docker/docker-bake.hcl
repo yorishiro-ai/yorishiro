@@ -6,6 +6,10 @@ variable "TAG" {
   default = "local"
 }
 
+variable "BUILD_SHA" {
+  default = "dev"
+}
+
 variable "EDITION" {
   default = "ee"
   validation {
@@ -31,6 +35,7 @@ target "app" {
   dockerfile = "Dockerfile"
   args = {
     EDITION = EDITION
+    BUILD_SHA = BUILD_SHA
   }
   tags = ["${IMAGE}:${TAG}"]
   annotations = ["manifest:org.opencontainers.image.description=An MCP-native, multi-tenant knowledge store with user-defined schemas."]
@@ -45,6 +50,7 @@ target "release" {
   inherits = ["app"]
   args = {
     EDITION = edition
+    BUILD_SHA = BUILD_SHA
   }
   platforms = ["linux/${ARCH}"]
   tags = ["${IMAGE}:${TAG}-${edition}-${ARCH}"]

@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct CreateSchemaResponse {
-    pub schema: SchemaRecord,
-    pub diff: VersioningDiff,
+pub(crate) struct CreateSchemaResponse {
+    pub(crate) schema: SchemaRecord,
+    pub(crate) diff: VersioningDiff,
 }
 
 /// Either an inline schema definition, or a reference to a template.
@@ -16,7 +16,7 @@ pub struct CreateSchemaResponse {
 /// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working unchanged.
 #[derive(Deserialize)]
 #[serde(untagged)]
-pub enum CreateSchemaRequest {
+pub(crate) enum CreateSchemaRequest {
     Definition(MetaSchemaDefinition),
     Template { template_id: String },
 }

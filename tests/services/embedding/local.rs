@@ -66,6 +66,12 @@ async fn embeds_texts_with_a_real_e5_model() {
         .read()
         .unwrap_or_else(|_| "models/multilingual-e5-base/tokenizer.json".into());
     if !Path::new(&model_path).exists() || !Path::new(&tokenizer_path).exists() {
+        assert!(
+            !crate::env::TestEnv::StrictTopology
+                .read()
+                .is_ok_and(|value| value == "true"),
+            "assigned E5 contract requires the pinned model and tokenizer assets"
+        );
         eprintln!("skipping embeds_texts_with_a_real_e5_model: model files not found");
         return;
     }

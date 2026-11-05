@@ -3,11 +3,11 @@ use uuid::Uuid;
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct UserRecord {
-    pub id: Uuid,
-    pub email: String,
-    pub display_name: Option<String>,
-    pub created_at: String,
+pub(crate) struct UserRecord {
+    pub(crate) id: Uuid,
+    pub(crate) email: String,
+    pub(crate) display_name: Option<String>,
+    pub(crate) created_at: String,
 }
 
 impl UserRecord {
@@ -28,9 +28,9 @@ impl UserRecord {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct UpdateUserRequest {
+pub(crate) struct UpdateUserRequest {
     /// New display name.
     /// Null clears it.
     /// Email, password and OAuth subjects are not editable here.
-    pub display_name: Option<String>,
+    pub(crate) display_name: Option<String>,
 }

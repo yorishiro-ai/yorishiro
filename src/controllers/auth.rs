@@ -66,7 +66,7 @@ async fn accept_invite(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn signup(
+async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
@@ -166,7 +166,7 @@ async fn signup_without_invite(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 ///
-pub async fn login(
+async fn login(
     State(ctx): State<AppContext>,
     Json(body): Json<LoginRequest>,
 ) -> Result<Response, ApiError> {

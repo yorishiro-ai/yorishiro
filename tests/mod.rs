@@ -22,6 +22,27 @@ mod timezone_cli;
 mod timezone_state;
 mod workers;
 
+async fn has_active_job(
+    db: &impl sea_orm::ConnectionTrait,
+    job_name: &str,
+    workspace_id: uuid::Uuid,
+) -> Result<bool, sea_orm::DbErr> {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::queue_job_lifecycles::{Column, Entity, LifecycleStatus};
+
+    Ok(Entity::find()
+        .filter(Column::JobName.eq(job_name))
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Status.is_in([
+            LifecycleStatus::Queued.as_db_str(),
+            LifecycleStatus::Running.as_db_str(),
+            LifecycleStatus::Retrying.as_db_str(),
+        ]))
+        .count(db)
+        .await?
+        > 0)
+}
+
 /// Records the database and queue provider after Loco has booted the app.
 pub(crate) fn record_configured_topology(ctx: &loco_rs::app::AppContext) {
     let config = &ctx.config;
@@ -272,6 +293,15 @@ fn require_backend(expected: &str) -> bool {
     } else {
         "skipped"
     };
+    if crate::env::TestEnv::StrictTopology
+        .read()
+        .is_ok_and(|value| value == "true")
+    {
+        assert_eq!(
+            actual, expected,
+            "assigned test selected the wrong database backend"
+        );
+    }
 
     let reason = if outcome == "executed" {
         format!("selected {expected}-specific test on {actual} backend")
@@ -289,6 +319,16 @@ fn require_backend(expected: &str) -> bool {
     }
 
     actual == expected
+}
+
+/// Assigned contracts fail instead of silently returning on a provider mismatch.
+pub(crate) fn reject_assigned_skip(reason: &str) {
+    assert!(
+        !crate::env::TestEnv::StrictTopology
+            .read()
+            .is_ok_and(|value| value == "true"),
+        "assigned contract skipped its assertions: {reason}"
+    );
 }
 
 /// Returns `true` and records execution only when the active backend is SQLite.

@@ -20,6 +20,7 @@ async fn sql_queue_close_releases_pool_and_retained_worker_context() {
             ctx.config.queue,
             Some(loco_rs::config::QueueConfig::Redis(_))
         ) {
+            crate::reject_assigned_skip("SQL queue close contract cannot run on Redis");
             return;
         }
         let mut worker_ctx = ctx.clone();
@@ -62,6 +63,9 @@ async fn redis_claim_refreshes_age_and_fences_reaped_completion_and_failure() {
                 ctx.config.queue,
                 Some(loco_rs::config::QueueConfig::Redis(_))
             ) {
+                crate::reject_assigned_skip(
+                    "Redis claim contract requires the Redis queue provider",
+                );
                 return;
             }
             let fixture =

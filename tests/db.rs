@@ -32,21 +32,47 @@ mod advisory_lock_tests {
 
     use crate::requests::boot_request;
 
-    /// PostgreSQL excludes a second transaction until the first ends; SQLite has one writer and no named locks, so the lock is a no-op that always succeeds.
     #[tokio::test]
     #[serial_test::serial(process_environment)]
-    async fn a_named_lock_excludes_another_transaction_only_on_postgres() {
+    async fn sqlite_named_locks_are_noops() {
+        if !crate::require_sqlite_backend() {
+            return;
+        }
         boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+            assert!(!ctx.is_postgres());
             let key = format!("lock-test-{}", uuid::Uuid::now_v7());
-            let postgres = ctx.is_postgres();
+            let first = ctx.db.begin().await.expect("first transaction");
+            let second = ctx.db.begin().await.expect("second transaction");
+            lock_for_update(&first, &key).await.expect("take the lock");
+            assert!(try_lock_for_update(&second, &key).await.expect("try"));
+            assert!(
+                try_lock_for_update(&second, &format!("{key}-other"))
+                    .await
+                    .expect("try another key")
+            );
+            first.commit().await.expect("end first transaction");
+            assert!(try_lock_for_update(&second, &key).await.expect("try again"));
+            second.rollback().await.expect("rollback");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(process_environment)]
+    async fn postgres_named_locks_exclude_until_transaction_end() {
+        if !crate::require_postgres_backend() {
+            return;
+        }
+        boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+            assert!(ctx.is_postgres());
+            let key = format!("lock-test-{}", uuid::Uuid::now_v7());
 
             let first = ctx.db.begin().await.expect("first transaction");
             let second = ctx.db.begin().await.expect("second transaction");
             lock_for_update(&first, &key).await.expect("take the lock");
 
-            assert_eq!(
-                try_lock_for_update(&second, &key).await.expect("try"),
-                !postgres,
+            assert!(
+                !try_lock_for_update(&second, &key).await.expect("try"),
                 "the same key is held by the first transaction"
             );
             assert!(

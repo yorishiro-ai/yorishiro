@@ -5,7 +5,7 @@
 .opencode/
 
 /target
-/scripts/__pycache__/
+__pycache__/
 /coverage
 *.swp
 *.swo

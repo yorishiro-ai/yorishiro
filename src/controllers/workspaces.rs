@@ -36,7 +36,7 @@ pub(crate) async fn list_workspaces(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn create_workspace(
+async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateWorkspaceRequest>,
@@ -56,7 +56,7 @@ pub async fn create_workspace(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn get_workspace(
+async fn get_workspace(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
     Path(id): Path<Uuid>,
@@ -78,7 +78,7 @@ async fn update_workspace(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, description = "Last workspace or referenced by schema forks", body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub(crate) async fn delete_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,

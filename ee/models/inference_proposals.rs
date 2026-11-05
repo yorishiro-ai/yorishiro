@@ -81,34 +81,15 @@ pub struct ProposalActionReport {
     pub changed: i64,
 }
 
+/// Records proposals only for the currently running attempt.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn record_batch(
+/// Rejects stale attempts, invalid jobs and persistence failures.
+pub async fn record_batch_attempt(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
-    schema_id: Uuid,
-    schema_version: i32,
-    fields: impl IntoIterator<Item = (Uuid, String, Value)>,
-) -> Result<i64, YorishiroError> {
-    record_batch_attempt(
-        conn,
-        workspace_id,
-        job_id,
-        None,
-        schema_id,
-        schema_version,
-        fields,
-    )
-    .await
-}
-
-pub(crate) async fn record_batch_attempt(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    job_id: Uuid,
-    attempt: Option<i32>,
+    attempt: i32,
     schema_id: Uuid,
     schema_version: i32,
     fields: impl IntoIterator<Item = (Uuid, String, Value)>,
@@ -130,9 +111,7 @@ pub(crate) async fn record_batch_attempt(
             message: format!("inference job '{job_id}' is not running"),
         });
     }
-    if let Some(attempt) = attempt
-        && job.attempt != attempt
-    {
+    if job.attempt != attempt {
         return Err(YorishiroError::Conflict {
             message: format!("inference job '{job_id}' attempt is stale"),
         });
@@ -231,15 +210,6 @@ async fn transition_pending(
         .await
         .internal()?;
     Ok(result.rows_affected as i64)
-}
-
-/// Closes pending proposals when their parent job fails without deleting their audit history.
-pub(crate) async fn discard_pending_for_job(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    job_id: Uuid,
-) -> Result<i64, YorishiroError> {
-    transition_pending(conn, workspace_id, job_id, ProposalStatus::Discarded).await
 }
 
 ///

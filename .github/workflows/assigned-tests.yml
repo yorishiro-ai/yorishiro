@@ -1,0 +1,186 @@
+name: Assigned tests
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: Verified include matrix with edition, job, database, queue and signed_licence fields
+        required: true
+        type: string
+    secrets:
+      YORISHIRO_LICENSE_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+# Reusable workflows do not inherit the caller's workflow-level environment.
+# Keep these immutable asset coordinates aligned with ci.yml.
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
+  EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
+  EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
+  EMBEDDING_MODEL_REMOTE_PATH: model.safetensors
+  EMBEDDING_MODEL_LOCAL_NAME: model.safetensors
+  EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
+  EMBEDDING_MODEL_SIZE: "1112201288"
+  EMBEDDING_TOKENIZER_REMOTE_PATH: tokenizer.json
+  EMBEDDING_TOKENIZER_LOCAL_NAME: tokenizer.json
+  EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
+  EMBEDDING_TOKENIZER_SIZE: "17082660"
+
+jobs:
+  assigned:
+    name: Assigned (${{ matrix.edition }}, ${{ matrix.job }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    env:
+      YORISHIRO_TEST_EDITION: ${{ matrix.edition }}
+      YORISHIRO_TEST_TOPOLOGY: ${{ matrix.database }}-${{ matrix.queue }}
+      YORISHIRO_TEST_QUEUE: ${{ matrix.queue }}
+      YORISHIRO_QUEUE_KIND: ${{ matrix.queue == 'postgres' && 'Postgres' || matrix.queue == 'redis' && 'Redis' || 'Sqlite' }}
+      DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgres://yorishiro:yorishiro@localhost:5432/yorishiro' || format('sqlite://{0}/assigned.sqlite3?mode=rwc', github.workspace) }}
+      QUEUE_URL: ${{ matrix.queue == 'redis' && 'redis://localhost:6379/15' || matrix.queue == 'postgres' && 'postgres://yorishiro:yorishiro@localhost:5432/yorishiro' || format('sqlite://{0}/assigned-queue.sqlite3?mode=rwc', github.workspace) }}
+      LOCO_ENV: ${{ matrix.database == 'postgres' && (matrix.queue == 'redis' && 'test_postgres_redis' || 'test_postgres') || (matrix.queue == 'redis' && 'test_sqlite_redis' || 'test_sqlite') }}
+      YORISHIRO_POSTGRES_TEST_URL: ${{ matrix.database == 'postgres' && 'postgres://yorishiro:yorishiro@localhost:5432/yorishiro' || '' }}
+      YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue == 'redis' && 'redis://localhost:6379/15' || '' }}
+      YORISHIRO_TEST_REDIS_BASE_URL: ${{ matrix.queue == 'redis' && 'redis://localhost:6379/15' || '' }}
+      YORISHIRO_LICENSE_KEY: ${{ matrix.edition == 'ee' && matrix.signed_licence && secrets.YORISHIRO_LICENSE_KEY || '' }}
+      YORISHIRO_TEST_E5_MODEL: ${{ matrix.requires_e5_cache && format('{0}/models/multilingual-e5-base/model.safetensors', github.workspace) || '' }}
+      YORISHIRO_TEST_E5_TOKENIZER: ${{ matrix.requires_e5_cache && format('{0}/models/multilingual-e5-base/tokenizer.json', github.workspace) || '' }}
+      DB_MAX_CONNECTIONS: "100"
+      DB_CONNECT_TIMEOUT: "5000"
+      RUST_BACKTRACE: "1"
+    services:
+      db:
+        image: ${{ matrix.database == 'postgres' && 'pgvector/pgvector:pg18' || '' }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-executables-${{ matrix.edition }}
+          path: ${{ runner.temp }}/executables
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-assignments
+          path: ${{ runner.temp }}/assignments
+
+      - name: Restore compiled executables without rebuilding
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          tar -xzf "$RUNNER_TEMP/executables/test-executables-$EDITION.tar.gz" -C "$GITHUB_WORKSPACE"
+          test -x target/debug/yorishiro
+          # The producer and consumer both use Ubuntu 26.04 for native OpenSSL compatibility.
+          ldd target/debug/yorishiro > "$RUNNER_TEMP/assigned-binary-libraries.txt"
+          if grep -F 'not found' "$RUNNER_TEMP/assigned-binary-libraries.txt"; then exit 1; fi
+
+      - name: Require a signed licence only for licensed assignments
+        if: matrix.signed_licence
+        run: |
+          if [[ -z "$YORISHIRO_LICENSE_KEY" ]]; then
+            echo '::error::The selected assignment requires the YORISHIRO_LICENSE_KEY secret.'
+            exit 1
+          fi
+
+      - name: Restore multilingual-e5-base cache
+        if: matrix.requires_e5_cache
+        uses: actions/cache/restore@v6
+        id: embedding-cache
+        with:
+          path: |
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+
+      - name: Verify required embedding assets before execution
+        if: matrix.requires_e5_cache
+        env:
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: unused
+          TOKENIZER_URL: unused
+        run: python3 scripts/embedding_cache.py verify
+
+      - name: Bootstrap PostgreSQL extensions and non-superuser migration identity
+        if: matrix.database == 'postgres'
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
+        run: |
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d template1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+          # Migrations create the NOLOGIN application role and grant membership themselves.
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
+            -c 'CREATE DATABASE yorishiro OWNER yorishiro;'
+          # The admin configures logging; application probes and tests remain non-superuser.
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
+
+      - name: Start Valkey only for Redis assignments
+        if: matrix.queue == 'redis'
+        timeout-minutes: 3
+        run: |
+          image="$(docker compose config --format json | jq -er '.services.redis.image')"
+          [[ "$image" == valkey/valkey:9.1.3 ]]
+          docker run --detach --name assigned-redis --publish 127.0.0.1:6379:6379 \
+            "$image" valkey-server --databases 65536 --save '' --appendonly no
+          docker exec assigned-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
+
+      - name: Execute verified exact assignments
+        id: execution
+        timeout-minutes: 45
+        env:
+          EDITION: ${{ matrix.edition }}
+          ASSIGNED_JOB: ${{ matrix.job }}
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
+          YORISHIRO_REQUEST_TIMING_DIR: ${{ runner.temp }}/assigned-results/timings
+        run: >-
+          python3 scripts/run_assigned_tests.py run
+          --assignments "$RUNNER_TEMP/assignments/test-assignments.json"
+          --edition "$EDITION"
+          --job "$ASSIGNED_JOB"
+          --output "$RUNNER_TEMP/assigned-results/receipt.json"
+          --artifacts "$RUNNER_TEMP/assigned-results/logs"
+
+      - name: Verify embedding assets after execution
+        if: always() && matrix.requires_e5_cache && steps.execution.outcome != 'skipped' && steps.execution.outcome != ''
+        env:
+          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: unused
+          TOKENIZER_URL: unused
+        run: python3 scripts/embedding_cache.py verify
+
+      - name: Upload execution receipt and redacted logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: assigned-test-result-${{ matrix.edition }}-${{ matrix.job }}
+          path: ${{ runner.temp }}/assigned-results
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove the assignment Redis service
+        if: always() && matrix.queue == 'redis'
+        run: docker rm --force assigned-redis

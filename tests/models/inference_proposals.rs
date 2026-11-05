@@ -62,7 +62,7 @@ async fn proposals_are_idempotent_and_confirmation_is_validated_and_undoable() {
             .await
             .expect("create job");
         inference_jobs::claim(&db, job_id).await.expect("claim job");
-        let first = inference_proposals::record_batch(
+        let first = crate::ee::inference_fixtures::record_batch(
             &db,
             workspace_id,
             job_id,
@@ -72,7 +72,7 @@ async fn proposals_are_idempotent_and_confirmation_is_validated_and_undoable() {
         )
         .await
         .expect("record proposal");
-        let retry = inference_proposals::record_batch(
+        let retry = crate::ee::inference_fixtures::record_batch(
             &db,
             workspace_id,
             job_id,
@@ -84,7 +84,32 @@ async fn proposals_are_idempotent_and_confirmation_is_validated_and_undoable() {
         .expect("retry proposal");
         assert_eq!(first, 1);
         assert_eq!(retry, 0);
-        inference_jobs::complete(&db, job_id, 0, 0)
+        let attempt = inference_jobs::get(&db, job_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .attempt;
+        assert!(
+            inference_proposals::record_batch_attempt(
+                &db,
+                workspace_id,
+                job_id,
+                attempt - 1,
+                active.id,
+                active.version,
+                [(entity.id, "body".into(), json!("stale attempt"))],
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            inference_proposals::for_job(&db, workspace_id, job_id)
+                .await
+                .unwrap()[0]
+                .proposed,
+            json!("inferred")
+        );
+        crate::ee::inference_fixtures::complete(&db, job_id, 0, 0)
             .await
             .expect("complete job");
         assert_eq!(
@@ -141,7 +166,7 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
             .await
             .unwrap();
         inference_jobs::claim(&db, invalid_job).await.unwrap();
-        inference_proposals::record_batch(
+        crate::ee::inference_fixtures::record_batch(
             &db,
             workspace_id,
             invalid_job,
@@ -151,7 +176,7 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
         )
         .await
         .unwrap();
-        inference_jobs::complete(&db, invalid_job, 0, 0)
+        crate::ee::inference_fixtures::complete(&db, invalid_job, 0, 0)
             .await
             .unwrap();
         let invalid = inference_proposals::confirm(&db, workspace_id, invalid_job, None)
@@ -164,7 +189,7 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
                 .await
                 .unwrap();
             inference_jobs::claim(&db, job_id).await.unwrap();
-            inference_proposals::record_batch(
+            crate::ee::inference_fixtures::record_batch(
                 &db,
                 workspace_id,
                 job_id,
@@ -174,7 +199,9 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
             )
             .await
             .unwrap();
-            inference_jobs::complete(&db, job_id, 0, 0).await.unwrap();
+            crate::ee::inference_fixtures::complete(&db, job_id, 0, 0)
+                .await
+                .unwrap();
             let changed = if rejected {
                 inference_proposals::reject(&db, workspace_id, job_id)
                     .await
@@ -214,7 +241,7 @@ async fn incomplete_and_failed_jobs_cannot_change_proposals() {
                 .await
                 .unwrap();
             inference_jobs::claim(&db, job_id).await.unwrap();
-            inference_proposals::record_batch(
+            crate::ee::inference_fixtures::record_batch(
                 &db,
                 workspace_id,
                 job_id,
@@ -225,7 +252,7 @@ async fn incomplete_and_failed_jobs_cannot_change_proposals() {
             .await
             .unwrap();
             if failed {
-                inference_jobs::fail(&db, job_id, "provider failed")
+                crate::ee::inference_fixtures::fail(&db, job_id, "provider failed")
                     .await
                     .unwrap();
             }
@@ -246,7 +273,9 @@ async fn incomplete_and_failed_jobs_cannot_change_proposals() {
             );
             // A workspace holds one running job at a time, so the incomplete job stops before the next pass starts another.
             if !failed {
-                inference_jobs::fail(&db, job_id, "stopped").await.unwrap();
+                crate::ee::inference_fixtures::fail(&db, job_id, "stopped")
+                    .await
+                    .unwrap();
             }
         }
     })
@@ -266,7 +295,7 @@ async fn edited_entities_make_pending_proposals_stale() {
             .await
             .unwrap();
         inference_jobs::claim(&db, job_id).await.unwrap();
-        inference_proposals::record_batch(
+        crate::ee::inference_fixtures::record_batch(
             &db,
             workspace_id,
             job_id,
@@ -276,7 +305,9 @@ async fn edited_entities_make_pending_proposals_stale() {
         )
         .await
         .unwrap();
-        inference_jobs::complete(&db, job_id, 0, 0).await.unwrap();
+        crate::ee::inference_fixtures::complete(&db, job_id, 0, 0)
+            .await
+            .unwrap();
 
         entity_entities::update(
             &db,

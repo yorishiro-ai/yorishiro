@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run
-"""Deliberate violations prove the CI matrix gate rejects regressions."""
+"""Deliberate violations prove CI responsibility guards reject regressions."""
 
 import re
 
@@ -8,7 +8,8 @@ from check_ci_matrix import ROOT, validate
 
 def main() -> int:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    validate(workflow)
+    assigned_workflow = (ROOT / ".github/workflows/assigned-tests.yml").read_text()
+    validate(workflow, assigned_workflow)
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         ubuntu_runners = re.findall(r"ubuntu-\d+\.\d+(?:-arm)?", path.read_text())
         assert set(ubuntu_runners) <= {"ubuntu-26.04", "ubuntu-26.04-arm"}, path
@@ -19,12 +20,33 @@ def main() -> int:
     assert "FROM almalinux:10" in (ROOT / ".github/packaging/Dockerfile").read_text()
     package_action = (ROOT / ".github/actions/build-and-package/action.yml").read_text()
     assert 'RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"' in package_action
-    ddl_window = workflow.split("      - name: Verify shared requests models and workers do not create databases\n", 1)[1].split("      - name: Upload ordinary request DDL evidence\n", 1)[0]
-    assert "-- requests:: models:: workers::" in ddl_window
-    assert "--skip models::query_embedding_requests::expired_rows_are_purged_and_live_rows_are_kept" in ddl_window
-    assert not any(line.strip().removesuffix("\\").strip() == "--skip models::query_embedding_requests::" for line in ddl_window.splitlines())
-    assert "CREATE TEMP TABLE ordinary_request_ddl_probe" in ddl_window
-    assert "(CREATE|DROP)[[:space:]]+DATABASE[[:space:]]" in ddl_window
+    inventory = (ROOT / ".github/workflows/test-build.yml").read_text()
+    assert '--workspace --no-run --message-format=json' in inventory
+    assert "scripts/test_assignments.py collect" in inventory
+    assignment = workflow.split("\n  test-assignment-verify:\n", 1)[1].split("\n  package-validation:\n", 1)[0]
+    assert "always()" in assignment
+    assert "scripts/test_assignments.py verify" in assignment
+    assert 'inventory-ce.json' in assignment and 'inventory-ee.json' in assignment
+    required_check = workflow.split("\n  required-check:\n", 1)[1]
+    assert 'needs.test-inventory-ce.result' in required_check
+    assert 'needs.test-inventory-ee.result' in required_check
+    assert 'needs.test-assignment-verify.result' in required_check
+    for edition in ("CE", "EE"):
+        assert f'require_success INVENTORY_{edition} "$INVENTORY_{edition}" true' in required_check
+    assert 'require_success ASSIGNMENT "$ASSIGNMENT" true' in required_check
+    assert 'needs.assigned-tests.result' in required_check
+    assert 'needs.assigned-test-verify.result' in required_check
+    for needed in ("true", "false"):
+        assert f'require_success RECEIPTS "$RECEIPTS" {needed}' in required_check
+    assert 'require_success ASSIGNED "$ASSIGNED" "$HAS_CORE"' in required_check
+    assert 'require_success E5 "$E5" "$HAS_E5"' in required_check
+    assert 'uses: ./.github/workflows/assigned-tests.yml' in workflow
+    assert 'scripts/run_assigned_tests.py verify' in workflow
+    assert 'name: test-executables-${{ inputs.edition }}' in inventory
+    assert "Verify shared requests models and workers do not create databases" not in workflow
+    assert "-- requests:: models:: workers::" not in workflow
+    assert "ALTER SYSTEM SET log_statement = 'ddl'" in assigned_workflow
+    assert "POSTGRES_CONTAINER: ${{ job.services.db.id }}" in assigned_workflow
     triggers = workflow.split("\non:\n", 1)[1].split("\nconcurrency:\n", 1)[0]
     assert "  pull_request:" in triggers
     assert "    branches: [develop]" in triggers
@@ -48,22 +70,56 @@ def main() -> int:
     assert 'env:\n          GH_TOKEN: ${{ github.token }}' in job
     assert 'REPO: ${{ github.repository }}' in job
     assert 'PR_NUMBER: ${{ github.event.pull_request.number }}' in job
-    matrix_start = workflow.index("          - edition: ce", workflow.index("\n  test:\n"))
-    first_end = workflow.index("          - edition: ce", matrix_start + 1)
-    first = workflow[matrix_start:first_end]
     violations = [
-        workflow[:matrix_start] + workflow[first_end:],  # Missing pair.
-        workflow[:matrix_start] + first + workflow[matrix_start:],  # Duplicate pair.
-        workflow.replace("queue_key: postgres", "queue_key: sqlite", 1),  # Crossed SQL pair.
-        workflow.replace("        include:", "        edition: [ce, ee]\n        include:", 1),  # Original axis/include bug.
-        workflow.replace("${{ matrix.edition }}", "hidden-edition"),
+        workflow + "\n  test:\n    name: Legacy full suite\n",
+        workflow.replace("      edition: ee", "      edition: ce", 1),
+        workflow.replace("    name: Schema generation (PostgreSQL)", "    matrix: [ce, ee]\n    name: Schema generation (PostgreSQL)", 1),
+        workflow.replace("minimum == configured == actual", "True", 1),
+        workflow.replace("uses: ./.github/actions/sea-orm-cli", "uses: missing-cli", 1),
+        workflow.replace("components: rustfmt\n", "components: clippy\n", 1),
+        workflow.replace('if [ "$count" -lt 10 ]', 'if [ "$count" -lt 0 ]', 1),
+        workflow.replace("python3 scripts/harden_generated_entities.py", "echo skip-hardening", 1),
+        workflow.replace("git diff --exit-code -- src/models/_entities", "echo skip-diff", 1),
+        workflow.replace("NOSUPERUSER NOBYPASSRLS", "SUPERUSER BYPASSRLS", 1),
+        workflow.replace("-d template1", "-d postgres", 1),
+        workflow.replace("assert plan['execution_matrix_ready'], plan['cutover_blockers']", "pass", 1),
+        workflow.replace("matrix: ${{ needs.test-assignment-verify.outputs.core_matrix }}", "matrix: unverified", 1),
+        workflow.replace("needs: [changes, test-assignment-verify]\n", "needs: [changes, prepare-embedding, test-assignment-verify]\n", 1),
+        workflow.replace("matrix: ${{ needs.test-assignment-verify.outputs.e5_matrix }}", "matrix: unverified", 1),
+        workflow.replace('require_success SCHEMA "$SCHEMA" true', 'require_success SCHEMA "$SCHEMA" false', 1),
+        workflow.replace("prepare-embedding, schema-generation, public-contract", "prepare-embedding, public-contract", 1),
+        workflow.replace('require_success RECEIPTS "$RECEIPTS" true', 'echo skip-receipts', 1),
+        workflow.replace('grep -Fxq "YORISHIRO_TOPOLOGY_REJECTED"', 'grep -Fxq "unrelated-error"', 1),
+        workflow + "\n# python3 scripts/test_topology.py postgres-postgres\n",
     ]
     for invalid in violations:
         try:
-            validate(invalid)
-        except (AssertionError, IndexError):
+            validate(invalid, assigned_workflow)
+        except AssertionError:
             continue
-        raise AssertionError("CI matrix gate accepted a deliberate violation")
+        raise AssertionError("CI responsibility gate accepted a deliberate violation")
+    for invalid in (
+        inventory.replace("--workspace --doc --no-default-features", "--workspace --no-default-features", 1),
+        inventory.replace("public-contract-binary-${{ inputs.edition }}", "missing-binary", 1),
+        inventory.replace("      - name: Publish the small public-contract binary directly",
+                          "      - if: inputs.edition == 'ce'\n        name: Publish the small public-contract binary directly", 1),
+    ):
+        try:
+            validate(workflow, assigned_workflow, invalid)
+        except AssertionError:
+            continue
+        raise AssertionError("CI gate accepted invalid edition artifact production")
+    for invalid in (
+        assigned_workflow.replace("matrix: ${{ fromJSON(inputs.matrix) }}", "matrix: unverified", 1),
+        assigned_workflow.replace("POSTGRES_CONTAINER: ${{ job.services.db.id }}", "POSTGRES_CONTAINER: missing"),
+        assigned_workflow.replace("ALTER SYSTEM SET log_statement = 'ddl'", "ALTER SYSTEM RESET log_statement", 1),
+        assigned_workflow.replace("python3 scripts/run_assigned_tests.py run", "cargo test --workspace", 1),
+    ):
+        try:
+            validate(workflow, invalid)
+        except AssertionError:
+            continue
+        raise AssertionError("CI responsibility gate accepted an invalid assignment consumer")
     return 0
 
 

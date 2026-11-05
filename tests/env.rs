@@ -10,6 +10,7 @@ pub(crate) enum TestEnv {
     WorkerClassSharedLimit,
     Timezone,
     TestTopology,
+    StrictTopology,
     #[cfg(feature = "enterprise")]
     StripeWebhookSecret,
     #[cfg(feature = "enterprise")]
@@ -63,6 +64,7 @@ impl TestEnv {
             Self::WorkerClassSharedLimit => "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
             Self::Timezone => "YORISHIRO_TIMEZONE",
             Self::TestTopology => "YORISHIRO_TEST_TOPOLOGY",
+            Self::StrictTopology => "YORISHIRO_TEST_STRICT_TOPOLOGY",
             #[cfg(feature = "enterprise")]
             Self::StripeWebhookSecret => "YORISHIRO_STRIPE_WEBHOOK_SECRET",
             #[cfg(feature = "enterprise")]

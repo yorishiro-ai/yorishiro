@@ -5,8 +5,8 @@ inputs:
   image:
     description: Image repository without a tag (e.g. ghcr.io/org/name)
     required: true
-  tag:
-    description: Release tag
+  source:
+    description: Prepared source commit
     required: true
   edition:
     description: Edition, ce or ee
@@ -24,15 +24,22 @@ runs:
         username: ${{ github.actor }}
         password: ${{ inputs.token }}
 
-    - name: Boot the published image
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: release-manifest-${{ inputs.edition }}
+        path: ${{ runner.temp }}/release-images
+
+    - name: Boot the exact candidate digest
       shell: bash
       env:
         IMAGE: ${{ inputs.image }}
-        TAG: ${{ inputs.tag }}
+        SOURCE: ${{ inputs.source }}
+        RUN_ID: ${{ github.run_id }}
         EDITION: ${{ inputs.edition }}
       run: |
         db=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro
         psql "$db" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+        reference=$(python3 scripts/release_images.py reference --image "$IMAGE" --source "$SOURCE" --run-id "$RUN_ID" --edition "$EDITION" --directory "$RUNNER_TEMP/release-images")
 
         docker run -d --name smoke --network host \
           -e DATABASE_URL="$db" \
@@ -40,7 +47,7 @@ runs:
           -e HOST=http://127.0.0.1:5150 \
           -e BINDING=127.0.0.1 \
           -e YORISHIRO_EMBEDDING_PROVIDER=none \
-          "${IMAGE}:${TAG}-${EDITION}"
+          "$reference"
 
         for _ in $(seq 1 60); do
           curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
@@ -52,3 +59,11 @@ runs:
           exit 1
         }
         docker rm -f smoke
+        python3 scripts/release_images.py smoked --image "$IMAGE" --source "$SOURCE" --run-id "$RUN_ID" --edition "$EDITION" --directory "$RUNNER_TEMP/release-images"
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: release-smoke-${{ inputs.edition }}
+        path: ${{ runner.temp }}/release-images/smoke-${{ inputs.edition }}.json
+        if-no-files-found: error
+        overwrite: true

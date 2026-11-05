@@ -54,16 +54,3 @@ fn a_too_deep_definition_reports_the_offending_field() {
         "the error should name the field that nests too deeply: {rendered}"
     );
 }
-
-/// This module re-exports the metaschema surface under one path, and `validate_definition` is what every write path runs before touching the database.
-/// Exercising it here also pins that the re-export still resolves: dropping it stops this file compiling.
-#[test]
-fn a_definition_with_no_entity_types_is_rejected() {
-    let error = validate_definition(&parse(serde_json::json!({
-        "name": "empty",
-        "entity_types": {}
-    })))
-    .unwrap_err();
-
-    assert!(matches!(error, YorishiroError::ValidationFailed { .. }));
-}

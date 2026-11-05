@@ -79,7 +79,7 @@ async fn perform_infer_fill(
     ctx: &AppContext,
     args: &InferFillArgs,
     job_id: Uuid,
-    attempt: Option<i32>,
+    attempt: i32,
 ) -> loco_rs::Result<(i64, i64)> {
     check_actor(ctx, args)
         .await
@@ -321,7 +321,7 @@ impl InferFillWorker {
             crate::models::queue_job_lifecycles::Entity::heartbeat(self.ctx.db.clone(), id, attempt)
         });
 
-        match perform_infer_fill(&self.ctx, &args, job_id, Some(attempt)).await {
+        match perform_infer_fill(&self.ctx, &args, job_id, attempt).await {
             Ok((proposed, skipped)) => {
                 if let Some(heartbeat) = heartbeat {
                     heartbeat.abort();

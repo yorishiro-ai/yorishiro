@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Focused contract tests for change-based CI selection."""
 
+from pathlib import Path
+
 from classify_ci_changes import (
     ALL,
     classify,
@@ -46,6 +48,19 @@ def test_release_workflow_selects_all_validations() -> None:
     assert result["package_validation"]
     assert result["docker_validation"]
     assert classify([".github/docker/docker-bake.hcl"])["docker_validation"]
+
+
+def test_ci_wiring_selects_its_package_checks() -> None:
+    result = classify([".github/workflows/ci.yml"])
+    assert result["rust_validation"]
+    assert result["package_build"] and result["package_validation"]
+
+
+def test_security_self_and_setup_changes_trigger_the_separate_audit() -> None:
+    workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/security.yml").read_text()
+    triggers = workflow.split("  workflow_dispatch:")[0]
+    for path in (".github/workflows/security.yml", ".github/actions/rust-setup/**"):
+        assert f'      - "{path}"' in triggers
 
 
 def test_manual_full_run_selects_every_group() -> None:
@@ -94,10 +109,11 @@ def test_package_and_docker_groups_are_independent() -> None:
 
 
 def test_package_build_prerequisite_selection() -> None:
-    assert package_build_allowed(True, False, "success", "skipped", "skipped", "skipped")
-    assert not package_build_allowed(True, True, "success", "success", "failure", "success")
-    assert not package_build_allowed(True, False, "cancelled", "skipped", "skipped", "skipped")
-    assert not package_build_allowed(False, False, "success", "skipped", "skipped", "skipped")
+    assert package_build_allowed(True, False, "success", "skipped", "skipped")
+    assert package_build_allowed(True, True, "success", "success", "success")
+    assert not package_build_allowed(True, True, "success", "success", "failure")
+    assert not package_build_allowed(True, False, "cancelled", "skipped", "skipped")
+    assert not package_build_allowed(False, False, "success", "skipped", "skipped")
 
 
 if __name__ == "__main__":

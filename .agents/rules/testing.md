@@ -61,6 +61,16 @@ make entities
 
 ## Test structure
 
+### GHA responsibility groups
+
+CI assigns compiled CE/EE identities through `tests/ci/assignments.json` rather than replaying the common suite across database and queue combinations.
+Common assertions run on SQLite, with explicit enterprise-delta, PostgreSQL, licensed and queue-provider owners.
+The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
+Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
+New tests must join the compiled inventory and produce their assigned execution receipt; a backend/provider early return is not passed coverage.
+See `tests/ci/README.md` for assignment rules, artifact provenance and GHA reproduction commands.
+The full-topology commands above remain available for deliberate manual diagnosis, not automatic duplication in every CI topology.
+
 The integration tests are one binary rooted at `tests/mod.rs`:
 
 - `tests/licence.rs` — licence verification, expiry boundaries

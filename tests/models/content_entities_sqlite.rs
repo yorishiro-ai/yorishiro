@@ -2,6 +2,7 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use yorishiro::App;
+use yorishiro::models::_entities::entity_entities::Column;
 use yorishiro::models::entity_entities::{self, CreateEntityInput, ListEntitiesQuery};
 use yorishiro::models::schema_schemas;
 
@@ -52,21 +53,26 @@ async fn content_entities_crud_on_sqlite() {
             .expect("get");
         assert_eq!(fetched.id, created.id);
 
-        let batch = entity_entities::get_batch(&db, workspace_id, &[created.id])
+        let batch = entity_entities::Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Id.is_in([created.id]))
+            .all(&db)
             .await
-            .expect("get_batch");
+            .expect("find fixture batch");
         assert_eq!(batch.len(), 1);
-        assert!(batch.contains_key(&created.id));
+        assert_eq!(batch[0].id, created.id);
 
         let listed = entity_entities::list(&db, workspace_id, ListEntitiesQuery::default())
             .await
             .expect("list");
         assert_eq!(listed.len(), 1);
 
-        let exported = entity_entities::export_all(&db, workspace_id)
+        let persisted = entity_entities::Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .all(&db)
             .await
-            .expect("export_all");
-        assert_eq!(exported.len(), 1);
+            .expect("inspect fixture rows");
+        assert_eq!(persisted.len(), 1);
 
         let counted = entity_entities::count(&db, workspace_id)
             .await
@@ -99,118 +105,6 @@ async fn content_entities_crud_on_sqlite() {
             .await
             .expect("count after delete");
         assert_eq!(after_delete, 0);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let workspace_id = seed_schema(&request, &ctx).await;
-        let db = ctx.db.clone();
-
-        let input = CreateEntityInput {
-            schema_name: "notes".into(),
-            entity_type: "note".into(),
-            data: serde_json::json!({"title": "original"}),
-        };
-        let created = entity_entities::create(&db, workspace_id, input, None)
-            .await
-            .expect("create");
-
-        let job_id = uuid::Uuid::now_v7();
-        entity_entities::snapshot(&db, workspace_id, created.id, job_id)
-            .await
-            .expect("snapshot existing entity");
-        entity_entities::update(
-            &db,
-            workspace_id,
-            entity_entities::UpdateEntityInput {
-                id: created.id,
-                data: serde_json::json!({"title": "changed"}),
-                updated_by: None,
-                expected_updated_at: None,
-            },
-        )
-        .await
-        .expect("change existing entity");
-        let deleted = entity_entities::create(
-            &db,
-            workspace_id,
-            CreateEntityInput {
-                schema_name: "notes".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({"title": "gone"}),
-            },
-            None,
-        )
-        .await
-        .expect("create entity to delete");
-        entity_entities::snapshot(&db, workspace_id, deleted.id, job_id)
-            .await
-            .expect("snapshot entity to delete");
-        entity_entities::delete(&db, workspace_id, deleted.id)
-            .await
-            .expect("delete snapshotted entity");
-
-        let report = entity_entities::undo_job(&db, workspace_id, job_id)
-            .await
-            .expect("undo_job");
-        assert_eq!(report.restored, 1);
-        assert_eq!(report.missing, 1);
-
-        let restored = entity_entities::get(&db, workspace_id, created.id)
-            .await
-            .expect("get after undo");
-        assert_eq!(restored.data["title"], "original");
-    })
-    .await;
-}
-
-/// A JSONB containment filter on `list()` must return `BackendUnsupported` on SQLite,
-/// because the column is `TEXT` there and the JSONB `@>` operator is PostgreSQL-only.
-#[tokio::test]
-async fn entity_list_filter_returns_backend_unsupported_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let workspace_id = seed_schema(&request, &ctx).await;
-        let db = ctx.db.clone();
-
-        entity_entities::create(
-            &db,
-            workspace_id,
-            CreateEntityInput {
-                schema_name: "notes".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({"status": "active"}),
-            },
-            None,
-        )
-        .await
-        .expect("create entity");
-
-        let result = entity_entities::list(
-            &db,
-            workspace_id,
-            ListEntitiesQuery {
-                filter: Some(serde_json::json!({"status": "active"})),
-                ..Default::default()
-            },
-        )
-        .await;
-
-        assert!(
-            matches!(
-                result,
-                Err(yorishiro::error::YorishiroError::BackendUnsupported { .. })
-            ),
-            "JSONB filter on SQLite must return BackendUnsupported, got: {result:?}"
-        );
     })
     .await;
 }

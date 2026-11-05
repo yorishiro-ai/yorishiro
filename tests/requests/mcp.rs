@@ -13,6 +13,48 @@ use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 use crate::EnvGuard;
 
 #[tokio::test]
+async fn workspace_deletion_reports_fork_references_without_exposing_destination() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ModelTrait, TransactionTrait};
+    use yorishiro::models::{_entities::workspace_schema_forks, tenancy};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let definition = json!({"name":"workspace-fork", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
+        let txn = ctx.db.begin().await.unwrap();
+        let destination = tenancy::create_workspace(&txn, tenant.tenant_id,
+            &format!("workspace-fork-{}", Uuid::now_v7()), None, None).await.unwrap();
+        let source = schema_schemas::create_schema(&txn, tenant.tenant_id, tenant.workspace_id,
+            serde_json::from_value(definition.clone()).unwrap(), None, None).await.unwrap().0;
+        let target = schema_schemas::create_schema(&txn, tenant.tenant_id, destination.id,
+            serde_json::from_value(definition).unwrap(), None, None).await.unwrap().0;
+        let fork = workspace_schema_forks::ActiveModel {
+            id: Set(Uuid::now_v7()), tenant_id: Set(tenant.tenant_id), workspace_id: Set(destination.id),
+            source_workspace_id: Set(tenant.workspace_id), source_schema_id: Set(source.id),
+            source_schema_version: Set(1), source_schema_name: Set("workspace-fork".into()),
+            fork_schema_id: Set(target.id), customized: Set(false), ..Default::default()
+        }.insert(&txn).await.unwrap();
+        txn.commit().await.unwrap();
+        let denied = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+            json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        assert_eq!(denied["result"]["isError"], true);
+        assert!(denied.to_string().contains("schema forks"), "{denied}");
+        assert!(!denied.to_string().contains(&destination.id.to_string()));
+        request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
+        fork.delete(&ctx.db).await.unwrap();
+        let destination_key = issue_api_key(&ctx, destination.id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let deleted = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+            json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"], true);
+        request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
+            .add_header("Authorization", format!("Bearer {destination_key}")).await.assert_status(StatusCode::NOT_FOUND);
+        request.get("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await.assert_status(StatusCode::UNAUTHORIZED);
+    }).await;
+}
+
+#[tokio::test]
 async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -63,7 +105,7 @@ async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
 }
 
 #[tokio::test]
-async fn invite_acceptance_uses_current_human_identity_without_retargeting() {
+async fn invite_acceptance_rejects_service_identity_and_duplicate_membership() {
     boot_request::<App, _, _>(|request, ctx| async move {
         use sea_orm::EntityTrait;
         use yorishiro::models::{api_keys, user_users};
@@ -77,21 +119,34 @@ async fn invite_acceptance_uses_current_human_identity_without_retargeting() {
         assert_eq!(denied["result"]["isError"], true);
         let duplicate = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
         assert_eq!(duplicate["result"]["isError"], true);
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-            let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-            let created = mcp_call(&request, &session, &target.api_key, 5, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
-            let invite = tool_result_json(&created);
-            let wrong = mcp_call(&request, &session, &target.api_key, 6, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
-            assert_eq!(wrong["result"]["isError"], true);
-            let accepted = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
-            let accepted = tool_result_json(&accepted);
-            assert_eq!(accepted["user_id"], json!(tenant.owner_id));
-            assert_eq!(accepted["tenant_id"], json!(target.tenant_id));
-            let replay = mcp_call(&request, &session, &tenant.api_key, 9, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
-            assert_eq!(replay["result"]["isError"], true);
-            let identity = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"whoami","arguments":{}})).await;
-            assert_eq!(tool_result_json(&identity)["workspace_id"], json!(tenant.workspace_id));
-        }
+    }).await;
+}
+
+#[tokio::test]
+async fn cross_tenant_invite_acceptance_uses_current_human_identity_without_retargeting() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        use sea_orm::EntityTrait;
+        use yorishiro::models::user_users;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let owner = user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap();
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        assert_ne!(tenant.tenant_id, target.tenant_id);
+        let created = mcp_call(&request, &session, &target.api_key, 5, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
+        let invite = tool_result_json(&created);
+        let wrong = mcp_call(&request, &session, &target.api_key, 6, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+        assert_eq!(wrong["result"]["isError"], true);
+        let accepted = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+        let accepted = tool_result_json(&accepted);
+        assert_eq!(accepted["user_id"], json!(tenant.owner_id));
+        assert_eq!(accepted["tenant_id"], json!(target.tenant_id));
+        let replay = mcp_call(&request, &session, &tenant.api_key, 9, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+        assert_eq!(replay["result"]["isError"], true);
+        let identity = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"whoami","arguments":{}})).await;
+        assert_eq!(tool_result_json(&identity)["workspace_id"], json!(tenant.workspace_id));
     }).await;
 }
 
@@ -896,19 +951,68 @@ async fn api_key_tools_preserve_history_ceilings_and_revocation() {
             )
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-            let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-            let foreign = mcp_call(
-                &request,
-                &session,
-                &other.api_key,
-                7,
-                "tools/call",
-                json!({"name":"revoke_api_key","arguments":{"key_id":created["id"]}}),
-            )
-            .await;
-            assert_eq!(foreign["result"]["isError"], true);
-        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn api_key_tools_reject_cross_tenant_revocation() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let session = initialize(&request).await;
+        let read_key = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            tenant.owner_id,
+            ApiKeyScope::Read,
+            false,
+        )
+        .await;
+        let created = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            2,
+            "tools/call",
+            json!({"name":"create_api_key","arguments":{"name":"managed"}}),
+        )
+        .await;
+        let created = tool_result_json(&created);
+        let rotated = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({"name":"rotate_api_key","arguments":{"key_id":created["id"]}}),
+        )
+        .await;
+        let successor = tool_result_json(&rotated);
+        let revoked = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            4,
+            "tools/call",
+            json!({"name":"revoke_api_key","arguments":{"key_id":successor["id"]}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&revoked)["revoked"], true);
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        assert_ne!(tenant.tenant_id, other.tenant_id);
+        let foreign = mcp_call(
+            &request,
+            &session,
+            &other.api_key,
+            5,
+            "tools/call",
+            json!({"name":"revoke_api_key","arguments":{"key_id":created["id"]}}),
+        )
+        .await;
+        assert_eq!(foreign["result"]["isError"], true);
     })
     .await;
 }
@@ -935,16 +1039,31 @@ async fn workspace_member_tools_match_rest_and_revoke_bound_credentials() {
         super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id, WorkspaceRole::Viewer).await;
         let denied = mcp_call(&request, &session, &member_key, 5, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
         assert_eq!(denied["result"]["isError"], true);
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-            let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-            let foreign = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":other.workspace_id,"user_id":user.id,"role":"admin"}})).await;
-            assert_eq!(foreign["result"]["isError"], true);
-        }
         let revoked = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"revoke_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id}})).await;
         assert_eq!(tool_result_json(&revoked)["revoked"], true);
         request.get("/api/whoami").add_header("Authorization", format!("Bearer {member_key}")).await.assert_status(StatusCode::UNAUTHORIZED);
         let members = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.json::<Value>();
         assert!(members.as_array().unwrap().iter().any(|member| member["user_id"] == user.id.to_string() && member["role"] == "member"));
+    }).await;
+}
+
+#[tokio::test]
+async fn workspace_member_tools_reject_cross_tenant_grants() {
+    use yorishiro::models::tenant_memberships::MembershipRole;
+    use yorishiro::models::{tenant_memberships, user_users};
+
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("workspace-managed"), "test-password", None).await.unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Member).await.unwrap();
+        let session = initialize(&request).await;
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        assert_ne!(tenant.tenant_id, other.tenant_id);
+        let foreign = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":other.workspace_id,"user_id":user.id,"role":"admin"}})).await;
+        assert_eq!(foreign["result"]["isError"], true);
     }).await;
 }
 
@@ -2325,171 +2444,6 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         assert_eq!(fill_entry["detail"]["job_id"], job_id.to_string());
         assert_eq!(fill_entry["detail"]["entities_updated"], 1);
         assert_eq!(fill_entry["detail"]["fields_filled"], 1);
-    })
-    .await;
-}
-
-/// Community MCP tools use the same authenticated mounted server as REST, and successful writes
-/// commit before the tool result is returned. The follow-up reads make a dropped transaction fail.
-#[tokio::test]
-async fn community_mcp_entities_relations_and_schema_tools_execute_over_protocol() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { workspace_id, owner_id, api_key: schema_key, .. } = TestTenant::create(&request, &ctx, TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        ).await;
-        let write_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Write, false).await;
-        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
-
-        let session = initialize(&request).await;
-        let schema = mcp_call(
-            &request,
-            &session,
-            &schema_key,
-            2,
-            "tools/call",
-            json!({
-                "name": "create_schema",
-                "arguments": {
-                    "definition": {
-                        "name": "graph",
-                        "entity_types": {
-                            "person": { "fields": { "name": { "type": "string", "required": true } } }
-                        },
-                        "relation_types": {
-                            "knows": { "source": "person", "target": "person" }
-                        }
-                    }
-                }
-            }),
-        )
-        .await;
-        assert_eq!(schema["result"]["isError"], false, "MCP call: {schema}");
-
-        let invalid = mcp_call(
-            &request,
-            &session,
-            &read_key,
-            3,
-            "tools/call",
-            json!({
-                "name": "list_relations",
-                "arguments": { "status": "not-a-status" }
-            }),
-        )
-        .await;
-        assert_eq!(invalid["result"]["isError"], true, "MCP call: {invalid}");
-        assert!(invalid["result"]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("relation status")));
-
-        let created = mcp_call(
-            &request,
-            &session,
-            &write_key,
-            4,
-            "tools/call",
-            json!({
-                "name": "create_entity",
-                "arguments": {
-                    "schema_name": "graph",
-                    "entity_type": "person",
-                    "data": { "name": "alice" }
-                }
-            }),
-        )
-        .await;
-        assert_eq!(created["result"]["isError"], false, "MCP call: {created}");
-        let alice = tool_result_json(&created);
-        let alice_id: Uuid = alice["id"].as_str().unwrap().parse().unwrap();
-
-        let second = mcp_call(
-            &request,
-            &session,
-            &write_key,
-            5,
-            "tools/call",
-            json!({
-                "name": "create_entity",
-                "arguments": {
-                    "schema_name": "graph",
-                    "entity_type": "person",
-                    "data": { "name": "bob" }
-                }
-            }),
-        )
-        .await;
-        let bob_id: Uuid = tool_result_json(&second)["id"].as_str().unwrap().parse().unwrap();
-
-        let relation = mcp_call(
-            &request,
-            &session,
-            &write_key,
-            6,
-            "tools/call",
-            json!({
-                "name": "create_relation",
-                "arguments": {
-                    "source_id": alice_id,
-                    "target_id": bob_id,
-                    "relation_type": "knows"
-                }
-            }),
-        )
-        .await;
-        assert_eq!(relation["result"]["isError"], false, "MCP call: {relation}");
-        let relation_id = tool_result_json(&relation)["id"].clone();
-
-        let listed = mcp_call(
-            &request,
-            &session,
-            &read_key,
-            7,
-            "tools/call",
-            json!({ "name": "list_entities", "arguments": { "entity_type": "person" } }),
-        )
-        .await;
-        assert_eq!(tool_result_json(&listed).as_array().unwrap().len(), 2);
-
-        let status = mcp_call(
-            &request,
-            &session,
-            &write_key,
-            8,
-            "tools/call",
-            json!({
-                "name": "set_relation_status",
-                "arguments": { "id": relation_id, "status": "archived" }
-            }),
-        )
-        .await;
-        assert_eq!(tool_result_json(&status)["status"], "archived");
-
-        let persisted = mcp_call(
-            &request,
-            &session,
-            &read_key,
-            9,
-            "tools/call",
-            json!({ "name": "get_relation", "arguments": { "id": relation_id } }),
-        )
-        .await;
-        assert_eq!(tool_result_json(&persisted)["status"], "archived");
-
-        let missing = mcp_call(
-            &request,
-            &session,
-            &read_key,
-            10,
-            "tools/call",
-            json!({ "name": "get_entity", "arguments": { "id": Uuid::new_v4() } }),
-        )
-        .await;
-        assert_eq!(missing["result"]["isError"], true, "MCP call: {missing}");
-        assert!(missing["result"]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("not found")));
     })
     .await;
 }

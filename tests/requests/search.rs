@@ -495,9 +495,6 @@ async fn a_disabled_embedding_provider_is_reported_by_the_worker() {
 /// `Read` is the lowest scope, so there's no "too-low scope" case to test against a read-gated endpoint beyond this.
 #[tokio::test]
 async fn search_requires_authentication() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/search?query_text=hello").await;
         assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);

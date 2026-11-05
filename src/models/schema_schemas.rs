@@ -333,30 +333,6 @@ pub(crate) async fn count_active(
         .map(|n| n as i64)
 }
 
-/// Fetches every schema version (active and archived) for the workspace, ordered by `(name, version)`, for a full-workspace data export.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn export_all(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<Vec<SchemaRecord>, YorishiroError> {
-    use crate::models::_entities::schema_schemas::Column;
-
-    Entity::find()
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(Column::Name)
-        .order_by_asc(Column::Version)
-        .all(conn)
-        .await
-        .internal()?
-        .into_iter()
-        .map(SchemaRecord::try_from)
-        .collect()
-}
-
 /// Fetches a specific schema version by id (used to resolve the version an entity references).
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).

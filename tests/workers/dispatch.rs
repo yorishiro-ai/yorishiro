@@ -14,6 +14,7 @@ use yorishiro::workers::target::WorkerTarget;
 async fn a_target_drains_its_own_jobs_behind_a_backlog_of_another_target() {
     crate::requests::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
         let loco_rs::config::QueueConfig::Redis(config) = ctx.config.queue.as_ref().unwrap() else {
+            crate::reject_assigned_skip("Redis target dispatch requires the Redis queue provider");
             return;
         };
         let producer = ctx.queue_provider.as_ref().unwrap();

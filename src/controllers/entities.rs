@@ -44,7 +44,7 @@ pub(crate) async fn create_entity(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn get_entity(
+async fn get_entity(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<EntityRecord>, ApiError> {
@@ -93,7 +93,7 @@ pub(crate) async fn delete_entity(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn list_entities(
+async fn list_entities(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListEntitiesParams>,
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {

@@ -33,7 +33,6 @@ mod origin;
 pub(crate) mod query_worker;
 #[cfg(feature = "enterprise")]
 mod queue;
-mod relations;
 #[cfg(feature = "enterprise")]
 mod schema_forks;
 mod schemas;

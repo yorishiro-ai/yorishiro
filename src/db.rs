@@ -383,20 +383,6 @@ impl TenantDb {
     }
 }
 
-/// Sets a PostgreSQL session's timezone using a bound IANA name.
-///
-/// # Errors
-/// Returns an error if the statement fails.
-pub async fn set_session_timezone(db: &DatabaseConnection, timezone: &str) -> Result<(), DbErr> {
-    db.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT set_config('TimeZone', $1, false)",
-        [timezone.into()],
-    ))
-    .await?;
-    Ok(())
-}
-
 /// Begins the transaction one workspace's request work runs in.
 ///
 /// PostgreSQL scopes it to the tenant and workspace through the tenant pool, so row-level security applies.

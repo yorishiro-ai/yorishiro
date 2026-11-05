@@ -14,31 +14,31 @@ pub struct CreateEntityRequest {
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct FillDefaultsRequest {
-    pub schema_name: String,
+pub(crate) struct FillDefaultsRequest {
+    pub(crate) schema_name: String,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct FillDefaultsResponse {
-    pub schema_name: String,
-    pub job_id: Uuid,
+pub(crate) struct FillDefaultsResponse {
+    pub(crate) schema_name: String,
+    pub(crate) job_id: Uuid,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct UndoResponse {
-    pub job_id: Uuid,
-    pub snapshot_job_id: Uuid,
+pub(crate) struct UndoResponse {
+    pub(crate) job_id: Uuid,
+    pub(crate) snapshot_job_id: Uuid,
 }
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct UpdateEntityRequest {
-    pub data: Value,
+pub(crate) struct UpdateEntityRequest {
+    pub(crate) data: Value,
     /// The entity's `updated_at` as the client read it; a mismatch is refused with a 409 conflict.
     #[serde(default)]
-    pub expected_updated_at: Option<DateTime<Utc>>,
+    pub(crate) expected_updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -77,7 +77,7 @@ impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ReindexResponse {
+pub(crate) struct ReindexResponse {
     /// The job ID assigned by the queue provider.
-    pub job_id: String,
+    pub(crate) job_id: String,
 }

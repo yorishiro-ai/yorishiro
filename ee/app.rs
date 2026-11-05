@@ -147,7 +147,7 @@ pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
         .document(edition::licence_required(
             controllers::marketplace::openapi_docs(),
         ));
-    // `/auth/oauth/status` is deliberately not guarded: it carries no secret and the login page polls it on every load.
+    // OAuth status shares the licence gate with login entry points, including when OAuth is unconfigured.
     mounts
         .mount(controllers::oauth::routes().layer(gate.clone()))
         .document(edition::licence_required(controllers::oauth::openapi_docs()))
@@ -182,6 +182,7 @@ pub(crate) fn mcp_tools(tools: McpToolSet) -> McpToolSet {
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(crate::edition::ee::tasks::seed_official_templates::SeedOfficialTemplates);
     tasks.register(crate::edition::ee::tasks::create_tenant_api_key::CreateTenantApiKey);
+    tasks.register(crate::edition::ee::tasks::tenant_reindex_schedule::TenantReindexSchedule);
     tasks.register(crate::edition::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark);
     // tasks-inject (do not remove)
 }

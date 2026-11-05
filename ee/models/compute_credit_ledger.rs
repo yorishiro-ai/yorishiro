@@ -105,12 +105,10 @@ async fn insert_row(
 }
 
 /// Debits the positive actual cost after successful work without permitting an overdraft.
-///
-/// The transaction-scoped workspace lock serializes concurrent debits on PostgreSQL.
-/// SQLite serializes write transactions, and the same transaction boundary makes a stale balance fail as a whole.
+/// PostgreSQL serializes competing debits through the workspace lock; SQLite rejects a stale write transaction as a whole.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error for nonpositive costs, insufficient balance or persistence failure.
 pub async fn debit_actual(
     conn: &DatabaseTransaction,
     workspace_id: Uuid,

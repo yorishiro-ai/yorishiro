@@ -82,7 +82,8 @@ fn rejects_unknown_array_item_type_during_deserialization() {
 #[test]
 fn rejects_empty_entity_types() {
     let def = parse(json!({ "name": "empty", "entity_types": {} }));
-    assert!(validate_definition(&def).is_err());
+    let error = validate_definition(&def).unwrap_err();
+    assert!(matches!(error, YorishiroError::ValidationFailed { .. }));
 }
 
 #[test]

@@ -72,7 +72,7 @@ pub(crate) fn before_run(ctx: &AppContext) {
     }
 }
 
-pub use crate::initializers::timezone::{cli_requires_timezone_gate, cli_timezone_gate_result};
+pub use crate::initializers::timezone::cli_requires_timezone_gate;
 
 pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
     vec![

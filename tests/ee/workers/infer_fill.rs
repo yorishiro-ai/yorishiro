@@ -132,6 +132,7 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
     // Lock only the owned queue file, leaving the producer database writable.
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         let Some(loco_rs::config::QueueConfig::Sqlite(config)) = ctx.config.queue.as_ref() else {
+            crate::reject_assigned_skip("stalled SQLite enqueue requires an owned SQLite queue");
             return;
         };
         let fixture =

@@ -90,7 +90,9 @@ async fn lifecycle_transitions_from_queued_to_completed_or_failed() {
                             .status,
                         InferenceJobStatus::Running
                     );
-                    inference_jobs::complete(&db, job_id, 3, 1).await.unwrap()
+                    crate::ee::inference_fixtures::complete(&db, job_id, 3, 1)
+                        .await
+                        .unwrap()
                 }
                 InferenceJobStatus::Failed => {
                     assert!(inference_jobs::claim(&db, job_id).await.unwrap());
@@ -102,7 +104,7 @@ async fn lifecycle_transitions_from_queued_to_completed_or_failed() {
                             .status,
                         InferenceJobStatus::Running
                     );
-                    inference_jobs::fail(&db, job_id, "provider failed")
+                    crate::ee::inference_fixtures::fail(&db, job_id, "provider failed")
                         .await
                         .unwrap();
                 }
@@ -131,7 +133,9 @@ async fn claim_rejects_stale_and_invalid_rows() {
             .expect("create job");
         assert!(inference_jobs::claim(&db, job_id).await.unwrap());
         assert!(!inference_jobs::claim(&db, job_id).await.unwrap());
-        inference_jobs::complete(&db, job_id, 1, 0).await.unwrap();
+        crate::ee::inference_fixtures::complete(&db, job_id, 1, 0)
+            .await
+            .unwrap();
         assert!(!inference_jobs::claim(&db, job_id).await.unwrap());
 
         let missing = inference_jobs::claim(&db, Uuid::new_v4()).await.unwrap();

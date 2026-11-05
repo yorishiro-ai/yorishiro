@@ -5,11 +5,120 @@ import csv
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_FILTER = r"(^|/)src/models/_entities/|(^|/)migration/src/|(^|/)src/bin/"
+
+
+def assignment_environment(cell, base, output_dir):
+    """Use the same topology and licence axes as ordinary assigned execution."""
+    env = dict(base)
+    for name in ("YORISHIRO_POSTGRES_TEST_URL", "YORISHIRO_REDIS_TEST_URL",
+                 "YORISHIRO_TEST_REDIS_BASE_URL", "YORISHIRO_TEST_E5_MODEL", "YORISHIRO_TEST_E5_TOKENIZER"):
+        env.pop(name, None)
+    pg = "postgres://yorishiro:yorishiro@localhost:5432/yorishiro"
+    name = cell["edition"] + "-" + cell["job"]
+    env["DATABASE_URL"] = pg if cell["database"] == "postgres" else f"sqlite://{ROOT}/coverage-{name}.sqlite3?mode=rwc"
+    queue = cell["queue"]
+    env["QUEUE_URL"] = pg if queue == "postgres" else (
+        "redis://localhost:6379/15" if queue == "redis" else f"sqlite://{ROOT}/coverage-{name}-queue.sqlite3?mode=rwc")
+    env["LOCO_ENV"] = "test_" + cell["database"] + ("_redis" if queue == "redis" else "")
+    env["YORISHIRO_QUEUE_KIND"] = {"postgres": "Postgres", "redis": "Redis", "sqlite": "Sqlite"}[queue]
+    env["YORISHIRO_TEST_EDITION"] = cell["edition"]
+    env["YORISHIRO_TEST_TOPOLOGY"] = cell["database"] + "-" + queue
+    env["YORISHIRO_TEST_QUEUE"] = queue
+    env["YORISHIRO_LICENSE_KEY"] = base.get("YORISHIRO_LICENSE_KEY", "") if cell.get("signed_licence") else ""
+    if cell.get("signed_licence") and not env["YORISHIRO_LICENSE_KEY"]:
+        raise RuntimeError("assigned coverage requires the signed EE licence secret")
+    if cell.get("requires_e5_cache"):
+        env["YORISHIRO_TEST_E5_MODEL"] = str(ROOT / "models/multilingual-e5-base/model.safetensors")
+        env["YORISHIRO_TEST_E5_TOKENIZER"] = str(ROOT / "models/multilingual-e5-base/tokenizer.json")
+    env["YORISHIRO_REQUEST_TIMING_DIR"] = str(output_dir / "timings" / (cell["edition"] + "-" + cell["job"]))
+    return env
+
+
+def run_assignments(output_dir, toolchain):
+    """Instrument once per edition, then execute the authoritative exact assignments."""
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not os.environ.get("LLVM_PROFILE_FILE"):
+        raise RuntimeError("coverage requires GHA and cargo llvm-cov show-env instrumentation")
+    if pathlib.Path(os.environ.get("CARGO_TARGET_DIR", "")).resolve() != ROOT / "target":
+        raise RuntimeError("coverage artifacts must use the reviewed native target directory")
+
+    def run(*command, **kwargs):
+        subprocess.run(list(command), cwd=ROOT, check=True, timeout=5400, **kwargs)
+
+    inventories = {}
+    for edition, features in (("ce", "community"), ("ee", "enterprise")):
+        messages = output_dir / f"cargo-{edition}.jsonl"
+        inventory = output_dir / f"inventory-{edition}.json"
+        cargo = ("cargo", toolchain)
+        with messages.open("w") as stream:
+            run(*cargo, "test", "--locked", "--no-default-features", "--features", features,
+                "--workspace", "--no-run", "--message-format=json", stdout=stream)
+        run(*cargo, "build", "--locked", "--no-default-features", "--features", features, "--bin", "yorishiro")
+        run(sys.executable, "scripts/test_assignments.py", "collect", "--cargo-messages", str(messages),
+            "--edition", edition, "--output", str(inventory))
+        data = json.loads(inventory.read_text())
+        # EE's ordinary executable replaces CE's path; preserve both exact producer artifacts.
+        for artifact in [*data["artifacts"], data["process_binary"]]:
+            path = pathlib.Path(artifact["executable"])
+            saved = output_dir / "binaries" / edition / path.relative_to(ROOT)
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(path, saved)
+        inventories[edition] = inventory
+
+    plan_path = output_dir / "assignments.json"
+    run(sys.executable, "scripts/test_assignments.py", "verify", "--ce", str(inventories["ce"]),
+        "--ee", str(inventories["ee"]), "--output", str(plan_path))
+    plan = json.loads(plan_path.read_text())
+    if not plan["execution_matrix_ready"]:
+        raise RuntimeError("coverage assignment inventory is not executable")
+    for edition in ("ce", "ee"):
+        data = json.loads(inventories[edition].read_text())
+        for artifact in [*data["artifacts"], data["process_binary"]]:
+            path = pathlib.Path(artifact["executable"])
+            shutil.move(output_dir / "binaries" / edition / path.relative_to(ROOT), path)
+        if edition == "ce":
+            for suite in ("rest", "mcp", "cli"):
+                run(sys.executable, "tests/blackbox/run.py", "--edition", "ce", "--suite", suite,
+                    "--binary", str(ROOT / "target/debug/yorishiro"),
+                    "--artifacts", str(output_dir / "public" / suite))
+            run(sys.executable, "scripts/check_blackbox_reports.py", "--edition", "ce",
+                "--binary", str(ROOT / "target/debug/yorishiro"), "--reports", str(output_dir / "public"))
+        else:
+            run(sys.executable, "tests/blackbox/run.py", "--edition", "ee", "--suite", "mcp",
+                "--binary", str(ROOT / "target/debug/yorishiro"),
+                "--artifacts", str(output_dir / "public-ee" / "mcp"))
+            run("docker", "exec", os.environ["POSTGRES_CONTAINER"], "psql", "-v", "ON_ERROR_STOP=1",
+                "-U", "postgres", "-d", "postgres", "-c", "CREATE DATABASE public_contract OWNER yorishiro")
+            public_env = dict(os.environ)
+            public_env["YORISHIRO_PUBLIC_POSTGRES_URL"] = "postgres://yorishiro:yorishiro@localhost:5432/public_contract"
+            if not public_env.get("YORISHIRO_LICENSE_KEY"):
+                raise RuntimeError("public PostgreSQL contracts require the signed EE licence")
+            run(sys.executable, "tests/blackbox/run.py", "--edition", "ee", "--suite", "tenant-postgres",
+                "--binary", str(ROOT / "target/debug/yorishiro"),
+                "--artifacts", str(output_dir / "public-ee" / "tenant-postgres"), env=public_env)
+            run(sys.executable, "scripts/check_blackbox_reports.py", "--edition", "ee",
+                "--binary", str(ROOT / "target/debug/yorishiro"), "--reports", str(output_dir / "public-ee"))
+        for cell in plan["execution_matrix"]["include"]:
+            if cell["edition"] != edition:
+                continue
+            # Ordinary GHA cells own fresh services; preserve that isolation in this sequential report.
+            if cell["database"] == "postgres":
+                run("docker", "exec", os.environ["POSTGRES_CONTAINER"], "psql", "-v", "ON_ERROR_STOP=1",
+                    "-U", "postgres", "-d", "postgres", "-c", "DROP DATABASE yorishiro WITH (FORCE)",
+                    "-c", "CREATE DATABASE yorishiro OWNER yorishiro")
+            if cell["queue"] == "redis":
+                run("docker", "exec", "coverage-redis", "valkey-cli", "FLUSHALL")
+            directory = output_dir / "receipts" / (edition + "-" + cell["job"])
+            run(sys.executable, "scripts/run_assigned_tests.py", "run", "--assignments", str(plan_path),
+                "--edition", edition, "--job", cell["job"], "--output", str(directory / "receipt.json"),
+                "--artifacts", str(directory / "logs"), env=assignment_environment(cell, os.environ, output_dir))
+    run(sys.executable, "scripts/run_assigned_tests.py", "verify", "--assignments", str(plan_path),
+        "--receipts", str(output_dir / "receipts"), "--output", str(output_dir / "execution.json"))
 
 
 def metric(summary, name):
@@ -36,13 +145,14 @@ def main():
     ignore = os.environ.get("COVERAGE_IGNORE_REGEX", DEFAULT_FILTER)
     toolchain = os.environ.get("COVERAGE_TOOLCHAIN", "+nightly")
 
+    run_assignments(output_dir, toolchain)
+
     command = [
         "cargo",
         toolchain,
         "llvm-cov",
+        "report",
         "--locked",
-        "--workspace",
-        "--branch",
         "--json",
         "--summary-only",
         "--ignore-filename-regex",
@@ -50,7 +160,7 @@ def main():
         "--output-path",
         str(raw),
     ]
-    subprocess.run(command, cwd=ROOT, check=True)
+    subprocess.run(command, cwd=ROOT, check=True, timeout=900)
 
     report = json.loads(raw.read_text())
     files = report.get("data", [{}])[0].get("files", [])

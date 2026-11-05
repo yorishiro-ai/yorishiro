@@ -51,7 +51,7 @@ pub(crate) async fn list_schemas(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn create_schema(
+async fn create_schema(
     State(ctx): State<AppContext>,
     authorized: Authorized<SchemaScope>,
     Json(body): Json<CreateSchemaRequest>,
@@ -97,7 +97,7 @@ pub async fn create_schema(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn get_active_schema(
+async fn get_active_schema(
     authorized: Authorized<ReadScope>,
     Path(name): Path<String>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
@@ -127,7 +127,7 @@ pub(crate) async fn list_templates(
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn get_template(
+async fn get_template(
     _authorized: Authorized<ReadScope>,
     Path(id): Path<String>,
 ) -> Result<Json<MetaSchemaDefinition>, ApiError> {

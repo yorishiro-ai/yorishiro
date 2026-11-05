@@ -61,7 +61,7 @@ def classify_path(path: str) -> set[str]:
     if s in {"Cargo.toml", "Cargo.lock", "migration/Cargo.toml"} or (p.name in {"Cargo.toml", "Cargo.lock"}):
         groups |= {"deps", "rust", "ee"}
     workflow_groups = {
-        ".github/workflows/ci.yml": {"shared", "rust", "ee"},
+        ".github/workflows/ci.yml": {"shared", "rust", "ee", "packaging"},
         ".github/workflows/release.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/release_pre.yml": {"shared", "rust", "ee", "packaging", "docker", "release"},
         ".github/workflows/security.yml": {"deps"},
@@ -112,12 +112,12 @@ def selected_job_succeeded(result: str, selected: bool) -> bool:
     return result == ("success" if selected else "skipped")
 
 
-def package_build_allowed(package_selected: bool, rust_selected: bool, changes_result: str, ce_result: str, ee_result: str, msrv_result: str) -> bool:
+def package_build_allowed(package_selected: bool, rust_selected: bool, changes_result: str, ce_result: str, ee_result: str) -> bool:
     """Select package builds independently, but require Rust checks when both groups apply."""
     return (
         changes_result == "success"
         and package_selected
-        and (not rust_selected or (ce_result == ee_result == msrv_result == "success"))
+        and (not rust_selected or (ce_result == ee_result == "success"))
     )
 
 

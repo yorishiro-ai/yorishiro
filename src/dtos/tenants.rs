@@ -4,29 +4,29 @@ use uuid::Uuid;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct DisableTenantRequest {
+pub(crate) struct DisableTenantRequest {
     /// Explicitly confirms the authenticated owner's tenant UUID.
-    pub confirmed_tenant_id: Uuid,
+    pub(crate) confirmed_tenant_id: Uuid,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct UpdateTenantRequest {
-    pub name: Option<String>,
+pub(crate) struct UpdateTenantRequest {
+    pub(crate) name: Option<String>,
     /// Explicitly replace the manual workspace cap, including clearing it with null.
     #[serde(default)]
-    pub replace_max_workspaces: bool,
-    pub max_workspaces: Option<i32>,
+    pub(crate) replace_max_workspaces: bool,
+    pub(crate) max_workspaces: Option<i32>,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct TenantRecord {
-    pub id: Uuid,
-    pub name: String,
-    pub max_workspaces: Option<i32>,
-    pub created_at: chrono::DateTime<crate::time::Timezone>,
+pub(crate) struct TenantRecord {
+    pub(crate) id: Uuid,
+    pub(crate) name: String,
+    pub(crate) max_workspaces: Option<i32>,
+    pub(crate) created_at: chrono::DateTime<crate::time::Timezone>,
 }
 
 impl TenantRecord {
