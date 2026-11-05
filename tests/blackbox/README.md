@@ -28,6 +28,8 @@ The EE MCP delta suite checks edition discovery and entity-column and worker-cla
 Both editions run with the enterprise licence explicitly unset; licensed capabilities need separate ownership.
 The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or under-scoped writes.
 It uses reserved invalid provider URLs without starting workers, so it proves configuration and enqueue admission, not external inference or reindex completion.
+The separate EE search scenario owns a loopback OpenAI-compatible HTTP stub and a real embedding worker, waits for reindex completion, and checks REST/MCP query results and cross-workspace isolation.
+Its deterministic vectors test transport and worker integration, not semantic model quality or a live provider.
 The EE composition scenario adopts a library template, changes its upstream definition, previews and applies a merge, and checks immutable schema history.
 It then creates a second-workspace fork, checks scoped visibility and stale-head rejection, updates and deletes the fork without changing source history.
 
@@ -48,7 +50,7 @@ Cleanup terminates the process group, escalates to kill after five seconds, wait
 ## Implemented coverage
 
 These scenarios cover selected workflows, not the entire advertised MCP surface.
-Public coverage remains incomplete for search/recall, schema fork/merge, broader membership/tenant administration and explicit EE settings workflows.
+Successful tool calls are not exhaustive behavioral coverage; cross-tenant acceptance and remaining fault and concurrency cases retain explicit owners outside these SQLite scenarios.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.
 Scenario counts alone are not a public-tool completeness guarantee.
 

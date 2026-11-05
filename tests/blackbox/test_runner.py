@@ -14,11 +14,26 @@ import run
 
 
 class ToolInventoryTests(unittest.TestCase):
+    def test_owned_provider_preserves_batch_indices_and_vector_width(self):
+        with run.embedding_endpoint() as (url, requests):
+            connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
+            try:
+                connection.request("POST", "/embeddings", json.dumps({"model": "blackbox-owned", "input": ["a", "b"]}),
+                                   {"Authorization": "Bearer blackbox-provider-secret", "Content-Type": "application/json"})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                data = json.loads(response.read())["data"]
+                self.assertEqual([row["index"] for row in data], [0, 1])
+                self.assertTrue(all(len(row["embedding"]) == 768 and row["embedding"][0] == 1.0 for row in data))
+                self.assertEqual(requests, ["a", "b"])
+            finally:
+                connection.close()
+
     def test_enterprise_scenarios_are_an_explicit_delta_not_a_common_replay(self):
         ids = [name for name, _ in run.scenarios("mcp", "ee")]
         self.assertEqual(ids, ["server.bootstrap", "ee.discovery-auth-scope-input",
                                "ee.column-worker-settings-lifecycle", "ee.provider-settings-lifecycle",
-                               "ee.schema-fork-upstream-merge"])
+                               "ee.schema-fork-upstream-merge", "ee.search-reindex-worker"])
         with self.assertRaises(AssertionError):
             run.scenarios("rest", "ee")
 

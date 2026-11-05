@@ -5,6 +5,7 @@ import argparse
 import contextlib
 import hashlib
 import http.client
+import http.server
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import uuid
@@ -344,7 +346,7 @@ class App:
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     @contextlib.contextmanager
-    def job_worker(self):
+    def job_worker(self, target="job-target:shared"):
         require(self.worker is None, "worker already started")
         previous_deadline = self.deadline
         self.deadline = min(previous_deadline, time.monotonic() + 60)
@@ -353,7 +355,7 @@ class App:
                      for name in ("worker.stdout", "worker.stderr")]
             self.worker = subprocess.Popen(
                 [str(self.args.binary), "--environment", "test_sqlite", "start",
-                 "--worker=job-target:shared", "--no-banner"],
+                 f"--worker={target}", "--no-banner"],
                 cwd=ROOT, env=self.env, stdout=files[0], stderr=files[1], start_new_session=True)
             yield self.worker
         finally:
@@ -1378,6 +1380,10 @@ def enterprise_providers(app):
 def enterprise_schema_composition(app):
     _, owner_key = human_owner(app)
     client = MCP(app, owner_key)
+    overview = client.call("get_tenant_overview")
+    require(overview == app.rest("GET", "/api/tenant/overview", key=owner_key),
+            "tenant overview differs across transports")
+    MCP(app, app.key).call("get_tenant_overview", error=True)
     _, read_key = app.issue(app.workspace, "read")
     reader = MCP(app, read_key)
     definition = json.loads(json.dumps(SCHEMA))
@@ -1433,6 +1439,80 @@ def enterprise_schema_composition(app):
     require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == archived, "fork lifecycle changed source history")
 
 
+@contextlib.contextmanager
+def embedding_endpoint():
+    requests = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            document = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            require(self.path == "/embeddings" and document["model"] == "blackbox-owned",
+                    "unexpected embedding request")
+            require(self.headers.get("Authorization") == "Bearer blackbox-provider-secret",
+                    "embedding credential missing")
+            requests.extend(document["input"])
+            data = [{"index": index, "embedding": [1.0] + [0.0] * 767}
+                    for index, _ in enumerate(document["input"])]
+            body = json.dumps({"data": data}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}", requests
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            require(not thread.is_alive(), "embedding endpoint did not stop")
+
+
+def enterprise_search(app):
+    workspace = output_field(app.task("create_workspace", tenant_id=app.tenant, name="search-target"),
+                             "workspace id", True)
+    _, key = app.issue(workspace, "migration")
+    _, schema_key = app.issue(workspace, "schema")
+    client, writer = MCP(app, key), MCP(app, schema_key)
+    definition = json.loads(json.dumps(SCHEMA))
+    definition["name"] = "search-notes"
+    definition["entity_types"]["note"]["fields"]["title"]["x-embed"] = True
+    writer.call("create_schema", {"definition": definition})
+    entity = writer.call("create_entity", {"schema_name": definition["name"], "entity_type": "note",
+                                           "data": {"title": "owned search document"}})
+    secret = "blackbox-provider-secret"
+    app.secrets.append(secret)
+    with embedding_endpoint() as (url, requests):
+        writer.call("set_embedding_provider", {"base_url": url, "api_key": secret,
+                                                "model": "blackbox-owned", "dimensions": 768})
+        job_id = client.call("reindex_workspace")["job_id"]
+        with app.job_worker("worker-target:shared") as worker:
+            while True:
+                app.remaining()
+                require(worker.poll() is None and app.server.poll() is None, "search process exited")
+                job = client.call("migration_job_status", {"job_id": job_id})
+                require(job["status"] in ("queued", "running", "completed"), f"reindex failed: {job}")
+                if job["status"] == "completed":
+                    require(app.rest("GET", f"/api/migration-jobs/{job_id}", key=key) == job,
+                            "completed reindex differs across transports")
+                    break
+                time.sleep(min(0.1, app.remaining()))
+            hits = client.call("search_entities", {"query_text": "owned search query", "entity_type": "note", "limit": 1})
+            rest = app.rest("GET", "/api/search?query_text=owned%20search%20query&entity_type=note&limit=1", key=key)
+            require(hits == rest and len(hits) == 1 and hits[0]["entity"]["id"] == entity["id"],
+                    "queued search did not return the owned entity across transports")
+            MCP(app, app.key).call("get_entity", {"id": entity["id"]}, error=True)
+        require(any("owned search document" in text for text in requests)
+                and requests.count("owned search query") >= 2, "document or query bypassed the owned provider")
+    writer.call("reset_embedding_provider")
+
+
 def scenarios(suite, edition="ce"):
     if edition == "ee":
         require(suite == "mcp", "EE owns only its dedicated MCP delta suite")
@@ -1440,7 +1520,8 @@ def scenarios(suite, edition="ce"):
                 ("ee.discovery-auth-scope-input", mcp_suite),
                 ("ee.column-worker-settings-lifecycle", enterprise_settings),
                 ("ee.provider-settings-lifecycle", enterprise_providers),
-                ("ee.schema-fork-upstream-merge", enterprise_schema_composition)]
+                ("ee.schema-fork-upstream-merge", enterprise_schema_composition),
+                ("ee.search-reindex-worker", enterprise_search)]
     common = [("server.bootstrap", lambda app: app.boot()),
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
     focused = {
