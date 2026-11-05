@@ -101,7 +101,11 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("","indisvalid").unwrap());
         // Execute and EXPLAIN the same production candidate builder without forcing an ANN plan.
         use sea_orm::{ConnectionTrait, TransactionTrait};
-        let txn = ctx.db.begin().await.unwrap();
+        let txn = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
+        let role = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            "SELECT current_user AS role, rolsuper FROM pg_roles WHERE rolname=current_user")).await.unwrap().unwrap();
+        assert_eq!(role.try_get::<String>("", "role").unwrap(), "yorishiro_app");
+        assert!(!role.try_get::<bool>("", "rolsuper").unwrap());
         txn.execute_unprepared("SET LOCAL plan_cache_mode=force_custom_plan; SET LOCAL hnsw.ef_search=200; SET LOCAL hnsw.iterative_scan=relaxed_order").await.unwrap();
         let query = search::SearchQuery { limit: 200, ..Default::default() };
         let vector = vec![1.0_f32;7];
@@ -128,6 +132,45 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let recall = hits.iter().filter(|hit| exact_ids.contains(&hit.entity.id)).count() as f64 / 200.0;
         assert!(recall >= 0.95, "production recall@200={recall}; plan={plan}");
         txn.rollback().await.unwrap();
+        // Hold the actual partition lock until concurrent index construction is waiting.
+        let partition = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1", fixture.workspace_id)))
+            .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
+        ctx.db.execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{index}\"")).await.unwrap();
+        let blocker = ctx.db.begin().await.unwrap();
+        blocker.execute_unprepared(&format!("LOCK TABLE {partition} IN SHARE MODE")).await.unwrap();
+        let maintenance_db = ctx.db.clone();
+        let maintenance = tokio::spawn(async move { entity_embeddings::maintain_workspace_indexes(&maintenance_db).await });
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let waiting = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+                    "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1) AS waiting",
+                    [format!("CREATE INDEX CONCURRENTLY \"{index}\"%").into()])).await.unwrap().unwrap().try_get::<bool>("", "waiting").unwrap();
+                if waiting { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("maintenance must reach the actual concurrent build lock");
+        let (provider, _server) = fixed_width_provider(7).await;
+        let reindex_db = ctx.db.clone();
+        let workspace_id = fixture.workspace_id;
+        let publication = tokio::spawn(async move { entity_embeddings::reindex_workspace(&reindex_db, workspace_id, &provider).await });
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap();
+                if workspace.embedding_reindexing { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("real reindex must fence publication while index build is blocked");
+        blocker.rollback().await.unwrap();
+        maintenance.await.unwrap().unwrap();
+        let published = publication.await.unwrap().unwrap();
+        assert!(published.failures.is_empty());
+        assert_eq!(published.reindexed, 2001);
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
+        let stamped = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(stamped.embedding_dimensions, Some(7));
+        assert!(!stamped.embedding_reindexing);
         // Publication in progress must retain the old graph even if metadata is changing.
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingReindexing,
             sea_orm::sea_query::Expr::value(true)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
