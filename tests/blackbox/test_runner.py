@@ -93,8 +93,10 @@ class ProtocolTests(unittest.TestCase):
         api = run.GraphAPI.__new__(run.GraphAPI)
         api.surface = "mcp"
         api.client = Mock()
-        api.client.rpc.return_value = document
+        api.client.call.return_value = text
         self.assertEqual(api.export(), text)
+        api.client.call.assert_called_once_with("export_jsonl", raw=True)
+        api.client.call.reset_mock()
         api.client.call.return_value = {"job_id": "job"}
         self.assertEqual(api.submit(text), {"job_id": "job"})
         api.client.call.assert_called_once_with("import_jsonl", {"jsonl": text})
