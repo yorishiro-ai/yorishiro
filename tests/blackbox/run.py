@@ -98,7 +98,7 @@ def tool_error(document):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path)
-    parser.add_argument("--suite", choices=("rest", "mcp", "cli"))
+    parser.add_argument("--suite", choices=("rest", "mcp", "cli", "tenant-postgres"))
     parser.add_argument("--edition", choices=("ce", "ee"))
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument("--list", action="store_true", help="print selected scenario IDs as JSON")
@@ -156,12 +156,23 @@ class App:
             "YORISHIRO_AUTH_RATE_LIMIT_MAX": "10000",
             "YORISHIRO_MCP_ALLOWED_HOSTS": "localhost,127.0.0.1",
         })
+        self.environment = "test_sqlite"
+        if args.suite == "tenant-postgres":
+            require(args.edition == "ee", "cross-tenant contracts require EE")
+            database = os.environ.get("YORISHIRO_PUBLIC_POSTGRES_URL", "")
+            licence = os.environ.get("YORISHIRO_LICENSE_KEY", "")
+            require(database.startswith("postgres://") and licence,
+                    "owned PostgreSQL URL and signed EE licence are required")
+            self.environment = "test_postgres"
+            self.secrets.extend([database, licence])
+            self.env.update(DATABASE_URL=database, QUEUE_URL=database, LOCO_ENV=self.environment,
+                            YORISHIRO_LICENSE_KEY=licence, YORISHIRO_MAX_TENANTS="0")
         config = self.directory / "config"
         config.mkdir()
         self.env["LOCO_CONFIG_FOLDER"] = str(config)
-        text = (ROOT / "config/test_sqlite.yaml").read_text()
+        text = (ROOT / f"config/{self.environment}.yaml").read_text()
         require(text.count("auto_migrate: true") == 1, "shipped SQLite config changed")
-        (config / "test_sqlite.yaml").write_text(text.replace("auto_migrate: true", "auto_migrate: false"))
+        (config / f"{self.environment}.yaml").write_text(text.replace("auto_migrate: true", "auto_migrate: false"))
 
     def remaining(self, cap=TIMEOUT):
         remaining = self.deadline - time.monotonic()
@@ -169,7 +180,7 @@ class App:
         return min(cap, remaining)
 
     def cli(self, *arguments, ok=True):
-        command = [str(self.args.binary), "--environment", "test_sqlite", *arguments]
+        command = [str(self.args.binary), "--environment", self.environment, *arguments]
         # File-backed capture stays bounded by disk, not pipe buffers, and survives timeout cleanup.
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
             process = subprocess.Popen(command, cwd=ROOT, env=self.env,
@@ -216,7 +227,7 @@ class App:
         self.server_files = [self.logs.enter_context((self.directory / name).open("wb"))
                              for name in ("server.stdout", "server.stderr")]
         self.server = subprocess.Popen(
-            [str(self.args.binary), "--environment", "test_sqlite", "start", "--no-banner"],
+            [str(self.args.binary), "--environment", self.environment, "start", "--no-banner"],
             cwd=ROOT, env=self.env, stdout=self.server_files[0],
             stderr=self.server_files[1], start_new_session=True)
         deadline = time.monotonic() + self.remaining(45)
@@ -354,7 +365,7 @@ class App:
             files = [self.logs.enter_context((self.directory / name).open("wb"))
                      for name in ("worker.stdout", "worker.stderr")]
             self.worker = subprocess.Popen(
-                [str(self.args.binary), "--environment", "test_sqlite", "start",
+                [str(self.args.binary), "--environment", self.environment, "start",
                  f"--worker={target}", "--no-banner"],
                 cwd=ROOT, env=self.env, stdout=files[0], stderr=files[1], start_new_session=True)
             yield self.worker
@@ -1513,8 +1524,44 @@ def enterprise_search(app):
     writer.call("reset_embedding_provider")
 
 
+def cross_tenant_acceptance(app):
+    account, key = human_owner(app)
+    client = MCP(app, key)
+    before = client.call("whoami")
+    target = output_field(app.task("create_tenant", name="inviting-tenant"), "tenant id", True)
+    workspace = output_field(app.task("create_workspace", tenant_id=target, name="inviting-workspace"),
+                             "workspace id", True)
+    invitation = app.task("create_invite", tenant_id=target, email="owner@example.invalid", role="admin")
+    token = output_field(invitation, "invite token (shown once)")
+    app.secrets.append(token)
+    client.call("accept_invite", {"invite_token": token}, key=app.key, error=True)
+    accepted = client.call("accept_invite", {"invite_token": token})
+    require(accepted == {"user_id": account["user_id"], "tenant_id": target, "role": "admin"},
+            "acceptance lost authenticated-user or target-tenant attribution")
+    client.call("accept_invite", {"invite_token": token}, error=True)
+    require(client.call("whoami") == before and app.rest("GET", "/api/whoami", key=key) == before,
+            "acceptance retargeted the existing credential")
+    output = app.task("create_api_key", workspace_id=workspace, scope="schema", user_id=account["user_id"])
+    target_key = output_field(output, "api key (shown once)")
+    app.secrets.append(target_key)
+    member = MCP(app, target_key)
+    identity = member.call("whoami")
+    require(identity["tenant_id"] == target and identity["workspace_id"] == workspace
+            and identity["user_id"] == account["user_id"], "accepted membership cannot select its target")
+    members = member.call("list_members")
+    require(members == app.rest("GET", "/api/members", key=target_key)
+            and any(row["user_id"] == account["user_id"] and row["role"] == "admin" for row in members),
+            "accepted membership is missing or differs across transports")
+    history = member.call("list_invites")
+    require(len(history) == 1 and history[0]["used_at"] is not None
+            and token not in json.dumps(history), "acceptance history missing or disclosed token")
+
+
 def scenarios(suite, edition="ce"):
     if edition == "ee":
+        if suite == "tenant-postgres":
+            return [("server.bootstrap", lambda app: app.boot()),
+                    ("ee.authenticated-cross-tenant-acceptance", cross_tenant_acceptance)]
         require(suite == "mcp", "EE owns only its dedicated MCP delta suite")
         return [("server.bootstrap", lambda app: app.boot()),
                 ("ee.discovery-auth-scope-input", mcp_suite),

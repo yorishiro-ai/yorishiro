@@ -88,13 +88,13 @@ class CoverageOwnershipTests(unittest.TestCase):
                                         ("ee", "postgres-redis", "signed")])
             commands = [call.args[0] for call in process.call_args_list]
             docker = [command for command in commands if command[0] == "docker"]
-            self.assertEqual(len(docker), 2)
-            self.assertIn("DROP DATABASE yorishiro WITH (FORCE)", docker[0])
-            self.assertEqual(docker[1], ["docker", "exec", "coverage-redis", "valkey-cli", "FLUSHALL"])
-            self.assertEqual(sum("tests/blackbox/run.py" in command for command in commands), 4)
+            self.assertEqual(len(docker), 3)
+            self.assertIn("DROP DATABASE yorishiro WITH (FORCE)", docker[1])
+            self.assertEqual(docker[2], ["docker", "exec", "coverage-redis", "valkey-cli", "FLUSHALL"])
+            self.assertEqual(sum("tests/blackbox/run.py" in command for command in commands), 5)
             public = [command for command in commands if "tests/blackbox/run.py" in command]
             self.assertEqual([command[command.index("--edition") + 1] for command in public],
-                             ["ce", "ce", "ce", "ee"])
+                             ["ce", "ce", "ce", "ee", "ee"])
             self.assertEqual(sum("verify" in command and "scripts/run_assigned_tests.py" in command
                                  for command in commands), 1)
             self.assertTrue(all("--no-run" in command for command in commands if "test" in command))

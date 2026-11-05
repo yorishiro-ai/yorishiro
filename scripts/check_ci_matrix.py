@@ -61,6 +61,11 @@ def validate(workflow: str, assigned_workflow: str, build_workflow: str | None =
         assert "needs: [changes, test-inventory-ce]" in job(workflow, consumer), "CE consumers must not wait for EE"
     assert "needs: [changes, test-inventory-ee]" in job(workflow, "public-contract-ee")
     assert "public-contract-ee" in job(workflow, "public-contract-verify")
+    assert "public-contract-tenant" in job(workflow, "public-contract-verify")
+    tenant = job(workflow, "public-contract-tenant")
+    assert "NOSUPERUSER NOBYPASSRLS" in tenant
+    assert "secrets.YORISHIRO_LICENSE_KEY" in tenant
+    assert "--suite tenant-postgres --edition ee" in tenant
     assignment = job(workflow, "test-assignment-verify")
     assert "needs: [changes, test-inventory-ce, test-inventory-ee]" in assignment
     assert "scripts/test_assignments.py verify" in assignment

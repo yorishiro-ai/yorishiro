@@ -351,9 +351,57 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  public-contract-tenant:
+    name: Public contracts (PostgreSQL, licensed ee, tenant)
+    needs: [changes, test-inventory-ee]
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    services:
+      db:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: public-contract-binary-ee
+          path: ${{ runner.temp }}/binary
+      - name: Prepare the owned non-superuser PostgreSQL database
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
+        run: |
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d template1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
+            -c 'CREATE DATABASE public_contract OWNER yorishiro;'
+      - name: Exercise authenticated cross-tenant acceptance
+        env:
+          YORISHIRO_PUBLIC_POSTGRES_URL: postgres://yorishiro:yorishiro@localhost:5432/public_contract
+          YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+        run: |
+          test -n "$YORISHIRO_LICENSE_KEY"
+          tar -xzf "$RUNNER_TEMP/binary/public-contract-ee.tar.gz" -C "$RUNNER_TEMP/binary"
+          python3 tests/blackbox/run.py --binary "$RUNNER_TEMP/binary/yorishiro" --suite tenant-postgres --edition ee --artifacts "$RUNNER_TEMP/contracts"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: public-contract-result-ee-tenant-postgres
+          path: ${{ runner.temp }}/contracts
+          if-no-files-found: error
+          retention-days: 7
+
   public-contract-verify:
     name: Verify public-contract coverage
-    needs: [changes, test-inventory-ce, test-inventory-ee, public-contract, public-contract-ee]
+    needs: [changes, test-inventory-ce, test-inventory-ee, public-contract, public-contract-ee, public-contract-tenant]
     if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5

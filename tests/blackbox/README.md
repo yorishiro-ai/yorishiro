@@ -51,6 +51,8 @@ Cleanup terminates the process group, escalates to kill after five seconds, wait
 
 These scenarios cover selected workflows, not the entire advertised MCP surface.
 Successful tool calls are not exhaustive behavioral coverage; cross-tenant acceptance and remaining fault and concurrency cases retain explicit owners outside these SQLite scenarios.
+The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL URL and signed licence, checks successful authenticated invite acceptance, token consumption, membership readback and unchanged original credential selection.
+Its required GHA job owns a non-superuser PostgreSQL service and its own database; ordinary SQLite suites never inherit that database or licence.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.
 Scenario counts alone are not a public-tool completeness guarantee.
 

@@ -34,9 +34,10 @@ class ReportGateTests(unittest.TestCase):
     def test_enterprise_requires_only_its_owned_mcp_delta(self):
         report = copy.deepcopy(self.reports[1])
         report["edition"] = "ee"
-        validate_reports({"mcp": ["mcp.one"]}, [report], "ee", self.digest)
+        tenant = {**report, "suite": "tenant-postgres", "results": [{"id": "tenant.one", "status": "passed", "duration_seconds": 0.1}]}
+        validate_reports({"mcp": ["mcp.one"], "tenant-postgres": ["tenant.one"]}, [report, tenant], "ee", self.digest)
         with self.assertRaises(ValueError):
-            validate_reports({"mcp": ["mcp.one"]}, [], "ee", self.digest)
+            validate_reports({"mcp": ["mcp.one"], "tenant-postgres": ["tenant.one"]}, [], "ee", self.digest)
         with self.assertRaises(ValueError):
             validate_reports(self.expected, [report], "ee", self.digest)
 
@@ -45,15 +46,18 @@ class ReportGateTests(unittest.TestCase):
         report["edition"] = "ee"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            tenant = {**report, "suite": "tenant-postgres", "results": [{"id": "tenant.one", "status": "passed", "duration_seconds": 0.1}]}
+            (root / "tenant").mkdir()
+            (root / "tenant/results.json").write_text(json.dumps(tenant))
             (root / "results.json").write_text(json.dumps(report))
-            validate_reports({"mcp": ["mcp.one"]}, load_reports(root), "ee", self.digest)
+            validate_reports({"mcp": ["mcp.one"], "tenant-postgres": ["tenant.one"]}, load_reports(root), "ee", self.digest)
             nested = root / "artifact"
             nested.mkdir()
             (nested / "results.json").write_text(json.dumps(report))
             with self.assertRaises(ValueError):
-                validate_reports({"mcp": ["mcp.one"]}, load_reports(root), "ee", self.digest)
+                validate_reports({"mcp": ["mcp.one"], "tenant-postgres": ["tenant.one"]}, load_reports(root), "ee", self.digest)
             (root / "results.json").unlink()
-            validate_reports({"mcp": ["mcp.one"]}, load_reports(root), "ee", self.digest)
+            validate_reports({"mcp": ["mcp.one"], "tenant-postgres": ["tenant.one"]}, load_reports(root), "ee", self.digest)
 
     def test_missing_duplicate_unknown_and_empty_suites_fail(self):
         for reports in (self.reports[:-1], self.reports + [self.reports[0]], []):

@@ -92,6 +92,15 @@ def run_assignments(output_dir, toolchain):
             run(sys.executable, "tests/blackbox/run.py", "--edition", "ee", "--suite", "mcp",
                 "--binary", str(ROOT / "target/debug/yorishiro"),
                 "--artifacts", str(output_dir / "public-ee" / "mcp"))
+            run("docker", "exec", os.environ["POSTGRES_CONTAINER"], "psql", "-v", "ON_ERROR_STOP=1",
+                "-U", "postgres", "-d", "postgres", "-c", "CREATE DATABASE public_contract OWNER yorishiro")
+            public_env = dict(os.environ)
+            public_env["YORISHIRO_PUBLIC_POSTGRES_URL"] = "postgres://yorishiro:yorishiro@localhost:5432/public_contract"
+            if not public_env.get("YORISHIRO_LICENSE_KEY"):
+                raise RuntimeError("public PostgreSQL contracts require the signed EE licence")
+            run(sys.executable, "tests/blackbox/run.py", "--edition", "ee", "--suite", "tenant-postgres",
+                "--binary", str(ROOT / "target/debug/yorishiro"),
+                "--artifacts", str(output_dir / "public-ee" / "tenant-postgres"), env=public_env)
             run(sys.executable, "scripts/check_blackbox_reports.py", "--edition", "ee",
                 "--binary", str(ROOT / "target/debug/yorishiro"), "--reports", str(output_dir / "public-ee"))
         for cell in plan["execution_matrix"]["include"]:

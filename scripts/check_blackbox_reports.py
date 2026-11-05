@@ -21,7 +21,7 @@ def load_reports(directory: Path) -> list[dict]:
 
 
 def validate_reports(expected: dict[str, list[str]], reports: list[dict], edition: str, binary_sha256: str) -> None:
-    if set(expected) != ({"mcp"} if edition == "ee" else set(SUITES)):
+    if set(expected) != ({"mcp", "tenant-postgres"} if edition == "ee" else set(SUITES)):
         raise ValueError("expected assignments must include REST, MCP and CLI")
     seen = set()
     for report in reports:
@@ -55,7 +55,7 @@ def main() -> int:
     parser.add_argument("--edition", choices=("ce", "ee"), required=True)
     args = parser.parse_args()
     expected = {}
-    for suite in (("mcp",) if args.edition == "ee" else SUITES):
+    for suite in (("mcp", "tenant-postgres") if args.edition == "ee" else SUITES):
         output = subprocess.check_output(
             [sys.executable, str(ROOT / "tests/blackbox/run.py"), "--suite", suite, "--edition", args.edition, "--list"],
             text=True,

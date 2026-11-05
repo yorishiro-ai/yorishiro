@@ -220,6 +220,23 @@ class ArgumentTests(unittest.TestCase):
             self.assertIn(str(Path(directory)), app.env["DATABASE_URL"])
             self.assertEqual(app.env["LOCO_CONFIG_FOLDER"], str(Path(directory) / "config"))
 
+    def test_postgres_contract_requires_explicit_database_and_licence(self):
+        args = run.parse_args(self.arguments())
+        args.suite, args.edition = "tenant-postgres", "ee"
+        for values, valid in (({}, False), ({"YORISHIRO_PUBLIC_POSTGRES_URL": "postgres://owned/db"}, False),
+                              ({"YORISHIRO_PUBLIC_POSTGRES_URL": "postgres://owned/db",
+                                "YORISHIRO_LICENSE_KEY": "signed"}, True)):
+            with self.subTest(values=values), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict("os.environ", values, clear=True):
+                if valid:
+                    app = run.App(args, directory)
+                    self.assertEqual(app.environment, "test_postgres")
+                    self.assertEqual(app.env["DATABASE_URL"], "postgres://owned/db")
+                    self.assertEqual(app.env["YORISHIRO_LICENSE_KEY"], "signed")
+                else:
+                    with self.assertRaisesRegex(AssertionError, "signed EE licence"):
+                        run.App(args, directory)
+
     def test_rest_extractor_rejection_is_text_not_json(self):
         app = Mock(key="credential", workspace="workspace")
         app.issue.return_value = ("id", "read-key")
