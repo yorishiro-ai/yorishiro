@@ -993,6 +993,67 @@ def invite_lifecycle(app):
             "cancelled invitation history was deleted")
 
 
+def membership_retirement_lifecycle(app):
+    owner = app.management_key
+    client = MCP(app, owner)
+    owner_id = client.call("whoami")["user_id"]
+    invitation = client.call("create_invite", {
+        "email": "successor@example.invalid", "role": "admin", "expires_at": "2090-01-01T00:00:00Z",
+    })
+    password = "blackbox-successor-password"
+    app.secrets.extend((invitation["token"], password))
+    account = app.rest("POST", "/auth/signup", {
+        "invite_token": invitation["token"], "password": password,
+    }, status=201)
+    user_id = account["user_id"]
+    issued = app.task("create_api_key", workspace_id=app.workspace, scope="schema", user_id=user_id)
+    key = output_field(issued, "api key (shown once)")
+    app.secrets.append(key)
+    member = MCP(app, key)
+    before = client.call("list_members")
+    require(before == app.rest("GET", "/api/members", key=owner), "membership lists differ")
+    preview = client.call("preview_member_role_change", {"user_id": user_id, "role": "viewer"})
+    require(preview["current_role"] == "admin" and preview["requested_role"] == "viewer"
+            and not preview["blocked_by_last_owner"], "wrong member role preview")
+    require(client.call("list_members") == before and member.call("whoami")["scope"] == "schema",
+            "role preview mutated membership or grants")
+    client.call("set_member_role", {"user_id": user_id, "role": "viewer"})
+    require(member.call("whoami")["scope"] == "read", "demotion did not reduce an existing key")
+    member.call("update_tenant", {"name": "viewer-denied"}, error=True)
+    removal = client.call("preview_member_removal", {"user_id": user_id})
+    require(removal == app.rest("GET", f"/api/members/{user_id}/removal-preview", key=owner)
+            and not removal["blocked_by_last_owner"] and removal["revoked_api_key_ids"],
+            "removal preview lost credential impact")
+    require(member.call("whoami")["scope"] == "read", "removal preview revoked a credential")
+    client.call("remove_member", {"user_id": user_id})
+    app.rest("DELETE", f"/api/members/{user_id}", status=204, key=owner)
+    app.rest("GET", "/api/whoami", status=401, key=key)
+    member.call("whoami", error=True)
+    require(not any(row["user_id"] == user_id for row in client.call("list_members")),
+            "removed membership remains visible")
+    client.call("set_member_role", {"user_id": user_id, "role": "admin"})
+    app.rest("GET", "/api/whoami", status=401, key=key)
+    issued = app.task("create_api_key", workspace_id=app.workspace, scope="schema", user_id=user_id)
+    successor_key = output_field(issued, "api key (shown once)")
+    app.secrets.append(successor_key)
+    successor = MCP(app, successor_key)
+    client.call("transfer_ownership", {"successor_user_id": user_id})
+    roles = {row["user_id"]: row["role"] for row in successor.call("list_members")}
+    require(roles[user_id] == "owner" and roles[owner_id] == "admin", "ownership transfer was not atomic")
+    client.call("tenant_retirement_inventory", error=True)
+    client.call("transfer_ownership", {"successor_user_id": owner_id}, error=True)
+    inventory = successor.call("tenant_retirement_inventory")
+    require(inventory == app.rest("GET", "/api/tenants/current/retirement", key=successor_key)
+            and inventory["tenant_id"] == app.tenant and inventory["disabled_at"] is None
+            and app.workspace in inventory["workspace_ids"], "wrong retirement inventory")
+    successor.call("disable_tenant", {"confirmed_tenant_id": str(uuid.uuid4())}, error=True)
+    require(successor.call("tenant_retirement_inventory") == inventory, "bad confirmation changed tenant")
+    successor.call("disable_tenant", {"confirmed_tenant_id": app.tenant})
+    for credential, session in ((owner, client), (successor_key, successor)):
+        app.rest("GET", "/api/whoami", status=401, key=credential)
+        session.call("whoami", error=True)
+
+
 def tenant_settings_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
@@ -1102,7 +1163,8 @@ def scenarios(suite):
                 ("mcp.user-profile-lifecycle", user_profile_lifecycle),
                 ("mcp.tenant-settings-lifecycle", tenant_settings_lifecycle),
                 ("mcp.invite-lifecycle", invite_lifecycle),
-                ("mcp.template-library-lifecycle", template_library_lifecycle)],
+                ("mcp.template-library-lifecycle", template_library_lifecycle),
+                ("mcp.membership-ownership-retirement", membership_retirement_lifecycle)],
     }
     return common + focused[suite]
 
