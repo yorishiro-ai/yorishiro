@@ -91,7 +91,10 @@ class CoverageOwnershipTests(unittest.TestCase):
             self.assertEqual(len(docker), 2)
             self.assertIn("DROP DATABASE yorishiro WITH (FORCE)", docker[0])
             self.assertEqual(docker[1], ["docker", "exec", "coverage-redis", "valkey-cli", "FLUSHALL"])
-            self.assertEqual(sum("tests/blackbox/run.py" in command for command in commands), 3)
+            self.assertEqual(sum("tests/blackbox/run.py" in command for command in commands), 4)
+            public = [command for command in commands if "tests/blackbox/run.py" in command]
+            self.assertEqual([command[command.index("--edition") + 1] for command in public],
+                             ["ce", "ce", "ce", "ee"])
             self.assertEqual(sum("verify" in command and "scripts/run_assigned_tests.py" in command
                                  for command in commands), 1)
             self.assertTrue(all("--no-run" in command for command in commands if "test" in command))

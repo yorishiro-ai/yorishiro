@@ -88,6 +88,12 @@ def run_assignments(output_dir, toolchain):
                     "--artifacts", str(output_dir / "public" / suite))
             run(sys.executable, "scripts/check_blackbox_reports.py", "--edition", "ce",
                 "--binary", str(ROOT / "target/debug/yorishiro"), "--reports", str(output_dir / "public"))
+        else:
+            run(sys.executable, "tests/blackbox/run.py", "--edition", "ee", "--suite", "mcp",
+                "--binary", str(ROOT / "target/debug/yorishiro"),
+                "--artifacts", str(output_dir / "public-ee" / "mcp"))
+            run(sys.executable, "scripts/check_blackbox_reports.py", "--edition", "ee",
+                "--binary", str(ROOT / "target/debug/yorishiro"), "--reports", str(output_dir / "public-ee"))
         for cell in plan["execution_matrix"]["include"]:
             if cell["edition"] != edition:
                 continue

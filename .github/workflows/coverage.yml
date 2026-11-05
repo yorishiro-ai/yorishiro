@@ -133,5 +133,6 @@ jobs:
             coverage/execution.json
             coverage/receipts/
             coverage/public/
+            coverage/public-ee/
             coverage/timings/
           if-no-files-found: error

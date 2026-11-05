@@ -100,8 +100,9 @@ def main() -> int:
         raise AssertionError("CI responsibility gate accepted a deliberate violation")
     for invalid in (
         inventory.replace("--workspace --doc --no-default-features", "--workspace --no-default-features", 1),
-        inventory.replace("public-contract-binary-ce", "missing-binary", 1),
-        inventory.replace("if: inputs.edition == 'ce'", "if: inputs.edition == 'ee'"),
+        inventory.replace("public-contract-binary-${{ inputs.edition }}", "missing-binary", 1),
+        inventory.replace("      - name: Publish the small public-contract binary directly",
+                          "      - if: inputs.edition == 'ce'\n        name: Publish the small public-contract binary directly", 1),
     ):
         try:
             validate(workflow, assigned_workflow, invalid)

@@ -63,13 +63,11 @@ jobs:
           compression-level: 0
           retention-days: 1
       - name: Publish the small public-contract binary directly
-        if: inputs.edition == 'ce'
-        run: tar -C target/debug -czf "$RUNNER_TEMP/public-contract-ce.tar.gz" yorishiro
+        run: tar -C target/debug -czf "$RUNNER_TEMP/public-contract-$EDITION.tar.gz" yorishiro
       - uses: actions/upload-artifact@v7
-        if: inputs.edition == 'ce'
         with:
-          name: public-contract-binary-ce
-          path: ${{ runner.temp }}/public-contract-ce.tar.gz
+          name: public-contract-binary-${{ inputs.edition }}
+          path: ${{ runner.temp }}/public-contract-${{ inputs.edition }}.tar.gz
           if-no-files-found: error
           compression-level: 0
           retention-days: 1

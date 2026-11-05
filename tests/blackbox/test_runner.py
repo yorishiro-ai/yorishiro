@@ -14,6 +14,13 @@ import run
 
 
 class ToolInventoryTests(unittest.TestCase):
+    def test_enterprise_scenarios_are_an_explicit_delta_not_a_common_replay(self):
+        ids = [name for name, _ in run.scenarios("mcp", "ee")]
+        self.assertEqual(ids, ["server.bootstrap", "ee.discovery-auth-scope-input",
+                               "ee.column-worker-settings-lifecycle"])
+        with self.assertRaises(AssertionError):
+            run.scenarios("rest", "ee")
+
     def test_raw_export_records_success_without_parsing_ndjson_as_one_document(self):
         app = Mock(current_scenario="mcp.graph", tool_calls=[])
         client = run.MCP.__new__(run.MCP)

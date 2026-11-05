@@ -134,7 +134,7 @@ class App:
         self.started = time.monotonic()
         self.deadline = self.started + 240
         self.results = [{"id": name, "status": "failed", "duration_seconds": 0,
-                         "detail": "not executed"} for name, _ in scenarios(args.suite)]
+                         "detail": "not executed"} for name, _ in scenarios(args.suite, args.edition)]
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             self.port = sock.getsockname()[1]
@@ -767,7 +767,10 @@ def mcp_suite(app):
     listed = client.rpc("tools/list")["result"]
     names = {tool["name"] for tool in listed["tools"]}
     reviewed = json.loads((ROOT / "tests/blackbox/tools.json").read_text())
-    require(names == set(reviewed["ce"]), "MCP public-tool inventory changed; review scenario ownership and gaps")
+    expected = set(reviewed["ce"])
+    if app.args.edition == "ee":
+        expected.update(reviewed["ee_additions"])
+    require(names == expected, "MCP public-tool inventory changed; review scenario ownership and gaps")
     app.discovered_tools = sorted(names)
     require({"list_schemas", "create_schema", "get_entity", "create_entity", "delete_entity"} <= names,
             "MCP discovery missing common tools")
@@ -1289,7 +1292,51 @@ def migration_lifecycle(app):
             "reindex enqueue lost job identity or cross-transport status")
 
 
-def scenarios(suite):
+def enterprise_settings(app):
+    client = MCP(app, app.key)
+    _, read_key = app.issue(app.workspace, "read")
+    reader = MCP(app, read_key)
+    path = "/api/workspace/entity-columns"
+    saved = client.call("set_entity_columns", {"entity_type": "note", "columns": ["title", "body"]})
+    require(saved == {"entity_type": "note", "columns": ["title", "body"]}, "wrong stored columns")
+    listed = reader.call("list_entity_columns")
+    require(listed == app.rest("GET", path), "column preferences differ across transports")
+    client.call("set_entity_columns", {"entity_type": "note", "columns": ["title", "title"]}, error=True)
+    reader.call("set_entity_columns", {"entity_type": "note", "columns": []}, error=True)
+    reader.call("reset_entity_columns", {"entity_type": "note"}, error=True)
+    require(client.call("list_entity_columns") == listed, "rejected column writes mutated preferences")
+    require(client.call("reset_entity_columns", {"entity_type": "note"})["reset"], "column reset failed")
+    require(app.rest("GET", path) == [], "reset left column preferences")
+    app.rest("PUT", path + "/note", {"columns": []})
+    require(client.call("list_entity_columns") == [{"entity_type": "note", "columns": []}],
+            "empty preferences were confused with reset")
+    app.rest("DELETE", path + "/note", status=204)
+    require(reader.call("list_entity_columns") == [], "REST reset did not reach MCP")
+
+    path = "/api/workspace/worker-class"
+    client.call("get_worker_class", error=True)
+    require(client.call("set_worker_class", {"worker_class": "shared"})["saved"], "worker assignment failed")
+    stored = reader.call("get_worker_class")
+    require(stored["worker_class"] == "shared" and stored == app.rest("GET", path),
+            "worker assignment differs across transports")
+    reader.call("set_worker_class", {"worker_class": "shared"}, error=True)
+    reader.call("reset_worker_class", error=True)
+    require(client.call("get_worker_class") == stored, "denied reset changed worker routing")
+    require(client.call("reset_worker_class")["reset"], "worker reset failed")
+    app.rest("GET", path, status=404)
+    client.call("get_worker_class", error=True)
+    app.rest("PUT", path, {"worker_class": "shared"}, status=204)
+    require(reader.call("get_worker_class")["worker_class"] == "shared", "REST assignment did not reach MCP")
+    app.rest("DELETE", path, status=204)
+    client.call("get_worker_class", error=True)
+
+
+def scenarios(suite, edition="ce"):
+    if edition == "ee":
+        require(suite == "mcp", "EE owns only its dedicated MCP delta suite")
+        return [("server.bootstrap", lambda app: app.boot()),
+                ("ee.discovery-auth-scope-input", mcp_suite),
+                ("ee.column-worker-settings-lifecycle", enterprise_settings)]
     common = [("server.bootstrap", lambda app: app.boot()),
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
     focused = {
@@ -1315,6 +1362,8 @@ def scenarios(suite):
 
 
 def self_check():
+    enterprise = scenarios("mcp", "ee")
+    require(len({name for name, _ in enterprise}) == len(enterprise), "duplicate EE scenario IDs")
     for suite in ("rest", "mcp", "cli"):
         definitions = scenarios(suite)
         ids = [name for name, _ in definitions]
@@ -1331,7 +1380,7 @@ def main(argv=None):
         print("blackbox scenario definitions: OK")
         return 0
     if args.list:
-        print(json.dumps([name for name, _ in scenarios(args.suite)]))
+        print(json.dumps([name for name, _ in scenarios(args.suite, args.edition)]))
         return 0
     def interrupted(signum, _frame):
         raise InterruptedError(f"runner interrupted by signal {signum}")
@@ -1341,7 +1390,7 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix="yorishiro-blackbox-") as directory:
         app = App(args, directory)
         try:
-            for result, (_, function) in zip(app.results, scenarios(args.suite)):
+            for result, (_, function) in zip(app.results, scenarios(args.suite, args.edition)):
                 app.current_scenario = result["id"]
                 started = time.monotonic()
                 try:

@@ -16,7 +16,7 @@ SUITES = ("rest", "mcp", "cli")
 
 
 def validate_reports(expected: dict[str, list[str]], reports: list[dict], edition: str, binary_sha256: str) -> None:
-    if set(expected) != set(SUITES):
+    if set(expected) != ({"mcp"} if edition == "ee" else set(SUITES)):
         raise ValueError("expected assignments must include REST, MCP and CLI")
     seen = set()
     for report in reports:
@@ -50,7 +50,7 @@ def main() -> int:
     parser.add_argument("--edition", choices=("ce", "ee"), required=True)
     args = parser.parse_args()
     expected = {}
-    for suite in SUITES:
+    for suite in (("mcp",) if args.edition == "ee" else SUITES):
         output = subprocess.check_output(
             [sys.executable, str(ROOT / "tests/blackbox/run.py"), "--suite", suite, "--edition", args.edition, "--list"],
             text=True,
@@ -62,6 +62,8 @@ def main() -> int:
     validate_reports(expected, reports, args.edition, digest)
     reviewed = json.loads((ROOT / "tests/blackbox/tools.json").read_text())
     inventory = set(reviewed["ce"])
+    if args.edition == "ee":
+        inventory.update(reviewed["ee_additions"])
     discovered = [report.get("discovered_tools", []) for report in reports if report["suite"] == "mcp"]
     if len(discovered) != 1 or set(discovered[0]) != inventory:
         raise ValueError("MCP discovery does not match the reviewed public-tool inventory")
@@ -77,7 +79,9 @@ def main() -> int:
     gaps = [name for name, outcomes in census.items() if not outcomes["succeeded"]]
     (args.reports / "tool-coverage.json").write_text(json.dumps({
         "binary_sha256": digest, "edition": args.edition, "tools": census,
-        "without_successful_mcp_call": gaps, "ee_additions_not_executed": reviewed["ee_additions"],
+        "without_successful_mcp_call": gaps,
+        "ee_additions_not_executed": [name for name in reviewed["ee_additions"]
+                                     if args.edition == "ce" or name in gaps],
         "complete_public_behavior_coverage": False,
     }, indent=2) + "\n")
     print(f"Public MCP census: {len(inventory) - len(gaps)}/{len(inventory)} tools called successfully; "

@@ -291,7 +291,7 @@ jobs:
           git diff --exit-code -- src/models/_entities
 
   public-contract:
-    name: Public contracts (SQLite, ${{ matrix.suite }})
+    name: Public contracts (SQLite, ${{ matrix.edition }}, ${{ matrix.suite }})
     needs: [changes, test-inventory-ce]
     if: ${{ needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
@@ -299,37 +299,68 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [rest, mcp, cli]
+        include:
+          - {edition: ce, suite: rest}
+          - {edition: ce, suite: mcp}
+          - {edition: ce, suite: cli}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: public-contract-binary-ce
+          name: public-contract-binary-${{ matrix.edition }}
           path: ${{ runner.temp }}/binary
       - name: Restore the built binary
-        run: tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C "$RUNNER_TEMP/binary"
+        run: tar -xzf "$RUNNER_TEMP/binary/public-contract-${{ matrix.edition }}.tar.gz" -C "$RUNNER_TEMP/binary"
       - name: Exercise the public interface through real processes
         run: >-
           python3 tests/blackbox/run.py
           --binary "$RUNNER_TEMP/binary/yorishiro"
           --suite "${{ matrix.suite }}"
-          --edition ce
+          --edition "${{ matrix.edition }}"
           --artifacts "$RUNNER_TEMP/contracts"
       - name: Upload redacted logs and scenario results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: public-contract-result-ce-${{ matrix.suite }}
+          name: public-contract-result-${{ matrix.edition }}-${{ matrix.suite }}
+          path: ${{ runner.temp }}/contracts
+          if-no-files-found: error
+          retention-days: 7
+
+  public-contract-ee:
+    name: Public contracts (SQLite, ee, mcp)
+    needs: [changes, test-inventory-ee]
+    if: ${{ needs.changes.outputs.rust_validation == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: public-contract-binary-ee
+          path: ${{ runner.temp }}/binary
+      - name: Exercise the enterprise delta through real processes
+        run: |
+          tar -xzf "$RUNNER_TEMP/binary/public-contract-ee.tar.gz" -C "$RUNNER_TEMP/binary"
+          python3 tests/blackbox/run.py --binary "$RUNNER_TEMP/binary/yorishiro" --suite mcp --edition ee --artifacts "$RUNNER_TEMP/contracts"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: public-contract-result-ee-mcp
           path: ${{ runner.temp }}/contracts
           if-no-files-found: error
           retention-days: 7
 
   public-contract-verify:
     name: Verify public-contract coverage
-    needs: [changes, test-inventory-ce, public-contract]
+    needs: [changes, test-inventory-ce, test-inventory-ee, public-contract, public-contract-ee]
     if: ${{ always() && needs.changes.result == 'success' && needs.changes.outputs.rust_validation == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [ce, ee]
     steps:
       - uses: actions/checkout@v7
       - name: Exercise the report and runner failure guards
@@ -339,20 +370,20 @@ jobs:
           python3 tests/blackbox/run.py --self-check
       - uses: actions/download-artifact@v8
         with:
-          name: public-contract-binary-ce
+          name: public-contract-binary-${{ matrix.edition }}
           path: ${{ runner.temp }}/binary
       - uses: actions/download-artifact@v8
         with:
-          pattern: public-contract-result-ce-*
+          pattern: public-contract-result-${{ matrix.edition }}-*
           path: ${{ runner.temp }}/reports
       - name: Require every assigned scenario on the same binary
         run: |
-          tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C "$RUNNER_TEMP/binary"
-          python3 scripts/check_blackbox_reports.py --edition ce --binary "$RUNNER_TEMP/binary/yorishiro" --reports "$RUNNER_TEMP/reports"
+          tar -xzf "$RUNNER_TEMP/binary/public-contract-${{ matrix.edition }}.tar.gz" -C "$RUNNER_TEMP/binary"
+          python3 scripts/check_blackbox_reports.py --edition "${{ matrix.edition }}" --binary "$RUNNER_TEMP/binary/yorishiro" --reports "$RUNNER_TEMP/reports"
       - name: Upload observed public-tool census
         uses: actions/upload-artifact@v7
         with:
-          name: public-tool-census-ce
+          name: public-tool-census-${{ matrix.edition }}
           path: ${{ runner.temp }}/reports/tool-coverage.json
           if-no-files-found: error
 

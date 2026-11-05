@@ -52,11 +52,15 @@ def validate(workflow: str, assigned_workflow: str, build_workflow: str | None =
     assert 'cargo test --locked --workspace --doc --no-default-features --features "$features"' in build_workflow
     assert "features=community" in build_workflow and "features=enterprise" in build_workflow
     assert build_workflow.index("cargo build") < build_workflow.index("scripts/test_assignments.py collect")
-    assert "public-contract-binary-ce" in build_workflow and "if: inputs.edition == 'ce'" in build_workflow
+    assert "public-contract-binary-${{ inputs.edition }}" in build_workflow
+    assert 'public-contract-$EDITION.tar.gz' in build_workflow
+    assert "if: inputs.edition == 'ce'" not in build_workflow, "both editions publish their own binary"
     assert "process_binary" in build_workflow
     assert "\n  public-contract-build:\n" not in workflow
     for consumer in ("public-contract", "schema-generation"):
         assert "needs: [changes, test-inventory-ce]" in job(workflow, consumer), "CE consumers must not wait for EE"
+    assert "needs: [changes, test-inventory-ee]" in job(workflow, "public-contract-ee")
+    assert "public-contract-ee" in job(workflow, "public-contract-verify")
     assignment = job(workflow, "test-assignment-verify")
     assert "needs: [changes, test-inventory-ce, test-inventory-ee]" in assignment
     assert "scripts/test_assignments.py verify" in assignment

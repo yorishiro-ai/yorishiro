@@ -1,10 +1,10 @@
 # External black-box checks
 
 `tools.json` records the reviewed CE tool inventory and EE additions.
-The real MCP discovery scenario requires the CE inventory to match exactly; runner-only checks compare both inventories to the source handlers.
+The real MCP discovery scenario requires the selected edition's inventory to match exactly; runner-only checks compare both inventories to the source handlers.
 Reports attribute successful and rejected MCP calls to their executing scenario without recording arguments or returned secrets.
 The report verifier writes `tool-coverage.json`, listing each tool's observed outcomes and every missing successful call.
-An observed successful call is not proof of complete behavior coverage, and EE additions are explicitly reported as unexecuted by this common runner.
+An observed successful call is not proof of complete behavior coverage, and each edition reports its missing successful calls explicitly.
 
 `rest.builtin-template-relations` creates every builtin template's entity and relation types through public HTTP using Write credentials after schema creation.
 The graph scenarios also cover Read-scoped MCP entity filtering, invalid relation-list status and missing-entity diagnostics.
@@ -19,11 +19,13 @@ Run from any directory, retaining this repository checkout beside the runner.
 python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro --suite rest --edition ce --artifacts /absolute/path/to/artifacts
 python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro --suite mcp --edition ce --artifacts /absolute/path/to/artifacts
 python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro --suite cli --edition ce --artifacts /absolute/path/to/artifacts
+python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro-ee --suite mcp --edition ee --artifacts /absolute/path/to/ee-artifacts
 ```
 
 Common contracts run on CE/SQLite; enterprise-only composition and behavior belong in explicit EE checks, not a duplicate common matrix.
 The edition argument labels evidence; it does not infer or verify the binary's compile-time features.
-The runner exercises only the community surface even when supplied an EE binary, with the enterprise licence explicitly unset.
+The EE MCP delta suite checks edition discovery and entity-column and worker-class setting, scope denial, nonmutation and reset through both transports, without replaying CE business scenarios.
+Both editions run with the enterprise licence explicitly unset; licensed capabilities need separate ownership.
 
 Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
 The CLI suite first verifies that a real work command fails timezone preparation before migration, then proves migration and normal tasks succeed.
