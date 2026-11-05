@@ -721,10 +721,20 @@ def builtin_relations(app):
     _, schema_key = app.issue(workspace, "schema")
     _, write_key = app.issue(workspace, "write")
     templates = app.rest("GET", "/api/templates", key=schema_key)
+    client = MCP(app, schema_key)
+    require(client.call("list_templates") == templates, "builtin inventory differs across transports")
     require(templates, "builtin template inventory is empty")
     for template in templates:
         definition = app.rest("GET", f"/api/templates/{template['id']}", key=schema_key)
+        require(client.call("get_template", {"template_id": template["id"]}) == definition,
+                "builtin definition differs across transports")
         app.rest("POST", "/api/schemas", definition, status=201, key=schema_key)
+        for entity_type in definition["entity_types"]:
+            document = client.call("get_entity_type_json_schema", {
+                "schema_name": definition["name"], "entity_type": entity_type,
+            })
+            require(document["type"] == "object" and "properties" in document,
+                    "entity type did not expose an object JSON Schema")
 
         def create(entity_type, definition=definition):
             return app.rest("POST", "/api/entities", {
@@ -1020,6 +1030,52 @@ def invite_lifecycle(app):
     require(client.call("whoami") == identity, "invite acceptance changed selected workspace or credentials")
 
 
+def workspace_key_lifecycle(app):
+    owner = app.management_key
+    client = MCP(app, owner)
+    identity = client.call("whoami")
+    capabilities = client.call("capabilities")
+    require(capabilities["tenant_admin"] and not capabilities["constraints"]["discovery_authorizes_requests"],
+            "capabilities confused discovery with authorization")
+    created = client.call("create_api_key", {"name": "mcp-issued", "scope": "read"})
+    app.secrets.append(created["full_key"])
+    delegated = MCP(app, created["full_key"])
+    require(delegated.call("whoami")["user_id"] == identity["user_id"], "MCP key lost attribution")
+    client.call("revoke_api_key", {"key_id": created["id"]})
+    delegated.call("whoami", error=True)
+    app.rest("GET", "/api/whoami", key=created["full_key"], status=401)
+    workspace = client.call("create_workspace", {"name": "mcp-managed"})
+    workspace_id = workspace["id"]
+    require(any(row["id"] == workspace_id for row in client.call("list_workspaces")),
+            "MCP-created workspace not listed")
+    require(any(row["id"] == workspace_id for row in client.call("discover_workspaces")),
+            "human discovery omitted tenant workspace")
+    issued = app.task("create_api_key", workspace_id=workspace_id, scope="schema", user_id=identity["user_id"])
+    selected_key = output_field(issued, "api key (shown once)")
+    app.secrets.append(selected_key)
+    selected = MCP(app, selected_key)
+    selected.call("update_workspace", {"workspace_id": workspace_id, "name": "mcp-renamed",
+                                       "replace_max_entities": True, "max_entities": 5})
+    detail = selected.call("get_workspace", {"workspace_id": workspace_id})
+    require(detail["name"] == "mcp-renamed" and detail["max_entities"] == 5,
+            "MCP workspace update not persisted")
+    require(app.rest("GET", f"/api/workspaces/{workspace_id}", key=selected_key) == detail,
+            "workspace detail differs across transports")
+    args = {"workspace_id": workspace_id, "user_id": identity["user_id"]}
+    client.call("grant_workspace_member", {**args, "role": "viewer"})
+    require(any(row["user_id"] == identity["user_id"] for row in client.call("list_workspace_members", {
+        "workspace_id": workspace_id,
+    })), "MCP workspace grant missing")
+    client.call("revoke_workspace_member", args)
+    require(not any(row["user_id"] == identity["user_id"] for row in client.call("list_workspace_members", {
+        "workspace_id": workspace_id,
+    })), "MCP workspace grant survived revocation")
+    client.call("delete_workspace", {"workspace_id": workspace_id})
+    app.rest("GET", f"/api/workspaces/{workspace_id}", key=owner, status=404)
+    selected.call("whoami", error=True)
+    require(client.call("whoami")["user_id"] == identity["user_id"], "workspace deletion invalidated unrelated key")
+
+
 def membership_retirement_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
@@ -1201,6 +1257,7 @@ def scenarios(suite):
                 ("mcp.tenant-settings-lifecycle", tenant_settings_lifecycle),
                 ("mcp.invite-lifecycle", invite_lifecycle),
                 ("mcp.template-library-lifecycle", template_library_lifecycle),
+                ("mcp.workspace-key-lifecycle", workspace_key_lifecycle),
                 ("mcp.membership-ownership-retirement", membership_retirement_lifecycle)],
     }
     return common + focused[suite]
