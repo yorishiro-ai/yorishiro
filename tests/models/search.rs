@@ -244,6 +244,8 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             model: "ranking".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         for (workspace, entity) in [
             (workspace_id, close.id),
@@ -298,6 +300,8 @@ async fn fixed_width_provider(
         model: "fixed-width".into(),
         dimensions: width,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (provider, server)
 }
@@ -328,6 +332,8 @@ async fn model_provider(
         model: model.into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (provider, server)
 }
@@ -433,6 +439,8 @@ async fn gated_model_provider(
         model: model.into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (std::sync::Arc::new(provider), server, entered, release)
 }

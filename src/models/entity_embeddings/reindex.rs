@@ -182,6 +182,7 @@ pub async fn reindex_workspace(
             workspace_id,
             provider.model_name(),
             dimensions,
+            provider.document_prefix(),
         )
         .await?;
         txn.commit().await.internal()?;

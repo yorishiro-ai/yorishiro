@@ -118,6 +118,8 @@ async fn configured_live_provider_embeds_stores_and_searches() {
             model: settings.model,
             dimensions,
             send_dimensions_param: settings.send_dimensions_param,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         }));
     let vectors = provider
         .embed_batch(&[
@@ -312,6 +314,8 @@ async fn a_result_for_an_expired_request_is_discarded() {
         model: "late-query-test".into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     let (workspace_tx, workspace_rx) = tokio::sync::oneshot::channel();
     boot_with_query_worker_and_drain(

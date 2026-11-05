@@ -234,6 +234,8 @@ mod conflict {
             model: "failure-http-test".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         }));
         (provider, server)
     }
@@ -302,6 +304,8 @@ mod conflict {
                 model: "aggregate-context-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (provider, server)
         }
@@ -362,6 +366,8 @@ mod conflict {
                 model: "error-then-success-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (state, provider, server)
         }
@@ -420,6 +426,8 @@ mod conflict {
                 model: "mixed-test-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (state, provider, server)
         }
@@ -465,6 +473,8 @@ mod conflict {
                 model: "gated-test-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (state, provider, server)
         }
@@ -502,6 +512,8 @@ mod conflict {
             model: "snapshot-http-provider".into(),
             dimensions: width,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         }));
         (provider, server, entered, release)
     }

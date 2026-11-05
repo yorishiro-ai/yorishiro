@@ -62,6 +62,8 @@ fn embedding_model() -> workspace_embedding_keys::Model {
         api_key: EMBEDDING_SECRET.into(),
         dimensions: 768,
         send_dimensions_param: true,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
         created_at: Utc::now().into(),
         updated_at: Utc::now().into(),
     }

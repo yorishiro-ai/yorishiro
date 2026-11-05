@@ -22,7 +22,16 @@ pub(crate) async fn configure(
     request: crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    set(
+    let previous = get(&txn, workspace_id).await?;
+    let query_only = previous.as_ref().is_some_and(|old| {
+        old.base_url == request.base_url.trim_end_matches('/')
+            && old.model == request.model
+            && old.api_key == request.api_key
+            && old.dimensions == request.dimensions
+            && old.send_dimensions_param == request.send_dimensions_param
+            && old.document_prefix == request.document_prefix
+    });
+    set_with_instructions(
         &txn,
         workspace_id,
         &request.base_url,
@@ -30,11 +39,15 @@ pub(crate) async fn configure(
         &request.api_key,
         request.dimensions,
         request.send_dimensions_param,
+        &request.query_instruction,
+        &request.document_prefix,
     )
     .await?;
-    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
-        .await
-        .internal()?;
+    if !query_only {
+        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+            .await
+            .internal()?;
+    }
     txn.commit().await.internal()?;
     Ok(())
 }
@@ -54,6 +67,8 @@ pub(crate) async fn resolve(
             model: config.model,
             dimensions: config.dimensions as usize,
             send_dimensions_param: config.send_dimensions_param,
+            query_instruction: config.query_instruction,
+            document_prefix: config.document_prefix,
         },
     ))))
 }
@@ -65,6 +80,8 @@ pub(crate) async fn resolve(
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "openapi", schema(as = EmbeddingKeyResponse))]
 pub(crate) struct EmbeddingKeyDescription {
+    pub(crate) query_instruction: String,
+    pub(crate) document_prefix: String,
     pub(crate) base_url: String,
     pub(crate) model: String,
     pub(crate) dimensions: i32,
@@ -75,6 +92,8 @@ pub(crate) struct EmbeddingKeyDescription {
 
 /// A workspace's own embedding credentials and model, as the provider lookup reads them to build a provider.
 pub(crate) struct EmbeddingKeyConfig {
+    pub(crate) query_instruction: String,
+    pub(crate) document_prefix: String,
     pub(crate) base_url: String,
     pub(crate) api_key: String,
     pub(crate) model: String,
@@ -97,6 +116,32 @@ pub async fn set(
     dimensions: i32,
     send_dimensions_param: bool,
 ) -> Result<(), YorishiroError> {
+    set_with_instructions(
+        conn,
+        workspace_id,
+        base_url,
+        model,
+        api_key,
+        dimensions,
+        send_dimensions_param,
+        "",
+        "",
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn set_with_instructions(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+    dimensions: i32,
+    send_dimensions_param: bool,
+    query_instruction: &str,
+    document_prefix: &str,
+) -> Result<(), YorishiroError> {
     let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
 
     if dimensions <= 0 {
@@ -113,6 +158,8 @@ pub async fn set(
         api_key: ActiveValue::Set(api_key.to_string()),
         dimensions: ActiveValue::Set(dimensions),
         send_dimensions_param: ActiveValue::Set(send_dimensions_param),
+        query_instruction: ActiveValue::Set(query_instruction.to_owned()),
+        document_prefix: ActiveValue::Set(document_prefix.to_owned()),
         updated_at: ActiveValue::Set(crate::time::now().into()),
         ..Default::default()
     };
@@ -125,6 +172,8 @@ pub async fn set(
                     Column::ApiKey,
                     Column::Dimensions,
                     Column::SendDimensionsParam,
+                    Column::QueryInstruction,
+                    Column::DocumentPrefix,
                     Column::UpdatedAt,
                 ])
                 .to_owned(),
@@ -170,7 +219,13 @@ pub(crate) async fn describe(
 ) -> Result<Option<EmbeddingKeyDescription>, YorishiroError> {
     Entity::find()
         .select_only()
-        .columns([Column::BaseUrl, Column::Model, Column::Dimensions])
+        .columns([
+            Column::BaseUrl,
+            Column::Model,
+            Column::Dimensions,
+            Column::QueryInstruction,
+            Column::DocumentPrefix,
+        ])
         .expr_as(sea_orm::sea_query::Expr::value(true), "configured")
         .filter(Column::WorkspaceId.eq(workspace_id))
         .into_model::<EmbeddingKeyDescription>()
@@ -188,6 +243,7 @@ pub(crate) async fn metadata(
         crate::services::embedding::EmbeddingMetadata {
             model: description.model,
             dimensions: description.dimensions as usize,
+            document_prefix: description.document_prefix,
         }
     }))
 }
@@ -210,5 +266,7 @@ pub(crate) async fn get(
         model: row.model,
         dimensions: row.dimensions,
         send_dimensions_param: row.send_dimensions_param,
+        query_instruction: row.query_instruction,
+        document_prefix: row.document_prefix,
     }))
 }

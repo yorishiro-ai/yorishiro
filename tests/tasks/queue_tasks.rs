@@ -98,6 +98,8 @@ async fn resync_queues_a_job_for_each_entity_without_an_embedding() {
             model: "task-test-model".into(),
             dimensions: 768,
             send_dimensions_param: true,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         entity_embeddings::sync_embedding_for_record(&ctx.db, workspace, &record, &provider)
             .await

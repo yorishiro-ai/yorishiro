@@ -88,7 +88,9 @@ async fn detect_startup_reindex(ctx: &AppContext) {
             continue;
         }
         let provider_model = provider.model_name();
-        if !workspace.is_stamped_with_other_embedding(&provider_model, provider.dimensions()) {
+        if !workspace.is_stamped_with_other_embedding(&provider_model, provider.dimensions())
+            && !workspace.has_other_document_prefix(provider.document_prefix())
+        {
             continue;
         }
         tracing::info!(
@@ -123,7 +125,8 @@ pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
             }
         };
         let Some(metadata) = metadata else { continue };
-        if workspace.is_stamped_with_other_embedding(&metadata.model, metadata.dimensions)
+        if (workspace.is_stamped_with_other_embedding(&metadata.model, metadata.dimensions)
+            || workspace.has_other_document_prefix(&metadata.document_prefix))
             && let Err(error) = enqueue_metadata_reindex(ctx, workspace.id).await
         {
             failures.push(format!("workspace {}: {error}", workspace.id));

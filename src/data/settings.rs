@@ -106,6 +106,10 @@ pub struct Embedding {
     pub(crate) api_key: String,
     pub(crate) model: Option<String>,
     pub(crate) send_dimensions_param: bool,
+    #[serde(default)]
+    pub(crate) query_instruction: String,
+    #[serde(default)]
+    pub(crate) document_prefix: String,
     pub(crate) local_model: String,
     pub(crate) local_max_sequence_length: usize,
     /// Maximum concurrent provider calls in one worker process.

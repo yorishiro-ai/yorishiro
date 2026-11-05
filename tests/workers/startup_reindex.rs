@@ -39,6 +39,8 @@ async fn scenario(
         model: model.into(),
         dimensions: 768,
         send_dimensions_param: true,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &previous)
         .await
@@ -50,6 +52,8 @@ async fn scenario(
             model: "startup-test-model".into(),
             dimensions: 768,
             send_dimensions_param: true,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         })) as Arc<dyn EmbeddingProvider>,
     );
     (ctx.clone(), server, workspace)
@@ -115,6 +119,8 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
             model: "same-model".into(),
             dimensions: 1536,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         yorishiro::models::entity_embeddings::reindex_workspace(&ctx.db, workspace, &old)
             .await
@@ -126,6 +132,8 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
                 model: "same-model".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
         ctx.shared_store.insert(current);
         let matching = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
@@ -134,6 +142,8 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
             model: "same-model".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         yorishiro::models::entity_embeddings::reindex_workspace(
             &ctx.db,

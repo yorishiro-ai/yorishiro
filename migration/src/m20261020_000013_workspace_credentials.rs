@@ -42,6 +42,18 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("workspace_embedding_keys"))
                     .if_not_exists()
                     .col(
+                        ColumnDef::new(Alias::new("query_instruction"))
+                            .text()
+                            .not_null()
+                            .default(""),
+                    )
+                    .col(
+                        ColumnDef::new(Alias::new("document_prefix"))
+                            .text()
+                            .not_null()
+                            .default(""),
+                    )
+                    .col(
                         helpers::uuid_col(manager, Alias::new("workspace_id"))
                             .not_null()
                             .primary_key(),

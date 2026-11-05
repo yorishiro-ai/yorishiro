@@ -39,6 +39,8 @@ async fn community_task_scans_mismatch_without_constructing_a_provider() {
             model: "previous-model".into(),
             dimensions: metadata.dimensions,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         stamp_workspace(
             &ctx,

@@ -55,6 +55,11 @@ impl MigrationTrait for Migration {
                         UPDATE workspace_workspaces SET embedding_content_revision = embedding_content_revision + 1 WHERE id = NEW.workspace_id;
                     END IF;
                 ELSE
+                    IF TG_OP = 'UPDATE' AND
+                        ROW(OLD.base_url, OLD.model, OLD.api_key, OLD.dimensions, OLD.send_dimensions_param, OLD.document_prefix)
+                        IS NOT DISTINCT FROM
+                        ROW(NEW.base_url, NEW.model, NEW.api_key, NEW.dimensions, NEW.send_dimensions_param, NEW.document_prefix)
+                    THEN RETURN NEW; END IF;
                     IF TG_OP = 'DELETE' THEN
                         UPDATE workspace_workspaces SET embedding_revision = embedding_revision + 1, embedding_reindexing = true WHERE id = OLD.workspace_id;
                     ELSE
@@ -76,8 +81,13 @@ impl MigrationTrait for Migration {
                 } else {
                     operation
                 };
+                let condition = if table == "workspace_embedding_keys" && operation == "UPDATE" {
+                    "WHEN OLD.base_url IS NOT NEW.base_url OR OLD.model IS NOT NEW.model OR OLD.api_key IS NOT NEW.api_key OR OLD.dimensions IS NOT NEW.dimensions OR OLD.send_dimensions_param IS NOT NEW.send_dimensions_param OR OLD.document_prefix IS NOT NEW.document_prefix "
+                } else {
+                    ""
+                };
                 helpers::sqlite_only(manager, &format!(
-                    "CREATE TRIGGER {table}_embedding_revision_{operation} BEFORE {operation_sql} ON {table} BEGIN \
+                    "CREATE TRIGGER {table}_embedding_revision_{operation} BEFORE {operation_sql} ON {table} {condition}BEGIN \
                      UPDATE workspace_workspaces SET {revision} = {revision} + 1{gate} WHERE id = {row}.workspace_id; END;",
                      revision = if table == "entity_entities" { "embedding_content_revision" } else { "embedding_revision" },
                      gate = if table == "entity_entities" { "" } else { ", embedding_reindexing = true" },

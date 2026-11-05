@@ -4,6 +4,77 @@ use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
+#[tokio::test]
+async fn document_prefix_invalidates_vectors_but_query_instruction_does_not() {
+    use sea_orm::EntityTrait;
+    use yorishiro::models::workspace_workspaces;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let read = || workspace_workspaces::Entity::find_by_id(setup.workspace_id).one(&ctx.db);
+        let initial = read().await.unwrap().unwrap();
+        let mut config = serde_json::json!({
+            "base_url": "https://embedding.example.invalid/v1",
+            "model": "test-model", "api_key": "test-key", "dimensions": 768,
+            "query_instruction": "query: ", "document_prefix": "passage: "
+        });
+        let put = request
+            .put("/api/workspace/embedding-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&config)
+            .await;
+        assert_eq!(put.status_code(), StatusCode::NO_CONTENT, "{}", put.text());
+        let assigned = read().await.unwrap().unwrap();
+        assert!(assigned.embedding_revision > initial.embedding_revision);
+        assert!(assigned.embedding_reindexing);
+
+        config["query_instruction"] = serde_json::json!("different query: ");
+        let put = request
+            .put("/api/workspace/embedding-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&config)
+            .await;
+        assert_eq!(put.status_code(), StatusCode::NO_CONTENT, "{}", put.text());
+        let query_changed = read().await.unwrap().unwrap();
+        assert_eq!(
+            query_changed.embedding_revision,
+            assigned.embedding_revision
+        );
+        assert_eq!(
+            query_changed.embedding_reindexing,
+            assigned.embedding_reindexing
+        );
+
+        config["document_prefix"] = serde_json::json!("new passage: ");
+        let put = request
+            .put("/api/workspace/embedding-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&config)
+            .await;
+        assert_eq!(put.status_code(), StatusCode::NO_CONTENT, "{}", put.text());
+        let document_changed = read().await.unwrap().unwrap();
+        assert!(document_changed.embedding_revision > query_changed.embedding_revision);
+        assert!(document_changed.embedding_reindexing);
+        let response = request
+            .get("/api/workspace/embedding-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(
+            response.json::<serde_json::Value>()["document_prefix"],
+            "new passage: "
+        );
+        assert!(!response.text().contains("test-key"));
+    })
+    .await;
+}
+
 /// Setting, reading and clearing a workspace's own embedding provider over REST.
 /// The key itself never comes back from GET, only what it configured, matching `llm_key_set_get_and_clear_round_trip`.
 #[tokio::test]

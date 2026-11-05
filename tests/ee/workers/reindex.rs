@@ -36,6 +36,8 @@ async fn provider(
         model: model.into(),
         dimensions: width,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (Arc::new(provider), server)
 }

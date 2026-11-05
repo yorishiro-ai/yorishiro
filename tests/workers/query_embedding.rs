@@ -59,6 +59,8 @@ async fn provider() -> (
         model: "query-http-test".into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     }));
     (provider, server, calls)
 }
@@ -255,6 +257,8 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
         model: "test-model".into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     })) as Arc<dyn EmbeddingProvider>;
     crate::requests::query_worker::boot_with_query_worker(provider, |request, ctx| async move {
         let ws = workspace(&request, &ctx).await;

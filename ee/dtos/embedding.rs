@@ -13,4 +13,8 @@ pub(crate) struct SetEmbeddingKeyRequest {
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(default = false))]
     pub(crate) send_dimensions_param: bool,
+    #[serde(default)]
+    pub(crate) query_instruction: String,
+    #[serde(default)]
+    pub(crate) document_prefix: String,
 }

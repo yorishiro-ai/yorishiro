@@ -2186,7 +2186,7 @@ Input schema:
 
 ### `set_embedding_provider`
 
-Configure the selected workspace's OpenAI-compatible embedding provider and queue a full reindex atomically (requires schema scope); the supplied API key is stored and never returned
+Configure the selected workspace's OpenAI-compatible embedding provider (requires schema scope); document changes queue a full reindex atomically, query-instruction-only changes do not; the supplied API key is stored and never returned
 
 Input schema:
 
@@ -2206,7 +2206,15 @@ Input schema:
       "format": "int32",
       "type": "integer"
     },
+    "document_prefix": {
+      "default": "",
+      "type": "string"
+    },
     "model": {
+      "type": "string"
+    },
+    "query_instruction": {
+      "default": "",
       "type": "string"
     },
     "send_dimensions_param": {

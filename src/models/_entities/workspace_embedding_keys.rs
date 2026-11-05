@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "workspace_embedding_keys")]
 pub struct Model {
+    #[sea_orm(column_type = "Text")]
+    pub query_instruction: String,
+    #[sea_orm(column_type = "Text")]
+    pub document_prefix: String,
     #[sea_orm(primary_key, auto_increment = false)]
     pub workspace_id: Uuid,
     #[sea_orm(column_type = "Text")]

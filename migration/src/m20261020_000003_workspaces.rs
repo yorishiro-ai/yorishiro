@@ -25,6 +25,12 @@ impl MigrationTrait for Migration {
             .col(ColumnDef::new(Alias::new("embedding_model")).text())
             .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
             .col(
+                ColumnDef::new(Alias::new("embedding_document_prefix"))
+                    .text()
+                    .not_null()
+                    .default(""),
+            )
+            .col(
                 ColumnDef::new(Alias::new("embedding_content_revision"))
                     .big_integer()
                     .not_null()

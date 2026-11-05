@@ -153,6 +153,8 @@ pub(crate) async fn keyword_provider(
         model: "keyword-test-provider".into(),
         dimensions: width,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (Arc::new(provider), server, inputs)
 }
@@ -176,6 +178,8 @@ pub(crate) async fn unavailable_provider() -> (Arc<dyn EmbeddingProvider>, HttpS
         model: "unavailable-test-model".into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (Arc::new(provider), server)
 }

@@ -10,18 +10,18 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "b94d63d9ebaab2d46f42cca90669c0dd4545d29c01b481f7fdd85aaed3f8c8c3",
-    "src": "eeec5bfdbc3be45345d88aaf4461abeb1a1adeaa23fc1cee4a35a5005a04d9ce",
-    "ee": "347c1fa093283545c06a44f3c5c2b39f5484597d0fd12b13df9d1249cbf7c0af",
-    "migration": "b85c8536b5e79bc0a02b6e40cbc0c7078bee3bbe6924cb45f1784042b1ad8099",
+    "tests": "de55af63b9520fc42a8811fe57ea5946eecab25317d466fed07948b74720dc67",
+    "src": "d5547ff4e38d14f082d2f1c79064004bd66c823e80355992c051bf5defc4b431",
+    "ee": "8dd62920911b7ad0c9a311a3d06d940ea6aee5d493e5ee9710a1fdf82f333c55",
+    "migration": "0ac4abdf6abeef9dcb319f85f3d0d2bd42467b3bddb93f0007dc4fe559c8e07b",
     "Cargo.toml": "c3e03bd1dfa5169fcfc97c1aeb119b4376b31c5ea7ef6ea2eb26c532f5ea0854",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
     "Cargo.lock": "b99843074f78094d24a2135fc13b52ff16a2c70a62ccd575c8a6c92e509d4702",
     ".cargo/config.toml": "0e69d92faa2874685d4439f53254384399e451afa5b406c41e4747ff66d0ae38",
     "patches/loco-rs/fixes.patch": "625207de3b3d0f2907038b4bfe2b0a000196905f080bc6b4a13325fff6dde9f8",
     "patches/loco-rs/verify.py": "1db35421ee3fdfa8c4cf142f22d43acbbfce7fbd9dc39b817a61f541e9555e5b",
-    "config": "af575f74f680ea5e3d14d5163cc92784c0272c2ba155f15cc879bcd681a3c6da",
-    "tests/fixtures": "0cb4321fb2b5c2fe7c3f991b8ad2fd6a2e9c0361d1e597f692aa93e7854170d1"
+    "config": "1b15dbaa216cda9678d86988abfbe25c772e3c9f2d85ed802b70483d23c6b3bd",
+    "tests/fixtures": "eb615ffb4a1a8f49598251f932b49da578f6044a993b2bf49e12619cc3d5fc1c"
   },
   "targets": [
     {"package":"yorishiro","target":"mod","kind":"test","source":"tests/mod.rs","allow_zero":false},

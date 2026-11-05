@@ -11,6 +11,7 @@ pub(crate) const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 pub struct EmbeddingMetadata {
     pub model: String,
     pub dimensions: usize,
+    pub document_prefix: String,
 }
 
 /// Resolves deployment provider identity without loading local model files.
@@ -25,6 +26,7 @@ pub fn deployment_embedding_metadata(
         return Ok(Some(EmbeddingMetadata {
             model: model.clone(),
             dimensions: config.dimensions,
+            document_prefix: config.document_prefix.clone(),
         }));
     }
     match config.provider {
@@ -46,6 +48,7 @@ pub fn deployment_embedding_metadata(
             Ok(Some(EmbeddingMetadata {
                 model: def.id.to_owned(),
                 dimensions: def.dimensions,
+                document_prefix: String::new(),
             }))
         }
     }
@@ -81,6 +84,11 @@ pub enum EmbeddingProviderAvailability {
 /// Storage accepts any nonempty finite vector with the workspace's effective width.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    /// Prefix affecting persisted document vectors, not query-only instructions.
+    fn document_prefix(&self) -> &str {
+        ""
+    }
+
     /// Generation captured when resolving a mutable workspace assignment.
     fn workspace_revision(&self) -> Option<i64> {
         None
@@ -198,6 +206,8 @@ pub async fn build_embedding_provider(
             model: model.clone(),
             dimensions,
             send_dimensions_param: config.send_dimensions_param,
+            query_instruction: config.query_instruction.clone(),
+            document_prefix: config.document_prefix.clone(),
         });
         tracing::info!(provider = "openai", %base_url, %model, dimensions, "embedding provider configured");
         return Ok(std::sync::Arc::new(provider));
