@@ -47,6 +47,11 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
             if i==20 { rare=Some(entity.id); }
         }
         let query = || search::SearchQuery { limit:10, ..Default::default() };
+        for (text, eligible) in [("boundary", true), ("ERR-4821x", true), ("ab", false), ("東京", false), ("東京都", false)] {
+            let statement = ctx.db.get_database_backend().build(&search::postgres_rrf_query(
+                fixture.workspace_id, vec![1.0,0.0], text, &query()).unwrap());
+            assert_eq!(statement.sql.contains("word_similarity"), eligible, "{text}: {}", statement.sql);
+        }
         let baseline = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "", query()).await.unwrap();
         let common = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "common", query()).await.unwrap();
         assert_eq!(baseline.iter().map(|h|h.entity.id).collect::<Vec<_>>(),common.iter().map(|h|h.entity.id).collect::<Vec<_>>(), "21+ matches must disable text list");

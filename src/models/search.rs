@@ -381,11 +381,19 @@ pub fn postgres_rrf_query(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
+    let latin_terms: Vec<_> = text
+        .split(|ch: char| !ch.is_ascii_alphabetic())
+        .filter(|term| term.len() >= 3)
+        .collect();
+    let text_score = if latin_terms.is_empty() {
+        Func::cust(Alias::new("similarity")).args([normalized.clone(), Expr::val(text)])
+    } else {
+        // word_similarity is directional: find query-word extents in the stored document.
+        Func::cust(Alias::new("word_similarity"))
+            .args([Expr::val(latin_terms.join(" ")), normalized.clone()])
+    };
     texts
-        .expr_as(
-            Func::cust(Alias::new("similarity")).args([normalized.clone(), Expr::val(text)]),
-            "text_similarity",
-        )
+        .expr_as(text_score, "text_similarity")
         .and_where(normalized.ilike(pattern))
         .and_where(Expr::val(!text.is_empty()))
         .limit(21);
