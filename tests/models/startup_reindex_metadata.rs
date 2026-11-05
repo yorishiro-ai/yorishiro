@@ -9,6 +9,8 @@ fn deployment_metadata_matches_provider_resolution_without_loading_provider() {
         "api_key": "",
         "model": "external-model",
         "send_dimensions_param": false,
+        "query_instruction": "query only: ",
+        "document_prefix": "passage: ",
         "local_model": "unused",
         "local_max_sequence_length": 512
     }));
@@ -20,6 +22,7 @@ fn deployment_metadata_matches_provider_resolution_without_loading_provider() {
         .expect("URL and model select the external provider before the provider enum");
     assert_eq!(metadata.model, "external-model");
     assert_eq!(metadata.dimensions, 1024);
+    assert_eq!(metadata.document_prefix, "passage: ");
 }
 
 #[test]

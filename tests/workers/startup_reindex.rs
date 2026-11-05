@@ -66,6 +66,124 @@ async fn queued(ctx: &AppContext, workspace: Uuid) -> bool {
 }
 
 #[tokio::test]
+async fn deployment_document_prefix_change_queues_and_restamps_after_publication() {
+    use yorishiro::models::{
+        entity_embeddings, entity_entities, schema_schemas, workspace_workspaces,
+    };
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let workspace = tenant.workspace_id;
+        let inputs = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+        let captured = inputs.clone();
+        let server = HttpStub::start(axum::Router::new().route(
+            "/embeddings",
+            axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+                let captured = captured.clone();
+                async move {
+                    let text = body["input"][0].as_str().unwrap().to_owned();
+                    let axis = usize::from(text.starts_with("new: "));
+                    captured.lock().await.push(text);
+                    let mut vector = vec![0.0_f32; 768];
+                    vector[axis] = 1.0;
+                    axum::Json(serde_json::json!({"data":[{"index":0,"embedding":vector}]}))
+                }
+            }),
+        ))
+        .await;
+        let definition = serde_json::from_value(serde_json::json!({
+            "name":"prefix-note", "entity_types":{"note":{"fields":{
+                "title":{"type":"string","x-embed":true}
+            }}}
+        }))
+        .unwrap();
+        schema_schemas::create_schema(&ctx.db, tenant.tenant_id, workspace, definition, None, None)
+            .await
+            .unwrap();
+        entity_entities::create(
+            &ctx.db,
+            workspace,
+            entity_entities::CreateEntityInput {
+                schema_name: "prefix-note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({"title":"stored document"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let config = |prefix: &str, query: &str| OpenAiCompatibleConfig {
+            base_url: server.url.clone(),
+            api_key: "key".into(),
+            model: "same-model".into(),
+            dimensions: 768,
+            send_dimensions_param: false,
+            document_prefix: prefix.into(),
+            query_instruction: query.into(),
+        };
+        let old = OpenAiCompatibleProvider::new(config("old: ", "query: "));
+        let outcome = entity_embeddings::reindex_workspace(&ctx.db, workspace, &old)
+            .await
+            .unwrap();
+        assert_eq!(outcome.reindexed, 1);
+        assert!(outcome.failures.is_empty());
+        let before = workspace_workspaces::Entity::find_by_id(workspace)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.embedding_document_prefix, "old: ");
+
+        // Replacing the process provider models a worker restart with new deployment settings.
+        ctx.shared_store
+            .insert(Arc::new(OpenAiCompatibleProvider::new(config(
+                "old: ",
+                "other query: ",
+            ))) as Arc<dyn EmbeddingProvider>);
+        startup_reindex::run(&ctx).await;
+        assert!(
+            !queued(&ctx, workspace).await,
+            "query-only deployment change needs no reindex"
+        );
+        let current = Arc::new(OpenAiCompatibleProvider::new(config(
+            "new: ",
+            "other query: ",
+        )));
+        ctx.shared_store
+            .insert(current.clone() as Arc<dyn EmbeddingProvider>);
+        startup_reindex::run(&ctx).await;
+        assert!(queued(&ctx, workspace).await);
+        let pending = workspace_workspaces::Entity::find_by_id(workspace)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            pending.embedding_document_prefix, "old: ",
+            "enqueue must not publish the new stamp"
+        );
+        let outcome = entity_embeddings::reindex_workspace(&ctx.db, workspace, current.as_ref())
+            .await
+            .unwrap();
+        assert_eq!(outcome.reindexed, 1);
+        assert!(outcome.failures.is_empty());
+        let published = workspace_workspaces::Entity::find_by_id(workspace)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(published.embedding_document_prefix, "new: ");
+        assert_eq!(published.embedding_model.as_deref(), Some("same-model"));
+        assert!(published.embedding_revision > before.embedding_revision);
+        assert!(!published.embedding_reindexing);
+        assert_eq!(
+            *inputs.lock().await,
+            ["old: title: stored document", "new: title: stored document"]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn a_workspace_stamped_with_another_model_is_queued_for_reindex() {
     boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;

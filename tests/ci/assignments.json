@@ -10,7 +10,7 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "de55af63b9520fc42a8811fe57ea5946eecab25317d466fed07948b74720dc67",
+    "tests": "74004bcf97b98fca4a4c9b8a4f159fce4a837e3179b34f21baaeceaa79fd32f1",
     "src": "d5547ff4e38d14f082d2f1c79064004bd66c823e80355992c051bf5defc4b431",
     "ee": "7562bfb365b0b9cf8cafe4028068c07c818f3b1dfdad4bcbd7e560500219287f",
     "migration": "0ac4abdf6abeef9dcb319f85f3d0d2bd42467b3bddb93f0007dc4fe559c8e07b",
@@ -189,6 +189,7 @@
     {"name":"tasks::tenant_reindex_scheduler::missing_lifecycle_table_returns_workspace_lookup_error","jobs":["common-sqlite"],"reason":"Shared task uses the EE-specific configure_deployment_metadata helper branch."}
   ],
   "exception_groups": [
+    {"source":"tests/requests/embedding.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"PostgreSQL provider triggers must distinguish query-only updates from document invalidation; shared enterprise fixture requires licensed tenancy.","names":["requests::embedding::postgres_document_prefix_revision_contract"]},
     {"source":"tests/ee/tasks/reindex_scheduler.rs","editions":["ee"],"role":"postgres","jobs":["postgres"],"reason":"Retirement and scheduler contend on the real membership advisory fence in an owned deployment database.","names":["ee::tasks::reindex_scheduler::postgres_tick_waits_for_disable_and_rechecks_tenant_activity"]},
     {"source":"tests/db/migrations.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL first-migration concurrency guard.","names":["db::migrations::concurrent_first_postgres_migrations_use_one_connection_each"]},
     {"source":"tests/initializers/shutdown.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL identity/tenant pools during worker draining.","names":["initializers::shutdown::shutdown_hook_keeps_database_available_until_loco_drains_workers"]},

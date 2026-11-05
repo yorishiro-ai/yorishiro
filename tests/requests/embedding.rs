@@ -6,6 +6,18 @@ use yorishiro::models::api_keys::ApiKeyScope;
 
 #[tokio::test]
 async fn document_prefix_invalidates_vectors_but_query_instruction_does_not() {
+    document_prefix_revision_contract().await;
+}
+
+#[tokio::test]
+async fn postgres_document_prefix_revision_contract() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    document_prefix_revision_contract().await;
+}
+
+async fn document_prefix_revision_contract() {
     use sea_orm::EntityTrait;
     use yorishiro::models::workspace_workspaces;
     boot_request::<App, _, _>(|request, ctx| async move {
