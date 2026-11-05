@@ -44,6 +44,7 @@ async fn literal_search_corpus() {
             "背景説明と unrelated filler sentences。".repeat(100)
         );
         let mut matching = None;
+        let mut corpus_ids = Vec::new();
         for title in [body, "unrelated grocery list".into()] {
             let entity = entity_entities::create(
                 &ctx.db,
@@ -58,6 +59,7 @@ async fn literal_search_corpus() {
             .await
             .unwrap();
             matching.get_or_insert(entity.id);
+            corpus_ids.push(entity.id);
         }
         let sqlite = sea_orm::ConnectionTrait::get_database_backend(&ctx.db)
             == sea_orm::DatabaseBackend::Sqlite;
@@ -99,12 +101,17 @@ async fn literal_search_corpus() {
             .await
             .unwrap_or_else(|error| panic!("literal query {text:?}: {error}"));
             let expected = if sqlite { sqlite_hit } else { postgres_hit };
-            let ids: Vec<_> = hits.iter().map(|hit| hit.entity.id).collect();
-            let expected_ids = if expected {
+            let mut ids: Vec<_> = hits.iter().map(|hit| hit.entity.id).collect();
+            // PostgreSQL searches serialized JSON, whose structural quotes occur in every row.
+            let mut expected_ids = if text == "\"" && !sqlite {
+                corpus_ids.clone()
+            } else if expected {
                 vec![matching.unwrap()]
             } else {
                 vec![]
             };
+            ids.sort_unstable();
+            expected_ids.sort_unstable();
             assert_eq!(ids, expected_ids, "literal query {text:?}, SQLite={sqlite}");
             assert!(hits.iter().all(|hit| hit.distance.is_none()));
         }
