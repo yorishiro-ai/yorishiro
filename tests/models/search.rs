@@ -233,6 +233,35 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let stamped = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap();
         assert_eq!(stamped.embedding_dimensions, Some(7));
         assert!(!stamped.embedding_reindexing);
+        // Exercise the real high-dimensional index lifecycle, not only generated SQL.
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4096])))
+            .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(4096)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        let high_index = format!("ysr_hnsw_{}_d4096", fixture.workspace_id.simple());
+        assert!(exists(high_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
+        let definition = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+            "SELECT pg_get_indexdef(to_regclass($1)) AS definition", [high_index.clone().into()])).await.unwrap().unwrap().try_get::<String>("", "definition").unwrap();
+        assert!(definition.contains("binary_quantize") && definition.contains("bit(4096)") && definition.contains("bit_hamming_ops"));
+        let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
+        let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4096], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        assert_eq!(positive.len(), 10);
+        assert!(positive.iter().all(|hit| hit.distance.unwrap().abs() < 0.00001));
+        let mut signed = vec![1.0_f32;4096]; signed[0] = -1.0;
+        let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        assert_eq!(reranked.len(), 10);
+        assert!(reranked.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
+        assert!(reranked.windows(2).all(|pair| pair[0].distance <= pair[1].distance));
+        tenant.rollback().await.unwrap();
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;7])))
+            .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(7)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(high_index).await.unwrap().is_none());
         // Publication in progress must retain the old graph even if metadata is changing.
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingReindexing,
             sea_orm::sea_query::Expr::value(true)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
