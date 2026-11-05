@@ -818,7 +818,7 @@ def cli_suite(app):
     app.rest("GET", "/api/schemas", key=key, status=401)
 
 
-def human_key_management(app):
+def human_owner(app):
     password = "blackbox-owned-password"
     app.secrets.append(password)
     invitation = app.task("create_invite", tenant_id=app.tenant,
@@ -836,6 +836,12 @@ def human_key_management(app):
         require(identity["user_id"] == account["user_id"] and identity["identity_kind"] == "user",
                 "CLI credential is not attributed to the invited human")
     app.management_key = owner
+    return account, owner
+
+
+def human_key_management(app):
+    account, owner = human_owner(app)
+    client = MCP(app, owner)
 
     expiry = "2090-01-01T00:00:00Z"
     original = app.rest("POST", "/api/api-keys", {
@@ -1370,7 +1376,8 @@ def enterprise_providers(app):
 
 
 def enterprise_schema_composition(app):
-    client = MCP(app, app.key)
+    _, owner_key = human_owner(app)
+    client = MCP(app, owner_key)
     _, read_key = app.issue(app.workspace, "read")
     reader = MCP(app, read_key)
     definition = json.loads(json.dumps(SCHEMA))
@@ -1382,11 +1389,11 @@ def enterprise_schema_composition(app):
     evolved["entity_types"]["note"]["fields"]["category"] = {"type": "string"}
     client.call("update_template_library_item", {"id": template["id"], "definition": evolved})
     changes = reader.call("list_upstream_changes")
-    require(len(changes) == 1 and changes == app.rest("GET", "/api/schemas/upstream-changes"),
+    require(len(changes) == 1 and changes == app.rest("GET", "/api/schemas/upstream-changes", key=owner_key),
             "upstream discovery differs across transports")
     preview = reader.call("merge_preview", {"schema_id": source["id"]})
     require(preview["summary"]["auto_add"] == 1
-            and preview == app.rest("GET", f"/api/schemas/{source['id']}/merge-preview"),
+            and preview == app.rest("GET", f"/api/schemas/{source['id']}/merge-preview", key=owner_key),
             "merge preview differs across transports")
     reader.call("merge_apply", {"schema_id": source["id"]}, error=True)
     require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == original, "preview or denial mutated source")
