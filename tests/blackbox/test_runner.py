@@ -245,6 +245,7 @@ class ArgumentTests(unittest.TestCase):
     def test_cli_boot_proves_timezone_preparation_before_migration(self):
         args = run.parse_args(self.arguments())
         args.suite = "cli"
+        args.edition = "ce"
         for diagnostic, accepted in (("no such table: timezone_state", True), ("unrelated error", False)):
             with self.subTest(diagnostic=diagnostic), tempfile.TemporaryDirectory() as directory:
                 app = run.App(args, directory)
