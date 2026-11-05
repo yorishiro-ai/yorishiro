@@ -1388,6 +1388,9 @@ def enterprise_schema_composition(app):
     evolved = json.loads(json.dumps(definition))
     evolved["entity_types"]["note"]["fields"]["category"] = {"type": "string"}
     client.call("update_template_library_item", {"id": template["id"], "definition": evolved})
+    pending = {**original, "origin_updated_at": None}
+    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == pending,
+            "upstream notification changed more than its pending flag")
     changes = reader.call("list_upstream_changes")
     require(len(changes) == 1 and changes == app.rest("GET", "/api/schemas/upstream-changes", key=owner_key),
             "upstream discovery differs across transports")
@@ -1396,11 +1399,12 @@ def enterprise_schema_composition(app):
             and preview == app.rest("GET", f"/api/schemas/{source['id']}/merge-preview", key=owner_key),
             "merge preview differs across transports")
     reader.call("merge_apply", {"schema_id": source["id"]}, error=True)
-    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == original, "preview or denial mutated source")
+    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == pending, "preview or denial mutated source")
     merged = client.call("merge_apply", {"schema_id": source["id"]})["schema"]
     require(merged["version"] == source["version"] + 1, "merge did not create a new schema version")
     require(reader.call("list_upstream_changes") == [], "merged origin still reports pending changes")
-    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == original, "merge changed immutable history")
+    archived = {**pending, "status": "archived"}
+    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == archived, "merge changed immutable history")
 
     target = output_field(app.task("create_workspace", tenant_id=app.tenant, name="fork-target"),
                           "workspace id", True)
@@ -1426,7 +1430,7 @@ def enterprise_schema_composition(app):
     require(owner.call("delete_schema_fork", {"fork_id": fork["id"]})["deleted"], "fork deletion failed")
     app.rest("GET", path, status=404, key=key)
     require(viewer.call("list_schema_forks") == [], "deleted fork remains visible")
-    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == original, "fork lifecycle changed source history")
+    require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == archived, "fork lifecycle changed source history")
 
 
 def scenarios(suite, edition="ce"):
