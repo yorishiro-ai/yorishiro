@@ -10,10 +10,10 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "74004bcf97b98fca4a4c9b8a4f159fce4a837e3179b34f21baaeceaa79fd32f1",
-    "src": "d5547ff4e38d14f082d2f1c79064004bd66c823e80355992c051bf5defc4b431",
+    "tests": "451b1a55b787057fb1c16b19ff962c722c8498b3acb49230db49095be36fe529",
+    "src": "81f11d4108efb02f4bc94d4215d2bd8724cc7cee15d7be9250524888331e223f",
     "ee": "7562bfb365b0b9cf8cafe4028068c07c818f3b1dfdad4bcbd7e560500219287f",
-    "migration": "0ac4abdf6abeef9dcb319f85f3d0d2bd42467b3bddb93f0007dc4fe559c8e07b",
+    "migration": "c464d3395f6eba139f7d7fe0378f3c3a3583a565df3780acd907c40300bb3188",
     "Cargo.toml": "c3e03bd1dfa5169fcfc97c1aeb119b4376b31c5ea7ef6ea2eb26c532f5ea0854",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
     "Cargo.lock": "b99843074f78094d24a2135fc13b52ff16a2c70a62ccd575c8a6c92e509d4702",

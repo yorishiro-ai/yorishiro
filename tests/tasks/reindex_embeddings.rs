@@ -71,7 +71,8 @@ async fn stamped_model(ctx: &loco_rs::app::AppContext, workspace_id: uuid::Uuid)
 }
 
 async fn embedding_is_set(ctx: &loco_rs::app::AppContext, entity_id: uuid::Uuid) -> bool {
-    entity_embeddings::Entity::find_by_id(entity_id)
+    entity_embeddings::Entity::find()
+        .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity_id))
         .select_only()
         .column_as(
             yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),

@@ -46,6 +46,11 @@ pub(super) async fn embed_and_write(
     let table = Alias::new(table);
     let id = Alias::new("entity_id");
     let embedding = Alias::new("embedding");
+    let workspace = Alias::new("workspace_id");
+    let tenant = Alias::new("tenant_id");
+    use crate::models::_entities::workspace_workspaces::{
+        Column as WorkspaceColumn, Entity as Workspace,
+    };
     let current = Query::select()
         .expr(Expr::val(1))
         .from(Entity)
@@ -54,17 +59,21 @@ pub(super) async fn embed_and_write(
         .and_where(Expr::col(Column::EmbeddingSyncToken).eq(input.embedding_sync_token))
         .to_owned();
     let source = Query::select()
+        .expr(Expr::val(input.workspace_id))
         .expr(Expr::val(input.entity_id))
+        .column(WorkspaceColumn::TenantId)
         .expr(Expr::val(vector.clone()))
+        .from(Workspace)
+        .and_where(Expr::col(WorkspaceColumn::Id).eq(input.workspace_id))
         .and_where(Expr::exists(current.clone()))
         .to_owned();
     let statement = Query::insert()
         .into_table(table.clone())
-        .columns([id.clone(), embedding.clone()])
+        .columns([workspace.clone(), id.clone(), tenant, embedding.clone()])
         .select_from(source)
         .map_err(|error| YorishiroError::Internal(error.into()))?
         .on_conflict(
-            OnConflict::column(id.clone())
+            OnConflict::columns([workspace, id.clone()])
                 .value(embedding, Expr::val(vector))
                 .action_and_where(Expr::col((table, id)).eq(input.entity_id))
                 .action_and_where(Expr::exists(current))

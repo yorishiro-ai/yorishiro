@@ -149,7 +149,11 @@ fn join_embedding(select: &mut SelectStatement, table: &str, join: JoinType) {
         Alias::new(table),
         Alias::new("ee"),
         Expr::col((Alias::new("ee"), Alias::new("entity_id")))
-            .equals((Alias::new("e"), Alias::new("id"))),
+            .equals((Alias::new("e"), Alias::new("id")))
+            .and(
+                Expr::col((Alias::new("ee"), Alias::new("workspace_id")))
+                    .equals((Alias::new("e"), Alias::new("workspace_id"))),
+            ),
     );
 }
 
@@ -248,6 +252,7 @@ pub async fn search_by_vector(
     };
     let mut knn = scoped_search(workspace_id, &query);
     join_embedding(&mut knn, embed_table, JoinType::InnerJoin);
+    knn.and_where(Expr::col((Alias::new("ee"), Alias::new("workspace_id"))).eq(workspace_id));
     knn.expr_as(distance.clone(), "distance")
         .and_where(embedding.clone().is_not_null())
         .order_by_expr(distance, Order::Asc)

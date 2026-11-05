@@ -17,26 +17,59 @@ impl MigrationTrait for Migration {
             } else {
                 embedding.blob();
             }
+            let mut table = Table::create()
+                .table(Alias::new(name))
+                .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
+                .col(helpers::uuid_col(manager, Alias::new("entity_id")).not_null())
+                .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
+                .col(embedding)
+                .primary_key(
+                    Index::create()
+                        .col(Alias::new("workspace_id"))
+                        .col(Alias::new("entity_id")),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .from(Alias::new(name), Alias::new("entity_id"))
+                        .to(Alias::new("entity_entities"), Alias::new("id"))
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .to_owned();
+            if manager.get_database_backend() == DbBackend::Postgres {
+                table.partition_by_hash([Alias::new("workspace_id")]);
+            }
+            manager.create_table(table).await?;
+            if manager.get_database_backend() == DbBackend::Postgres {
+                for remainder in 0..64 {
+                    manager
+                        .create_table(
+                            Table::create()
+                                .table(Alias::new(format!("{name}_p{remainder}")))
+                                .partition_of(Alias::new(name))
+                                .values_with(64, remainder)
+                                .to_owned(),
+                        )
+                        .await?;
+                }
+            }
             manager
-                .create_table(
-                    Table::create()
+                .create_index(
+                    Index::create()
+                        .name("entity_embeddings_workspace_idx")
                         .table(Alias::new(name))
-                        .col(
-                            helpers::uuid_col(manager, Alias::new("entity_id"))
-                                .not_null()
-                                .primary_key(),
-                        )
-                        .col(embedding)
-                        .foreign_key(
-                            ForeignKey::create()
-                                .from(Alias::new(name), Alias::new("entity_id"))
-                                .to(Alias::new("entity_entities"), Alias::new("id"))
-                                .on_delete(ForeignKeyAction::Cascade),
-                        )
+                        .col(Alias::new("workspace_id"))
                         .to_owned(),
                 )
                 .await?;
-            helpers::pg_only(manager,&format!("ALTER TABLE {name} ENABLE ROW LEVEL SECURITY; CREATE POLICY workspace_isolation ON {name} FOR SELECT USING (EXISTS (SELECT 1 FROM entity_entities e WHERE e.id = {name}.entity_id));")).await?;
+            helpers::enable_rls_with_policy(
+                manager,
+                name,
+                "tenant_isolation",
+                "tenant_id",
+                "app.current_tenant",
+                false,
+            )
+            .await?;
             helpers::grant(manager, "SELECT", name).await?;
         }
 

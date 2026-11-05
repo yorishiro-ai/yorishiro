@@ -386,7 +386,8 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             "result: {result:?}"
         );
 
-        let stored = entity_embeddings::Entity::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find()
+            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
             .filter(
                 yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
@@ -495,7 +496,8 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             "result: {result:?}"
         );
 
-        let stored = entity_embeddings::Entity::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find()
+            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
             .filter(
                 yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
@@ -576,7 +578,8 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         assert!(result.is_ok(), "result: {result:?}");
 
         // Verify the embedding was written.
-        let stored = entity_embeddings::Entity::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find()
+            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
             .filter(
                 yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
@@ -848,7 +851,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity::find_by_id(*entity_id)
+                entity_embeddings::Entity::find().filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(*entity_id))
                     .select_only()
                     .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
@@ -936,14 +939,36 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         }
 
         // Verify the old vectors are stored.
+        // Catalog queries verify physical partitioning, which the entity API cannot describe.
+        let layout = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT count(*) AS partitions FROM pg_inherits WHERE inhparent = 'entity_embeddings'::regclass",
+        )).await.unwrap().unwrap();
+        assert_eq!(layout.try_get::<i64>("", "partitions").unwrap(), 64);
+        let policy = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT qual FROM pg_policies WHERE tablename = 'entity_embeddings' AND policyname = 'tenant_isolation'",
+        )).await.unwrap().unwrap();
+        let condition: String = policy.try_get("", "qual").unwrap();
+        assert!(condition.contains("tenant_id") && condition.contains("app.current_tenant"));
+        assert!(!condition.contains("entity_entities"));
         let old_v1 = model_vector(&old_provider.model_name());
         for entity_id in [e1.id, e2.id] {
+            use yorishiro::models::_entities::entity_embeddings as vectors;
+            let owner = vectors::Entity::find_by_id((workspace_id, entity_id))
+                .select_only().column(vectors::Column::TenantId)
+                .into_tuple::<uuid::Uuid>().one(&ctx.db).await.unwrap().unwrap();
+            assert_eq!(owner, tenant_id);
             let stored: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity::find_by_id(entity_id)
+                entity_embeddings::Entity::find()
+                    .filter(
+                        yorishiro::models::_entities::entity_embeddings::Column::EntityId
+                            .eq(entity_id),
+                    )
                     .select_only()
                     .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
@@ -1003,7 +1028,11 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity::find_by_id(entity_id)
+                entity_embeddings::Entity::find()
+                    .filter(
+                        yorishiro::models::_entities::entity_embeddings::Column::EntityId
+                            .eq(entity_id),
+                    )
                     .select_only()
                     .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
@@ -1259,7 +1288,7 @@ async fn sqlite_document_embed_persist_and_search() {
             .expect("embed entity");
 
             // Verify the embedding was written to the shared table.
-            let has_embedding = entity_embeddings::Entity::find_by_id(entity.id)
+            let has_embedding = entity_embeddings::Entity::find().filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
                 .select_only()
                 .expr_as(
                     sea_orm::sea_query::Expr::col(
@@ -1386,6 +1415,16 @@ async fn reindex_replaces_existing_vectors_and_restamps_the_workspace() {
             .expect("read workspace")
             .expect("workspace row");
         assert_eq!(stamped.embedding_model.as_deref(), Some("model-b"));
+        use yorishiro::models::_entities::entity_embeddings as vectors;
+        let scope = vectors::Entity::find_by_id((workspace_id, entity.id))
+            .select_only()
+            .columns([vectors::Column::WorkspaceId, vectors::Column::TenantId])
+            .into_tuple::<(uuid::Uuid, uuid::Uuid)>()
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(scope, (workspace_id, tenant_id));
     })
     .await;
 }
@@ -1479,7 +1518,8 @@ async fn reindex_switches_between_arbitrary_widths() {
                 },
             ))
             .arg(Expr::col(embeddings::Column::Embedding));
-            let stored = embeddings::Entity::find_by_id(entity.id)
+            let stored = embeddings::Entity::find()
+                .filter(embeddings::Column::EntityId.eq(entity.id))
                 .select_only()
                 .expr(length)
                 .into_tuple::<i32>()
@@ -1509,7 +1549,8 @@ async fn reindex_switches_between_arbitrary_widths() {
                 },
             ))
             .arg(Expr::col(embeddings::Column::Embedding));
-            let retained = embeddings::Entity::find_by_id(other.id)
+            let retained = embeddings::Entity::find()
+                .filter(embeddings::Column::EntityId.eq(other.id))
                 .select_only()
                 .expr(other_length)
                 .into_tuple::<i32>()

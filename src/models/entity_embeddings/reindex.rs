@@ -145,6 +145,9 @@ pub async fn reindex_workspace(
             .to_owned();
         super::Entity::delete_many()
             .filter(
+                crate::models::_entities::entity_embeddings::Column::WorkspaceId.eq(workspace_id),
+            )
+            .filter(
                 QueryExpr::col(crate::models::_entities::entity_embeddings::Column::EntityId)
                     .in_subquery(entities),
             )
