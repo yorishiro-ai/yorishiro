@@ -42,9 +42,11 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let ids: Vec<_> = (0..2000).map(|_| uuid::Uuid::now_v7()).collect();
         let rows = ids.iter().map(|id| { let mut row = original.clone().into_active_model(); row.id=Set(*id); row });
         entities::Entity::insert_many(rows).exec(&ctx.db).await.unwrap();
-        let rows = ids.iter().map(|id| vectors::ActiveModel {
+        let rows = ids.iter().enumerate().map(|(i, id)| vectors::ActiveModel {
             workspace_id:Set(fixture.workspace_id), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
-            embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;7])))
+            embedding:Set(Some(sea_orm::entity::prelude::PgVector::from((0..7).map(|axis| {
+                (((i + 1) * (axis + 11) * 7919 % 104729) as f32 / 104729.0) + 0.01
+            }).collect::<Vec<_>>())))
         });
         vectors::Entity::insert_many(rows).exec(&ctx.db).await.unwrap();
         let mut workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap().into_active_model();
@@ -55,6 +57,35 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let exists = |name: String| sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres, "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)", [name.into()]));
         assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("","indisvalid").unwrap());
+        // Execute and EXPLAIN the same production candidate builder without forcing an ANN plan.
+        use sea_orm::{ConnectionTrait, TransactionTrait};
+        let txn = ctx.db.begin().await.unwrap();
+        txn.execute_unprepared("SET LOCAL plan_cache_mode=force_custom_plan; SET LOCAL hnsw.ef_search=200; SET LOCAL hnsw.iterative_scan=relaxed_order").await.unwrap();
+        let query = search::SearchQuery { limit: 200, ..Default::default() };
+        let vector = vec![1.0_f32;7];
+        let statement = ctx.db.get_database_backend().build(&search::vector_candidates_query(
+            ctx.db.get_database_backend(), fixture.workspace_id, vector.clone(), &query).unwrap());
+        let mut explain = statement.clone();
+        explain.sql = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {}", explain.sql);
+        let plan = txn.query_one_raw(explain).await.unwrap().unwrap().try_get::<serde_json::Value>("", "QUERY PLAN").unwrap();
+        println!("production vector plan: {plan}");
+        assert!(plan.to_string().contains(&index), "production query must use workspace HNSW: {plan}");
+        let natural = txn.query_all_raw(statement.clone()).await.unwrap();
+        assert_eq!(natural.len(), 200, "candidate limit must not be capped at pgvector's default 40");
+        txn.execute_unprepared("SET LOCAL hnsw.ef_search=40; SET LOCAL hnsw.iterative_scan=off").await.unwrap();
+        let hits = search::search_by_vector(&txn, fixture.workspace_id, vector, "", query).await.unwrap();
+        assert_eq!(hits.len(), 200);
+        let settings = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            "SELECT current_setting('hnsw.ef_search') AS ef, current_setting('hnsw.iterative_scan') AS scan")).await.unwrap().unwrap();
+        assert_eq!(settings.try_get::<String>("", "ef").unwrap(), "40");
+        assert_eq!(settings.try_get::<String>("", "scan").unwrap(), "off");
+        txn.execute_unprepared("SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off").await.unwrap();
+        let exact = txn.query_all_raw(statement).await.unwrap();
+        assert_eq!(exact.len(), natural.len());
+        let exact_ids: std::collections::HashSet<uuid::Uuid> = exact.iter().map(|row| row.try_get("", "id").unwrap()).collect();
+        let recall = hits.iter().filter(|hit| exact_ids.contains(&hit.entity.id)).count() as f64 / 200.0;
+        assert!(recall >= 0.95, "production recall@200={recall}; plan={plan}");
+        txn.rollback().await.unwrap();
         // A valid graph survives shrinkage and repeated maintenance.
         vectors::Entity::delete_many().filter(vectors::Column::EntityId.eq(ids[0])).exec(&ctx.db).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
