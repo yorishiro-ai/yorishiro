@@ -155,6 +155,37 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let partition = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
             format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1", fixture.workspace_id)))
             .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
+        // Put adversarial near-identical vectors in another workspace of the same tenant/partition.
+        let remainder: i32 = partition.strip_prefix("entity_embeddings_p").unwrap().parse().unwrap();
+        let neighbor = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+            "SELECT id FROM (SELECT uuidv7() AS id FROM generate_series(1,4096)) candidates WHERE satisfies_hash_partition('entity_embeddings'::regclass,64,$1,id) LIMIT 1",
+            [remainder.into()])).await.unwrap().unwrap().try_get::<uuid::Uuid>("", "id").unwrap();
+        let mut neighbor_workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id)
+            .one(&ctx.db).await.unwrap().unwrap().into_active_model();
+        neighbor_workspace.id = Set(neighbor);
+        neighbor_workspace.name = Set(format!("neighbor-{neighbor}"));
+        neighbor_workspace.insert(&ctx.db).await.unwrap();
+        let neighbor_ids: Vec<_> = (0..3000).map(|_| uuid::Uuid::now_v7()).collect();
+        entities::Entity::insert_many(neighbor_ids.iter().map(|id| {
+            let mut row = original.clone().into_active_model(); row.id=Set(*id); row.workspace_id=Set(neighbor); row
+        })).exec(&ctx.db).await.unwrap();
+        vectors::Entity::insert_many(neighbor_ids.iter().map(|id| vectors::ActiveModel {
+            workspace_id:Set(neighbor), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
+            embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;7])))
+        })).exec(&ctx.db).await.unwrap();
+        let same_partition = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+            "SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id=$1 LIMIT 1", [neighbor.into()]))
+            .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
+        assert_eq!(same_partition, partition);
+        let scoped = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
+        let after = search::search_by_vector(&scoped, fixture.workspace_id, vec![1.0_f32;7], "", search::SearchQuery { limit:200, ..Default::default() }).await.unwrap();
+        assert!(after.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
+        let after_ids: std::collections::HashSet<_> = after.iter().map(|hit| hit.entity.id).collect();
+        assert_eq!(after_ids, hits.iter().map(|hit| hit.entity.id).collect(), "neighbor vectors must not change the workspace graph results");
+        let after_recall = after_ids.intersection(&exact_ids).count() as f64 / 200.0;
+        assert_eq!(after_recall, recall);
+        scoped.rollback().await.unwrap();
+        workspace_workspaces::Entity::delete_by_id(neighbor).exec(&ctx.db).await.unwrap();
         ctx.db.execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{index}\"")).await.unwrap();
         let blocker = ctx.db.begin().await.unwrap();
         blocker.execute_unprepared(&format!("LOCK TABLE {partition} IN SHARE MODE")).await.unwrap();
