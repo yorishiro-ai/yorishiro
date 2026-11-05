@@ -904,6 +904,64 @@ def template_library_lifecycle(app):
                     for item in client.call("list_template_library")), "deleted templates remain listed")
 
 
+def migration_lifecycle(app):
+    _, key = app.issue(app.workspace, "migration")
+    client = MCP(app, key)
+    name = "migration-contract"
+    definition = {**SCHEMA, "name": name}
+    first = client.call("create_schema", {"definition": definition})["schema"]
+    entity = client.call("create_entity", {
+        "schema_name": name, "entity_type": "note", "data": {"title": "before"},
+    })
+    definition = {**definition, "entity_types": {"note": {"fields": {
+        **SCHEMA["entity_types"]["note"]["fields"],
+        "priority": {"type": "integer", "required": True, "default": 7},
+    }}}}
+    active = client.call("create_schema", {"definition": definition})["schema"]
+    require(active["version"] > first["version"], "migration schema did not evolve")
+    drift = client.call("get_entity_drift", {"id": entity["id"]})
+    require(any(field["name"] == "priority" and field["required"] for field in drift["missing_fields"]),
+            "drift omitted required default field")
+    report = client.call("migration_dry_run", {"name": name})
+    require(report["total_entities"] == 1 and report["needs_values"] == 1,
+            "dry-run did not count the old entity")
+    require(client.call("get_entity", {"id": entity["id"]})["data"] == entity["data"],
+            "dry-run changed entity data")
+    reader = MCP(app, app.key)
+    reader.call("fill_defaults", {"schema_name": name}, error=True)
+    job_id = client.call("fill_defaults", {"schema_name": name})["job_id"]
+    require(client.call("migration_job_status", {"job_id": job_id})["status"] == "queued",
+            "migration was not queued before worker startup")
+    require(client.call("get_entity", {"id": entity["id"]})["data"] == entity["data"],
+            "enqueue changed entity data before worker startup")
+
+    def completed(job_id, worker):
+        while True:
+            app.remaining()
+            require(worker.poll() is None and app.server.poll() is None, "migration process exited")
+            job = client.call("migration_job_status", {"job_id": job_id})
+            require(job["status"] in ("queued", "running", "completed"), f"migration failed: {job}")
+            if job["status"] == "completed":
+                require(app.rest("GET", f"/api/migration-jobs/{job_id}", key=key) == job,
+                        "REST/MCP migration status differs")
+                return
+            time.sleep(min(0.1, app.remaining()))
+
+    with app.job_worker() as worker:
+        completed(job_id, worker)
+        filled = client.call("get_entity", {"id": entity["id"]})
+        require(filled["data"] == {"title": "before", "priority": 7}
+                and filled["schema_version"] == entity["schema_version"],
+                "fill-defaults changed version or failed to fill data")
+        reader.call("undo_migration_job", {"job_id": job_id}, error=True)
+        undo = app.rest("POST", f"/api/migration-jobs/{job_id}/undo", status=202, key=key)
+        require(undo["snapshot_job_id"] == job_id and undo["job_id"] != job_id, "undo identity lost")
+        completed(undo["job_id"], worker)
+    restored = client.call("get_entity", {"id": entity["id"]})
+    require(restored["data"] == entity["data"] and restored["schema_version"] == entity["schema_version"],
+            "undo did not restore pre-migration snapshot")
+
+
 def scenarios(suite):
     common = [("server.bootstrap", lambda app: app.boot()),
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
@@ -914,7 +972,8 @@ def scenarios(suite):
                  ("rest.auth-scope-input", rest_suite)],
         "mcp": [("mcp.schema-entity-crud", lambda app: crud(app, "mcp")),
                 ("mcp.relation-export-import-worker", lambda app: relation_export_import_worker(app, "mcp")),
-                ("mcp.discovery-auth-scope-input", mcp_suite)],
+                ("mcp.discovery-auth-scope-input", mcp_suite),
+                ("mcp.migration-worker-undo", migration_lifecycle)],
         "cli": [("cli.arguments-tasks-stdout-effects", cli_suite),
                 ("cli.human-key-management", human_key_management),
                 ("mcp.template-library-lifecycle", template_library_lifecycle)],
