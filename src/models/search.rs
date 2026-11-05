@@ -385,9 +385,14 @@ pub fn postgres_rrf_query(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
-    let latin_terms: Vec<_> = text
-        .split(|ch: char| !ch.is_ascii_alphabetic())
-        .filter(|term| term.len() >= 3)
+    // Script properties cover extended Latin without treating Greek/Cyrillic as Latin.
+    let latin = tokenizers::utils::SysRegex::new(r"(?:\p{Latin}\p{M}*)+").map_err(|error| {
+        YorishiroError::Internal(anyhow::anyhow!("Latin term pattern: {error}"))
+    })?;
+    let latin_terms: Vec<_> = latin
+        .find_iter(text)
+        .map(|(start, end)| &text[start..end])
+        .filter(|term| term.chars().filter(|ch| ch.is_alphabetic()).count() >= 3)
         .collect();
     let text_score = if latin_terms.is_empty() {
         Func::cust(Alias::new("similarity")).args([normalized.clone(), Expr::val(text)])
