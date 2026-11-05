@@ -933,8 +933,9 @@ def user_profile_lifecycle(app):
     for value in ("   ", "x" * 101):
         app.rest("PUT", path, {"display_name": value}, status=409, key=owner)
         client.call("update_current_user", {"display_name": value}, error=True)
-    app.rest("PUT", path, {"display_name": "forbidden", "email": "other@example.invalid"},
-             status=422, key=owner)
+    status, _, _ = app.http("PUT", path, {"display_name": "forbidden", "email": "other@example.invalid"},
+                            key=owner)
+    require(status == 422, "profile accepted an immutable identity field")
     client.call("update_current_user", {"display_name": "forbidden", "email": "other@example.invalid"}, error=True)
     require(client.call("get_current_user") == updated, "rejected update changed the profile")
     cleared = app.rest("PUT", path, {"display_name": None}, key=owner)
