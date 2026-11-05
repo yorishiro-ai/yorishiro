@@ -26,6 +26,8 @@ Common contracts run on CE/SQLite; enterprise-only composition and behavior belo
 The edition argument labels evidence; it does not infer or verify the binary's compile-time features.
 The EE MCP delta suite checks edition discovery and entity-column and worker-class setting, scope denial, nonmutation and reset through both transports, without replaying CE business scenarios.
 Both editions run with the enterprise licence explicitly unset; licensed capabilities need separate ownership.
+The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or under-scoped writes.
+It uses reserved invalid provider URLs without starting workers, so it proves configuration and enqueue admission, not external inference or reindex completion.
 
 Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
 The CLI suite first verifies that a real work command fails timezone preparation before migration, then proves migration and normal tasks succeed.

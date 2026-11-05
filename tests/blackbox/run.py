@@ -1331,12 +1331,51 @@ def enterprise_settings(app):
     client.call("get_worker_class", error=True)
 
 
+def enterprise_providers(app):
+    client = MCP(app, app.key)
+    _, read_key = app.issue(app.workspace, "read")
+    reader = MCP(app, read_key)
+    for kind in ("llm", "embedding"):
+        path = f"/api/workspace/{kind}-key"
+        secret = f"blackbox-{kind}-provider-secret"
+        app.secrets.append(secret)
+        settings = {"base_url": f"https://{kind}.example.invalid/v1",
+                    "model": f"test-{kind}", "api_key": secret}
+        if kind == "embedding":
+            settings["dimensions"] = 32
+        get, put, reset = (f"{operation}_{kind}_provider" for operation in ("get", "set", "reset"))
+        client.call(get, error=True)
+        app.rest("GET", path, status=404)
+        saved = client.call(put, settings)
+        require(saved == {"saved": True}, "provider configuration failed")
+        metadata = reader.call(get)
+        require(metadata == app.rest("GET", path) and metadata["model"] == settings["model"],
+                "provider metadata differs across transports")
+        require("api_key" not in metadata and secret not in json.dumps([saved, metadata]),
+                "provider metadata disclosed its secret")
+        reader.call(put, settings, error=True)
+        reader.call(reset, error=True)
+        invalid = dict(settings)
+        invalid["api_key" if kind == "llm" else "dimensions"] = "" if kind == "llm" else 0
+        client.call(put, invalid, error=True)
+        require(reader.call(get) == metadata, "rejected provider writes mutated configuration")
+        require(client.call(reset) == {"reset": True}, "provider reset failed")
+        client.call(get, error=True)
+        app.rest("GET", path, status=404)
+        app.rest("PUT", path, settings, status=204)
+        require(reader.call(get) == metadata, "REST provider configuration did not reach MCP")
+        app.rest("DELETE", path, status=204)
+        client.call(get, error=True)
+        app.rest("GET", path, status=404)
+
+
 def scenarios(suite, edition="ce"):
     if edition == "ee":
         require(suite == "mcp", "EE owns only its dedicated MCP delta suite")
         return [("server.bootstrap", lambda app: app.boot()),
                 ("ee.discovery-auth-scope-input", mcp_suite),
-                ("ee.column-worker-settings-lifecycle", enterprise_settings)]
+                ("ee.column-worker-settings-lifecycle", enterprise_settings),
+                ("ee.provider-settings-lifecycle", enterprise_providers)]
     common = [("server.bootstrap", lambda app: app.boot()),
               ("auth.cli-issue-rest-mcp-revoke", vertical_slice)]
     focused = {
