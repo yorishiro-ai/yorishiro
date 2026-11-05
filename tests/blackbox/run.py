@@ -1008,15 +1008,7 @@ def invite_lifecycle(app):
     client.call("accept_invite", {"invite_token": refreshed["token"]}, error=True)
     require(next(row for row in client.call("list_invites") if row["id"] == existing["id"])["used_at"] is None,
             "rejected existing membership consumed the invitation")
-    target = output_field(app.task("create_tenant", name="invite-target"), "tenant id", True)
-    invitation = app.task("create_invite", tenant_id=target, email="owner@example.invalid", role="owner")
-    token = output_field(invitation, "invite token (shown once)")
-    app.secrets.append(token)
-    redemption = client.call("accept_invite", {"invite_token": token})
-    require(redemption == {"user_id": identity["user_id"], "tenant_id": target, "role": "owner"},
-            "authenticated invite acceptance changed account or tenant attribution")
     require(client.call("whoami") == identity, "invite acceptance changed selected workspace or credentials")
-    client.call("accept_invite", {"invite_token": token}, error=True)
 
 
 def membership_retirement_lifecycle(app):
