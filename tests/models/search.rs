@@ -25,6 +25,39 @@ fn note_definition() -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+        use yorishiro::models::_entities::entity_embeddings as vectors;
+        let mut rare = None;
+        for i in 0..60 {
+            let entity = entity_entities::create(&ctx.db, fixture.workspace_id, entity_entities::CreateEntityInput {
+                schema_name:"note".into(), entity_type:"note".into(),
+                data:serde_json::json!({"title":if i==20 {"common ERR-4821x"} else {"common document"}})
+            }, None).await.unwrap();
+            vectors::ActiveModel { workspace_id:Set(fixture.workspace_id), entity_id:Set(entity.id),
+                tenant_id:Set(fixture.tenant_id), embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0, i as f32 / 60.0 + 0.01]))) }
+                .insert(&ctx.db).await.unwrap();
+            if i==20 { rare=Some(entity.id); }
+        }
+        let query = || search::SearchQuery { limit:10, ..Default::default() };
+        let baseline = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "", query()).await.unwrap();
+        let common = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "common", query()).await.unwrap();
+        assert_eq!(baseline.iter().map(|h|h.entity.id).collect::<Vec<_>>(),common.iter().map(|h|h.entity.id).collect::<Vec<_>>(), "21+ matches must disable text list");
+        let rare_hits = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "ERR-4821x", query()).await.unwrap();
+        assert_eq!(rare_hits[0].entity.id, rare.unwrap(), "vector rank21 plus text rank1 must lead RRF");
+        assert_eq!(rare_hits.len(),10);
+        assert_eq!(rare_hits.iter().map(|h|h.entity.id).collect::<std::collections::HashSet<_>>().len(),10);
+    }).await;
+}
+
+#[tokio::test]
 async fn postgres_workspace_hnsw_promotion_and_cleanup() {
     if !crate::require_postgres_backend() {
         return;

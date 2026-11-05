@@ -29,6 +29,7 @@ const DEFAULT_SEARCH_LIMIT: i64 = 10;
 pub(crate) const MIN_SEARCH_LIMIT: i64 = 1;
 pub(crate) const MAX_SEARCH_LIMIT: i64 = 200;
 
+#[derive(Clone)]
 pub struct SearchQuery {
     pub entity_type: Option<String>,
     /// JSONB containment filter (`data @> filter`), e.g. `{"status": "active"}`.
@@ -254,6 +255,18 @@ async fn search_vectors(
     let mut normalized = tokenizers::NormalizedString::from(query_text);
     normalized.nfkc();
     let query_text = normalized.get().trim();
+    if !sqlite {
+        let statement = postgres_rrf_query(workspace_id, vector, query_text, &query)?;
+        return Ok(
+            SearchRow::find_by_statement(conn.get_database_backend().build(&statement))
+                .all(conn)
+                .await
+                .internal()?
+                .into_iter()
+                .map(SearchRow::into_hit)
+                .collect(),
+        );
+    }
     let terms: Vec<_> = query_text.split_whitespace().collect();
     let sqlite_match = terms
         .iter()
@@ -337,6 +350,108 @@ async fn search_vectors(
         );
     }
     Ok(hits)
+}
+
+fn postgres_rrf_query(
+    workspace_id: Uuid,
+    vector: Vec<f32>,
+    text: &str,
+    query: &SearchQuery,
+) -> Result<SelectStatement, YorishiroError> {
+    use sea_orm::sea_query::{CommonTableExpression, UnionType, WithClause};
+    let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
+    let mut candidates = query.clone();
+    candidates.limit = std::cmp::max(limit, 50);
+    let vectors = vector_candidates_query(
+        sea_orm::DatabaseBackend::Postgres,
+        workspace_id,
+        vector,
+        &candidates,
+    )?;
+    let mut texts = scoped_search(workspace_id, query);
+    let normalized = Expr::cust("normalize(\"e\".\"data\"::text, nfkc)");
+    let pattern = format!(
+        "%{}%",
+        text.replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
+    texts
+        .expr_as(
+            Func::cust(Alias::new("similarity")).args([normalized.clone(), Expr::val(text)]),
+            "text_similarity",
+        )
+        .and_where(normalized.ilike(pattern))
+        .and_where(Expr::val(!text.is_empty()))
+        .limit(21);
+    let ranked_vectors = Query::select()
+        .column(Alias::new("id"))
+        .expr_as(
+            Expr::cust("1.0 / (60 + row_number() OVER (ORDER BY distance, id))"),
+            "score",
+        )
+        .from(Alias::new("vectors"))
+        .to_owned();
+    let count = Query::select()
+        .expr(Expr::col(Alias::new("id")).count())
+        .from(Alias::new("texts"))
+        .to_owned();
+    let mut ranks = ranked_vectors;
+    ranks.union(
+        UnionType::All,
+        Query::select()
+            .column(Alias::new("id"))
+            .expr_as(
+                Expr::cust("1.0 / (60 + row_number() OVER (ORDER BY text_similarity DESC, id))"),
+                "score",
+            )
+            .from(Alias::new("texts"))
+            .and_where(Expr::SubQuery(None, Box::new(count.into())).lte(20))
+            .to_owned(),
+    );
+    let scores = Query::select()
+        .column(Alias::new("id"))
+        .expr_as(Expr::col(Alias::new("score")).sum(), "score")
+        .from(Alias::new("ranks"))
+        .group_by_col(Alias::new("id"))
+        .to_owned();
+    let mut with = WithClause::new();
+    for (name, statement) in [
+        ("vectors", vectors),
+        ("texts", texts),
+        ("ranks", ranks),
+        ("scores", scores),
+    ] {
+        with.cte(
+            CommonTableExpression::new()
+                .table_name(Alias::new(name))
+                .query(statement)
+                .to_owned(),
+        );
+    }
+    let mut merged = scoped_search(workspace_id, query);
+    merged
+        .join(
+            JoinType::InnerJoin,
+            Alias::new("scores"),
+            Expr::col((Alias::new("scores"), Alias::new("id")))
+                .equals((Alias::new("e"), Alias::new("id"))),
+        )
+        .join(
+            JoinType::LeftJoin,
+            Alias::new("vectors"),
+            Expr::col((Alias::new("vectors"), Alias::new("id")))
+                .equals((Alias::new("e"), Alias::new("id"))),
+        )
+        .expr_as(
+            Expr::col((Alias::new("vectors"), Alias::new("distance"))),
+            "distance",
+        )
+        .order_by((Alias::new("scores"), Alias::new("score")), Order::Desc)
+        .order_by((Alias::new("e"), Alias::new("id")), Order::Asc)
+        .limit(limit as u64)
+        .with_cte(with);
+    Ok(merged)
 }
 
 /// Builds the production vector candidate query for execution or EXPLAIN diagnostics.
