@@ -14,6 +14,21 @@ import run
 
 
 class ToolInventoryTests(unittest.TestCase):
+    def test_raw_export_records_success_without_parsing_ndjson_as_one_document(self):
+        app = Mock(current_scenario="mcp.graph", tool_calls=[])
+        client = run.MCP.__new__(run.MCP)
+        client.app = app
+        text = '{"kind":"schema"}\n{"kind":"entity"}\n'
+        client.rpc = Mock(return_value={"result": {"content": [{"type": "text", "text": text}]}})
+        self.assertEqual(client.call("export_jsonl", raw=True), text)
+        self.assertEqual(app.tool_calls, [
+            {"tool": "export_jsonl", "scenario": "mcp.graph", "outcome": "succeeded"},
+        ])
+        client.rpc.return_value = {"result": {"isError": True, "content": []}}
+        with self.assertRaises(AssertionError):
+            client.call("export_jsonl", raw=True)
+        self.assertEqual(len(app.tool_calls), 1)
+
     def test_calls_record_only_successfully_validated_outcomes(self):
         app = Mock(current_scenario="mcp.example", tool_calls=[])
         client = run.MCP.__new__(run.MCP)

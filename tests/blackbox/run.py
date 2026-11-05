@@ -396,13 +396,13 @@ class MCP:
         require(status == (202 if notification else 200), f"MCP HTTP {status}: {text}")
         return None if notification else rpc_document(text, request_id)
 
-    def call(self, name, arguments=None, error=False, key=None):
+    def call(self, name, arguments=None, error=False, key=None, raw=False):
         document = self.rpc("tools/call", {"name": name, "arguments": arguments or {}}, key=key)
         if error:
             require(tool_error(document), f"expected MCP rejection: {name}: {document}")
             self.app.tool_calls.append({"tool": name, "scenario": self.app.current_scenario, "outcome": "rejected"})
             return document
-        value = tool_value(document)
+        value = tool_text(document) if raw else tool_value(document)
         self.app.tool_calls.append({"tool": name, "scenario": self.app.current_scenario, "outcome": "succeeded"})
         return value
 
@@ -511,7 +511,7 @@ class GraphAPI:
 
     def export(self):
         if self.surface == "mcp":
-            return tool_text(self.client.rpc("tools/call", {"name": "export_jsonl", "arguments": {}}))
+            return self.client.call("export_jsonl", raw=True)
         status, headers, text = self.app.http("GET", "/api/export.jsonl", key=self.key)
         require(status == 200, f"export failed: {status}: {text}")
         content_type = next((value for name, value in headers.items()
@@ -1235,9 +1235,23 @@ def migration_lifecycle(app):
         undo = app.rest("POST", f"/api/migration-jobs/{job_id}/undo", status=202, key=key)
         require(undo["snapshot_job_id"] == job_id and undo["job_id"] != job_id, "undo identity lost")
         completed(undo["job_id"], worker)
+        second_job = client.call("fill_defaults", {"schema_name": name})["job_id"]
+        completed(second_job, worker)
+        require(client.call("get_entity", {"id": entity["id"]})["data"] == filled["data"],
+                "second migration did not refill restored data")
+        second_undo = client.call("undo_migration_job", {"job_id": second_job})
+        require(second_undo["snapshot_job_id"] == second_job and second_undo["job_id"] != second_job,
+                "MCP undo lost snapshot identity")
+        completed(second_undo["job_id"], worker)
     restored = client.call("get_entity", {"id": entity["id"]})
     require(restored["data"] == entity["data"] and restored["schema_version"] == entity["schema_version"],
             "undo did not restore pre-migration snapshot")
+    reader.call("reindex_workspace", error=True)
+    reindex = client.call("reindex_workspace")
+    queued = client.call("migration_job_status", {"job_id": reindex["job_id"]})
+    require(queued["job_name"] == "reindex" and queued["status"] == "queued"
+            and app.rest("GET", f"/api/migration-jobs/{reindex['job_id']}", key=key) == queued,
+            "reindex enqueue lost job identity or cross-transport status")
 
 
 def scenarios(suite):
