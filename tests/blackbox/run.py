@@ -950,6 +950,49 @@ def user_profile_lifecycle(app):
     require(client.call("get_current_user") == cleared, "service credential changed a human profile")
 
 
+def invite_lifecycle(app):
+    owner = app.management_key
+    client = MCP(app, owner)
+    path = "/api/members/invites"
+    created = client.call("create_invite", {
+        "email": "invited@example.invalid", "role": "viewer", "expires_at": "2090-01-01T00:00:00Z",
+    })
+    app.secrets.append(created["token"])
+    invite_id = created["id"]
+    replaced = app.rest("POST", f"{path}/{invite_id}/reissue", {
+        "expires_at": "2090-01-02T00:00:00Z",
+    }, key=owner)
+    app.secrets.append(replaced["token"])
+    require(replaced["id"] == invite_id and replaced["token"] != created["token"],
+            "invite reissue did not replace the token on the same record")
+    password = "blackbox-invited-password"
+    app.secrets.append(password)
+    app.rest("POST", "/auth/signup", {"invite_token": created["token"], "password": password}, status=422)
+    records = client.call("list_invites")
+    require(records == app.rest("GET", path, key=owner), "REST/MCP invite history differs")
+    require(all("token" not in row and "token_hash" not in row for row in records)
+            and all(secret not in json.dumps(records) for secret in (created["token"], replaced["token"])),
+            "invite listing exposed a credential")
+    accepted = app.rest("POST", "/auth/signup", {
+        "invite_token": replaced["token"], "password": password,
+    }, status=201)
+    require(accepted["tenant_id"] == app.tenant and accepted["role"] == "viewer", "invite redemption lost grants")
+    app.rest("POST", "/auth/signup", {"invite_token": replaced["token"], "password": password}, status=422)
+    app.rest("DELETE", f"{path}/{invite_id}", status=409, key=owner)
+    client.call("reissue_invite", {"invite_id": invite_id, "expires_at": "2090-01-03T00:00:00Z"}, error=True)
+    used = next(row for row in client.call("list_invites") if row["id"] == invite_id)
+    require(used["used_at"] is not None, "consumed invitation history lost")
+    cancelled = app.rest("POST", path, {
+        "email": "cancelled@example.invalid", "role": "viewer", "expires_at": "2090-01-01T00:00:00Z",
+    }, status=201, key=owner)
+    app.secrets.append(cancelled["token"])
+    client.call("revoke_invite", {"invite_id": cancelled["id"]})
+    app.rest("DELETE", f"{path}/{cancelled['id']}", status=204, key=owner)
+    app.rest("POST", "/auth/signup", {"invite_token": cancelled["token"], "password": password}, status=422)
+    require(any(row["id"] == cancelled["id"] and row["used_at"] is None for row in client.call("list_invites")),
+            "cancelled invitation history was deleted")
+
+
 def tenant_settings_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
@@ -1058,6 +1101,7 @@ def scenarios(suite):
                 ("cli.human-key-management", human_key_management),
                 ("mcp.user-profile-lifecycle", user_profile_lifecycle),
                 ("mcp.tenant-settings-lifecycle", tenant_settings_lifecycle),
+                ("mcp.invite-lifecycle", invite_lifecycle),
                 ("mcp.template-library-lifecycle", template_library_lifecycle)],
     }
     return common + focused[suite]
