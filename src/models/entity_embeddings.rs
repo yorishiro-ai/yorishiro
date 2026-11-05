@@ -1,11 +1,13 @@
 //! Variable-dimension embedding storage and workspace reindex operations.
 
+mod indexes;
 mod persistence;
 mod reindex;
 mod resolution;
 mod stamp;
 mod write;
 
+pub use indexes::maintain_workspace_indexes;
 pub use reindex::{ReindexFailure, ReindexOutcome, reindex_workspace};
 pub(crate) use write::EmbeddingWriteOutcome;
 pub use write::sync_embedding_for_record;

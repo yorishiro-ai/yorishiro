@@ -16,6 +16,7 @@ impl Task for RecoverWorkerDispatches {
     async fn run(&self, ctx: &AppContext, _vars: &Vars) -> Result<()> {
         crate::workers::startup_reindex::run(ctx).await;
         crate::workers::dispatch::recover_pending(ctx).await;
+        crate::models::entity_embeddings::maintain_workspace_indexes(&ctx.db).await?;
         Ok(())
     }
 }

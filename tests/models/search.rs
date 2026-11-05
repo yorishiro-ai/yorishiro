@@ -24,6 +24,65 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
+#[tokio::test]
+async fn postgres_workspace_hnsw_promotion_and_cleanup() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
+    use yorishiro::models::_entities::{entity_embeddings as vectors, entity_entities as entities};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
+        let entity = entity_entities::create(&ctx.db, fixture.workspace_id, entity_entities::CreateEntityInput {
+            schema_name:"note".into(), entity_type:"note".into(), data:serde_json::json!({"title":"index fixture"})
+        }, None).await.unwrap();
+        let original = entities::Entity::find_by_id(entity.id).one(&ctx.db).await.unwrap().unwrap();
+        let ids: Vec<_> = (0..2000).map(|_| uuid::Uuid::now_v7()).collect();
+        let rows = ids.iter().map(|id| { let mut row = original.clone().into_active_model(); row.id=Set(*id); row });
+        entities::Entity::insert_many(rows).exec(&ctx.db).await.unwrap();
+        let rows = ids.iter().map(|id| vectors::ActiveModel {
+            workspace_id:Set(fixture.workspace_id), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
+            embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;7])))
+        });
+        vectors::Entity::insert_many(rows).exec(&ctx.db).await.unwrap();
+        let mut workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap().into_active_model();
+        workspace.embedding_dimensions=Set(Some(7)); workspace.embedding_model=Set(Some("fixture".into()));
+        workspace.update(&ctx.db).await.unwrap();
+        let index = format!("ysr_hnsw_{}_d7", fixture.workspace_id.simple());
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        let exists = |name: String| sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres, "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)", [name.into()]));
+        assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("","indisvalid").unwrap());
+        // A valid graph survives shrinkage and repeated maintenance.
+        vectors::Entity::delete_many().filter(vectors::Column::EntityId.eq(ids[0])).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index.clone()).await.unwrap().is_some());
+        // Widen all vectors and atomically published metadata before the next sweep.
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;13])))
+            .exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(13)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index.clone()).await.unwrap().is_none());
+        // Failed concurrent builds leave invalid indexes; recreate that catalog state using a failed unique build.
+        let partition = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1",fixture.workspace_id))).await.unwrap().unwrap().try_get::<String>("","name").unwrap();
+        let bad = format!("ysr_hnsw_{}_d13", fixture.workspace_id.simple());
+        sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("DROP INDEX CONCURRENTLY \"{bad}\"")).await.unwrap();
+        assert!(sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE UNIQUE INDEX CONCURRENTLY \"{bad}\" ON {partition}(tenant_id)")).await.is_err());
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(bad).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "invalid promoted graph is rebuilt");
+        // Deleting workspace metadata leaves no owned graph after the sweep.
+        sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE INDEX CONCURRENTLY \"{index}\" ON {partition}(workspace_id)")).await.unwrap();
+        workspace_workspaces::Entity::delete_by_id(fixture.workspace_id).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index).await.unwrap().is_none());
+    }).await;
+}
+
 async fn literal_search_corpus() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let fixture =
