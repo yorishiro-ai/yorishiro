@@ -67,7 +67,7 @@ def run_assignments(output_dir, toolchain):
             path = pathlib.Path(artifact["executable"])
             saved = output_dir / "binaries" / edition / path.relative_to(ROOT)
             saved.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, saved)
+            shutil.move(path, saved)
         inventories[edition] = inventory
 
     plan_path = output_dir / "assignments.json"
@@ -80,7 +80,7 @@ def run_assignments(output_dir, toolchain):
         data = json.loads(inventories[edition].read_text())
         for artifact in [*data["artifacts"], data["process_binary"]]:
             path = pathlib.Path(artifact["executable"])
-            shutil.copy2(output_dir / "binaries" / edition / path.relative_to(ROOT), path)
+            shutil.move(output_dir / "binaries" / edition / path.relative_to(ROOT), path)
         if edition == "ce":
             for suite in ("rest", "mcp", "cli"):
                 run(sys.executable, "tests/blackbox/run.py", "--edition", "ce", "--suite", suite,

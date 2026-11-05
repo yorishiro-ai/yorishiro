@@ -95,6 +95,7 @@ class CoverageOwnershipTests(unittest.TestCase):
             self.assertEqual(sum("verify" in command and "scripts/run_assigned_tests.py" in command
                                  for command in commands), 1)
             self.assertTrue(all("--no-run" in command for command in commands if "test" in command))
+            self.assertFalse(any(path.is_file() for path in (output / "binaries").rglob("*")))
 
     def test_workflow_owns_real_prerequisites_and_keeps_branch_module_reports(self):
         workflow = (ROOT / ".github/workflows/coverage.yml").read_text()
