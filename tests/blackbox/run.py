@@ -124,6 +124,8 @@ class App:
         self.directory = Path(directory)
         self.secrets = []
         self.events = []
+        self.tool_calls = []
+        self.discovered_tools = []
         self.server = None
         self.worker = None
         self.server_files = []
@@ -335,7 +337,8 @@ class App:
             for chunk in iter(lambda: binary.read(1024 * 1024), b""):
                 digest.update(chunk)
         report = {"suite": self.args.suite, "edition": self.args.edition,
-                  "binary_sha256": digest.hexdigest(), "results": self.results}
+                  "binary_sha256": digest.hexdigest(), "results": self.results,
+                  "discovered_tools": self.discovered_tools, "tool_calls": self.tool_calls}
         report_path = self.args.artifacts / "results.json"
         require(not report_path.is_symlink(), "report symlink refused")
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -397,8 +400,11 @@ class MCP:
         document = self.rpc("tools/call", {"name": name, "arguments": arguments or {}}, key=key)
         if error:
             require(tool_error(document), f"expected MCP rejection: {name}: {document}")
+            self.app.tool_calls.append({"tool": name, "scenario": self.app.current_scenario, "outcome": "rejected"})
             return document
-        return tool_value(document)
+        value = tool_value(document)
+        self.app.tool_calls.append({"tool": name, "scenario": self.app.current_scenario, "outcome": "succeeded"})
+        return value
 
 
 def vertical_slice(app):
@@ -750,6 +756,9 @@ def mcp_suite(app):
     client = MCP(app, app.key)
     listed = client.rpc("tools/list")["result"]
     names = {tool["name"] for tool in listed["tools"]}
+    reviewed = json.loads((ROOT / "tests/blackbox/tools.json").read_text())
+    require(names == set(reviewed["ce"]), "MCP public-tool inventory changed; review scenario ownership and gaps")
+    app.discovered_tools = sorted(names)
     require({"list_schemas", "create_schema", "get_entity", "create_entity", "delete_entity"} <= names,
             "MCP discovery missing common tools")
     require(len(names) == len(listed["tools"]), "MCP discovery has duplicate names")
@@ -1225,6 +1234,7 @@ def main(argv=None):
         app = App(args, directory)
         try:
             for result, (_, function) in zip(app.results, scenarios(args.suite)):
+                app.current_scenario = result["id"]
                 started = time.monotonic()
                 try:
                     function(app)

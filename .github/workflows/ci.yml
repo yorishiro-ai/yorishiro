@@ -349,6 +349,12 @@ jobs:
         run: |
           tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C "$RUNNER_TEMP/binary"
           python3 scripts/check_blackbox_reports.py --edition ce --binary "$RUNNER_TEMP/binary/yorishiro" --reports "$RUNNER_TEMP/reports"
+      - name: Upload observed public-tool census
+        uses: actions/upload-artifact@v7
+        with:
+          name: public-tool-census-ce
+          path: ${{ runner.temp }}/reports/tool-coverage.json
+          if-no-files-found: error
 
   test-inventory-ce:
     name: Community test artifacts

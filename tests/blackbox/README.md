@@ -1,5 +1,11 @@
 # External black-box checks
 
+`tools.json` records the reviewed CE tool inventory and EE additions.
+The real MCP discovery scenario requires the CE inventory to match exactly; runner-only checks compare both inventories to the source handlers.
+Reports attribute successful and rejected MCP calls to their executing scenario without recording arguments or returned secrets.
+The report verifier writes `tool-coverage.json`, listing each tool's observed outcomes and every missing successful call.
+An observed successful call is not proof of complete behavior coverage, and EE additions are explicitly reported as unexecuted by this common runner.
+
 `rest.builtin-template-relations` creates every builtin template's entity and relation types through public HTTP using Write credentials after schema creation.
 The graph scenarios also cover Read-scoped MCP entity filtering, invalid relation-list status and missing-entity diagnostics.
 Their internal predecessors were retired after the expanded replacement passed GHA run `41735414722` at commit `d5e1982291eda5a4bbcdad29790af5d699f2e60f`.

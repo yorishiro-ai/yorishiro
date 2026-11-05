@@ -60,6 +60,28 @@ def main() -> int:
     with args.binary.open("rb") as binary:
         digest = hashlib.file_digest(binary, "sha256").hexdigest()
     validate_reports(expected, reports, args.edition, digest)
+    reviewed = json.loads((ROOT / "tests/blackbox/tools.json").read_text())
+    inventory = set(reviewed["ce"])
+    discovered = [report.get("discovered_tools", []) for report in reports if report["suite"] == "mcp"]
+    if len(discovered) != 1 or set(discovered[0]) != inventory:
+        raise ValueError("MCP discovery does not match the reviewed public-tool inventory")
+    calls = [call for report in reports for call in report.get("tool_calls", [])]
+    for report in reports:
+        for call in report.get("tool_calls", []):
+            if (call.get("tool") not in inventory or call.get("scenario") not in expected[report["suite"]]
+                    or call.get("outcome") not in ("succeeded", "rejected")):
+                raise ValueError("invalid public-tool execution attribution")
+    census = {name: {outcome: sorted({call["scenario"] for call in calls
+                                    if call["tool"] == name and call["outcome"] == outcome})
+                     for outcome in ("succeeded", "rejected")} for name in sorted(inventory)}
+    gaps = [name for name, outcomes in census.items() if not outcomes["succeeded"]]
+    (args.reports / "tool-coverage.json").write_text(json.dumps({
+        "binary_sha256": digest, "edition": args.edition, "tools": census,
+        "without_successful_mcp_call": gaps, "ee_additions_not_executed": reviewed["ee_additions"],
+        "complete_public_behavior_coverage": False,
+    }, indent=2) + "\n")
+    print(f"Public MCP census: {len(inventory) - len(gaps)}/{len(inventory)} tools called successfully; "
+          f"{len(gaps)} without successful calls, {len(reviewed['ee_additions'])} EE additions not executed")
     print(f"Public contracts: {len(reports)} suites, {sum(map(len, expected.values()))} assigned scenarios passed on {digest}")
     return 0
 

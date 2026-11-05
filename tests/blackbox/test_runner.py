@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -10,6 +11,32 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import run
+
+
+class ToolInventoryTests(unittest.TestCase):
+    def test_calls_record_only_successfully_validated_outcomes(self):
+        app = Mock(current_scenario="mcp.example", tool_calls=[])
+        client = run.MCP.__new__(run.MCP)
+        client.app = app
+        client.rpc = Mock(return_value={"result": {"content": [{"type": "text", "text": "{}"}]}})
+        self.assertEqual(client.call("whoami"), {})
+        client.rpc.return_value = {"result": {"isError": True, "content": []}}
+        client.call("get_entity", error=True)
+        with self.assertRaises(AssertionError):
+            client.call("get_entity")
+        self.assertEqual(app.tool_calls, [
+            {"tool": "whoami", "scenario": "mcp.example", "outcome": "succeeded"},
+            {"tool": "get_entity", "scenario": "mcp.example", "outcome": "rejected"},
+        ])
+
+    def test_reviewed_inventory_matches_source_tools(self):
+        reviewed = json.loads((run.ROOT / "tests/blackbox/tools.json").read_text())
+        for edition, directory in (("ce", "src/controllers/mcp"), ("ee_additions", "ee/controllers/mcp")):
+            names = []
+            for path in (run.ROOT / directory).glob("*.rs"):
+                names.extend(re.findall(r'#\[tool\([\s\S]*?\)\]\s*pub(?:\(crate\))? async fn (\w+)', path.read_text()))
+            self.assertEqual(sorted(names), reviewed[edition])
+            self.assertEqual(len(names), len(set(names)))
 
 
 class ProtocolTests(unittest.TestCase):
