@@ -1030,6 +1030,34 @@ def invite_lifecycle(app):
     require(client.call("whoami") == identity, "invite acceptance changed selected workspace or credentials")
 
 
+def audit_history_lifecycle(app):
+    owner = app.management_key
+    client = MCP(app, owner)
+    client.call("list_audit_log", error=True)
+    app.rest("GET", "/api/audit-log", key=owner, status=403)
+    issued = app.task("create_api_key", workspace_id=app.workspace, scope="read", audit="true")
+    key = output_field(issued, "api key (shown once)")
+    app.secrets.append(key)
+    auditor = MCP(app, key)
+    capabilities = auditor.call("capabilities")
+    require(capabilities["audit"] and "schema" not in capabilities["scopes"],
+            "audit grant incorrectly elevated ordinary scope")
+    auditor.call("create_schema", {"definition": {**SCHEMA, "name": "audit-denied"}}, error=True)
+    records = auditor.call("list_audit_log", {"page": 1, "page_size": 50})
+    require(records and records == app.rest("GET", "/api/audit-log?page=1&page_size=50", key=key),
+            "audit history empty or differs across transports")
+    require(all(row["workspace_id"] == app.workspace and row["tenant_id"] == app.tenant for row in records),
+            "audit history crossed workspace or tenant boundary")
+    serialized = json.dumps(records)
+    require(all(secret not in serialized for secret in app.secrets), "audit history exposed a credential")
+    first = auditor.call("list_audit_log", {"page": 1, "page_size": 1})
+    require(first == records[:1], "audit pagination changed first record")
+    auditor.call("list_audit_log", {"page": 0}, error=True)
+    app.task("revoke_api_key", key_id=output_field(issued, "api key id", True))
+    auditor.call("list_audit_log", error=True)
+    app.rest("GET", "/api/audit-log", key=key, status=401)
+
+
 def workspace_key_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
@@ -1273,6 +1301,7 @@ def scenarios(suite):
                 ("mcp.invite-lifecycle", invite_lifecycle),
                 ("mcp.template-library-lifecycle", template_library_lifecycle),
                 ("mcp.workspace-key-lifecycle", workspace_key_lifecycle),
+                ("mcp.audit-history-lifecycle", audit_history_lifecycle),
                 ("mcp.membership-ownership-retirement", membership_retirement_lifecycle)],
     }
     return common + focused[suite]
