@@ -26,7 +26,9 @@ fn deployment_metadata_matches_provider_resolution_without_loading_provider() {
     for (dimensions, valid) in [(0, false), (4096, true), (4097, false)] {
         let settings = config_with_embedding(serde_json::json!({
             "provider":"openai", "dimensions":dimensions,
-            "base_url":"http://embedding.test", "model":"external-model"
+            "base_url":"http://embedding.test", "model":"external-model",
+            "api_key":"", "send_dimensions_param":false,
+            "local_model":"unused", "local_max_sequence_length":512
         }))
         .settings::<yorishiro::data::settings::Settings>()
         .unwrap();
