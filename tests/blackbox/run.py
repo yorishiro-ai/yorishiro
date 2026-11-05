@@ -1057,7 +1057,9 @@ def audit_history_lifecycle(app):
     require(all(secret not in serialized for secret in app.secrets), "audit history exposed a credential")
     first = auditor.call("list_audit_log", {"page": 1, "page_size": 1})
     require(first == records[:1], "audit pagination changed first record")
-    auditor.call("list_audit_log", {"page": 0}, error=True)
+    require(auditor.call("list_audit_log", {"page": 0, "page_size": 1}) == first,
+            "zero audit page did not normalize to the first page")
+    auditor.call("list_audit_log", {"page": 18446744073709551615, "page_size": 50}, error=True)
     app.task("revoke_api_key", key_id=output_field(issued, "api key id", True))
     auditor.call("list_audit_log", error=True)
     app.rest("GET", "/api/audit-log", key=key, status=401)
