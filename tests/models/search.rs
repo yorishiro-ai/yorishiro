@@ -24,6 +24,110 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
+async fn literal_search_corpus() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let definition = serde_json::from_value(note_definition()).unwrap();
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let body = format!(
+            "{} quarterly roadmap コネクタ導入 数据库迁移 ＭＣＰ ｺﾈｸﾀ ＷＩＤＴＨ tunnel-based a:b foo\"bar MCP AND NOT x (x 100%under_score",
+            "背景説明と unrelated filler sentences。".repeat(100)
+        );
+        let mut matching = None;
+        for title in [body, "unrelated grocery list".into()] {
+            let entity = entity_entities::create(
+                &ctx.db,
+                fixture.workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({"title": title}),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            matching.get_or_insert(entity.id);
+        }
+        let sqlite = sea_orm::ConnectionTrait::get_database_backend(&ctx.db)
+            == sea_orm::DatabaseBackend::Sqlite;
+        // Both backends use this exact corpus; only documented SQLite limitations differ.
+        for (text, postgres_hit, sqlite_hit) in [
+            ("quarterly roadmap", true, true),
+            ("コネクタ導入", true, true),
+            ("導入", true, false),
+            ("数据库", true, true),
+            ("数据", true, false),
+            ("MCP", true, true),
+            ("コネクタ", true, true),
+            ("ＭＣＰ", true, true),
+            ("ｺﾈｸﾀ", true, true),
+            ("WIDTH", true, false),
+            ("ＷＩＤＴＨ", true, false),
+            ("tunnel-based", true, true),
+            ("a:b", true, true),
+            ("foo\"bar", false, false),
+            ("foo\\\"bar", true, true),
+            ("MCP AND", true, true),
+            ("NOT", true, true),
+            ("xy", false, false),
+            ("(x", true, false),
+            ("100%under_score", true, true),
+            ("missing-literal", false, false),
+            ("100_other_score", false, false),
+            ("\"", true, false),
+            ("", false, false),
+            ("   ", false, false),
+        ] {
+            let hits = search::search_by_vector(
+                &ctx.db,
+                fixture.workspace_id,
+                vec![1.0_f32; 768],
+                text,
+                search::SearchQuery::default(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("literal query {text:?}: {error}"));
+            let expected = if sqlite { sqlite_hit } else { postgres_hit };
+            let ids: Vec<_> = hits.iter().map(|hit| hit.entity.id).collect();
+            let expected_ids = if expected {
+                vec![matching.unwrap()]
+            } else {
+                vec![]
+            };
+            assert_eq!(ids, expected_ids, "literal query {text:?}, SQLite={sqlite}");
+            assert!(hits.iter().all(|hit| hit.distance.is_none()));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_literal_search_shared_corpus() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    literal_search_corpus().await;
+}
+
+#[tokio::test]
+async fn postgres_literal_search_shared_corpus() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    literal_search_corpus().await;
+}
+
 /// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {

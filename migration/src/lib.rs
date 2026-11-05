@@ -36,6 +36,7 @@ mod m20261029_055438_tenant_retirement_events;
 mod m20261030_080520_api_key_lifecycle;
 mod m20261102_050000_tenant_api_key_resolution;
 mod m20261103_000000_schema_reference_counts;
+mod m20261106_000000_normalize_search_text;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -112,6 +113,7 @@ impl MigratorTrait for Migrations {
             Box::new(m20261030_080520_api_key_lifecycle::Migration),
             Box::new(m20261102_050000_tenant_api_key_resolution::Migration),
             Box::new(m20261103_000000_schema_reference_counts::Migration),
+            Box::new(m20261106_000000_normalize_search_text::Migration),
             // inject-above (do not remove this comment)
         ]
     }

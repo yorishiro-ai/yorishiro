@@ -3,9 +3,9 @@
 //! Embeddings live in the separate `entity_embeddings` table, so every query here
 //! joins `entity_entities e` to that table when searching by vector.
 //!
-//! Two queries run for each backend: vector search first, then a trigram (PostgreSQL pg_trgm)
-//! or trigram (SQLite FTS5 `tokenize='trigram'`) fallback for entities with no embedding at
-//! all.  Both backends therefore use character-n-gram fuzzy matching for the fallback path.
+//! Vector search runs first, followed by a literal text fallback for unembedded entities.
+//! PostgreSQL uses NFKC-normalized ILIKE with a trigram expression index.
+//! SQLite uses quoted FTS5 trigram terms and cannot match terms shorter than three characters.
 //! The two halves are merged in Rust.
 //!
 //! Embedding generation follows two paths.
@@ -223,6 +223,15 @@ pub async fn search_by_vector(
             });
         }
     };
+    let mut normalized = tokenizers::NormalizedString::from(query_text);
+    normalized.nfkc();
+    let query_text = normalized.get().trim();
+    let terms: Vec<_> = query_text.split_whitespace().collect();
+    let sqlite_match = terms
+        .iter()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" AND ");
     let embedding = Expr::col((Alias::new("ee"), Alias::new("embedding")));
     let distance = if sqlite {
         Func::cust(Alias::new("vec_distance_cosine"))
@@ -253,7 +262,10 @@ pub async fn search_by_vector(
             .collect();
 
     // Vector hits outrank every text-only match.
-    if (hits.len() as i64) < limit {
+    if (hits.len() as i64) < limit
+        && !terms.is_empty()
+        && (!sqlite || terms.iter().all(|term| term.chars().count() >= 3))
+    {
         let mut fallback = scoped_search(workspace_id, &query);
         join_embedding(&mut fallback, embed_table, JoinType::LeftJoin);
         fallback.expr_as(
@@ -276,7 +288,7 @@ pub async fn search_by_vector(
                 )
                 .and_where(
                     Expr::col(Alias::new("entity_fts"))
-                        .binary(SqliteBinOper::Match, Expr::val(query_text)),
+                        .binary(SqliteBinOper::Match, Expr::val(sqlite_match)),
                 )
                 .and_where(Expr::col((Alias::new("ee"), Alias::new("entity_id"))).is_null())
                 .order_by_expr(
@@ -286,13 +298,18 @@ pub async fn search_by_vector(
                     Order::Asc,
                 );
         } else {
-            let text = Expr::col((Alias::new("e"), Alias::new("data"))).cast_as(Alias::new("text"));
+            // The NFKC grammar keyword must match the PostgreSQL expression index.
+            let text = Expr::cust("normalize(\"e\".\"data\"::text, nfkc)");
+            let pattern = format!(
+                "%{}%",
+                query_text
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            );
             fallback
                 .and_where(embedding.is_null())
-                .and_where(
-                    text.clone()
-                        .binary(PgBinOper::Similarity, Expr::val(query_text)),
-                )
+                .and_where(text.clone().ilike(pattern))
                 .order_by_expr(
                     Func::cust(Alias::new("similarity"))
                         .args([text, Expr::val(query_text)])
