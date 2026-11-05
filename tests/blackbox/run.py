@@ -918,6 +918,37 @@ def template_library_lifecycle(app):
                     for item in client.call("list_template_library")), "deleted templates remain listed")
 
 
+def user_profile_lifecycle(app):
+    owner = app.management_key
+    client = MCP(app, owner)
+    path = "/api/users/me"
+    original = client.call("get_current_user")
+    require(app.rest("GET", path, key=owner) == original, "REST/MCP profiles differ")
+    require(set(original) == {"id", "email", "display_name", "created_at"},
+            "profile exposed private identity fields")
+    updated = client.call("update_current_user", {"display_name": "  Contract Owner  "})
+    require(updated["display_name"] == "Contract Owner" and updated["id"] == original["id"]
+            and updated["email"] == original["email"], "profile update changed identity or ignored trimming")
+    require(app.rest("GET", path, key=owner) == updated, "MCP profile update not visible to REST")
+    for value in ("   ", "x" * 101):
+        app.rest("PUT", path, {"display_name": value}, status=409, key=owner)
+        client.call("update_current_user", {"display_name": value}, error=True)
+    app.rest("PUT", path, {"display_name": "forbidden", "email": "other@example.invalid"},
+             status=422, key=owner)
+    client.call("update_current_user", {"display_name": "forbidden", "email": "other@example.invalid"}, error=True)
+    require(client.call("get_current_user") == updated, "rejected update changed the profile")
+    cleared = app.rest("PUT", path, {"display_name": None}, key=owner)
+    require(cleared["display_name"] is None and client.call("get_current_user") == cleared,
+            "REST profile clear not visible to MCP")
+    _, service = app.issue(app.workspace, "read")
+    service_client = MCP(app, service)
+    app.rest("GET", path, status=403, key=service)
+    app.rest("PUT", path, {"display_name": "service"}, status=403, key=service)
+    service_client.call("get_current_user", error=True)
+    service_client.call("update_current_user", {"display_name": "service"}, error=True)
+    require(client.call("get_current_user") == cleared, "service credential changed a human profile")
+
+
 def migration_lifecycle(app):
     _, key = app.issue(app.workspace, "migration")
     client = MCP(app, key)
@@ -990,6 +1021,7 @@ def scenarios(suite):
                 ("mcp.migration-worker-undo", migration_lifecycle)],
         "cli": [("cli.arguments-tasks-stdout-effects", cli_suite),
                 ("cli.human-key-management", human_key_management),
+                ("mcp.user-profile-lifecycle", user_profile_lifecycle),
                 ("mcp.template-library-lifecycle", template_library_lifecycle)],
     }
     return common + focused[suite]
