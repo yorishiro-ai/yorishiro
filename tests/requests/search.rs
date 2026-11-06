@@ -98,6 +98,10 @@ async fn configured_live_provider_embeds_stores_and_searches() {
         api_key: String,
         model: String,
         send_dimensions_param: bool,
+        #[serde(default)]
+        query_instruction: String,
+        #[serde(default)]
+        document_prefix: String,
     }
 
     let config = App::load_config(&Environment::Test).await.unwrap();
@@ -118,8 +122,8 @@ async fn configured_live_provider_embeds_stores_and_searches() {
             model: settings.model,
             dimensions,
             send_dimensions_param: settings.send_dimensions_param,
-            query_instruction: String::new(),
-            document_prefix: String::new(),
+            query_instruction: settings.query_instruction,
+            document_prefix: settings.document_prefix,
         }));
     let vectors = provider
         .embed_batch(&[
@@ -142,6 +146,8 @@ async fn configured_live_provider_embeds_stores_and_searches() {
             "Fresh bread is baked in the kitchen.",
         ];
         embedded_notes(&ctx, &setup, provider.as_ref(), &documents).await;
+        #[cfg(feature = "enterprise")]
+        let session = super::mcp::initialize(&request).await;
         for (query, expected) in [
             ("A cat sleeps on a warm sofa.", documents[0]),
             ("How do I back up and restore a PostgreSQL database?", documents[1]),
@@ -155,9 +161,23 @@ async fn configured_live_provider_embeds_stores_and_searches() {
             assert_eq!(titles(&hits).len(), 3);
             assert_eq!(titles(&hits)[0], expected, "live semantic ranking");
             assert!(hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
+            #[cfg(feature = "enterprise")]
+            {
+                let response = super::mcp::mcp_call(&request, &session, &setup.api_key,
+                    20, "tools/call", serde_json::json!({
+                        "name":"search_entities", "arguments":{"query_text":query,"limit":3}
+                    })).await;
+                assert_eq!(response["result"]["isError"], false, "live MCP search failed");
+                let mcp_hits = super::mcp::tool_result_json(&response);
+                assert_eq!(titles(&mcp_hits)[0], expected, "live MCP semantic ranking");
+                let ids = |value: &serde_json::Value| value.as_array().unwrap().iter()
+                    .map(|hit| hit["entity"]["id"].clone()).collect::<Vec<_>>();
+                assert_eq!(ids(&mcp_hits), ids(&hits), "live transport result IDs");
+                assert!(mcp_hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
+            }
         }
         assert_eq!(rows_left(&ctx, setup.workspace_id).await, 0);
-        println!("Live embedding smoke passed: dimensions={dimensions}, stored_documents=3, queued_searches=2");
+        println!("Live embedding smoke passed: dimensions={dimensions}, stored_documents=3, REST queries=2, MCP enabled={}", cfg!(feature = "enterprise"));
     }).await;
 }
 

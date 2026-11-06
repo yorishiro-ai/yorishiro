@@ -765,7 +765,7 @@ pub(super) async fn initialize(request: &TestServer) -> String {
     session
 }
 
-async fn mcp_call(
+pub(super) async fn mcp_call(
     request: &TestServer,
     session: &str,
     api_key: &str,
@@ -797,7 +797,7 @@ fn tool_inventory(response: &Value) -> Vec<Value> {
         .clone()
 }
 
-fn tool_result_json(response: &Value) -> Value {
+pub(super) fn tool_result_json(response: &Value) -> Value {
     serde_json::from_str(
         response["result"]["content"][0]["text"]
             .as_str()
