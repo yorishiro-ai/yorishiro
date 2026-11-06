@@ -2596,6 +2596,129 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     .await;
 }
 
+/// Both transports retain the nearest document when stored binary codes collapse or become diverse.
+#[tokio::test]
+async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
+    use super::query_worker::boot_with_query_worker;
+    use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::{_entities::entity_embeddings as vectors, entity_embeddings};
+
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    let (provider, _server, _) = crate::http_stub::keyword_provider(4096).await;
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let definition = serde_json::from_value(json!({
+            "name":"note", "entity_types":{"note":{"fields":{
+                "title":{"type":"string", "required":true, "x-embed":true}
+            }}}
+        }))
+        .unwrap();
+        schema_schemas::create_schema(
+            &ctx.db,
+            setup.tenant_id,
+            setup.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let nearest = entity_entities::create(
+            &ctx.db,
+            setup.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: json!({"title":"nearest document"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            setup.workspace_id,
+            &nearest,
+            provider.as_ref(),
+        )
+        .await
+        .unwrap();
+        let mut embeddings = Vec::new();
+        // More documents than the binary candidate cap make code collapse observable.
+        for i in 0..1001 {
+            let document = entity_entities::create(
+                &ctx.db,
+                setup.workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: json!({"title":format!("decoy {i}")}),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            embeddings.push(vectors::ActiveModel {
+                workspace_id: Set(setup.workspace_id),
+                entity_id: Set(document.id),
+                tenant_id: Set(setup.tenant_id),
+                embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![
+                    1.0;
+                    4096
+                ]))),
+            });
+        }
+        vectors::Entity::insert_many(embeddings)
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        let session = initialize(&request).await;
+        for (phase, background) in [(0, 0.001_f32), (1, -0.001_f32)] {
+            let mut vector = vec![background; 4096];
+            vector[1] = 1.0;
+            vectors::Entity::update_many()
+                .col_expr(
+                    vectors::Column::Embedding,
+                    sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
+                )
+                .filter(vectors::Column::EntityId.eq(nearest.id))
+                .exec(&ctx.db)
+                .await
+                .unwrap();
+            let rest = request
+                .get("/api/search?query_text=beta&limit=10")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .await;
+            rest.assert_status(StatusCode::OK);
+            let hits = rest.json::<Value>();
+            assert_eq!(hits.as_array().unwrap().len(), 10);
+            assert_eq!(
+                hits[0]["entity"]["id"],
+                nearest.id.to_string(),
+                "phase {phase}: {hits}"
+            );
+            let mcp = mcp_call(
+                &request,
+                &session,
+                &setup.api_key,
+                10 + phase,
+                "tools/call",
+                json!({"name":"search_entities","arguments":{"query_text":"beta","limit":10}}),
+            )
+            .await;
+            assert_eq!(mcp["result"]["isError"], false, "{mcp}");
+            assert_eq!(
+                tool_result_json(&mcp),
+                hits,
+                "phase {phase}: transport results agree"
+            );
+        }
+    })
+    .await;
+}
+
 /// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
 #[tokio::test]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {

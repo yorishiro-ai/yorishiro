@@ -10,7 +10,7 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "766fce07d1908db1120d42554a39a5f1f052b1da728248cd9f45a66e1293e023",
+    "tests": "2439927c908bf5e9ca2c825be96f1d27b6389d527e35d8bae2216c09c8413b96",
     "src": "095c44ba2d70299698cbf2f3b2873cf922cf8891cff097e6de097aa4bd24aac4",
     "ee": "4f73546fac8f6dbf312d424fa7bcc60d9d12b4c849fc7f957f2a922c7354407e",
     "migration": "c464d3395f6eba139f7d7fe0378f3c3a3583a565df3780acd907c40300bb3188",
@@ -189,6 +189,7 @@
     {"name":"tasks::tenant_reindex_scheduler::missing_lifecycle_table_returns_workspace_lookup_error","jobs":["common-sqlite"],"reason":"Shared task uses the EE-specific configure_deployment_metadata helper branch."}
   ],
   "exception_groups": [
+    {"source":"tests/requests/mcp.rs","editions":["ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL high-dimensional code-collapse fallback and recovery through REST and MCP with an owned worker fixture.","names":["requests::mcp::postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery"]},
     {"source":"tests/requests/embedding.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"PostgreSQL provider triggers must distinguish query-only updates from document invalidation; shared enterprise fixture requires licensed tenancy.","names":["requests::embedding::postgres_document_prefix_revision_contract"]},
     {"source":"tests/ee/tasks/reindex_scheduler.rs","editions":["ee"],"role":"postgres","jobs":["postgres"],"reason":"Retirement and scheduler contend on the real membership advisory fence in an owned deployment database.","names":["ee::tasks::reindex_scheduler::postgres_tick_waits_for_disable_and_rechecks_tenant_activity"]},
     {"source":"tests/db/migrations.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL first-migration concurrency guard.","names":["db::migrations::concurrent_first_postgres_migrations_use_one_connection_each"]},
