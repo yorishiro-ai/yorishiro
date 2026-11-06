@@ -293,7 +293,13 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("DROP INDEX CONCURRENTLY \"{bad}\"")).await.unwrap();
         assert!(sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE UNIQUE INDEX CONCURRENTLY \"{bad}\" ON {partition}(tenant_id)")).await.is_err());
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        assert!(exists(bad).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "invalid promoted graph is rebuilt");
+        assert!(exists(bad.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "invalid promoted graph is rebuilt");
+        // Attached partitions need not follow the original p0..p63 naming convention.
+        ctx.db.execute_unprepared(&format!("ALTER TABLE {partition} RENAME TO \"expanded_\"\"p90\"" )).await.unwrap();
+        ctx.db.execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{bad}\"" )).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(bad).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
+        ctx.db.execute_unprepared(&format!("ALTER TABLE \"expanded_\"\"p90\" RENAME TO {partition}" )).await.unwrap();
         // Deleting workspace metadata leaves no owned graph after the sweep.
         sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE INDEX CONCURRENTLY \"{index}\" ON {partition}(workspace_id)")).await.unwrap();
         let deletion = ctx.db.begin().await.unwrap();

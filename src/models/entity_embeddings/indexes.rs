@@ -23,7 +23,7 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
         .await
         .internal()?
         .detach();
-    let outcome = async {
+    let outcome: Result<(), YorishiroError> = async {
         let locked: bool = sea_orm::sqlx::query_scalar("SELECT pg_try_advisory_lock(hashtextextended('embedding-index-maintenance', 0))")
             .fetch_one(&mut conn).await.internal()?;
         if !locked { return Ok(()); }
@@ -59,11 +59,11 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                     .execute(&mut conn).await.internal()?;
             }
             let partition: Option<String> = sea_orm::sqlx::query_scalar(
-                "SELECT c.relname::text FROM entity_embeddings e JOIN pg_class c ON c.oid=e.tableoid WHERE e.workspace_id=$1 LIMIT 1")
+                "SELECT c.relname::text FROM entity_embeddings e JOIN pg_class c ON c.oid=e.tableoid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_inherits h ON h.inhrelid=c.oid WHERE e.workspace_id=$1 AND h.inhparent='public.entity_embeddings'::regclass AND n.nspname='public' LIMIT 1")
                 .bind(workspace.id).fetch_optional(&mut conn).await.internal()?;
             if let Some(partition) = partition {
-                let suffix = partition.strip_prefix("entity_embeddings_p").and_then(|s| s.parse::<u32>().ok());
-                if !suffix.is_some_and(|n| n < 64) { return Err(YorishiroError::Internal(anyhow::anyhow!("unexpected embedding partition"))); }
+                // Catalog membership identifies partitions; quote names independently of their spelling.
+                let partition = partition.replace('"', "\"\"");
                 sea_orm::sqlx::query("SET max_parallel_maintenance_workers=0").execute(&mut conn).await.internal()?;
                 let expression = if dimensions > 2000 {
                     format!("(binary_quantize(embedding)::bit({dimensions})) bit_hamming_ops")
