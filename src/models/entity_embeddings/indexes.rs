@@ -41,7 +41,7 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 }
                 continue;
             }
-            let Some(dimensions @ 1..=4096) = workspace.embedding_dimensions else { continue; };
+            let Some(dimensions @ 1..=4000) = workspace.embedding_dimensions else { continue; };
             let name = format!("ysr_hnsw_{}_d{dimensions}", workspace.id.simple());
             let valid = existing.iter().any(|(index, valid)| index == &name && *valid);
             let count = entity_embeddings::Entity::find()

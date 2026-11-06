@@ -523,13 +523,14 @@ pub fn vector_candidates_query(
         .limit(limit as u64);
     let degenerate =
         vector.iter().all(|value| *value > 0.0) || vector.iter().all(|value| *value <= 0.0);
-    if !sqlite && dimensions > 2000 && degenerate {
+    if !sqlite && dimensions > 2000 && dimensions <= 4000 && degenerate {
         tracing::warn!(
             dimensions,
             "sign-degenerate query uses exact cosine search to avoid binary candidate collapse"
         );
     }
-    if !sqlite && dimensions > 2000 && !degenerate {
+    // Above the full-dimensional halfvec index limit, retain original cosine instead of binary candidates.
+    if !sqlite && dimensions > 2000 && dimensions <= 4000 && !degenerate {
         // Inspect the same scoped rows in this statement so writes cannot race a cached quality flag.
         let mut codes = knn.clone();
         let code = Func::cust(Alias::new("binary_quantize")).arg(embedding.clone());

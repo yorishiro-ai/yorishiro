@@ -52,13 +52,16 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
                 fixture.workspace_id, vec![1.0,0.0], text, &query()).unwrap());
             assert_eq!(statement.sql.contains("word_similarity"), eligible, "{text}: {}", statement.sql);
         }
-        let mut signed = vec![1.0_f32;4096]; signed[0] = -1.0;
+        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
         let binary = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
         let sql = ctx.db.get_database_backend().build(&binary).sql;
         assert!(sql.contains("binary_quantize") && sql.contains("<~>"));
         assert!(!sql.contains("\"w\".\"id\" = \"e\".\"workspace_id\""), "reindex guard must not correlate the ANN join");
         let positive = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4096], &query()).unwrap();
-        assert!(!ctx.db.get_database_backend().build(&positive).sql.contains("<~>"), "sign-degenerate queries need exact safety fallback");
+        assert!(!ctx.db.get_database_backend().build(&positive).sql.contains("<~>"), "above 4000 dimensions always uses original cosine");
+        let mut signed = vec![1.0_f32;4001]; signed[0] = -1.0;
+        let exact = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
+        assert!(!ctx.db.get_database_backend().build(&exact).sql.contains("binary_quantize"));
         assert!(search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4097], &query()).is_err());
         let baseline = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "", query()).await.unwrap();
         let common = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "common", query()).await.unwrap();
@@ -236,33 +239,42 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(!stamped.embedding_reindexing);
         // Exercise the real high-dimensional index lifecycle, not only generated SQL.
         vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
-            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4096])))
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4000])))
             .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
-            sea_orm::sea_query::Expr::value(4096)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+            sea_orm::sea_query::Expr::value(4000)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        let high_index = format!("ysr_hnsw_{}_d4096", fixture.workspace_id.simple());
+        let high_index = format!("ysr_hnsw_{}_d4000", fixture.workspace_id.simple());
         assert!(exists(high_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
         let definition = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
             "SELECT pg_get_indexdef(to_regclass($1)) AS definition", [high_index.clone().into()])).await.unwrap().unwrap().try_get::<String>("", "definition").unwrap();
-        assert!(definition.contains("binary_quantize") && definition.contains("bit(4096)") && definition.contains("bit_hamming_ops"));
+        assert!(definition.contains("binary_quantize") && definition.contains("bit(4000)") && definition.contains("bit_hamming_ops"));
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4096], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4000], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(positive.len(), 10);
         assert!(positive.iter().all(|hit| hit.distance.unwrap().abs() < 0.00001));
-        let mut nearest = vec![1.0_f32;4096]; nearest[0] = 0.001;
+        let mut nearest = vec![1.0_f32;4000]; nearest[0] = 0.001;
         vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
             sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(nearest)))
             .filter(vectors::Column::EntityId.eq(ids[1])).exec(&ctx.db).await.unwrap();
         tenant.rollback().await.unwrap();
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let mut signed = vec![1.0_f32;4096]; signed[0] = -1.0;
+        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
         let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(reranked.len(), 10);
         assert_eq!(reranked[0].entity.id, ids[1], "collapsed document codes must use original cosine even for mixed-sign queries");
         assert!(reranked.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
         assert!(reranked.windows(2).all(|pair| pair[0].distance <= pair[1].distance));
         tenant.rollback().await.unwrap();
+        // Unsupported ANN dimensions retire the previous graph automatically.
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4096])))
+            .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(4096)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(high_index.clone()).await.unwrap().is_none());
+        assert!(exists(format!("ysr_hnsw_{}_d4096", fixture.workspace_id.simple())).await.unwrap().is_none());
         vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
             sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;7])))
             .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
