@@ -532,19 +532,22 @@ pub fn vector_candidates_query(
     if !sqlite && dimensions > 2000 && !degenerate {
         // Inspect the same scoped rows in this statement so writes cannot race a cached quality flag.
         let mut codes = knn.clone();
+        let code = Func::cust(Alias::new("binary_quantize")).arg(embedding.clone());
         codes
             .clear_selects()
             .clear_order_by()
-            .distinct()
-            .expr(Func::cust(Alias::new("binary_quantize")).arg(embedding.clone()))
-            .limit(2);
-        let count = Query::select()
-            .expr(Expr::cust("count(*)"))
-            .from_subquery(codes, Alias::new("codes"))
-            .to_owned();
-        let collapsed = Expr::SubQuery(None, Box::new(count.into()));
+            .expr(code.clone())
+            .limit(1);
+        let mut different = knn.clone();
+        different
+            .clear_selects()
+            .clear_order_by()
+            .expr(Expr::val(1))
+            .and_where(Expr::expr(code).ne(Expr::SubQuery(None, Box::new(codes.into()))))
+            .limit(1);
+        let diverse = Expr::exists(different);
         let mut exact = knn.clone();
-        exact.and_where(collapsed.clone().lte(1));
+        exact.and_where(diverse.clone().not());
         let binary = |value: Expr| {
             Func::cust(Alias::new("binary_quantize"))
                 .arg(value)
@@ -561,7 +564,7 @@ pub fn vector_candidates_query(
         reranked
             .column((Alias::new("candidates"), sea_orm::sea_query::Asterisk))
             .from_subquery(knn, Alias::new("candidates"))
-            .and_where(collapsed.gt(1))
+            .and_where(diverse)
             .order_by(Alias::new("distance"), Order::Asc)
             .limit(limit as u64);
         reranked.union(sea_orm::sea_query::UnionType::All, exact);
