@@ -42,6 +42,7 @@
     "resource-live":{"database":"sqlite","queue":"sqlite","manual_external":true,"status":"opt-in-not-required","requires":"Explicitly configured private live endpoint; retained opt-in ignored coverage, never reported as passed by ordinary CI."}
   },
   "postgres_dedicated": [
+    {"name":"requests::mcp::postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery","source":"tests/requests/mcp.rs"},
     {"name":"ee::tasks::reindex_scheduler::postgres_tick_waits_for_disable_and_rechecks_tenant_activity","source":"tests/ee/tasks/reindex_scheduler.rs"},
     {"name":"db::migrations::concurrent_first_postgres_migrations_use_one_connection_each","source":"tests/db/migrations.rs"},
     {"name":"initializers::shutdown::shutdown_hook_keeps_database_available_until_loco_drains_workers","source":"tests/initializers/shutdown.rs"},
