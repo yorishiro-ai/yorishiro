@@ -134,10 +134,8 @@ fn scoped_search(workspace_id: Uuid, query: &SearchQuery) -> SelectStatement {
     let reindexing = Query::select()
         .expr(Expr::val(1))
         .from_as(Alias::new("workspace_workspaces"), Alias::new("w"))
-        .and_where(
-            Expr::col((Alias::new("w"), Alias::new("id")))
-                .equals((Alias::new("e"), Column::WorkspaceId)),
-        )
+        // Workspace is fixed above; an uncorrelated guard avoids distorting ANN join estimates.
+        .and_where(Expr::col((Alias::new("w"), Alias::new("id"))).eq(workspace_id))
         .and_where(Expr::col((Alias::new("w"), Alias::new("embedding_reindexing"))).eq(true))
         .to_owned();
     select.and_where(Expr::exists(reindexing).not());

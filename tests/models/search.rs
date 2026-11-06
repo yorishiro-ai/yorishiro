@@ -56,6 +56,7 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
         let binary = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
         let sql = ctx.db.get_database_backend().build(&binary).sql;
         assert!(sql.contains("binary_quantize") && sql.contains("<~>"));
+        assert!(!sql.contains("\"w\".\"id\" = \"e\".\"workspace_id\""), "reindex guard must not correlate the ANN join");
         let positive = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4096], &query()).unwrap();
         assert!(!ctx.db.get_database_backend().build(&positive).sql.contains("<~>"), "sign-degenerate queries need exact safety fallback");
         assert!(search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4097], &query()).is_err());
