@@ -250,9 +250,16 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4096], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(positive.len(), 10);
         assert!(positive.iter().all(|hit| hit.distance.unwrap().abs() < 0.00001));
+        let mut nearest = vec![1.0_f32;4096]; nearest[0] = 0.001;
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(nearest)))
+            .filter(vectors::Column::EntityId.eq(ids[1])).exec(&ctx.db).await.unwrap();
+        tenant.rollback().await.unwrap();
+        let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         let mut signed = vec![1.0_f32;4096]; signed[0] = -1.0;
         let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(reranked.len(), 10);
+        assert_eq!(reranked[0].entity.id, ids[1], "collapsed document codes must use original cosine even for mixed-sign queries");
         assert!(reranked.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
         assert!(reranked.windows(2).all(|pair| pair[0].distance <= pair[1].distance));
         tenant.rollback().await.unwrap();
