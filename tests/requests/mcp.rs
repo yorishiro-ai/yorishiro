@@ -2685,10 +2685,6 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             } }),
         )
         .await;
-        assert_eq!(filtered["result"]["isError"], false, "{filtered}");
-        let filtered_hits = tool_result_json(&filtered);
-        assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
-        assert_eq!(filtered_hits[0]["entity"]["id"], candidates[0].to_string());
         let rest = request
             .get("/api/search")
             .add_query_param("query_text", "beta")
@@ -2697,12 +2693,28 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             .add_query_param("limit", "1")
             .add_header("Authorization", format!("Bearer {read_key}"))
             .await;
-        rest.assert_status(StatusCode::OK);
-        assert_eq!(
-            rest.json::<Value>(),
-            filtered_hits,
-            "filters agree across transports"
-        );
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            assert_eq!(filtered["result"]["isError"], true, "{filtered}");
+            assert!(
+                filtered["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("content filtering is not supported on SQLite")
+            );
+            rest.assert_status(StatusCode::NOT_IMPLEMENTED);
+            assert_eq!(rest.json::<Value>()["error"]["code"], "backend_unsupported");
+        } else {
+            assert_eq!(filtered["result"]["isError"], false, "{filtered}");
+            let filtered_hits = tool_result_json(&filtered);
+            assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
+            assert_eq!(filtered_hits[0]["entity"]["id"], candidates[0].to_string());
+            rest.assert_status(StatusCode::OK);
+            assert_eq!(
+                rest.json::<Value>(),
+                filtered_hits,
+                "filters agree across transports"
+            );
+        }
         let calls = inputs.lock().unwrap().len();
         let (failed_provider, _failed_server) = unavailable_provider().await;
         let reindex =
