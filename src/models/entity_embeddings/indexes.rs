@@ -42,7 +42,11 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 continue;
             }
             let Some(dimensions @ 1..=4000) = workspace.embedding_dimensions else { continue; };
-            let name = format!("ysr_hnsw_{}_d{dimensions}", workspace.id.simple());
+            let name = if dimensions > 2000 {
+                format!("ysr_hnsw_{}_d{dimensions}_nl2", workspace.id.simple())
+            } else {
+                format!("ysr_hnsw_{}_d{dimensions}", workspace.id.simple())
+            };
             let valid = existing.iter().any(|(index, valid)| index == &name && *valid);
             let count = entity_embeddings::Entity::find()
                 .select_only().column(entity_embeddings::Column::EntityId)
@@ -66,7 +70,7 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 let partition = partition.replace('"', "\"\"");
                 sea_orm::sqlx::query("SET max_parallel_maintenance_workers=0").execute(&mut conn).await.internal()?;
                 let expression = if dimensions > 2000 {
-                    format!("(binary_quantize(embedding)::bit({dimensions})) bit_hamming_ops")
+                    format!("(l2_normalize(embedding)::halfvec({dimensions})) halfvec_l2_ops")
                 } else {
                     format!("(embedding::vector({dimensions})) vector_cosine_ops")
                 };

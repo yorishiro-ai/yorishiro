@@ -521,54 +521,27 @@ pub fn vector_candidates_query(
         .and_where(embedding.clone().is_not_null())
         .order_by_expr(distance, Order::Asc)
         .limit(limit as u64);
-    let degenerate =
-        vector.iter().all(|value| *value > 0.0) || vector.iter().all(|value| *value <= 0.0);
-    if !sqlite && dimensions > 2000 && dimensions <= 4000 && degenerate {
-        tracing::warn!(
-            dimensions,
-            "sign-degenerate query uses exact cosine search to avoid binary candidate collapse"
-        );
-    }
-    // Above the full-dimensional halfvec index limit, retain original cosine instead of binary candidates.
-    if !sqlite && dimensions > 2000 && dimensions <= 4000 && !degenerate {
-        // Inspect the same scoped rows in this statement so writes cannot race a cached quality flag.
-        let mut codes = knn.clone();
-        let code = Func::cust(Alias::new("binary_quantize")).arg(embedding.clone());
-        codes
-            .clear_selects()
-            .clear_order_by()
-            .expr(code.clone())
-            .limit(1);
-        let mut different = knn.clone();
-        different
-            .clear_selects()
-            .clear_order_by()
-            .expr(Expr::val(1))
-            .and_where(Expr::expr(code).ne(Expr::SubQuery(None, Box::new(codes.into()))))
-            .limit(1);
-        let diverse = Expr::exists(different);
-        let mut exact = knn.clone();
-        exact.and_where(diverse.clone().not());
-        let binary = |value: Expr| {
-            Func::cust(Alias::new("binary_quantize"))
+    // Normalize before half precision so provider vector lengths do not change candidate ranks.
+    // Original cosine remains the final distance; half precision and HNSW are approximate.
+    if !sqlite && (2001..=4000).contains(&dimensions) {
+        let normalized = |value: Expr| {
+            Func::cust(Alias::new("l2_normalize"))
                 .arg(value)
-                .cast_as(Alias::new(format!("bit({dimensions})")))
+                .cast_as(Alias::new(format!("halfvec({dimensions})")))
         };
-        let hamming = binary(embedding).binary(
-            sea_orm::sea_query::BinOper::Custom("<~>"),
-            binary(Expr::val(sea_orm::entity::prelude::PgVector::from(vector))),
+        let candidate_distance = normalized(embedding).binary(
+            sea_orm::sea_query::BinOper::Custom("<->"),
+            normalized(Expr::val(sea_orm::entity::prelude::PgVector::from(vector))),
         );
         knn.clear_order_by()
-            .order_by_expr(hamming, Order::Asc)
+            .order_by_expr(candidate_distance, Order::Asc)
             .limit(1000);
         let mut reranked = Query::select();
         reranked
             .column((Alias::new("candidates"), sea_orm::sea_query::Asterisk))
             .from_subquery(knn, Alias::new("candidates"))
-            .and_where(diverse)
             .order_by(Alias::new("distance"), Order::Asc)
             .limit(limit as u64);
-        reranked.union(sea_orm::sea_query::UnionType::All, exact);
         return Ok(reranked);
     }
     Ok(knn)

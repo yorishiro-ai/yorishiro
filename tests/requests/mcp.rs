@@ -2596,7 +2596,7 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     .await;
 }
 
-/// Both transports retain the nearest document when stored binary codes collapse or become diverse.
+/// Normalized halfvec candidates retain the nearest original cosine through both transports.
 #[tokio::test]
 async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
     use super::query_worker::boot_with_query_worker;
@@ -2606,7 +2606,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
     if !crate::require_postgres_backend() {
         return;
     }
-    let (provider, _server, _) = crate::http_stub::keyword_provider(4096).await;
+    let (provider, _server, _) = crate::http_stub::keyword_provider(4000).await;
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::from_value(json!({
@@ -2646,7 +2646,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
         .await
         .unwrap();
         let mut embeddings = Vec::new();
-        // More documents than the binary candidate cap make code collapse observable.
+        // Exceed the candidate cap to exercise retrieval followed by original-cosine reranking.
         for i in 0..1001 {
             let document = entity_entities::create(
                 &ctx.db,
@@ -2666,7 +2666,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 tenant_id: Set(setup.tenant_id),
                 embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![
                     1.0;
-                    4096
+                    4000
                 ]))),
             });
         }
@@ -2676,7 +2676,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
             .unwrap();
         let session = initialize(&request).await;
         for (phase, background) in [(0, 0.001_f32), (1, -0.001_f32)] {
-            let mut vector = vec![background; 4096];
+            let mut vector = vec![background; 4000];
             vector[1] = 1.0;
             vectors::Entity::update_many()
                 .col_expr(
