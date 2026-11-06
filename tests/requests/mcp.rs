@@ -2603,7 +2603,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use crate::http_stub::{keyword_provider, unavailable_provider};
     use yorishiro::models::entity_embeddings;
 
-    let (provider, _server, inputs) = keyword_provider(768).await;
+    let (provider, _server, inputs) = keyword_provider(4096).await;
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
         let TestTenant {
             tenant_id,
@@ -2662,6 +2662,46 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
         assert_eq!(
             hits[0]["entity"]["data"]["title"], "beta plan",
             "nearest entity first: {hits}"
+        );
+        let rest = request
+            .get("/api/search?query_text=beta&limit=2")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(
+            rest.json::<Value>(),
+            hits,
+            "search results agree across transports"
+        );
+        let filtered = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            5,
+            "tools/call",
+            json!({ "name": "search_entities", "arguments": {
+                "query_text": "beta", "entity_type": "note",
+                "filter": { "title": "alpha plan" }, "limit": 1
+            } }),
+        )
+        .await;
+        assert_eq!(filtered["result"]["isError"], false, "{filtered}");
+        let filtered_hits = tool_result_json(&filtered);
+        assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
+        assert_eq!(filtered_hits[0]["entity"]["id"], candidates[0].to_string());
+        let rest = request
+            .get("/api/search")
+            .add_query_param("query_text", "beta")
+            .add_query_param("entity_type", "note")
+            .add_query_param("filter", r#"{"title":"alpha plan"}"#)
+            .add_query_param("limit", "1")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(
+            rest.json::<Value>(),
+            filtered_hits,
+            "filters agree across transports"
         );
         let calls = inputs.lock().unwrap().len();
         let (failed_provider, _failed_server) = unavailable_provider().await;
