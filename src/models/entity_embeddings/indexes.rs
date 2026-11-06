@@ -41,12 +41,8 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 }
                 continue;
             }
-            let Some(dimensions @ 1..=4000) = workspace.embedding_dimensions else { continue; };
-            let name = if dimensions > 2000 {
-                format!("ysr_hnsw_{}_d{dimensions}_nl2", workspace.id.simple())
-            } else {
-                format!("ysr_hnsw_{}_d{dimensions}", workspace.id.simple())
-            };
+            let Some(dimensions @ 1..=2000) = workspace.embedding_dimensions else { continue; };
+            let name = format!("ysr_hnsw_{}_d{dimensions}", workspace.id.simple());
             let valid = existing.iter().any(|(index, valid)| index == &name && *valid);
             let count = entity_embeddings::Entity::find()
                 .select_only().column(entity_embeddings::Column::EntityId)
@@ -69,11 +65,7 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 // Catalog membership identifies partitions; quote names independently of their spelling.
                 let partition = partition.replace('"', "\"\"");
                 sea_orm::sqlx::query("SET max_parallel_maintenance_workers=0").execute(&mut conn).await.internal()?;
-                let expression = if dimensions > 2000 {
-                    format!("(l2_normalize(embedding)::halfvec({dimensions})) halfvec_l2_ops")
-                } else {
-                    format!("(embedding::vector({dimensions})) vector_cosine_ops")
-                };
+                let expression = format!("(embedding::vector({dimensions})) vector_cosine_ops");
                 sea_orm::sqlx::query(AssertSqlSafe(format!("CREATE INDEX CONCURRENTLY \"{name}\" ON public.\"{partition}\" USING hnsw ({expression}) WITH (m=32, ef_construction=128) WHERE workspace_id='{}'::uuid AND vector_dims(embedding)={dimensions}", workspace.id)))
                     .execute(&mut conn).await.internal()?;
             }

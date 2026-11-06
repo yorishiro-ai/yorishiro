@@ -2596,7 +2596,7 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     .await;
 }
 
-/// Normalized halfvec candidates retain the nearest original cosine through both transports.
+/// High-dimensional exact search retains the nearest original cosine through both transports.
 #[tokio::test]
 async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
     use super::query_worker::boot_with_query_worker;
@@ -2646,7 +2646,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
         .await
         .unwrap();
         let mut embeddings = Vec::new();
-        // Exceed the candidate cap to exercise retrieval followed by original-cosine reranking.
+        // Exceed the former candidate cap to protect against reintroducing candidate loss.
         for i in 0..1001 {
             let document = entity_entities::create(
                 &ctx.db,

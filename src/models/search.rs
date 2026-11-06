@@ -521,28 +521,7 @@ pub fn vector_candidates_query(
         .and_where(embedding.clone().is_not_null())
         .order_by_expr(distance, Order::Asc)
         .limit(limit as u64);
-    // Normalize before half precision so provider vector lengths do not change candidate ranks.
-    // Original cosine remains the final distance; half precision and HNSW are approximate.
-    if !sqlite && (2001..=4000).contains(&dimensions) {
-        let normalized = |value: Expr| {
-            Func::cust(Alias::new("l2_normalize"))
-                .arg(value)
-                .cast_as(Alias::new(format!("halfvec({dimensions})")))
-        };
-        let candidate_distance = normalized(embedding).binary(
-            sea_orm::sea_query::BinOper::Custom("<->"),
-            normalized(Expr::val(sea_orm::entity::prelude::PgVector::from(vector))),
-        );
-        knn.clear_order_by()
-            .order_by_expr(candidate_distance, Order::Asc)
-            .limit(1000);
-        let mut reranked = Query::select();
-        reranked
-            .column((Alias::new("candidates"), sea_orm::sea_query::Asterisk))
-            .from_subquery(knn, Alias::new("candidates"))
-            .order_by(Alias::new("distance"), Order::Asc)
-            .limit(limit as u64);
-        return Ok(reranked);
-    }
+    // High-dimensional ANN candidates failed nearest-document regression on duplicate vectors.
+    // Keep original cosine exact until a replacement passes the same regression.
     Ok(knn)
 }

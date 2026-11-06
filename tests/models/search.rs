@@ -55,7 +55,7 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
         let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
         let binary = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
         let sql = ctx.db.get_database_backend().build(&binary).sql;
-        assert!(sql.contains("l2_normalize") && sql.contains("halfvec(4000)") && sql.contains("<->"));
+        assert!(sql.contains("<=>") && !sql.contains("halfvec"));
         assert!(!sql.contains("binary_quantize"));
         assert!(!sql.contains("\"w\".\"id\" = \"e\".\"workspace_id\""), "reindex guard must not correlate the ANN join");
         let positive = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4096], &query()).unwrap();
@@ -244,16 +244,18 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
             .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
             sea_orm::sea_query::Expr::value(4000)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
-        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         let high_index = format!("ysr_hnsw_{}_d4000_nl2", fixture.workspace_id.simple());
         let legacy_index = format!("ysr_hnsw_{}_d4000", fixture.workspace_id.simple());
-        ctx.db.execute_unprepared(&format!("ALTER INDEX \"{high_index}\" RENAME TO \"{legacy_index}\" ")).await.unwrap();
+        let partition = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1", fixture.workspace_id)))
+            .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
+        // Catalog cleanup must retire both abandoned high-dimensional index identities.
+        for name in [&high_index, &legacy_index] {
+            ctx.db.execute_unprepared(&format!("CREATE INDEX \"{name}\" ON {partition}(workspace_id)")).await.unwrap();
+        }
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        assert!(exists(legacy_index).await.unwrap().is_none(), "legacy index identity must be retired");
-        assert!(exists(high_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
-        let definition = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
-            "SELECT pg_get_indexdef(to_regclass($1)) AS definition", [high_index.clone().into()])).await.unwrap().unwrap().try_get::<String>("", "definition").unwrap();
-        assert!(definition.contains("l2_normalize") && definition.contains("halfvec(4000)") && definition.contains("halfvec_l2_ops"));
+        assert!(exists(high_index.clone()).await.unwrap().is_none());
+        assert!(exists(legacy_index).await.unwrap().is_none());
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4000], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(positive.len(), 10);
@@ -267,7 +269,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
         let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(reranked.len(), 10);
-        assert_eq!(reranked[0].entity.id, ids[1], "normalized halfvec candidates must retain the closest original cosine");
+        assert_eq!(reranked[0].entity.id, ids[1], "high-dimensional exact must retain the closest original cosine");
         assert!(reranked.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
         assert!(reranked.windows(2).all(|pair| pair[0].distance <= pair[1].distance));
         tenant.rollback().await.unwrap();
