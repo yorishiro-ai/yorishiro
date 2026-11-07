@@ -126,7 +126,7 @@ async fn postgres_qwen06_materialized_recall() {
         })
         .collect();
     assert!(corpus.iter().flatten().all(|value| value.is_finite()));
-    boot_request::<App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         schema_schemas::create_schema(
