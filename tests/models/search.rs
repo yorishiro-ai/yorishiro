@@ -94,6 +94,213 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
 }
 
 #[tokio::test]
+async fn postgres_qwen06_materialized_recall() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, IntoActiveModel};
+    use sha2::{Digest, Sha256};
+    use yorishiro::models::_entities::{entity_embeddings as vectors, entity_entities as entities};
+
+    let metadata: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/search/qwen06.json")).unwrap();
+    let bytes = include_bytes!("../fixtures/search/qwen06.f32");
+    assert_eq!(
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+        metadata["sha256"].as_str().unwrap()
+    );
+    assert_eq!(bytes.len(), (2100 + 12) * 1024 * 4);
+    let corpus: Vec<Vec<f32>> = bytes
+        .as_chunks::<{ 1024 * 4 }>()
+        .0
+        .iter()
+        .map(|row| {
+            row.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|value| f32::from_le_bytes(*value))
+                .collect()
+        })
+        .collect();
+    assert!(corpus.iter().flatten().all(|value| value.is_finite()));
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let seed = entity_entities::create(
+            &ctx.db,
+            fixture.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({"title":"corpus seed"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let original = entities::Entity::find_by_id(seed.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let ids: Vec<_> = (0..2100).map(|_| uuid::Uuid::now_v7()).collect();
+        entities::Entity::insert_many(ids.iter().enumerate().map(|(i, id)| {
+            let mut row = original.clone().into_active_model();
+            row.id = Set(*id);
+            row.data = Set(serde_json::json!({"title": metadata["documents"][i]}));
+            row
+        }))
+        .exec(&ctx.db)
+        .await
+        .unwrap();
+        for (id_batch, vector_batch) in ids.chunks(100).zip(corpus[..2100].chunks(100)) {
+            vectors::Entity::insert_many(id_batch.iter().zip(vector_batch).map(|(id, vector)| {
+                vectors::ActiveModel {
+                    workspace_id: Set(fixture.workspace_id),
+                    entity_id: Set(*id),
+                    tenant_id: Set(fixture.tenant_id),
+                    embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(
+                        vector.clone(),
+                    ))),
+                }
+            }))
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        }
+        let mut workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        workspace.embedding_dimensions = Set(Some(1024));
+        workspace.embedding_model = Set(Some("qwen-embedding-3-0.6b".into()));
+        workspace.update(&ctx.db).await.unwrap();
+        let index = format!("ysr_hnsw_{}_d1024", fixture.workspace_id.simple());
+        for build in 0..3 {
+            entity_embeddings::maintain_workspace_indexes(&ctx.db)
+                .await
+                .unwrap();
+            ctx.db
+                .execute_unprepared("ANALYZE entity_entities; ANALYZE entity_embeddings")
+                .await
+                .unwrap();
+            let txn = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id)
+                .await
+                .unwrap();
+            for (i, vector) in corpus[2100..].iter().enumerate() {
+                let query = search::SearchQuery {
+                    limit: 10,
+                    ..Default::default()
+                };
+                let statement = ctx.db.get_database_backend().build(
+                    &search::postgres_rrf_query(fixture.workspace_id, vector.clone(), "", &query)
+                        .unwrap(),
+                );
+                assert!(
+                    statement.sql.contains("MATERIALIZED") && statement.to_string().contains("LIMIT 1000")
+                );
+                txn.execute_unprepared(
+                    "SET LOCAL hnsw.ef_search=400; SET LOCAL hnsw.iterative_scan=relaxed_order",
+                )
+                .await
+                .unwrap();
+                let mut explain = statement.clone();
+                explain.sql = format!("EXPLAIN (ANALYZE, FORMAT JSON) {}", explain.sql);
+                let plan = txn
+                    .query_one_raw(explain)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .try_get::<serde_json::Value>("", "QUERY PLAN")
+                    .unwrap();
+                let mut nodes = vec![&plan[0]["Plan"]];
+                let mut hnsw_used = false;
+                let mut candidates_used = false;
+                while let Some(node) = nodes.pop() {
+                    if node["Index Name"].as_str() == Some(&index) {
+                        assert!(node["Actual Loops"].as_f64().unwrap() > 0.0);
+                        assert!(
+                            node["Actual Rows"].as_f64().unwrap()
+                                * node["Actual Loops"].as_f64().unwrap()
+                                <= 1000.0
+                        );
+                        hnsw_used = true;
+                    }
+                    if node["CTE Name"].as_str() == Some("ann_candidates") {
+                        candidates_used |= node["Actual Loops"].as_f64().unwrap() > 0.0;
+                    }
+                    if let Some(children) = node["Plans"].as_array() {
+                        nodes.extend(children);
+                    }
+                }
+                assert!(hnsw_used && candidates_used, "{plan}");
+                let hits =
+                    search::search_by_vector(&txn, fixture.workspace_id, vector.clone(), "", query)
+                        .await
+                        .unwrap();
+                txn.execute_unprepared(
+                    "SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off",
+                )
+                .await
+                .unwrap();
+                let exact_statement = ctx.db.get_database_backend().build(
+                    &search::vector_candidates_query(
+                        sea_orm::DatabaseBackend::Postgres,
+                        fixture.workspace_id,
+                        vector.clone(),
+                        &search::SearchQuery {
+                            limit: 10,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap(),
+                );
+                let exact: Vec<uuid::Uuid> = txn
+                    .query_all_raw(exact_statement)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|row| row.try_get("", "id").unwrap())
+                    .collect();
+                txn.execute_unprepared(
+                    "SET LOCAL enable_indexscan=on; SET LOCAL enable_bitmapscan=on",
+                )
+                .await
+                .unwrap();
+                assert_eq!(hits.len(), 10);
+                assert_eq!(hits[0].entity.id, exact[0], "build={build}, query={i}");
+                assert!(
+                    hits.iter().all(|hit| exact.contains(&hit.entity.id)),
+                    "recall@10 must be 1: build={build}, query={i}"
+                );
+            }
+            println!("Qwen0.6B build {build}: 12/12 queries recall@10=1 and exact top1; materialized HNSW candidates <=1000");
+            txn.rollback().await.unwrap();
+            ctx.db
+                .execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{index}\""))
+                .await
+                .unwrap();
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn postgres_workspace_hnsw_promotion_and_cleanup() {
     if !crate::require_postgres_backend() {
         return;

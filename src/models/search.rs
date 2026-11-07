@@ -208,7 +208,7 @@ pub async fn search_by_vector(
         let ef_search = if vector.len() > 2000 {
             1000
         } else {
-            std::cmp::max(query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT), 200)
+            std::cmp::max(query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT), 400)
         };
         // SeaORM cannot express transaction-local PostgreSQL settings.
         txn.execute_raw(sea_orm::Statement::from_sql_and_values(
@@ -369,12 +369,26 @@ pub fn postgres_rrf_query(
     let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
     let mut candidates = query.clone();
     candidates.limit = std::cmp::max(limit, 50);
-    let vectors = vector_candidates_query(
+    let vector_dimensions = vector.len();
+    let mut vectors = vector_candidates_query(
         sea_orm::DatabaseBackend::Postgres,
         workspace_id,
         vector,
         &candidates,
     )?;
+    let mut ann_candidates = None;
+    if vector_dimensions <= 2000 {
+        // Relaxed HNSW can emit closer rows after the initial result batch.
+        vectors.limit(1000);
+        ann_candidates = Some(vectors);
+        vectors = Query::select()
+            .column(sea_orm::sea_query::Asterisk)
+            .from(Alias::new("ann_candidates"))
+            .order_by_expr(Expr::cust("distance + 0"), Order::Asc)
+            .order_by(Alias::new("id"), Order::Asc)
+            .limit(candidates.limit as u64)
+            .to_owned();
+    }
     let mut texts = scoped_search(workspace_id, query);
     let normalized = Expr::cust("normalize(\"e\".\"data\"::text, nfkc)");
     let pattern = format!(
@@ -436,6 +450,15 @@ pub fn postgres_rrf_query(
         .group_by_col(Alias::new("id"))
         .to_owned();
     let mut with = WithClause::new();
+    if let Some(statement) = ann_candidates {
+        with.cte(
+            CommonTableExpression::new()
+                .table_name(Alias::new("ann_candidates"))
+                .query(statement)
+                .materialized(true)
+                .to_owned(),
+        );
+    }
     for (name, statement) in [
         ("vectors", vectors),
         ("texts", texts),
