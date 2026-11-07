@@ -71,7 +71,8 @@ async fn stamped_model(ctx: &loco_rs::app::AppContext, workspace_id: uuid::Uuid)
 }
 
 async fn embedding_is_set(ctx: &loco_rs::app::AppContext, entity_id: uuid::Uuid) -> bool {
-    entity_embeddings::Entity::find_by_id(entity_id)
+    entity_embeddings::Entity::find()
+        .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity_id))
         .select_only()
         .column_as(
             yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
@@ -115,6 +116,8 @@ async fn http_provider(
         model: model.into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (provider, server)
 }
@@ -250,6 +253,8 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
             model: "intfloat/multilingual-e5-base".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         let reindex = yorishiro::db::reindex_workspace_with_lock(
             &ctx,
@@ -322,6 +327,8 @@ async fn reindex_rejects_entities_added_after_enumeration() {
             model: "intfloat/multilingual-e5-base".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         let reindex = yorishiro::db::reindex_workspace_with_lock(
             &ctx,
@@ -385,6 +392,8 @@ async fn old_embedding_response_cannot_overwrite_completed_reindex() {
             model: "nomic-ai/nomic-embed-text-v1.5".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         let reindex = entity_embeddings::sync_embedding_for_record(&ctx.db, workspace_id, &first, &provider);
         let modify = async {
@@ -446,6 +455,8 @@ async fn newer_reindex_supersedes_a_paused_run() {
             model: "intfloat/multilingual-e5-base".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         let reindex = entity_embeddings::reindex_workspace(
             &ctx.db,

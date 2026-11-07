@@ -24,6 +24,641 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
+#[tokio::test]
+async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+        use yorishiro::models::_entities::entity_embeddings as vectors;
+        let mut rare = None;
+        for i in 0..60 {
+            let entity = entity_entities::create(&ctx.db, fixture.workspace_id, entity_entities::CreateEntityInput {
+                schema_name:"note".into(), entity_type:"note".into(),
+                data:serde_json::json!({"title":if i==20 {"common ERR-4821x"} else {"common document"}})
+            }, None).await.unwrap();
+            vectors::ActiveModel { workspace_id:Set(fixture.workspace_id), entity_id:Set(entity.id),
+                tenant_id:Set(fixture.tenant_id), embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0, i as f32 / 60.0 + 0.01]))) }
+                .insert(&ctx.db).await.unwrap();
+            if i==20 { rare=Some(entity.id); }
+        }
+        let query = || search::SearchQuery { limit:10, ..Default::default() };
+        for (text, eligible) in [("boundary", true), ("ERR-4821x", true), ("café", true), ("Łódź", true), ("Việt", true), ("a\u{301}bc", true), ("éà", false), ("a\u{301}b", false), ("Αθήνα", false), ("Москва", false), ("ab", false), ("東京", false), ("東京都", false)] {
+            let statement = ctx.db.get_database_backend().build(&search::postgres_rrf_query(
+                fixture.workspace_id, vec![1.0,0.0], text, &query()).unwrap());
+            assert_eq!(statement.sql.contains("word_similarity"), eligible, "{text}: {}", statement.sql);
+        }
+        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
+        let binary = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
+        let sql = ctx.db.get_database_backend().build(&binary).sql;
+        assert!(sql.contains("<=>") && !sql.contains("halfvec"));
+        assert!(!sql.contains("binary_quantize"));
+        assert!(!sql.contains("\"w\".\"id\" = \"e\".\"workspace_id\""), "reindex guard must not correlate the ANN join");
+        let positive = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4096], &query()).unwrap();
+        assert!(!ctx.db.get_database_backend().build(&positive).sql.contains("<~>"), "above 4000 dimensions always uses original cosine");
+        let mut signed = vec![1.0_f32;4001]; signed[0] = -1.0;
+        let exact = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
+        assert!(!ctx.db.get_database_backend().build(&exact).sql.contains("binary_quantize"));
+        assert!(search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4097], &query()).is_err());
+        let baseline = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "", query()).await.unwrap();
+        let common = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "common", query()).await.unwrap();
+        assert_eq!(baseline.iter().map(|h|h.entity.id).collect::<Vec<_>>(),common.iter().map(|h|h.entity.id).collect::<Vec<_>>(), "21+ matches must disable text list");
+        let rare_hits = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "ERR-4821x", query()).await.unwrap();
+        assert_eq!(rare_hits[0].entity.id, rare.unwrap(), "vector rank21 plus text rank1 must lead RRF");
+        assert_eq!(rare_hits.len(),10);
+        assert_eq!(rare_hits.iter().map(|h|h.entity.id).collect::<std::collections::HashSet<_>>().len(),10);
+        let text_fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(&ctx.db, text_fixture.tenant_id, text_fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
+        let mut first = None;
+        for i in 0..21 {
+            if i == 20 {
+                let hits = search::search_by_vector(&ctx.db, text_fixture.workspace_id, vec![1.0,0.0], "境界 boundary", query()).await.unwrap();
+                assert_eq!(hits.len(), 10, "exactly 20 matches must enable text-only results");
+                assert_eq!(hits[0].entity.id, first.unwrap(), "closest literal text must rank first");
+                assert!(hits.iter().all(|hit| hit.distance.is_none()));
+            }
+            let title = if i == 0 { "境界 boundary".to_string() } else { format!("境界 boundary {}", "unrelated filler ".repeat(20)) };
+            let entity = entity_entities::create(&ctx.db, text_fixture.workspace_id, entity_entities::CreateEntityInput {
+                schema_name:"note".into(), entity_type:"note".into(), data:serde_json::json!({"title":title})
+            }, None).await.unwrap();
+            if i == 0 { first = Some(entity.id); }
+        }
+        let gated = search::search_by_vector(&ctx.db, text_fixture.workspace_id, vec![1.0,0.0], "境界 boundary", query()).await.unwrap();
+        assert!(gated.is_empty(), "exactly 21 text-only matches must disable the text list");
+    }).await;
+}
+
+#[tokio::test]
+async fn postgres_qwen06_materialized_recall() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, IntoActiveModel};
+    use sha2::{Digest, Sha256};
+    use yorishiro::models::_entities::{entity_embeddings as vectors, entity_entities as entities};
+
+    let metadata: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/search/qwen06.json")).unwrap();
+    let bytes = include_bytes!("../fixtures/search/qwen06.f32");
+    assert_eq!(
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+        metadata["sha256"].as_str().unwrap()
+    );
+    assert_eq!(bytes.len(), (2100 + 12) * 1024 * 4);
+    let corpus: Vec<Vec<f32>> = bytes
+        .as_chunks::<{ 1024 * 4 }>()
+        .0
+        .iter()
+        .map(|row| {
+            row.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|value| f32::from_le_bytes(*value))
+                .collect()
+        })
+        .collect();
+    assert!(corpus.iter().flatten().all(|value| value.is_finite()));
+    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let seed = entity_entities::create(
+            &ctx.db,
+            fixture.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({"title":"corpus seed"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let original = entities::Entity::find_by_id(seed.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let ids: Vec<_> = (0..2100).map(|_| uuid::Uuid::now_v7()).collect();
+        entities::Entity::insert_many(ids.iter().enumerate().map(|(i, id)| {
+            let mut row = original.clone().into_active_model();
+            row.id = Set(*id);
+            row.data = Set(serde_json::json!({"title": metadata["documents"][i]}));
+            row
+        }))
+        .exec(&ctx.db)
+        .await
+        .unwrap();
+        for (id_batch, vector_batch) in ids.chunks(100).zip(corpus[..2100].chunks(100)) {
+            vectors::Entity::insert_many(id_batch.iter().zip(vector_batch).map(|(id, vector)| {
+                vectors::ActiveModel {
+                    workspace_id: Set(fixture.workspace_id),
+                    entity_id: Set(*id),
+                    tenant_id: Set(fixture.tenant_id),
+                    embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(
+                        vector.clone(),
+                    ))),
+                }
+            }))
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        }
+        let mut workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        workspace.embedding_dimensions = Set(Some(1024));
+        workspace.embedding_model = Set(Some("qwen-embedding-3-0.6b".into()));
+        workspace.update(&ctx.db).await.unwrap();
+        let index = format!("ysr_hnsw_{}_d1024", fixture.workspace_id.simple());
+        for build in 0..3 {
+            entity_embeddings::maintain_workspace_indexes(&ctx.db)
+                .await
+                .unwrap();
+            ctx.db
+                .execute_unprepared("ANALYZE entity_entities; ANALYZE entity_embeddings")
+                .await
+                .unwrap();
+            let txn = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id)
+                .await
+                .unwrap();
+            for (i, vector) in corpus[2100..].iter().enumerate() {
+                let query = search::SearchQuery {
+                    limit: 10,
+                    ..Default::default()
+                };
+                let statement = ctx.db.get_database_backend().build(
+                    &search::postgres_rrf_query(fixture.workspace_id, vector.clone(), "", &query)
+                        .unwrap(),
+                );
+                assert!(
+                    statement.sql.contains("MATERIALIZED") && statement.to_string().contains("LIMIT 1000")
+                );
+                txn.execute_unprepared(
+                    "SET LOCAL hnsw.ef_search=400; SET LOCAL hnsw.iterative_scan=relaxed_order",
+                )
+                .await
+                .unwrap();
+                let mut explain = statement.clone();
+                explain.sql = format!("EXPLAIN (ANALYZE, FORMAT JSON) {}", explain.sql);
+                let plan = txn
+                    .query_one_raw(explain)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .try_get::<serde_json::Value>("", "QUERY PLAN")
+                    .unwrap();
+                let mut nodes = vec![&plan[0]["Plan"]];
+                let mut hnsw_used = false;
+                let mut candidates_used = false;
+                while let Some(node) = nodes.pop() {
+                    if node["Index Name"].as_str() == Some(&index) {
+                        assert!(node["Actual Loops"].as_f64().unwrap() > 0.0);
+                        assert!(
+                            node["Actual Rows"].as_f64().unwrap()
+                                * node["Actual Loops"].as_f64().unwrap()
+                                <= 1000.0
+                        );
+                        hnsw_used = true;
+                    }
+                    if node["CTE Name"].as_str() == Some("ann_candidates") {
+                        candidates_used |= node["Actual Loops"].as_f64().unwrap() > 0.0;
+                    }
+                    if let Some(children) = node["Plans"].as_array() {
+                        nodes.extend(children);
+                    }
+                }
+                assert!(hnsw_used && candidates_used, "{plan}");
+                let hits =
+                    search::search_by_vector(&txn, fixture.workspace_id, vector.clone(), "", query)
+                        .await
+                        .unwrap();
+                txn.execute_unprepared(
+                    "SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off",
+                )
+                .await
+                .unwrap();
+                let exact_statement = ctx.db.get_database_backend().build(
+                    &search::vector_candidates_query(
+                        sea_orm::DatabaseBackend::Postgres,
+                        fixture.workspace_id,
+                        vector.clone(),
+                        &search::SearchQuery {
+                            limit: 10,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap(),
+                );
+                let exact: Vec<uuid::Uuid> = txn
+                    .query_all_raw(exact_statement)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|row| row.try_get("", "id").unwrap())
+                    .collect();
+                txn.execute_unprepared(
+                    "SET LOCAL enable_indexscan=on; SET LOCAL enable_bitmapscan=on",
+                )
+                .await
+                .unwrap();
+                assert_eq!(hits.len(), 10);
+                assert_eq!(hits[0].entity.id, exact[0], "build={build}, query={i}");
+                assert!(
+                    hits.iter().all(|hit| exact.contains(&hit.entity.id)),
+                    "recall@10 must be 1: build={build}, query={i}"
+                );
+            }
+            println!("Qwen0.6B build {build}: 12/12 queries recall@10=1 and exact top1; materialized HNSW candidates <=1000");
+            txn.rollback().await.unwrap();
+            ctx.db
+                .execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{index}\""))
+                .await
+                .unwrap();
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn postgres_workspace_hnsw_promotion_and_cleanup() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
+    use yorishiro::models::_entities::{entity_embeddings as vectors, entity_entities as entities};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id,
+            serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
+        let entity = entity_entities::create(&ctx.db, fixture.workspace_id, entity_entities::CreateEntityInput {
+            schema_name:"note".into(), entity_type:"note".into(), data:serde_json::json!({"title":"index fixture"})
+        }, None).await.unwrap();
+        let original = entities::Entity::find_by_id(entity.id).one(&ctx.db).await.unwrap().unwrap();
+        let ids: Vec<_> = (0..2000).map(|_| uuid::Uuid::now_v7()).collect();
+        let rows = ids.iter().map(|id| { let mut row = original.clone().into_active_model(); row.id=Set(*id); row });
+        entities::Entity::insert_many(rows).exec(&ctx.db).await.unwrap();
+        let rows = ids.iter().enumerate().map(|(i, id)| vectors::ActiveModel {
+            workspace_id:Set(fixture.workspace_id), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
+            embedding:Set(Some(sea_orm::entity::prelude::PgVector::from((0..7).map(|axis| {
+                (((i + 1) * (axis + 11) * 7919 % 104729) as f32 / 104729.0) + 0.01
+            }).collect::<Vec<_>>())))
+        });
+        vectors::Entity::insert_many(rows).exec(&ctx.db).await.unwrap();
+        let mut workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap().into_active_model();
+        workspace.embedding_dimensions=Set(Some(7)); workspace.embedding_model=Set(Some("fixture".into()));
+        workspace.update(&ctx.db).await.unwrap();
+        let index = format!("ysr_hnsw_{}_d7", fixture.workspace_id.simple());
+        // A second maintainer must skip while the real session lock is held.
+        use sea_orm::sqlx::Connection as _;
+        let mut lock = ctx.db.get_postgres_connection_pool().acquire().await.unwrap().detach();
+        sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended('embedding-index-maintenance',0))")
+            .execute(&mut lock).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), entity_embeddings::maintain_workspace_indexes(&ctx.db)).await.unwrap().unwrap();
+        let present: Option<String> = sea_orm::sqlx::query_scalar("SELECT to_regclass($1)::text").bind(&index).fetch_one(&mut lock).await.unwrap();
+        assert!(present.is_none(), "a competing maintenance session must not create the index");
+        lock.close().await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        let exists = |name: String| sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres, "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)", [name.into()]));
+        assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("","indisvalid").unwrap());
+        // Execute and EXPLAIN the same production candidate builder without forcing an ANN plan.
+        use sea_orm::{ConnectionTrait, TransactionTrait};
+        let txn = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
+        let role = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            "SELECT current_user AS role, rolsuper FROM pg_roles WHERE rolname=current_user")).await.unwrap().unwrap();
+        assert_eq!(role.try_get::<String>("", "role").unwrap(), "yorishiro_app");
+        assert!(!role.try_get::<bool>("", "rolsuper").unwrap());
+        txn.execute_unprepared("SET LOCAL plan_cache_mode=force_custom_plan; SET LOCAL hnsw.ef_search=200; SET LOCAL hnsw.iterative_scan=relaxed_order").await.unwrap();
+        let query = search::SearchQuery { limit: 200, ..Default::default() };
+        let vector = vec![1.0_f32;7];
+        let statement = ctx.db.get_database_backend().build(&search::postgres_rrf_query(
+            fixture.workspace_id, vector.clone(), "", &query).unwrap());
+        let mut explain = statement.clone();
+        explain.sql = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {}", explain.sql);
+        let plan = txn.query_one_raw(explain).await.unwrap().unwrap().try_get::<serde_json::Value>("", "QUERY PLAN").unwrap();
+        println!("production vector plan: {plan}");
+        assert!(plan.to_string().contains(&index), "production query must use workspace HNSW: {plan}");
+        let natural = txn.query_all_raw(statement.clone()).await.unwrap();
+        assert_eq!(natural.len(), 200, "candidate limit must not be capped at pgvector's default 40");
+        txn.execute_unprepared("SET LOCAL hnsw.ef_search=40; SET LOCAL hnsw.iterative_scan=off").await.unwrap();
+        let hits = search::search_by_vector(&txn, fixture.workspace_id, vector, "", query).await.unwrap();
+        assert_eq!(hits.len(), 200);
+        let settings = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            "SELECT current_setting('hnsw.ef_search') AS ef, current_setting('hnsw.iterative_scan') AS scan")).await.unwrap().unwrap();
+        assert_eq!(settings.try_get::<String>("", "ef").unwrap(), "40");
+        assert_eq!(settings.try_get::<String>("", "scan").unwrap(), "off");
+        txn.execute_unprepared("SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off").await.unwrap();
+        let exact = txn.query_all_raw(statement).await.unwrap();
+        assert_eq!(exact.len(), natural.len());
+        let exact_ids: std::collections::HashSet<uuid::Uuid> = exact.iter().map(|row| row.try_get("", "id").unwrap()).collect();
+        let recall = hits.iter().filter(|hit| exact_ids.contains(&hit.entity.id)).count() as f64 / 200.0;
+        assert!(recall >= 0.95, "production recall@200={recall}; plan={plan}");
+        txn.rollback().await.unwrap();
+        // Hold the actual partition lock until concurrent index construction is waiting.
+        let partition = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1", fixture.workspace_id)))
+            .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
+        // Put adversarial near-identical vectors in another workspace of the same tenant/partition.
+        let remainder: i32 = partition.strip_prefix("entity_embeddings_p").unwrap().parse().unwrap();
+        let neighbor = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+            "SELECT id FROM (SELECT uuidv7() AS id FROM generate_series(1,4096)) candidates WHERE satisfies_hash_partition('entity_embeddings'::regclass,64,$1,id) LIMIT 1",
+            [remainder.into()])).await.unwrap().unwrap().try_get::<uuid::Uuid>("", "id").unwrap();
+        let mut neighbor_workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id)
+            .one(&ctx.db).await.unwrap().unwrap().into_active_model();
+        neighbor_workspace.id = Set(neighbor);
+        neighbor_workspace.name = Set(format!("neighbor-{neighbor}"));
+        neighbor_workspace.insert(&ctx.db).await.unwrap();
+        let neighbor_ids: Vec<_> = (0..3000).map(|_| uuid::Uuid::now_v7()).collect();
+        entities::Entity::insert_many(neighbor_ids.iter().map(|id| {
+            let mut row = original.clone().into_active_model(); row.id=Set(*id); row.workspace_id=Set(neighbor); row
+        })).exec(&ctx.db).await.unwrap();
+        vectors::Entity::insert_many(neighbor_ids.iter().map(|id| vectors::ActiveModel {
+            workspace_id:Set(neighbor), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
+            embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;7])))
+        })).exec(&ctx.db).await.unwrap();
+        let same_partition = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+            "SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id=$1 LIMIT 1", [neighbor.into()]))
+            .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
+        assert_eq!(same_partition, partition);
+        let scoped = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
+        let after = search::search_by_vector(&scoped, fixture.workspace_id, vec![1.0_f32;7], "", search::SearchQuery { limit:200, ..Default::default() }).await.unwrap();
+        assert!(after.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
+        let after_ids: std::collections::HashSet<_> = after.iter().map(|hit| hit.entity.id).collect();
+        assert_eq!(after_ids, hits.iter().map(|hit| hit.entity.id).collect(), "neighbor vectors must not change the workspace graph results");
+        let after_recall = after_ids.intersection(&exact_ids).count() as f64 / 200.0;
+        assert_eq!(after_recall, recall);
+        scoped.rollback().await.unwrap();
+        workspace_workspaces::Entity::delete_by_id(neighbor).exec(&ctx.db).await.unwrap();
+        ctx.db.execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{index}\"")).await.unwrap();
+        let blocker = ctx.db.begin().await.unwrap();
+        blocker.execute_unprepared(&format!("LOCK TABLE {partition} IN SHARE MODE")).await.unwrap();
+        let maintenance_db = ctx.db.clone();
+        let maintenance = tokio::spawn(async move { entity_embeddings::maintain_workspace_indexes(&maintenance_db).await });
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let waiting = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+                    "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1) AS waiting",
+                    [format!("CREATE INDEX CONCURRENTLY \"{index}\"%").into()])).await.unwrap().unwrap().try_get::<bool>("", "waiting").unwrap();
+                if waiting { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("maintenance must reach the actual concurrent build lock");
+        let (provider, _server) = fixed_width_provider(7).await;
+        let reindex_db = ctx.db.clone();
+        let workspace_id = fixture.workspace_id;
+        let publication = tokio::spawn(async move { entity_embeddings::reindex_workspace(&reindex_db, workspace_id, &provider).await });
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap();
+                if workspace.embedding_reindexing { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("real reindex must fence publication while index build is blocked");
+        blocker.rollback().await.unwrap();
+        maintenance.await.unwrap().unwrap();
+        let published = publication.await.unwrap().unwrap();
+        assert!(published.failures.is_empty());
+        assert_eq!(published.reindexed, 2001);
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
+        let stamped = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(stamped.embedding_dimensions, Some(7));
+        assert!(!stamped.embedding_reindexing);
+        // Exercise the real high-dimensional index lifecycle, not only generated SQL.
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4000])))
+            .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(4000)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        let high_index = format!("ysr_hnsw_{}_d4000_nl2", fixture.workspace_id.simple());
+        let legacy_index = format!("ysr_hnsw_{}_d4000", fixture.workspace_id.simple());
+        let partition = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1", fixture.workspace_id)))
+            .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
+        // Catalog cleanup must retire both abandoned high-dimensional index identities.
+        for name in [&high_index, &legacy_index] {
+            ctx.db.execute_unprepared(&format!("CREATE INDEX \"{name}\" ON {partition}(workspace_id)")).await.unwrap();
+        }
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(high_index.clone()).await.unwrap().is_none());
+        assert!(exists(legacy_index).await.unwrap().is_none());
+        let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
+        let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4000], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        assert_eq!(positive.len(), 10);
+        assert!(positive.iter().all(|hit| hit.distance.unwrap().abs() < 0.00001));
+        let mut nearest = vec![1.0_f32;4000]; nearest[0] = 0.001;
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(nearest)))
+            .filter(vectors::Column::EntityId.eq(ids[1])).exec(&ctx.db).await.unwrap();
+        tenant.rollback().await.unwrap();
+        let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
+        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
+        let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        assert_eq!(reranked.len(), 10);
+        assert_eq!(reranked[0].entity.id, ids[1], "high-dimensional exact must retain the closest original cosine");
+        assert!(reranked.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
+        assert!(reranked.windows(2).all(|pair| pair[0].distance <= pair[1].distance));
+        tenant.rollback().await.unwrap();
+        // Unsupported ANN dimensions retire the previous graph automatically.
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4096])))
+            .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(4096)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(high_index.clone()).await.unwrap().is_none());
+        assert!(exists(format!("ysr_hnsw_{}_d4096", fixture.workspace_id.simple())).await.unwrap().is_none());
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;7])))
+            .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(7)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(high_index).await.unwrap().is_none());
+        // Publication in progress must retain the old graph even if metadata is changing.
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingReindexing,
+            sea_orm::sea_query::Expr::value(true)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        let publication = ctx.db.begin().await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(13)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&publication).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), entity_embeddings::maintain_workspace_indexes(&ctx.db)).await.unwrap().unwrap();
+        assert!(exists(index.clone()).await.unwrap().is_some());
+        publication.rollback().await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingReindexing,
+            sea_orm::sea_query::Expr::value(false)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        // A valid graph survives shrinkage and repeated maintenance.
+        vectors::Entity::delete_many().filter(vectors::Column::EntityId.eq(ids[0])).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index.clone()).await.unwrap().is_some());
+        // Widen all vectors and atomically published metadata before the next sweep.
+        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
+            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;13])))
+            .exec(&ctx.db).await.unwrap();
+        workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
+            sea_orm::sea_query::Expr::value(13)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index.clone()).await.unwrap().is_none());
+        // Failed concurrent builds leave invalid indexes; recreate that catalog state using a failed unique build.
+        let partition = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+            format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1",fixture.workspace_id))).await.unwrap().unwrap().try_get::<String>("","name").unwrap();
+        let bad = format!("ysr_hnsw_{}_d13", fixture.workspace_id.simple());
+        sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("DROP INDEX CONCURRENTLY \"{bad}\"")).await.unwrap();
+        assert!(sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE UNIQUE INDEX CONCURRENTLY \"{bad}\" ON {partition}(tenant_id)")).await.is_err());
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(bad.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "invalid promoted graph is rebuilt");
+        // Attached partitions need not follow the original p0..p63 naming convention.
+        ctx.db.execute_unprepared(&format!("ALTER TABLE {partition} RENAME TO \"expanded_\"\"p90\"" )).await.unwrap();
+        ctx.db.execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{bad}\"" )).await.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(bad).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
+        ctx.db.execute_unprepared(&format!("ALTER TABLE \"expanded_\"\"p90\" RENAME TO {partition}" )).await.unwrap();
+        // Deleting workspace metadata leaves no owned graph after the sweep.
+        sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE INDEX CONCURRENTLY \"{index}\" ON {partition}(workspace_id)")).await.unwrap();
+        let deletion = ctx.db.begin().await.unwrap();
+        workspace_workspaces::Entity::delete_by_id(fixture.workspace_id).exec(&deletion).await.unwrap();
+        let (maintenance, committed) = tokio::join!(
+            entity_embeddings::maintain_workspace_indexes(&ctx.db),
+            deletion.commit(),
+        );
+        committed.unwrap();
+        maintenance.unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+        assert!(exists(index).await.unwrap().is_none());
+    }).await;
+}
+
+async fn literal_search_corpus() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let fixture =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let definition = serde_json::from_value(note_definition()).unwrap();
+        schema_schemas::create_schema(
+            &ctx.db,
+            fixture.tenant_id,
+            fixture.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let body = format!(
+            "{} quarterly roadmap コネクタ導入 数据库迁移 ＭＣＰ ｺﾈｸﾀ ＷＩＤＴＨ tunnel-based a:b foo\"bar MCP AND NOT x (x 100%under_score",
+            "背景説明と unrelated filler sentences。".repeat(100)
+        );
+        let mut matching = None;
+        let mut corpus_ids = Vec::new();
+        for title in [body, "unrelated grocery list".into()] {
+            let entity = entity_entities::create(
+                &ctx.db,
+                fixture.workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({"title": title}),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            matching.get_or_insert(entity.id);
+            corpus_ids.push(entity.id);
+        }
+        let sqlite = sea_orm::ConnectionTrait::get_database_backend(&ctx.db)
+            == sea_orm::DatabaseBackend::Sqlite;
+        // Both backends use this exact corpus; only documented SQLite limitations differ.
+        for (text, postgres_hit, sqlite_hit) in [
+            ("quarterly roadmap", true, true),
+            ("コネクタ導入", true, true),
+            ("導入", true, false),
+            ("数据库", true, true),
+            ("数据", true, false),
+            ("MCP", true, true),
+            ("コネクタ", true, true),
+            ("ＭＣＰ", true, true),
+            ("ｺﾈｸﾀ", true, true),
+            ("WIDTH", true, false),
+            ("ＷＩＤＴＨ", true, false),
+            ("tunnel-based", true, true),
+            ("a:b", true, true),
+            ("foo\"bar", false, false),
+            ("foo\\\"bar", true, true),
+            ("MCP AND", true, true),
+            ("NOT", true, true),
+            ("xy", false, false),
+            ("(x", true, false),
+            ("100%under_score", true, true),
+            ("missing-literal", false, false),
+            ("100_other_score", false, false),
+            ("\"", true, false),
+            ("", false, false),
+            ("   ", false, false),
+        ] {
+            let hits = search::search_by_vector(
+                &ctx.db,
+                fixture.workspace_id,
+                vec![1.0_f32; 768],
+                text,
+                search::SearchQuery::default(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("literal query {text:?}: {error}"));
+            let expected = if sqlite { sqlite_hit } else { postgres_hit };
+            let mut ids: Vec<_> = hits.iter().map(|hit| hit.entity.id).collect();
+            // PostgreSQL searches serialized JSON, whose structural quotes occur in every row.
+            let mut expected_ids = if text == "\"" && !sqlite {
+                corpus_ids.clone()
+            } else if expected {
+                vec![matching.unwrap()]
+            } else {
+                vec![]
+            };
+            ids.sort_unstable();
+            expected_ids.sort_unstable();
+            assert_eq!(ids, expected_ids, "literal query {text:?}, SQLite={sqlite}");
+            assert!(hits.iter().all(|hit| hit.distance.is_none()));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_literal_search_shared_corpus() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    literal_search_corpus().await;
+}
+
+#[tokio::test]
+async fn postgres_literal_search_shared_corpus() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    literal_search_corpus().await;
+}
+
 /// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
@@ -133,6 +768,8 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             model: "ranking".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         for (workspace, entity) in [
             (workspace_id, close.id),
@@ -187,6 +824,8 @@ async fn fixed_width_provider(
         model: "fixed-width".into(),
         dimensions: width,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (provider, server)
 }
@@ -217,6 +856,8 @@ async fn model_provider(
         model: model.into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (provider, server)
 }
@@ -269,7 +910,8 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             "result: {result:?}"
         );
 
-        let stored = entity_embeddings::Entity::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find()
+            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
             .filter(
                 yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
@@ -322,6 +964,8 @@ async fn gated_model_provider(
         model: model.into(),
         dimensions: 768,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (std::sync::Arc::new(provider), server, entered, release)
 }
@@ -376,7 +1020,8 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             "result: {result:?}"
         );
 
-        let stored = entity_embeddings::Entity::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find()
+            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
             .filter(
                 yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
@@ -457,7 +1102,8 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         assert!(result.is_ok(), "result: {result:?}");
 
         // Verify the embedding was written.
-        let stored = entity_embeddings::Entity::find_by_id(entity.id)
+        let stored = entity_embeddings::Entity::find()
+            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
             .filter(
                 yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
             )
@@ -729,7 +1375,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity::find_by_id(*entity_id)
+                entity_embeddings::Entity::find().filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(*entity_id))
                     .select_only()
                     .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
@@ -817,14 +1463,36 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         }
 
         // Verify the old vectors are stored.
+        // Catalog queries verify physical partitioning, which the entity API cannot describe.
+        let layout = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT count(*) AS partitions FROM pg_inherits WHERE inhparent = 'entity_embeddings'::regclass",
+        )).await.unwrap().unwrap();
+        assert_eq!(layout.try_get::<i64>("", "partitions").unwrap(), 64);
+        let policy = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT qual FROM pg_policies WHERE tablename = 'entity_embeddings' AND policyname = 'tenant_isolation'",
+        )).await.unwrap().unwrap();
+        let condition: String = policy.try_get("", "qual").unwrap();
+        assert!(condition.contains("tenant_id") && condition.contains("app.current_tenant"));
+        assert!(!condition.contains("entity_entities"));
         let old_v1 = model_vector(&old_provider.model_name());
         for entity_id in [e1.id, e2.id] {
+            use yorishiro::models::_entities::entity_embeddings as vectors;
+            let owner = vectors::Entity::find_by_id((workspace_id, entity_id))
+                .select_only().column(vectors::Column::TenantId)
+                .into_tuple::<uuid::Uuid>().one(&ctx.db).await.unwrap().unwrap();
+            assert_eq!(owner, tenant_id);
             let stored: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity::find_by_id(entity_id)
+                entity_embeddings::Entity::find()
+                    .filter(
+                        yorishiro::models::_entities::entity_embeddings::Column::EntityId
+                            .eq(entity_id),
+                    )
                     .select_only()
                     .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
@@ -884,7 +1552,11 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 struct Row {
                     embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
-                entity_embeddings::Entity::find_by_id(entity_id)
+                entity_embeddings::Entity::find()
+                    .filter(
+                        yorishiro::models::_entities::entity_embeddings::Column::EntityId
+                            .eq(entity_id),
+                    )
                     .select_only()
                     .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
                     .into_model::<Row>()
@@ -903,7 +1575,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
     .await;
 }
 
-/// The trigram fallback surfaces an entity with no embedding at all, when its data fuzzy-matches `query_text`; an entity with neither an embedding nor a fuzzy match must not appear.
+/// Gated PostgreSQL literal text search includes an unembedded entity when its data contains `query_text`; a nonmatching entity must not appear.
 #[tokio::test]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
     if !super::super::require_postgres_backend() {
@@ -944,7 +1616,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
         )
         .await
         .expect("create unrelated entity");
-        // Neither entity has an embedding: both rely entirely on the trigram fallback.
+        // Neither entity has an embedding: both rely entirely on selective literal text matches.
 
         let hits = search::search_by_vector(
             &ctx.db,
@@ -966,7 +1638,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
     .await;
 }
 
-/// The FTS5 fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text`, when
+/// The FTS5 fallback on SQLite surfaces an entity whose `data` matches quoted FTS5 terms from `query_text`, when
 /// the entity has no embedding; an entity with neither an embedding nor a MATCH match must not
 /// appear.
 ///
@@ -1140,7 +1812,7 @@ async fn sqlite_document_embed_persist_and_search() {
             .expect("embed entity");
 
             // Verify the embedding was written to the shared table.
-            let has_embedding = entity_embeddings::Entity::find_by_id(entity.id)
+            let has_embedding = entity_embeddings::Entity::find().filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
                 .select_only()
                 .expr_as(
                     sea_orm::sea_query::Expr::col(
@@ -1267,6 +1939,16 @@ async fn reindex_replaces_existing_vectors_and_restamps_the_workspace() {
             .expect("read workspace")
             .expect("workspace row");
         assert_eq!(stamped.embedding_model.as_deref(), Some("model-b"));
+        use yorishiro::models::_entities::entity_embeddings as vectors;
+        let scope = vectors::Entity::find_by_id((workspace_id, entity.id))
+            .select_only()
+            .columns([vectors::Column::WorkspaceId, vectors::Column::TenantId])
+            .into_tuple::<(uuid::Uuid, uuid::Uuid)>()
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(scope, (workspace_id, tenant_id));
     })
     .await;
 }
@@ -1336,7 +2018,7 @@ async fn reindex_switches_between_arbitrary_widths() {
         entity_embeddings::reindex_workspace(&ctx.db, other_workspace.id, &other_provider)
             .await
             .unwrap();
-        for width in [7, 13, 7] {
+        for width in [7, 4096, 13, 7] {
             let (provider, _server) = fixed_width_provider(width).await;
             let outcome =
                 entity_embeddings::reindex_workspace(&ctx.db, fixture.workspace_id, &provider)
@@ -1360,7 +2042,8 @@ async fn reindex_switches_between_arbitrary_widths() {
                 },
             ))
             .arg(Expr::col(embeddings::Column::Embedding));
-            let stored = embeddings::Entity::find_by_id(entity.id)
+            let stored = embeddings::Entity::find()
+                .filter(embeddings::Column::EntityId.eq(entity.id))
                 .select_only()
                 .expr(length)
                 .into_tuple::<i32>()
@@ -1390,7 +2073,8 @@ async fn reindex_switches_between_arbitrary_widths() {
                 },
             ))
             .arg(Expr::col(embeddings::Column::Embedding));
-            let retained = embeddings::Entity::find_by_id(other.id)
+            let retained = embeddings::Entity::find()
+                .filter(embeddings::Column::EntityId.eq(other.id))
                 .select_only()
                 .expr(other_length)
                 .into_tuple::<i32>()

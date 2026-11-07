@@ -29,6 +29,7 @@ impl MigrationTrait for Migration {
                     .col(helpers::created_at(manager))
                     .col(ColumnDef::new(Alias::new("embedding_model")).text())
                     .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
+                    .col(helpers::ts_tz_col(manager, Alias::new("disabled_at")))
                     .to_owned(),
             )
             .await?;

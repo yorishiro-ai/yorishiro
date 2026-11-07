@@ -94,7 +94,8 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - `src/db.rs::require_min_sqlite_connections(2)` — minimum 2 connections.
 - Vector search via sqlite-vec (BLOB storage).
 - ID generation: `before_save` hook calls `db::sqlite_generated_id()`.
-- Embedding column lives in `content_entity_embeddings` table on both backends.
+- Embedding column lives in `entity_embeddings` on both backends, with a `(workspace_id, entity_id)` primary key.
+- PostgreSQL uses 64 workspace hash partitions, tenant RLS, and scheduled workspace-specific partial HNSW promotion starting at 2,000 vectors.
 - FTS5 with `tokenize='trigram'` for fuzzy text search (pg_trgm equivalent on PostgreSQL).
 
 ### Migration helpers (`migration/src/helpers.rs`)

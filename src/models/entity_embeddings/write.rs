@@ -62,6 +62,23 @@ async fn sync_embedding(
             message: "workspace reindex is in progress".into(),
         });
     }
+    use crate::models::_entities::workspace_workspaces::{Column, Entity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+    let stamp = Entity::find()
+        .select_only()
+        .columns([Column::EmbeddingModel, Column::EmbeddingDocumentPrefix])
+        .filter(Column::Id.eq(workspace_id))
+        .into_tuple::<(Option<String>, String)>()
+        .one(&txn)
+        .await
+        .map_err(|error| YorishiroError::Internal(error.into()))?;
+    if stamp.is_some_and(|(model, prefix)| model.is_some() && prefix != provider.document_prefix())
+    {
+        return Err(YorishiroError::Conflict {
+            message: "document prefix changed; reindex the workspace before writing embeddings"
+                .into(),
+        });
+    }
     let conn = &txn;
     let chain =
         super::resolution::resolve_embedding_chain(conn, workspace_id, provider.dimensions())
@@ -118,6 +135,7 @@ async fn sync_embedding(
             workspace_id,
             provider.model_name(),
             dimensions,
+            provider.document_prefix(),
         )
         .await?;
     }

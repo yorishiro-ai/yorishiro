@@ -11,6 +11,7 @@ pub(crate) const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 pub struct EmbeddingMetadata {
     pub model: String,
     pub dimensions: usize,
+    pub document_prefix: String,
 }
 
 /// Resolves deployment provider identity without loading local model files.
@@ -21,10 +22,15 @@ pub fn deployment_embedding_metadata(
     settings: &crate::data::settings::Settings,
 ) -> anyhow::Result<Option<EmbeddingMetadata>> {
     let config = &settings.embedding;
+    anyhow::ensure!(
+        (1..=4096).contains(&config.dimensions),
+        "embedding dimensions must be between 1 and 4096"
+    );
     if let (Some(_), Some(model)) = (&config.base_url, &config.model) {
         return Ok(Some(EmbeddingMetadata {
             model: model.clone(),
             dimensions: config.dimensions,
+            document_prefix: config.document_prefix.clone(),
         }));
     }
     match config.provider {
@@ -46,6 +52,7 @@ pub fn deployment_embedding_metadata(
             Ok(Some(EmbeddingMetadata {
                 model: def.id.to_owned(),
                 dimensions: def.dimensions,
+                document_prefix: String::new(),
             }))
         }
     }
@@ -81,6 +88,11 @@ pub enum EmbeddingProviderAvailability {
 /// Storage accepts any nonempty finite vector with the workspace's effective width.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    /// Prefix affecting persisted document vectors, not query-only instructions.
+    fn document_prefix(&self) -> &str {
+        ""
+    }
+
     /// Generation captured when resolving a mutable workspace assignment.
     fn workspace_revision(&self) -> Option<i64> {
         None
@@ -184,6 +196,10 @@ pub async fn build_embedding_provider(
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let config = &config.embedding;
     let dimensions = config.dimensions;
+    anyhow::ensure!(
+        (1..=4096).contains(&dimensions),
+        "embedding dimensions must be between 1 and 4096"
+    );
 
     // Check base_url/model presence before PROVIDER so that the documented
     // shape (PROVIDER unset, base_url+model set) reaches the OpenAI-compatible
@@ -198,6 +214,8 @@ pub async fn build_embedding_provider(
             model: model.clone(),
             dimensions,
             send_dimensions_param: config.send_dimensions_param,
+            query_instruction: config.query_instruction.clone(),
+            document_prefix: config.document_prefix.clone(),
         });
         tracing::info!(provider = "openai", %base_url, %model, dimensions, "embedding provider configured");
         return Ok(std::sync::Arc::new(provider));

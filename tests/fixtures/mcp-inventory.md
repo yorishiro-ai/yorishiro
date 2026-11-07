@@ -1519,7 +1519,7 @@ Input schema:
 
 ### `search_entities`
 
-Vector similarity search over entities using a natural-language query (requires read scope)
+Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope)
 
 Input schema:
 
@@ -1545,7 +1545,7 @@ Input schema:
       ]
     },
     "query_text": {
-      "description": "Natural-language query text.\nVectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.\nAlso used, as-is, for an auxiliary pg_trgm fuzzy text match against entities that have no embedding.",
+      "description": "Natural-language query text.\nVectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.\nPostgreSQL also fuses NFKC-normalized literal text matches when at most 20 entities match.\nSQLite fills remaining slots from unembedded entities using quoted FTS5 terms of at least three characters.",
       "type": "string"
     }
   },
@@ -2186,7 +2186,7 @@ Input schema:
 
 ### `set_embedding_provider`
 
-Configure the selected workspace's OpenAI-compatible embedding provider and queue a full reindex atomically (requires schema scope); the supplied API key is stored and never returned
+Configure the selected workspace's OpenAI-compatible embedding provider (requires schema scope); document changes queue a full reindex atomically, query-instruction-only changes do not; the supplied API key is stored and never returned
 
 Input schema:
 
@@ -2206,7 +2206,15 @@ Input schema:
       "format": "int32",
       "type": "integer"
     },
+    "document_prefix": {
+      "default": "",
+      "type": "string"
+    },
     "model": {
+      "type": "string"
+    },
+    "query_instruction": {
+      "default": "",
       "type": "string"
     },
     "send_dimensions_param": {

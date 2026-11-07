@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "entity_embeddings")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    pub workspace_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub entity_id: Uuid,
+    pub tenant_id: Uuid,
     pub embedding: Option<PgVector>,
 }
 

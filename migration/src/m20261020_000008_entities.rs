@@ -121,7 +121,7 @@ impl MigrationTrait for Migration {
         .await?;
         helpers::pg_only(
                 manager,
-                "CREATE INDEX entities_data_trgm_idx ON entity_entities USING gin ((data::text) gin_trgm_ops)",
+                "CREATE INDEX entities_data_trgm_idx ON entity_entities USING gin (normalize(data::text, nfkc) gin_trgm_ops)",
             )
             .await?;
 

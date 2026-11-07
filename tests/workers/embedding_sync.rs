@@ -234,6 +234,8 @@ mod conflict {
             model: "failure-http-test".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         }));
         (provider, server)
     }
@@ -268,7 +270,7 @@ mod conflict {
         max_active: AtomicUsize,
         aggregate: Arc<AtomicUsize>,
         aggregate_max: Arc<AtomicUsize>,
-        entered: Arc<Notify>,
+        entered: Arc<Semaphore>,
         release: Arc<Semaphore>,
     }
 
@@ -285,7 +287,7 @@ mod conflict {
                         state.max_active.fetch_max(local, Ordering::SeqCst);
                         let aggregate = state.aggregate.fetch_add(1, Ordering::SeqCst) + 1;
                         state.aggregate_max.fetch_max(aggregate, Ordering::SeqCst);
-                        state.entered.notify_waiters();
+                        state.entered.add_permits(1);
                         let _local_guard = ActiveGuard(&state.active);
                         let _aggregate_guard = ActiveGuard(&state.aggregate);
                         state.release.acquire().await.unwrap().forget();
@@ -302,6 +304,8 @@ mod conflict {
                 model: "aggregate-context-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (provider, server)
         }
@@ -362,6 +366,8 @@ mod conflict {
                 model: "error-then-success-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (state, provider, server)
         }
@@ -420,6 +426,8 @@ mod conflict {
                 model: "mixed-test-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (state, provider, server)
         }
@@ -465,6 +473,8 @@ mod conflict {
                 model: "gated-test-provider".into(),
                 dimensions: 768,
                 send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
             }));
             (state, provider, server)
         }
@@ -502,6 +512,8 @@ mod conflict {
             model: "snapshot-http-provider".into(),
             dimensions: width,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         }));
         (provider, server, entered, release)
     }
@@ -1296,7 +1308,7 @@ mod conflict {
         }
         let aggregate = Arc::new(AtomicUsize::new(0));
         let aggregate_max = Arc::new(AtomicUsize::new(0));
-        let entered = Arc::new(Notify::new());
+        let entered = Arc::new(Semaphore::new(0));
         let release = Arc::new(Semaphore::new(0));
         let provider_a = Arc::new(AggregateGatedProvider {
             active: AtomicUsize::new(0),
@@ -1318,11 +1330,22 @@ mod conflict {
             let (transport, _server_a) = provider_a.transport().await;
             ctx_a.shared_store.insert(transport.clone());
             let harness_a = QueueHarness::lane(ctx_a, 2).await;
+            let cleanup_release_a = release.clone();
             let result = std::panic::AssertUnwindSafe(async {
                 let (id_a, _) = harness_a.enqueue(workspace, entity).await;
-                tokio::time::timeout(std::time::Duration::from_secs(3), entered.notified())
+                // Deliberately observe arrival before waiting to cover early provider entry.
+                tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                    while entered.available_permits() == 0 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(3), entered.acquire())
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .unwrap()
+                    .forget();
                 let provider_b = Arc::new(AggregateGatedProvider {
                     active: AtomicUsize::new(0),
                     max_active: AtomicUsize::new(0),
@@ -1336,6 +1359,7 @@ mod conflict {
                     let (transport, _server_b) = provider_b.transport().await;
                     ctx_b.shared_store.insert(transport.clone());
                     let harness_b = QueueHarness::lane(ctx_b, 2).await;
+                    let cleanup_release_b = release.clone();
                     let result_b = std::panic::AssertUnwindSafe(async {
                         let (id_b, _) = harness_b.enqueue(workspace_b, entity_b).await;
                         tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -1364,6 +1388,7 @@ mod conflict {
                     })
                     .catch_unwind()
                     .await;
+                    cleanup_release_b.add_permits(2);
                     harness_b.shutdown().await;
                     if let Err(panic) = result_b {
                         std::panic::resume_unwind(panic);
@@ -1389,6 +1414,7 @@ mod conflict {
             })
             .catch_unwind()
             .await;
+            cleanup_release_a.add_permits(2);
             harness_a.shutdown().await;
             if let Err(panic) = result {
                 std::panic::resume_unwind(panic);

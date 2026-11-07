@@ -1,11 +1,13 @@
 //! Variable-dimension embedding storage and workspace reindex operations.
 
+mod indexes;
 mod persistence;
 mod reindex;
 mod resolution;
 mod stamp;
 mod write;
 
+pub use indexes::maintain_workspace_indexes;
 pub use reindex::{ReindexFailure, ReindexOutcome, reindex_workspace};
 pub(crate) use write::EmbeddingWriteOutcome;
 pub use write::sync_embedding_for_record;
@@ -22,6 +24,7 @@ pub(super) fn validate_vector(
     expected_dimensions: usize,
 ) -> Result<(), crate::YorishiroError> {
     if vector.is_empty()
+        || vector.len() > 4096
         || vector.len() != expected_dimensions
         || vector.iter().any(|value| !value.is_finite())
     {

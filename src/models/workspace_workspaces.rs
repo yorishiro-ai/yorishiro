@@ -15,6 +15,9 @@ struct AssignedEmbeddingProvider {
 
 #[loco_rs::prelude::async_trait]
 impl crate::services::embedding::EmbeddingProvider for AssignedEmbeddingProvider {
+    fn document_prefix(&self) -> &str {
+        self.provider.document_prefix()
+    }
     fn workspace_revision(&self) -> Option<i64> {
         Some(self.revision)
     }
@@ -60,7 +63,8 @@ pub(crate) async fn check_embedding_assignment(
             .await
             .internal()?
         && (assignment.model != provider.model_name()
-            || usize::try_from(assignment.dimensions).ok() != Some(provider.dimensions()))
+            || usize::try_from(assignment.dimensions).ok() != Some(provider.dimensions())
+            || assignment.document_prefix != provider.document_prefix())
     {
         return Err(YorishiroError::Conflict {
             message: "embedding provider assignment changed; resolve the provider again".into(),
@@ -207,9 +211,14 @@ pub struct StartupReindexRow {
     pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<i32>,
     pub embedding_reindexing: bool,
+    pub embedding_document_prefix: String,
 }
 
 impl StartupReindexRow {
+    /// Compares document preprocessing independently of query-only instructions.
+    pub fn has_other_document_prefix(&self, prefix: &str) -> bool {
+        self.embedding_model.is_some() && self.embedding_document_prefix != prefix
+    }
     /// Whether the workspace's stored vectors differ from the effective provider identity.
     /// A workspace with no stamp has no vectors to replace: its first write stamps it.
     pub fn is_stamped_with_other_embedding(&self, provider_model: &str, dimensions: usize) -> bool {
@@ -291,6 +300,7 @@ pub(crate) async fn stamped_for_reindex(
             Column::EmbeddingModel,
             Column::EmbeddingDimensions,
             Column::EmbeddingReindexing,
+            Column::EmbeddingDocumentPrefix,
         ])
         .filter(
             Column::EmbeddingModel
@@ -434,10 +444,15 @@ pub(crate) async fn stamp_embedding_if_missing(
     workspace_id: Uuid,
     model: String,
     dimensions: i32,
+    document_prefix: &str,
 ) -> Result<(), YorishiroError> {
     use sea_orm::sea_query::Expr;
 
     Entity::update_many()
+        .col_expr(
+            crate::models::_entities::workspace_workspaces::Column::EmbeddingDocumentPrefix,
+            Expr::value(document_prefix),
+        )
         .col_expr(
             crate::models::_entities::workspace_workspaces::Column::EmbeddingModel,
             Expr::value(model),

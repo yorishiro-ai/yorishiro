@@ -17,26 +17,59 @@ impl MigrationTrait for Migration {
             } else {
                 embedding.blob();
             }
+            let mut table = Table::create()
+                .table(Alias::new(name))
+                .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
+                .col(helpers::uuid_col(manager, Alias::new("entity_id")).not_null())
+                .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
+                .col(embedding)
+                .primary_key(
+                    Index::create()
+                        .col(Alias::new("workspace_id"))
+                        .col(Alias::new("entity_id")),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .from(Alias::new(name), Alias::new("entity_id"))
+                        .to(Alias::new("entity_entities"), Alias::new("id"))
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .to_owned();
+            if manager.get_database_backend() == DbBackend::Postgres {
+                table.partition_by_hash([Alias::new("workspace_id")]);
+            }
+            manager.create_table(table).await?;
+            if manager.get_database_backend() == DbBackend::Postgres {
+                for remainder in 0..64 {
+                    manager
+                        .create_table(
+                            Table::create()
+                                .table(Alias::new(format!("{name}_p{remainder}")))
+                                .partition_of(Alias::new(name))
+                                .values_with(64, remainder)
+                                .to_owned(),
+                        )
+                        .await?;
+                }
+            }
             manager
-                .create_table(
-                    Table::create()
+                .create_index(
+                    Index::create()
+                        .name("entity_embeddings_workspace_idx")
                         .table(Alias::new(name))
-                        .col(
-                            helpers::uuid_col(manager, Alias::new("entity_id"))
-                                .not_null()
-                                .primary_key(),
-                        )
-                        .col(embedding)
-                        .foreign_key(
-                            ForeignKey::create()
-                                .from(Alias::new(name), Alias::new("entity_id"))
-                                .to(Alias::new("entity_entities"), Alias::new("id"))
-                                .on_delete(ForeignKeyAction::Cascade),
-                        )
+                        .col(Alias::new("workspace_id"))
                         .to_owned(),
                 )
                 .await?;
-            helpers::pg_only(manager,&format!("ALTER TABLE {name} ENABLE ROW LEVEL SECURITY; CREATE POLICY workspace_isolation ON {name} FOR SELECT USING (EXISTS (SELECT 1 FROM entity_entities e WHERE e.id = {name}.entity_id));")).await?;
+            helpers::enable_rls_with_policy(
+                manager,
+                name,
+                "tenant_isolation",
+                "tenant_id",
+                "app.current_tenant",
+                false,
+            )
+            .await?;
             helpers::grant(manager, "SELECT", name).await?;
         }
 
@@ -55,6 +88,11 @@ impl MigrationTrait for Migration {
                         UPDATE workspace_workspaces SET embedding_content_revision = embedding_content_revision + 1 WHERE id = NEW.workspace_id;
                     END IF;
                 ELSE
+                    IF TG_OP = 'UPDATE' AND
+                        ROW(OLD.base_url, OLD.model, OLD.api_key, OLD.dimensions, OLD.send_dimensions_param, OLD.document_prefix)
+                        IS NOT DISTINCT FROM
+                        ROW(NEW.base_url, NEW.model, NEW.api_key, NEW.dimensions, NEW.send_dimensions_param, NEW.document_prefix)
+                    THEN RETURN NEW; END IF;
                     IF TG_OP = 'DELETE' THEN
                         UPDATE workspace_workspaces SET embedding_revision = embedding_revision + 1, embedding_reindexing = true WHERE id = OLD.workspace_id;
                     ELSE
@@ -76,8 +114,13 @@ impl MigrationTrait for Migration {
                 } else {
                     operation
                 };
+                let condition = if table == "workspace_embedding_keys" && operation == "UPDATE" {
+                    "WHEN OLD.base_url IS NOT NEW.base_url OR OLD.model IS NOT NEW.model OR OLD.api_key IS NOT NEW.api_key OR OLD.dimensions IS NOT NEW.dimensions OR OLD.send_dimensions_param IS NOT NEW.send_dimensions_param OR OLD.document_prefix IS NOT NEW.document_prefix "
+                } else {
+                    ""
+                };
                 helpers::sqlite_only(manager, &format!(
-                    "CREATE TRIGGER {table}_embedding_revision_{operation} BEFORE {operation_sql} ON {table} BEGIN \
+                    "CREATE TRIGGER {table}_embedding_revision_{operation} BEFORE {operation_sql} ON {table} {condition}BEGIN \
                      UPDATE workspace_workspaces SET {revision} = {revision} + 1{gate} WHERE id = {row}.workspace_id; END;",
                      revision = if table == "entity_entities" { "embedding_content_revision" } else { "embedding_revision" },
                      gate = if table == "entity_entities" { "" } else { ", embedding_reindexing = true" },

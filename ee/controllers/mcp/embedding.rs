@@ -39,7 +39,7 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Configure the selected workspace's OpenAI-compatible embedding provider and queue a full reindex atomically (requires schema scope); the supplied API key is stored and never returned")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Configure the selected workspace's OpenAI-compatible embedding provider (requires schema scope); document changes queue a full reindex atomically, query-instruction-only changes do not; the supplied API key is stored and never returned")]
     pub(crate) async fn set_embedding_provider(
         &self,
         Parameters(input): Parameters<SetEmbeddingKeyRequest>,

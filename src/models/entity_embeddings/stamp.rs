@@ -9,12 +9,14 @@ pub(super) async fn stamp_workspace_embedding(
     workspace_id: Uuid,
     model: String,
     dimensions: i32,
+    document_prefix: &str,
 ) -> Result<(), YorishiroError> {
     crate::models::workspace_workspaces::stamp_embedding_if_missing(
         conn,
         workspace_id,
         model,
         dimensions,
+        document_prefix,
     )
     .await
 }
@@ -25,6 +27,7 @@ pub(super) async fn restamp_workspace_embedding(
     workspace_id: Uuid,
     model: String,
     dimensions: i32,
+    document_prefix: &str,
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::workspace_workspaces::{Column, Entity};
     use sea_orm::sea_query::Expr;
@@ -32,6 +35,10 @@ pub(super) async fn restamp_workspace_embedding(
     Entity::update_many()
         .col_expr(Column::EmbeddingModel, Expr::value(model))
         .col_expr(Column::EmbeddingDimensions, Expr::value(dimensions))
+        .col_expr(
+            Column::EmbeddingDocumentPrefix,
+            Expr::value(document_prefix),
+        )
         .col_expr(Column::EmbeddingReindexing, Expr::value(false))
         .filter(Column::Id.eq(workspace_id))
         .exec(conn)

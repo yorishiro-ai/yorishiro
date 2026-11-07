@@ -765,7 +765,7 @@ pub(super) async fn initialize(request: &TestServer) -> String {
     session
 }
 
-async fn mcp_call(
+pub(super) async fn mcp_call(
     request: &TestServer,
     session: &str,
     api_key: &str,
@@ -797,7 +797,7 @@ fn tool_inventory(response: &Value) -> Vec<Value> {
         .clone()
 }
 
-fn tool_result_json(response: &Value) -> Value {
+pub(super) fn tool_result_json(response: &Value) -> Value {
     serde_json::from_str(
         response["result"]["content"][0]["text"]
             .as_str()
@@ -2596,6 +2596,129 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     .await;
 }
 
+/// High-dimensional exact search retains the nearest original cosine through both transports.
+#[tokio::test]
+async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
+    use super::query_worker::boot_with_query_worker;
+    use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::{_entities::entity_embeddings as vectors, entity_embeddings};
+
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    let (provider, _server, _) = crate::http_stub::keyword_provider(4000).await;
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let definition = serde_json::from_value(json!({
+            "name":"note", "entity_types":{"note":{"fields":{
+                "title":{"type":"string", "required":true, "x-embed":true}
+            }}}
+        }))
+        .unwrap();
+        schema_schemas::create_schema(
+            &ctx.db,
+            setup.tenant_id,
+            setup.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let nearest = entity_entities::create(
+            &ctx.db,
+            setup.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: json!({"title":"nearest document"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            setup.workspace_id,
+            &nearest,
+            provider.as_ref(),
+        )
+        .await
+        .unwrap();
+        let mut embeddings = Vec::new();
+        // Exceed the former candidate cap to protect against reintroducing candidate loss.
+        for i in 0..1001 {
+            let document = entity_entities::create(
+                &ctx.db,
+                setup.workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: json!({"title":format!("decoy {i}")}),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            embeddings.push(vectors::ActiveModel {
+                workspace_id: Set(setup.workspace_id),
+                entity_id: Set(document.id),
+                tenant_id: Set(setup.tenant_id),
+                embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![
+                    1.0;
+                    4000
+                ]))),
+            });
+        }
+        vectors::Entity::insert_many(embeddings)
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        let session = initialize(&request).await;
+        for (phase, background) in [(0, 0.001_f32), (1, -0.001_f32)] {
+            let mut vector = vec![background; 4000];
+            vector[1] = 1.0;
+            vectors::Entity::update_many()
+                .col_expr(
+                    vectors::Column::Embedding,
+                    sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
+                )
+                .filter(vectors::Column::EntityId.eq(nearest.id))
+                .exec(&ctx.db)
+                .await
+                .unwrap();
+            let rest = request
+                .get("/api/search?query_text=beta&limit=10")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .await;
+            rest.assert_status(StatusCode::OK);
+            let hits = rest.json::<Value>();
+            assert_eq!(hits.as_array().unwrap().len(), 10);
+            assert_eq!(
+                hits[0]["entity"]["id"],
+                nearest.id.to_string(),
+                "phase {phase}: {hits}"
+            );
+            let mcp = mcp_call(
+                &request,
+                &session,
+                &setup.api_key,
+                10 + phase,
+                "tools/call",
+                json!({"name":"search_entities","arguments":{"query_text":"beta","limit":10}}),
+            )
+            .await;
+            assert_eq!(mcp["result"]["isError"], false, "{mcp}");
+            assert_eq!(
+                tool_result_json(&mcp),
+                hits,
+                "phase {phase}: transport results agree"
+            );
+        }
+    })
+    .await;
+}
+
 /// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
 #[tokio::test]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {
@@ -2603,7 +2726,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use crate::http_stub::{keyword_provider, unavailable_provider};
     use yorishiro::models::entity_embeddings;
 
-    let (provider, _server, inputs) = keyword_provider(768).await;
+    let (provider, _server, inputs) = keyword_provider(4096).await;
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
         let TestTenant {
             tenant_id,
@@ -2663,6 +2786,58 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             hits[0]["entity"]["data"]["title"], "beta plan",
             "nearest entity first: {hits}"
         );
+        let rest = request
+            .get("/api/search?query_text=beta&limit=2")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(
+            rest.json::<Value>(),
+            hits,
+            "search results agree across transports"
+        );
+        let filtered = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            5,
+            "tools/call",
+            json!({ "name": "search_entities", "arguments": {
+                "query_text": "beta", "entity_type": "note",
+                "filter": { "title": "alpha plan" }, "limit": 1
+            } }),
+        )
+        .await;
+        let rest = request
+            .get("/api/search")
+            .add_query_param("query_text", "beta")
+            .add_query_param("entity_type", "note")
+            .add_query_param("filter", r#"{"title":"alpha plan"}"#)
+            .add_query_param("limit", "1")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            assert_eq!(filtered["result"]["isError"], true, "{filtered}");
+            assert!(
+                filtered["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("content filtering is not supported on SQLite")
+            );
+            rest.assert_status(StatusCode::NOT_IMPLEMENTED);
+            assert_eq!(rest.json::<Value>()["error"]["code"], "backend_unsupported");
+        } else {
+            assert_eq!(filtered["result"]["isError"], false, "{filtered}");
+            let filtered_hits = tool_result_json(&filtered);
+            assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
+            assert_eq!(filtered_hits[0]["entity"]["id"], candidates[0].to_string());
+            rest.assert_status(StatusCode::OK);
+            assert_eq!(
+                rest.json::<Value>(),
+                filtered_hits,
+                "filters agree across transports"
+            );
+        }
         let calls = inputs.lock().unwrap().len();
         let (failed_provider, _failed_server) = unavailable_provider().await;
         let reindex =

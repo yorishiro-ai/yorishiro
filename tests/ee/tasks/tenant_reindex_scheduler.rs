@@ -100,6 +100,8 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
             model: "previous-model".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         });
         yorishiro::models::entity_embeddings::reindex_workspace(
             &ctx.db,

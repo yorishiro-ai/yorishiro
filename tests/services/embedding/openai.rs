@@ -13,6 +13,54 @@ use yorishiro::{
 
 use crate::http_stub::HttpStub;
 
+#[tokio::test]
+async fn query_instruction_and_document_prefix_are_exact_and_independent() {
+    use yorishiro::services::embedding::EmbedKind;
+    let inputs = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let captured = inputs.clone();
+    let server = HttpStub::start(Router::new().route(
+        "/embeddings",
+        post(move |Json(body): Json<serde_json::Value>| {
+            let captured = captured.clone();
+            async move {
+                captured.lock().await.push(body["input"].clone());
+                Json(serde_json::json!({"data":[{"index":0,"embedding":[1.0,2.0]}]}))
+            }
+        }),
+    ))
+    .await;
+    let mut settings = config(server.url.clone());
+    settings.query_instruction = "Instruct: retrieve\nQuery: ".into();
+    settings.document_prefix = "passage: ".into();
+    let provider = OpenAiCompatibleProvider::new(settings);
+    provider.embed_as(EmbedKind::Query, "query").await.unwrap();
+    provider
+        .embed_as(EmbedKind::Document, "document")
+        .await
+        .unwrap();
+    provider.embed_batch(&["raw"]).await.unwrap();
+    let unchanged = OpenAiCompatibleProvider::new(config(server.url.clone()));
+    unchanged
+        .embed_as(EmbedKind::Query, "plain query")
+        .await
+        .unwrap();
+    unchanged
+        .embed_as(EmbedKind::Document, "plain document")
+        .await
+        .unwrap();
+    assert_eq!(
+        *inputs.lock().await,
+        vec![
+            serde_json::json!(["Instruct: retrieve\nQuery: query"]),
+            serde_json::json!(["passage: document"]),
+            serde_json::json!(["raw"]),
+            serde_json::json!(["plain query"]),
+            serde_json::json!(["plain document"]),
+        ]
+    );
+    assert_eq!(provider.model_name(), "test-model");
+}
+
 fn config(base_url: String) -> OpenAiCompatibleConfig {
     OpenAiCompatibleConfig {
         base_url,
@@ -20,6 +68,8 @@ fn config(base_url: String) -> OpenAiCompatibleConfig {
         model: "test-model".into(),
         dimensions: 2,
         send_dimensions_param: true,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     }
 }
 

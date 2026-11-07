@@ -51,16 +51,19 @@ impl MigrationTrait for Migration {
                             .unique_key(),
                     )
                     .col(ColumnDef::new(Alias::new("key_prefix")).text().not_null())
-                    .col(
-                        ColumnDef::new(Alias::new("scope"))
-                            .text()
-                            .not_null()
-                            .check(Expr::cust(
-                                "scope IN ('read', 'write', 'schema', 'migration')",
-                            )),
-                    )
+                    .col(ColumnDef::new(Alias::new("scope")).text().not_null().check(
+                        Expr::col(Alias::new("scope")).is_in([
+                            "read",
+                            "write",
+                            "schema",
+                            "migration",
+                        ]),
+                    ))
                     .col(helpers::created_at(manager))
                     .col(helpers::ts_tz_col(manager, Alias::new("last_used_at")))
+                    .col(helpers::ts_tz_col(manager, Alias::new("expires_at")))
+                    .col(helpers::ts_tz_col(manager, Alias::new("revoked_at")))
+                    .col(helpers::uuid_col(manager, Alias::new("replaced_by_id")))
                     .col(
                         ColumnDef::new(Alias::new("audit"))
                             .boolean()
@@ -104,10 +107,12 @@ impl MigrationTrait for Migration {
                  SECURITY DEFINER
                  SET search_path = pg_catalog, public, pg_temp
                  AS $$
-                   SELECT k.id, k.workspace_id, w.tenant_id, k.scope, k.user_id, k.audit
+                    SELECT k.id, k.workspace_id, k.tenant_id, k.scope, k.user_id, k.audit
                    FROM api_keys k
-                   JOIN workspace_workspaces w ON w.id = k.workspace_id
-                   WHERE k.key_hash = p_key_hash
+                    LEFT JOIN workspace_workspaces w ON w.id = k.workspace_id
+                    WHERE k.key_hash = p_key_hash AND k.revoked_at IS NULL
+                      AND (k.expires_at IS NULL OR k.expires_at > CURRENT_TIMESTAMP)
+                      AND (k.workspace_id IS NULL OR w.tenant_id = k.tenant_id)
                  $$;
 
                  REVOKE ALL ON FUNCTION authenticate_api_key(bytea) FROM PUBLIC;
@@ -133,7 +138,8 @@ impl MigrationTrait for Migration {
                           ON k.workspace_id IS NULL
                          AND w.id = p_requested_workspace
                          AND w.tenant_id = k.tenant_id
-                   WHERE k.key_hash = p_key_hash
+                    WHERE k.key_hash = p_key_hash AND k.revoked_at IS NULL
+                      AND (k.expires_at IS NULL OR k.expires_at > CURRENT_TIMESTAMP)
                      AND (k.workspace_id IS NOT NULL OR w.id IS NOT NULL)
                  $$;
 
