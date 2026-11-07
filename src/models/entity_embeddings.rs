@@ -1,5 +1,6 @@
 //! Variable-dimension embedding storage and workspace reindex operations.
 
+pub(crate) mod hnsw;
 mod indexes;
 mod persistence;
 mod reindex;

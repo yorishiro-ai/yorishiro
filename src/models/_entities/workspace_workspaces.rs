@@ -40,6 +40,8 @@ pub enum Relation {
     ComputeCreditLedger,
     #[sea_orm(has_many = "super::entity_column_preferences::Entity")]
     EntityColumnPreferences,
+    #[sea_orm(has_one = "super::entity_embedding_indexes::Entity")]
+    EntityEmbeddingIndexes,
     #[sea_orm(has_many = "super::entity_entities::Entity")]
     EntityEntities,
     #[sea_orm(has_many = "super::entity_relations::Entity")]
@@ -99,6 +101,12 @@ impl Related<super::compute_credit_ledger::Entity> for Entity {
 impl Related<super::entity_column_preferences::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::EntityColumnPreferences.def()
+    }
+}
+
+impl Related<super::entity_embedding_indexes::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::EntityEmbeddingIndexes.def()
     }
 }
 

@@ -41,6 +41,16 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 }
                 continue;
             }
+            if let Some(dimensions @ 2001..=4096) = workspace.embedding_dimensions {
+                super::hnsw::maintain(db, workspace.id, dimensions as usize).await?;
+            }
+            if workspace.embedding_dimensions.is_none_or(|dimensions| dimensions <= 2000) {
+                // The pgvector path no longer needs the serialized high-dimensional graph.
+                use sea_orm::{ConnectionTrait, Statement};
+                db.execute_raw(Statement::from_sql_and_values(DatabaseBackend::Postgres,
+                    "UPDATE entity_embedding_indexes i SET dimensions=NULL, format=NULL, graph=NULL, vectors=NULL, pending='{}'::jsonb WHERE workspace_id=$1 AND graph IS NOT NULL AND EXISTS (SELECT 1 FROM workspace_workspaces w WHERE w.id=i.workspace_id AND NOT w.embedding_reindexing AND (w.embedding_dimensions IS NULL OR w.embedding_dimensions<=2000))",
+                    [workspace.id.into()])).await.internal()?;
+            }
             let Some(dimensions @ 1..=2000) = workspace.embedding_dimensions else { continue; };
             let name = format!("ysr_hnsw_{}_d{dimensions}", workspace.id.simple());
             let valid = existing.iter().any(|(index, valid)| index == &name && *valid);

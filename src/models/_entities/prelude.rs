@@ -4,6 +4,7 @@ pub use super::api_key_audit_log::Entity as ApiKeyAuditLog;
 pub use super::api_keys::Entity as ApiKeys;
 pub use super::compute_credit_ledger::Entity as ComputeCreditLedger;
 pub use super::entity_column_preferences::Entity as EntityColumnPreferences;
+pub use super::entity_embedding_indexes::Entity as EntityEmbeddingIndexes;
 pub use super::entity_embeddings::Entity as EntityEmbeddings;
 pub use super::entity_entities::Entity as EntityEntities;
 pub use super::entity_relations::Entity as EntityRelations;

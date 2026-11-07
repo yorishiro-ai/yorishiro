@@ -2596,11 +2596,12 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     .await;
 }
 
-/// High-dimensional exact search retains the nearest original cosine through both transports.
+/// High-dimensional HNSW retains the nearest original cosine through both transports.
 #[tokio::test]
 async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
     use super::query_worker::boot_with_query_worker;
     use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+    use std::future::IntoFuture;
     use yorishiro::models::{_entities::entity_embeddings as vectors, entity_embeddings};
 
     if !crate::require_postgres_backend() {
@@ -2647,7 +2648,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
         .unwrap();
         let mut embeddings = Vec::new();
         // Exceed the former candidate cap to protect against reintroducing candidate loss.
-        for i in 0..1001 {
+        for i in 0..2000 {
             let document = entity_entities::create(
                 &ctx.db,
                 setup.workspace_id,
@@ -2672,6 +2673,9 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
         }
         vectors::Entity::insert_many(embeddings)
             .exec(&ctx.db)
+            .await
+            .unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db)
             .await
             .unwrap();
         let session = initialize(&request).await;
@@ -2713,6 +2717,38 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 tool_result_json(&mcp),
                 hits,
                 "phase {phase}: transport results agree"
+            );
+            let mut timings = Vec::new();
+            for iteration in 0..10 {
+                let started = std::time::Instant::now();
+                let rest = request
+                    .get("/api/search?query_text=beta&limit=10")
+                    .add_header("Authorization", format!("Bearer {}", setup.api_key));
+                let mcp = mcp_call(
+                    &request,
+                    &session,
+                    &setup.api_key,
+                    100 + phase * 10 + iteration,
+                    "tools/call",
+                    json!({"name":"search_entities","arguments":{"query_text":"beta","limit":10}}),
+                );
+                let (rest, mcp) = tokio::join!(rest.into_future(), mcp);
+                rest.assert_status(StatusCode::OK);
+                assert_eq!(
+                    rest.json::<Value>()[0]["entity"]["id"],
+                    nearest.id.to_string()
+                );
+                assert_eq!(mcp["result"]["isError"], false, "{mcp}");
+                assert_eq!(
+                    tool_result_json(&mcp)[0]["entity"]["id"],
+                    nearest.id.to_string()
+                );
+                timings.push(started.elapsed().as_secs_f64() * 1000.0);
+            }
+            timings.sort_by(f64::total_cmp);
+            println!(
+                "REST+MCP concurrent pairs phase={phase} n=10 p50_ms={:.3} max_ms={:.3}",
+                timings[4], timings[9]
             );
         }
     })

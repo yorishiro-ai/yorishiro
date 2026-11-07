@@ -258,7 +258,30 @@ async fn search_vectors(
     normalized.nfkc();
     let query_text = normalized.get().trim();
     if !sqlite {
-        let statement = postgres_rrf_query(workspace_id, vector, query_text, &query)?;
+        let candidate_ids = if vector.len() > 2000 {
+            let allowed = if query.entity_type.is_some() || query.filter.is_some() {
+                let mut eligible = scoped_search(workspace_id, &query);
+                eligible
+                    .clear_selects()
+                    .column((Alias::new("e"), Alias::new("id")));
+                Some(
+                    conn.query_all_raw(conn.get_database_backend().build(&eligible))
+                        .await
+                        .internal()?
+                        .into_iter()
+                        .map(|row| row.try_get("", "id"))
+                        .collect::<Result<std::collections::HashSet<Uuid>, _>>()
+                        .internal()?,
+                )
+            } else {
+                None
+            };
+            super::entity_embeddings::hnsw::candidates(conn, workspace_id, &vector, allowed).await?
+        } else {
+            None
+        };
+        let statement =
+            postgres_rrf_with_candidates(workspace_id, vector, query_text, &query, candidate_ids)?;
         return Ok(
             SearchRow::find_by_statement(conn.get_database_backend().build(&statement))
                 .all(conn)
@@ -354,7 +377,8 @@ async fn search_vectors(
     Ok(hits)
 }
 
-/// Builds the final PostgreSQL gated RRF query for execution and plan diagnostics.
+/// Builds the PostgreSQL gated RRF SQL without application HNSW candidate selection.
+/// High-dimensional plan diagnostics must also account for the executor's graph search.
 /// Input text must already be NFKC-normalized and trimmed.
 ///
 /// # Errors
@@ -364,6 +388,16 @@ pub fn postgres_rrf_query(
     vector: Vec<f32>,
     text: &str,
     query: &SearchQuery,
+) -> Result<SelectStatement, YorishiroError> {
+    postgres_rrf_with_candidates(workspace_id, vector, text, query, None)
+}
+
+fn postgres_rrf_with_candidates(
+    workspace_id: Uuid,
+    vector: Vec<f32>,
+    text: &str,
+    query: &SearchQuery,
+    candidate_ids: Option<Vec<Uuid>>,
 ) -> Result<SelectStatement, YorishiroError> {
     use sea_orm::sea_query::{CommonTableExpression, UnionType, WithClause};
     let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
@@ -377,6 +411,10 @@ pub fn postgres_rrf_query(
         &candidates,
     )?;
     let mut ann_candidates = None;
+    if let Some(ids) = candidate_ids {
+        vectors.and_where(Expr::col((Alias::new("e"), Alias::new("id"))).is_in(ids));
+        vectors.order_by((Alias::new("e"), Alias::new("id")), Order::Asc);
+    }
     if vector_dimensions <= 2000 {
         // Relaxed HNSW can emit closer rows after the initial result batch.
         vectors.limit(1000);
@@ -544,7 +582,7 @@ pub fn vector_candidates_query(
         .and_where(embedding.clone().is_not_null())
         .order_by_expr(distance, Order::Asc)
         .limit(limit as u64);
-    // High-dimensional ANN candidates failed nearest-document regression on duplicate vectors.
-    // Keep original cosine exact until a replacement passes the same regression.
+    // High-dimensional HNSW IDs are applied by the executor before original-coordinate reranking.
+    // Unpromoted or invalidated workspaces retain exact search until maintenance publishes a graph.
     Ok(knn)
 }

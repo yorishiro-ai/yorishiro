@@ -97,13 +97,14 @@ schemars = { version = "1.2.3", features = ["uuid1"] }
 # vLLM/real OpenAI over HTTP.
 reqwest.workspace = true
 # Local embedding provider (services::embedding::local): runs intfloat/multilingual-e5-base in-process
-# from safetensors weights. candle-core/candle-nn/candle-transformers build a fully static binary
-# (no openssl-sys, no libstdc++ link).
+# from safetensors weights without an external inference service.
 candle-core = { version = "0.11.1" }
 candle-nn = { version = "0.11.1" }
 candle-transformers = { version = "0.11.1" }
 tokenizers = { version = "0.23.2", features = ["onig"] }
 sqlite-vec = "=0.1.9"
+# Full-coordinate HNSW above PostgreSQL pgvector's dense-index dimension limit.
+usearch = { version = "=2.26.6", default-features = false }
 # Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
 # re-export libsqlite3_sys from its own sqlx dependency, so we reach it
 # directly here and avoid the version-mismatch E0432.

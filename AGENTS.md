@@ -95,7 +95,9 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - Vector search via sqlite-vec (BLOB storage).
 - ID generation: `before_save` hook calls `db::sqlite_generated_id()`.
 - Embedding column lives in `entity_embeddings` on both backends, with a `(workspace_id, entity_id)` primary key.
-- PostgreSQL uses 64 workspace hash partitions, tenant RLS, and scheduled workspace-specific partial HNSW promotion starting at 2,000 vectors.
+- PostgreSQL uses 64 workspace hash partitions, tenant RLS, and scheduled workspace-specific HNSW promotion starting at 2,000 vectors.
+- Dimensions up to 2,000 use partial pgvector indexes; 2,001 through 4,096 use full-coordinate F32 USearch graphs persisted in `entity_embedding_indexes` with tenant RLS.
+- Vector-write triggers queue changed entity IDs transactionally; searches apply pending library mutations before original-cosine reranking, and maintenance publishes graph revisions by compare-and-swap.
 - FTS5 with `tokenize='trigram'` for fuzzy text search (pg_trgm equivalent on PostgreSQL).
 
 ### Migration helpers (`migration/src/helpers.rs`)

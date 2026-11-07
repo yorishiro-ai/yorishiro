@@ -32,6 +32,7 @@ mod m20261020_000026_timezone_state;
 mod m20261020_000027_entity_embeddings;
 mod m20261020_000028_workspace_memberships;
 mod m20261020_000029_tenant_retirement_events;
+mod m20261107_000000_entity_embedding_indexes;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -104,6 +105,7 @@ impl MigratorTrait for Migrations {
             Box::new(m20261020_000027_entity_embeddings::Migration),
             Box::new(m20261020_000028_workspace_memberships::Migration),
             Box::new(m20261020_000029_tenant_retirement_events::Migration),
+            Box::new(m20261107_000000_entity_embedding_indexes::Migration),
             // inject-above (do not remove this comment)
         ]
     }
