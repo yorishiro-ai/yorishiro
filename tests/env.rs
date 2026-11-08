@@ -53,10 +53,6 @@ pub(crate) enum TestEnv {
     RedisBaseUrl,
     E5Model,
     E5Tokenizer,
-    #[cfg(feature = "enterprise")]
-    SearchComparison,
-    #[cfg(feature = "enterprise")]
-    GithubActions,
 }
 
 impl TestEnv {
@@ -111,10 +107,6 @@ impl TestEnv {
             Self::RedisBaseUrl => "YORISHIRO_TEST_REDIS_BASE_URL",
             Self::E5Model => "YORISHIRO_TEST_E5_MODEL",
             Self::E5Tokenizer => "YORISHIRO_TEST_E5_TOKENIZER",
-            #[cfg(feature = "enterprise")]
-            Self::SearchComparison => "YORISHIRO_SEARCH_COMPARISON",
-            #[cfg(feature = "enterprise")]
-            Self::GithubActions => "GITHUB_ACTIONS",
         }
     }
 
