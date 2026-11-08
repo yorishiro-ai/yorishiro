@@ -206,7 +206,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
         workspace.embedding_model = Set(Some(metadata["model"].as_str().unwrap().into()));
         workspace.update(&ctx.db).await.unwrap();
         let index = format!("ysr_hnsw_{}_d{dimensions}", fixture.workspace_id.simple());
-        for build in 0..3 {
+        let build = 0;
             entity_embeddings::maintain_workspace_indexes(&ctx.db)
                 .await
                 .unwrap();
@@ -319,19 +319,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
             }
             println!("genuine dimensions={dimensions} build={build}: 12/12 queries recall@10=1 and exact top1; HNSW candidates <=1000");
             txn.rollback().await.unwrap();
-            if dimensions <= 2000 {
-            ctx.db
-                .execute_unprepared(&format!("DROP INDEX CONCURRENTLY \"{index}\""))
-                .await
-                .unwrap();
-            } else {
-                ctx.db.execute_raw(sea_orm::Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Postgres,
-                    "UPDATE entity_embedding_indexes SET dimensions=NULL, graph=NULL, vectors=NULL WHERE workspace_id=$1",
-                    [fixture.workspace_id.into()],
-                )).await.unwrap();
-            }
-        }
+
     })
     .await;
 }

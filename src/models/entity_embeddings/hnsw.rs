@@ -94,14 +94,14 @@ async fn changes(
 }
 
 fn load(
-    graph: Vec<u8>,
+    graph: &[u8],
     vectors: Vec<u8>,
     dimensions: usize,
     ids: Vec<Uuid>,
     rows: Vec<entity_embeddings::Model>,
 ) -> Result<(Index, Vec<Uuid>), YorishiroError> {
     let index = new_index(dimensions)?;
-    index.load_from_buffer(&graph).internal()?;
+    index.load_from_buffer(graph).internal()?;
     index.change_expansion_search(2000);
     // Reused nodes need the same exploration budget as searches after large direction changes.
     index.change_expansion_add(2000);
@@ -227,7 +227,7 @@ pub(super) async fn maintain(
     let (graph, vectors) = tokio::task::spawn_blocking(move || {
         if let (Some(graph), Some(vectors), Some((ids, changed))) = (old_graph, old_vectors, delta)
         {
-            let (graph, keys) = load(graph, vectors, dimensions, ids, changed)?;
+            let (graph, keys) = load(&graph, vectors, dimensions, ids, changed)?;
             return save(&graph, &keys);
         }
         build(rows, dimensions)
@@ -275,7 +275,16 @@ pub(crate) async fn candidates(
     // shortcut: deserialize each search; add a revision-keyed bounded resident index when measured reload cost exceeds the search budget.
     tokio::task::spawn_blocking(move || {
         let started = std::time::Instant::now();
-        let (graph, keys) = load(graph, vectors, dimensions, ids, rows)?;
+        let serialized = graph;
+        let (graph, keys) = if ids.is_empty() && rows.is_empty() {
+            let index = new_index(dimensions)?;
+            // SAFETY: serialized is immutable and outlives index, which never leaves this closure.
+            unsafe { index.view_from_buffer(&serialized) }.internal()?;
+            index.change_expansion_search(2000);
+            (index, serde_json::from_slice::<Vec<Uuid>>(&vectors).internal()?)
+        } else {
+            load(&serialized, vectors, dimensions, ids, rows)?
+        };
         let load_ms = started.elapsed().as_secs_f64() * 1000.0;
         if graph.size() == 0 {
             return Ok(Some(Vec::new()));
