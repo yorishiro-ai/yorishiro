@@ -79,6 +79,9 @@ async fn changes(
         .keys()
         .map(|id| Uuid::parse_str(id).internal())
         .collect::<Result<Vec<_>, _>>()?;
+    if ids.is_empty() {
+        return Ok((ids, Vec::new()));
+    }
     let rows = entity_embeddings::Entity::find()
         .filter(entity_embeddings::Column::WorkspaceId.eq(workspace_id))
         .filter(entity_embeddings::Column::EntityId.is_in(ids.clone()))
@@ -103,6 +106,9 @@ fn load(
     // Reused nodes need the same exploration budget as searches after large direction changes.
     index.change_expansion_add(2000);
     let mut keys: Vec<Uuid> = serde_json::from_slice(&vectors).internal()?;
+    if ids.is_empty() && rows.is_empty() {
+        return Ok((index, keys));
+    }
     let mut labels: HashMap<_, _> = keys
         .iter()
         .enumerate()
@@ -149,7 +155,7 @@ pub(super) async fn maintain(
     let state = txn
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            "SELECT revision, dimensions, format, graph, vectors, pending FROM entity_embedding_indexes WHERE workspace_id=$1",
+            "SELECT revision, dimensions, format, pending FROM entity_embedding_indexes WHERE workspace_id=$1",
             [workspace_id.into()],
         ))
         .await
@@ -171,8 +177,28 @@ pub(super) async fn maintain(
         txn.rollback().await.internal()?;
         return Ok(());
     }
-    let old_graph: Option<Vec<u8>> = state.try_get("", "graph").internal()?;
-    let old_vectors: Option<Vec<u8>> = state.try_get("", "vectors").internal()?;
+    // Fetch large graph blobs only when an existing index actually needs incremental maintenance.
+    let previous = if compatible {
+        txn.query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT graph, vectors FROM entity_embedding_indexes WHERE workspace_id=$1",
+            [workspace_id.into()],
+        ))
+        .await
+        .internal()?
+    } else {
+        None
+    };
+    let old_graph: Option<Vec<u8>> = previous
+        .as_ref()
+        .map(|state| state.try_get("", "graph").internal())
+        .transpose()?
+        .flatten();
+    let old_vectors: Option<Vec<u8>> = previous
+        .as_ref()
+        .map(|state| state.try_get("", "vectors").internal())
+        .transpose()?
+        .flatten();
     let delta = if compatible {
         Some(changes(&txn, workspace_id, pending).await?)
     } else {
