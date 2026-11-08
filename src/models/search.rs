@@ -282,15 +282,13 @@ async fn search_vectors(
         };
         let statement =
             postgres_rrf_with_candidates(workspace_id, vector, query_text, &query, candidate_ids)?;
-        return Ok(
-            SearchRow::find_by_statement(conn.get_database_backend().build(&statement))
-                .all(conn)
-                .await
-                .internal()?
-                .into_iter()
-                .map(SearchRow::into_hit)
-                .collect(),
-        );
+        let started = std::time::Instant::now();
+        let rows = SearchRow::find_by_statement(conn.get_database_backend().build(&statement))
+            .all(conn)
+            .await
+            .internal()?;
+        tracing::debug!(%workspace_id, rows = rows.len(), rerank_ms = started.elapsed().as_secs_f64() * 1000.0, "PostgreSQL search results ranked");
+        return Ok(rows.into_iter().map(SearchRow::into_hit).collect());
     }
     let terms: Vec<_> = query_text.split_whitespace().collect();
     let sqlite_match = terms

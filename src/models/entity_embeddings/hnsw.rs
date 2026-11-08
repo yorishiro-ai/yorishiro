@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter,
@@ -24,7 +24,7 @@ struct CachedGraph {
 }
 
 // Keep only the most recent graph; in-flight requests retain their own immutable references.
-static GRAPH_CACHE: Mutex<Option<CachedGraph>> = Mutex::new(None);
+static GRAPH_CACHE: tokio::sync::Mutex<Option<CachedGraph>> = tokio::sync::Mutex::const_new(None);
 const CACHE_BYTES: usize = 256 * 1024 * 1024;
 
 fn normalized(vector: &[f32]) -> Vec<f32> {
@@ -283,10 +283,9 @@ pub(crate) async fn candidates(
     let identity: String = state.try_get("", "identity").internal()?;
     let revision: i64 = state.try_get("", "revision").internal()?;
     let version: String = state.try_get("", "version").internal()?;
-    let cached = GRAPH_CACHE
-        .lock()
-        .map_err(|_| anyhow::anyhow!("graph cache lock poisoned"))
-        .internal()?
+    // Coalesce concurrent misses instead of transferring the same large graph per reader.
+    let mut cache = GRAPH_CACHE.lock().await;
+    let cached = cache
         .as_ref()
         .filter(|entry| {
             entry.identity == identity
@@ -309,10 +308,7 @@ pub(crate) async fn candidates(
         let graph = Arc::new(blobs.try_get::<Vec<u8>>("", "graph").internal()?);
         let keys = Arc::new(blobs.try_get::<Vec<u8>>("", "vectors").internal()?);
         if graph.len().saturating_add(keys.len()) <= CACHE_BYTES {
-            *GRAPH_CACHE
-                .lock()
-                .map_err(|_| anyhow::anyhow!("graph cache lock poisoned"))
-                .internal()? = Some(CachedGraph {
+            *cache = Some(CachedGraph {
                 identity,
                 workspace: workspace_id,
                 revision,
@@ -323,6 +319,7 @@ pub(crate) async fn candidates(
         }
         (graph, keys)
     };
+    drop(cache);
     let fetch_ms = fetch_started.elapsed().as_secs_f64() * 1000.0;
     let graph_bytes = graph.len();
     let keys_bytes = vectors.len();
