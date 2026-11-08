@@ -27,7 +27,9 @@ class EnvConfigTest(unittest.TestCase):
             config_keys.update(re.findall(r'get_env\(name="([A-Z][A-Z0-9_]+)"', path.read_text()))
         direct = set(re.findall(r'=> "([A-Z][A-Z0-9_]+)"', (ROOT / "src/data/env.rs").read_text()))
         harness = {
+            "GITHUB_ACTIONS",
             "LOCO_ENV",
+            "YORISHIRO_SEARCH_COMPARISON",
             "YORISHIRO_BACKEND_MARKER_DIR",
             "YORISHIRO_REQUEST_TIMING_DIR",
             "YORISHIRO_SQLITE_LOCK_CHILD_URI",

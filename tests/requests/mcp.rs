@@ -2606,6 +2606,13 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
     if !crate::require_postgres_backend() {
         return;
     }
+    let diagnostic = crate::env::TestEnv::SearchComparison.read().ok();
+    if diagnostic.is_some() {
+        assert_eq!(
+            crate::env::TestEnv::GithubActions.read().as_deref(),
+            Ok("true")
+        );
+    }
     let (provider, _server, _) = crate::http_stub::keyword_provider(4000).await;
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -2647,7 +2654,8 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
         .unwrap();
         let mut embeddings = Vec::new();
         // Exceed the former candidate cap to protect against reintroducing candidate loss.
-        for i in 0..2000 {
+        let mut decoy_id = None;
+        for i in 0..if diagnostic.is_some() { 9999 } else { 2000 } {
             let document = entity_entities::create(
                 &ctx.db,
                 setup.workspace_id,
@@ -2660,14 +2668,20 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
             )
             .await
             .unwrap();
+            decoy_id = Some(document.id);
+            let vector = if diagnostic.is_some() {
+                (0..4000).map(|j| {
+                    let v = ((i as u64 + 1).wrapping_mul(6364136223846793005)
+                        .wrapping_add((j as u64).wrapping_mul(1442695040888963407)))
+                        ^ ((j as u64 + 1).wrapping_mul(2862933555777941757));
+                    ((v >> 32) as u32 as f32 / u32::MAX as f32) + 0.1
+                }).collect()
+            } else { vec![1.0;4000] };
             embeddings.push(vectors::ActiveModel {
                 workspace_id: Set(setup.workspace_id),
                 entity_id: Set(document.id),
                 tenant_id: Set(setup.tenant_id),
-                embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![
-                    1.0;
-                    4000
-                ]))),
+                embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vector))),
             });
         }
         vectors::Entity::insert_many(embeddings)
@@ -2726,6 +2740,78 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 .await;
             persisted.assert_status(StatusCode::OK);
             assert_eq!(persisted.json::<Value>(), hits, "persisted graph agrees");
+        }
+        if let Some(concurrency) = diagnostic {
+            let concurrency: usize = concurrency.parse().unwrap();
+            assert!([4, 8].contains(&concurrency));
+            let mut timings = Vec::new();
+            let mut write_ms = Vec::new();
+            let mut maintenance_ms = Vec::new();
+            let started = std::time::Instant::now();
+            for round in 0..8 {
+                let readers = (0..concurrency).map(|client| {
+                    let request = &request;
+                    let session = &session;
+                    let key = &setup.api_key;
+                    async move {
+                        let mut timings = Vec::new();
+                        for iteration in 0..4 {
+                            let before = std::time::Instant::now();
+                            let hits = if client % 2 == 0 {
+                                let response = request.get("/api/search?query_text=beta&limit=10")
+                                    .add_header("Authorization", format!("Bearer {key}")).await;
+                                response.assert_status(StatusCode::OK);
+                                response.json::<Value>()
+                            } else {
+                                let response = mcp_call(request, session, key,
+                                    1000 + round * 1000 + client as i64 * 10 + iteration,
+                                    "tools/call", json!({"name":"search_entities","arguments":{"query_text":"beta","limit":10}})).await;
+                                assert_eq!(response["result"]["isError"], false, "{response}");
+                                tool_result_json(&response)
+                            };
+                            assert_eq!(hits.as_array().unwrap().len(), 10);
+                            assert_eq!(hits[0]["entity"]["id"], nearest.id.to_string());
+                            timings.push(before.elapsed().as_secs_f64() * 1000.0);
+                        }
+                        timings
+                    }
+                });
+                let writer = async {
+                    let before = std::time::Instant::now();
+                    let mut vector = vec![if round % 2 == 0 { 0.001 } else { -0.001 };4000];
+                    vector[1] = 1.0;
+                    let changed = vectors::Entity::update_many()
+                        .col_expr(vectors::Column::Embedding, sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vector)))
+                        .filter(vectors::Column::WorkspaceId.eq(setup.workspace_id))
+                        .filter(vectors::Column::EntityId.eq(nearest.id)).exec(&ctx.db).await.unwrap();
+                    assert_eq!(changed.rows_affected, 1);
+                    let removed = vectors::Entity::delete_many()
+                        .filter(vectors::Column::WorkspaceId.eq(setup.workspace_id))
+                        .filter(vectors::Column::EntityId.eq(decoy_id.unwrap())).exec(&ctx.db).await.unwrap();
+                    assert_eq!(removed.rows_affected, 1);
+                    vectors::Entity::insert(vectors::ActiveModel {
+                        workspace_id: Set(setup.workspace_id), entity_id: Set(decoy_id.unwrap()), tenant_id: Set(setup.tenant_id),
+                        embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0;4000])))
+                    }).exec(&ctx.db).await.unwrap();
+                    write_ms.push(before.elapsed().as_secs_f64() * 1000.0);
+                    if round % 4 == 0 {
+                        let before = std::time::Instant::now();
+                        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
+                        maintenance_ms.push(before.elapsed().as_secs_f64() * 1000.0);
+                    }
+                };
+                let (readers, ()) = tokio::join!(futures::future::join_all(readers), writer);
+                timings.extend(readers.into_iter().flatten());
+            }
+            assert_eq!(timings.len(), concurrency * 32);
+            assert_eq!(write_ms.len(), 8);
+            assert_eq!(maintenance_ms.len(), 2);
+            timings.sort_by(f64::total_cmp);
+            let n = timings.len();
+            let elapsed = started.elapsed().as_secs_f64();
+            println!("SEARCH_COMPARISON {}", json!({"concurrency":concurrency,"rounds":8,"requests":n,"writes":24,
+                "elapsed_s":elapsed,"qps":n as f64/elapsed,"p50_ms":timings[(n-1)/2],"p95_ms":timings[(n-1)*95/100],
+                "max_ms":timings[n-1],"write_ms":write_ms,"maintenance_ms":maintenance_ms}));
         }
     })
     .await;
