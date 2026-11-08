@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/search-comparison.yml
       - scripts/search_comparison.py
+      - tests/requests/mcp.rs
 
 permissions:
   contents: read

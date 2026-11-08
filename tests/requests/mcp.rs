@@ -2608,6 +2608,13 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
     }
     let diagnostic = crate::env::TestEnv::SearchComparison.read().ok();
     if diagnostic.is_some() {
+        // Phase timings explain matched-run differences between the two production revisions.
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                "yorishiro::models::entity_embeddings::hnsw=debug,yorishiro::models::search=debug",
+            )
+            .with_ansi(false)
+            .try_init();
         assert_eq!(
             crate::env::TestEnv::GithubActions.read().as_deref(),
             Ok("true")
