@@ -54,8 +54,21 @@ jobs:
           docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
             -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
             -c 'CREATE DATABASE yorishiro OWNER yorishiro;'
+          # Plans of slow statements explain the final-ranking variance seen in matched runs.
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            -c "ALTER SYSTEM SET session_preload_libraries = 'auto_explain'" \
+            -c "ALTER SYSTEM SET auto_explain.log_min_duration = '700ms'" \
+            -c "ALTER SYSTEM SET auto_explain.log_analyze = on" \
+            -c "ALTER SYSTEM SET auto_explain.log_buffers = on" \
+            -c 'SELECT pg_reload_conf()'
       - name: Compare identical release workloads in ABBA order
         run: python3 scripts/search_comparison.py
+      - name: Collect slow-statement plans
+        if: always()
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.db.id }}
+        run: |
+          docker logs "$POSTGRES_CONTAINER" 2>&1 | grep -A60 'duration: ' > "$RUNNER_TEMP/search-comparison/postgres-slow-plans.log" || true
       - uses: actions/upload-artifact@v7
         if: always()
         with:
