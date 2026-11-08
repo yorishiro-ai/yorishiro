@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter,
@@ -19,12 +19,18 @@ struct CachedGraph {
     workspace: Uuid,
     revision: i64,
     version: String,
-    graph: Arc<Vec<u8>>,
-    keys: Arc<Vec<u8>>,
+    dimensions: usize,
+    prepared: Arc<tokio::sync::OnceCell<Option<PreparedGraph>>>,
 }
 
-// Keep only the most recent graph; in-flight requests retain their own immutable references.
-static GRAPH_CACHE: tokio::sync::Mutex<Option<CachedGraph>> = tokio::sync::Mutex::const_new(None);
+struct PreparedGraph {
+    index: Index,
+    keys: Vec<Uuid>,
+    search_slot: Arc<tokio::sync::Semaphore>,
+}
+
+// Retain one prepared generation; in-flight readers own evicted generations until completion.
+static GRAPH_CACHE: Mutex<Option<CachedGraph>> = Mutex::new(None);
 const CACHE_BYTES: usize = 256 * 1024 * 1024;
 
 fn normalized(vector: &[f32]) -> Vec<f32> {
@@ -115,6 +121,7 @@ fn load(
     rows: Vec<entity_embeddings::Model>,
 ) -> Result<(Index, Vec<Uuid>), YorishiroError> {
     let index = new_index(dimensions)?;
+    index.reserve_capacity_and_threads(0, 1).internal()?;
     index.load_from_buffer(graph).internal()?;
     index.change_expansion_search(2000);
     // Reused nodes need the same exploration budget as searches after large direction changes.
@@ -134,7 +141,7 @@ fn load(
         }
     }
     index
-        .reserve(index.size().saturating_add(rows.len()))
+        .reserve_capacity_and_threads(index.size().saturating_add(rows.len()), 1)
         .internal()?;
     for row in rows {
         let vector = row
@@ -275,7 +282,7 @@ pub(crate) async fn candidates(
     let lock_wait_ms = started.elapsed().as_secs_f64() * 1000.0;
     let fetch_started = std::time::Instant::now();
     let state = conn.query_one_raw(Statement::from_sql_and_values(DatabaseBackend::Postgres,
-        "SELECT revision, xmin::text AS version, pending, concat((SELECT oid FROM pg_database WHERE datname=current_database()), '/', current_database(), '/', inet_server_addr(), '/', inet_server_port(), '/', pg_postmaster_start_time(), '/', current_user, '/', current_setting('app.current_tenant', true)) AS identity FROM entity_embedding_indexes WHERE workspace_id=$1 AND dimensions=$2 AND format=$3 AND graph IS NOT NULL AND vectors IS NOT NULL",
+        "SELECT revision, xmin::text AS version, pending, octet_length(graph)::bigint + octet_length(vectors)::bigint AS bytes, concat((SELECT oid FROM pg_database WHERE datname=current_database()), '/', current_database(), '/', inet_server_addr(), '/', inet_server_port(), '/', pg_postmaster_start_time(), '/', current_user, '/', current_setting('app.current_tenant', true)) AS identity FROM entity_embedding_indexes WHERE workspace_id=$1 AND dimensions=$2 AND format=$3 AND graph IS NOT NULL AND vectors IS NOT NULL",
         [workspace_id.into(), (vector.len() as i32).into(), FORMAT.into()])).await.internal()?;
     let Some(state) = state else {
         return Ok(None);
@@ -283,21 +290,47 @@ pub(crate) async fn candidates(
     let identity: String = state.try_get("", "identity").internal()?;
     let revision: i64 = state.try_get("", "revision").internal()?;
     let version: String = state.try_get("", "version").internal()?;
-    // Coalesce concurrent misses instead of transferring the same large graph per reader.
-    let mut cache = GRAPH_CACHE.lock().await;
-    let cached = cache
-        .as_ref()
-        .filter(|entry| {
+    let bytes: i64 = state.try_get("", "bytes").internal()?;
+    let dimensions = vector.len();
+    let (prepared, cache_hit, displaced) = {
+        let mut cache = GRAPH_CACHE
+            .lock()
+            .map_err(|_| anyhow::anyhow!("graph cache poisoned"))
+            .internal()?;
+        if let Some(entry) = cache.as_ref().filter(|entry| {
             entry.identity == identity
                 && entry.workspace == workspace_id
                 && entry.revision == revision
                 && entry.version == version
-        })
-        .map(|entry| (Arc::clone(&entry.graph), Arc::clone(&entry.keys)));
-    let cache_hit = cached.is_some();
-    let (graph, vectors) = if let Some(cached) = cached {
-        cached
-    } else {
+                && entry.dimensions == dimensions
+        }) {
+            (
+                Arc::clone(&entry.prepared),
+                entry.prepared.initialized(),
+                None,
+            )
+        } else {
+            let prepared = Arc::new(tokio::sync::OnceCell::new());
+            let displaced = if bytes <= CACHE_BYTES as i64 {
+                cache.replace(CachedGraph {
+                    identity,
+                    workspace: workspace_id,
+                    revision,
+                    version: version.clone(),
+                    dimensions,
+                    prepared: Arc::clone(&prepared),
+                })
+            } else {
+                None
+            };
+            (prepared, false, displaced)
+        }
+    };
+    drop(displaced);
+    let pending = state.try_get("", "pending").internal()?;
+    // Only readers of this generation wait for its preparation, never unrelated workspace hits.
+    let graph = prepared.get_or_try_init(|| async {
+        let preparation_started = std::time::Instant::now();
         // A publication between metadata and blob reads must not populate the wrong cache version.
         let blobs = conn.query_one_raw(Statement::from_sql_and_values(DatabaseBackend::Postgres,
             "SELECT graph, vectors FROM entity_embedding_indexes WHERE workspace_id=$1 AND revision=$2 AND xmin::text=$3 AND dimensions=$4 AND format=$5",
@@ -305,46 +338,43 @@ pub(crate) async fn candidates(
         let Some(blobs) = blobs else {
             return Ok(None);
         };
-        let graph = Arc::new(blobs.try_get::<Vec<u8>>("", "graph").internal()?);
-        let keys = Arc::new(blobs.try_get::<Vec<u8>>("", "vectors").internal()?);
-        if graph.len().saturating_add(keys.len()) <= CACHE_BYTES {
-            *cache = Some(CachedGraph {
-                identity,
-                workspace: workspace_id,
-                revision,
-                version,
-                graph: Arc::clone(&graph),
-                keys: Arc::clone(&keys),
-            });
-        }
-        (graph, keys)
-    };
-    drop(cache);
+        let graph: Vec<u8> = blobs.try_get("", "graph").internal()?;
+        let keys: Vec<u8> = blobs.try_get("", "vectors").internal()?;
+        let blob_ms = preparation_started.elapsed().as_secs_f64() * 1000.0;
+        let delta_started = std::time::Instant::now();
+        let (ids, rows) = changes(conn, workspace_id, pending).await?;
+        let delta_ms = delta_started.elapsed().as_secs_f64() * 1000.0;
+        let pending_ids = ids.len();
+        let submitted = std::time::Instant::now();
+        tokio::task::spawn_blocking(move || {
+            let blocking_wait_ms = submitted.elapsed().as_secs_f64() * 1000.0;
+            let load_started = std::time::Instant::now();
+            let (index, keys) = load(&graph, keys, dimensions, ids, rows)?;
+            tracing::debug!(%workspace_id, dimensions, revision, pending_ids, bytes, blob_ms, delta_ms, blocking_wait_ms, load_ms = load_started.elapsed().as_secs_f64() * 1000.0, total_ms = preparation_started.elapsed().as_secs_f64() * 1000.0, "HNSW generation prepared");
+            Ok::<_, YorishiroError>(Some(PreparedGraph {
+                index, keys, search_slot: Arc::new(tokio::sync::Semaphore::new(1)),
+            }))
+        }).await.internal()?
+    }).await?;
     let fetch_ms = fetch_started.elapsed().as_secs_f64() * 1000.0;
-    let graph_bytes = graph.len();
-    let keys_bytes = vectors.len();
-    let dimensions = vector.len();
-    let pending = state.try_get("", "pending").internal()?;
-    let delta_started = std::time::Instant::now();
-    let (ids, rows) = changes(conn, workspace_id, pending).await?;
-    let delta_fetch_ms = delta_started.elapsed().as_secs_f64() * 1000.0;
-    let pending_ids = ids.len();
+    let Some(graph) = graph else {
+        return Ok(None);
+    };
+    // Admit before spawning so queued readers do not occupy blocking-pool threads.
+    let search_lock_started = std::time::Instant::now();
+    let permit = Arc::clone(&graph.search_slot)
+        .acquire_owned()
+        .await
+        .internal()?;
+    let search_lock_ms = search_lock_started.elapsed().as_secs_f64() * 1000.0;
     let query = normalized(vector);
+    let prepared = Arc::clone(&prepared);
     let submitted = std::time::Instant::now();
     tokio::task::spawn_blocking(move || {
         let blocking_wait_ms = submitted.elapsed().as_secs_f64() * 1000.0;
-        let load_started = std::time::Instant::now();
-        let serialized = graph;
-        let (graph, keys) = if ids.is_empty() && rows.is_empty() {
-            let index = new_index(dimensions)?;
-            // SAFETY: serialized is immutable and outlives index, which never leaves this closure.
-            unsafe { index.view_from_buffer(&serialized) }.internal()?;
-            index.change_expansion_search(2000);
-            (index, serde_json::from_slice::<Vec<Uuid>>(&vectors).internal()?)
-        } else {
-            load(&serialized, vectors.as_ref().clone(), dimensions, ids, rows)?
-        };
-        let load_ms = load_started.elapsed().as_secs_f64() * 1000.0;
+        let _permit = permit;
+        let prepared = prepared.get().and_then(Option::as_ref).ok_or_else(|| anyhow::anyhow!("unprepared HNSW graph")).internal()?;
+        let PreparedGraph { index: graph, keys, .. } = prepared;
         if graph.size() == 0 {
             return Ok(Some(Vec::new()));
         }
@@ -353,10 +383,12 @@ pub(crate) async fn candidates(
                 .is_some_and(|id| allowed.as_ref().is_none_or(|ids| ids.contains(id)))
         };
         let search_started = std::time::Instant::now();
-        let hits = graph
-            .filtered_search(&query, CANDIDATE_LIMIT, filter)
-            .internal()?;
-        tracing::debug!(%workspace_id, dimensions, cache_hit, nodes = graph.size(), candidates = hits.keys.len(), graph_bytes, keys_bytes, pending_ids, lock_wait_ms, fetch_ms, delta_fetch_ms, blocking_wait_ms, load_ms, search_ms = search_started.elapsed().as_secs_f64() * 1000.0, total_ms = started.elapsed().as_secs_f64() * 1000.0, "HNSW candidates selected");
+        let hits = if allowed.is_some() {
+            graph.filtered_search(&query, CANDIDATE_LIMIT, filter)
+        } else {
+            graph.search(&query, CANDIDATE_LIMIT)
+        }.internal()?;
+        tracing::debug!(%workspace_id, dimensions, cache_hit, nodes = graph.size(), candidates = hits.keys.len(), bytes, lock_wait_ms, fetch_ms, blocking_wait_ms, search_lock_ms, search_ms = search_started.elapsed().as_secs_f64() * 1000.0, total_ms = started.elapsed().as_secs_f64() * 1000.0, "HNSW candidates selected");
         let ids = hits
             .keys
             .into_iter()

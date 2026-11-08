@@ -405,9 +405,20 @@ fn postgres_rrf_with_candidates(
     let mut vectors = vector_candidates_query(
         sea_orm::DatabaseBackend::Postgres,
         workspace_id,
-        vector,
+        vector.clone(),
         &candidates,
     )?;
+    // Rank IDs and distances only; entity payloads are fetched after rank fusion.
+    vectors
+        .clear_selects()
+        .column((Alias::new("e"), Alias::new("id")));
+    let distance = Expr::col((Alias::new("ee"), Alias::new("embedding")))
+        .cast_as(Alias::new(format!("vector({vector_dimensions})")))
+        .binary(
+            PgBinOper::CosineDistance,
+            Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
+        );
+    vectors.expr_as(distance, "distance");
     let mut ann_candidates = None;
     if let Some(ids) = candidate_ids {
         vectors.and_where(Expr::col((Alias::new("e"), Alias::new("id"))).is_in(ids));
@@ -426,6 +437,9 @@ fn postgres_rrf_with_candidates(
             .to_owned();
     }
     let mut texts = scoped_search(workspace_id, query);
+    texts
+        .clear_selects()
+        .column((Alias::new("e"), Alias::new("id")));
     let normalized = Expr::cust("normalize(\"e\".\"data\"::text, nfkc)");
     let pattern = format!(
         "%{}%",

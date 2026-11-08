@@ -2692,8 +2692,17 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 .unwrap();
             let rest = request
                 .get("/api/search?query_text=beta&limit=10")
-                .add_header("Authorization", format!("Bearer {}", setup.api_key))
-                .await;
+                .add_header("Authorization", format!("Bearer {}", setup.api_key));
+            let mcp = mcp_call(
+                &request,
+                &session,
+                &setup.api_key,
+                10 + phase,
+                "tools/call",
+                json!({"name":"search_entities","arguments":{"query_text":"beta","limit":10}}),
+            );
+            // Concurrent transports share preparation but retain independent authorization and ranking.
+            let (rest, mcp) = tokio::join!(async { rest.await }, mcp);
             rest.assert_status(StatusCode::OK);
             let hits = rest.json::<Value>();
             assert_eq!(hits.as_array().unwrap().len(), 10);
@@ -2702,15 +2711,6 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 nearest.id.to_string(),
                 "phase {phase}: {hits}"
             );
-            let mcp = mcp_call(
-                &request,
-                &session,
-                &setup.api_key,
-                10 + phase,
-                "tools/call",
-                json!({"name":"search_entities","arguments":{"query_text":"beta","limit":10}}),
-            )
-            .await;
             assert_eq!(mcp["result"]["isError"], false, "{mcp}");
             assert_eq!(
                 tool_result_json(&mcp),
