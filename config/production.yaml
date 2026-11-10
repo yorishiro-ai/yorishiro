@@ -120,6 +120,12 @@ queue:
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
+  # Loco deletes finished SQL queue rows after these ages; queued and processing jobs are never touched.
+  retention:
+    completed_days: 7
+    cancelled_days: 7
+    failed_days: 30
+    interval_seconds: 3600
 <% else %>
 queue:
   kind: Postgres
@@ -149,6 +155,12 @@ queue:
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
+  # Loco deletes finished SQL queue rows after these ages; queued and processing jobs are never touched.
+  retention:
+    completed_days: 7
+    cancelled_days: 7
+    failed_days: 30
+    interval_seconds: 3600
 <% endif %>
 
 workers:
