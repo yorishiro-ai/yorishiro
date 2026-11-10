@@ -56,6 +56,8 @@ pub struct LocalEmbeddingProvider {
     inner: Arc<Inner>,
     // Bound activation memory before allocating tensors or occupying a blocking thread.
     inference: Arc<tokio::sync::Semaphore>,
+    // The deployment's outbound deadlines; production builds set them after the model loads.
+    timeouts: crate::data::settings::HttpTimeouts,
 }
 
 struct Inner {
@@ -146,7 +148,14 @@ impl LocalEmbeddingProvider {
         Ok(Self {
             inner: Arc::new(inner),
             inference: Arc::new(tokio::sync::Semaphore::new(1)),
+            timeouts: crate::data::settings::HttpTimeouts::default(),
         })
+    }
+
+    /// Sets the deployment's outbound deadlines on a loaded provider.
+    pub(crate) fn with_timeouts(mut self, timeouts: crate::data::settings::HttpTimeouts) -> Self {
+        self.timeouts = timeouts;
+        self
     }
 }
 
@@ -335,8 +344,9 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
             .await
             .map_err(|err| internal(format!("embedding task panicked: {err}")))?
         };
-        let timeout = crate::data::http_timeouts::deadline(
+        let timeout = crate::data::http_timeouts::deadline_for(
             crate::data::http_timeouts::HttpTimeout::LocalEmbedding,
+            self.timeouts,
         );
         match tokio::time::timeout(timeout, task).await {
             Ok(result) => result,

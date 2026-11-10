@@ -101,8 +101,6 @@ candle-nn = { version = "0.11.1" }
 candle-transformers = { version = "0.11.1" }
 tokenizers = { version = "0.23.2", features = ["onig"] }
 sqlite-vec = "=0.1.9"
-# Full-coordinate HNSW above PostgreSQL pgvector's dense-index dimension limit.
-usearch = { version = "=2.26.6", default-features = false }
 # Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
 # re-export libsqlite3_sys from its own sqlx dependency, so we reach it
 # directly here and avoid the version-mismatch E0432.

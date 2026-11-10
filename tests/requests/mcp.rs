@@ -2778,15 +2778,6 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 hits,
                 "phase {phase}: transport results agree"
             );
-            entity_embeddings::maintain_workspace_indexes(&ctx.db)
-                .await
-                .unwrap();
-            let persisted = request
-                .get("/api/search?query_text=beta&limit=10")
-                .add_header("Authorization", format!("Bearer {}", setup.api_key))
-                .await;
-            persisted.assert_status(StatusCode::OK);
-            assert_eq!(persisted.json::<Value>(), hits, "persisted graph agrees");
         }
     })
     .await;

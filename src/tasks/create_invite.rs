@@ -49,9 +49,7 @@ impl Task for CreateInvite {
                 hint: String::new(),
             })?,
             Err(_) => {
-                app_context
-                    .config
-                    .settings::<crate::data::settings::Settings>()?
+                crate::data::settings::installed(app_context)?
                     .limits
                     .invite_ttl_hours
             }

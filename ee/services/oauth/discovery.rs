@@ -34,10 +34,12 @@ pub fn redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
+// The OAuth flow has no application context at this layer, so it uses the documented default deadline.
 fn http_client() -> Client {
     Client::builder()
-        .timeout(crate::data::http_timeouts::deadline(
+        .timeout(crate::data::http_timeouts::deadline_for(
             crate::data::http_timeouts::HttpTimeout::OidcDiscovery,
+            crate::data::settings::HttpTimeouts::default(),
         ))
         .redirect(redirect_policy())
         .build()

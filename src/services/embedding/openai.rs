@@ -35,20 +35,30 @@ pub struct OpenAiCompatibleProvider {
 
 impl OpenAiCompatibleProvider {
     ///
+    /// Builds the provider around its own HTTP client with the documented default deadlines,
+    /// for callers without deployment settings (tests, tools).
+    ///
     /// # Panics
-    /// Panics if an internal invariant required by this operation is violated.
+    /// Panics if the reqwest client cannot be built from the static configuration.
     pub fn new(config: OpenAiCompatibleConfig) -> Self {
-        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-        let client = CLIENT
-            .get_or_init(|| {
-                reqwest::Client::builder()
-                    .timeout(crate::data::http_timeouts::deadline(
-                        crate::data::http_timeouts::HttpTimeout::EmbeddingRequest,
-                    ))
-                    .build()
-                    .expect("reqwest client configuration is static and always valid")
-            })
-            .clone();
+        Self::with_timeouts(config, crate::data::settings::HttpTimeouts::default())
+    }
+
+    /// Builds the provider with the deployment's outbound deadlines.
+    ///
+    /// # Panics
+    /// Panics if the reqwest client cannot be built from the static configuration.
+    pub(crate) fn with_timeouts(
+        config: OpenAiCompatibleConfig,
+        timeouts: crate::data::settings::HttpTimeouts,
+    ) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(crate::data::http_timeouts::deadline_for(
+                crate::data::http_timeouts::HttpTimeout::EmbeddingRequest,
+                timeouts,
+            ))
+            .build()
+            .expect("reqwest client configuration is static and always valid");
 
         Self::with_client(config, client)
     }

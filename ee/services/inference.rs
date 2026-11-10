@@ -32,24 +32,32 @@ pub struct InferenceClient {
 }
 
 impl InferenceClient {
+    /// Builds the client with the documented default deadlines, for callers without deployment settings (tests, tools).
     ///
     /// # Panics
-    /// Panics if an internal invariant required by this operation is violated.
+    /// Panics if the reqwest client cannot be built from the static configuration.
     pub fn new(config: InferenceConfig) -> Self {
-        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-        let client = CLIENT
-            .get_or_init(|| {
-                reqwest::Client::builder()
-                    .timeout(crate::data::http_timeouts::deadline(
-                        crate::data::http_timeouts::HttpTimeout::InferenceRequest,
-                    ))
-                    // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
-                    // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at.
-                    .redirect(reqwest::redirect::Policy::none())
-                    .build()
-                    .expect("reqwest client configuration is static and always valid")
-            })
-            .clone();
+        Self::with_timeouts(config, crate::data::settings::HttpTimeouts::default())
+    }
+
+    /// Builds the client with the deployment's outbound deadline.
+    ///
+    /// # Panics
+    /// Panics if the reqwest client cannot be built from the static configuration.
+    pub(crate) fn with_timeouts(
+        config: InferenceConfig,
+        timeouts: crate::data::settings::HttpTimeouts,
+    ) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(crate::data::http_timeouts::deadline_for(
+                crate::data::http_timeouts::HttpTimeout::InferenceRequest,
+                timeouts,
+            ))
+            // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
+            // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("reqwest client configuration is static and always valid");
 
         Self::with_client(config, client)
     }

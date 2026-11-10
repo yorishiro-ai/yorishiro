@@ -51,9 +51,13 @@ pub(crate) fn render<T: chrono::TimeZone>(
     in_timezone(instant, configured(ctx))
 }
 
-/// Returns the configured zone from validated application settings.
+/// Returns the configured zone: the one installed at boot, or the config parse when the
+/// pools install their connections before the services do.
 #[must_use]
 pub(crate) fn configured(ctx: &loco_rs::app::AppContext) -> Tz {
+    if let Some(zone) = ctx.shared_store.get_ref::<Tz>() {
+        return *zone;
+    }
     ctx.config
         .settings::<crate::data::settings::Settings>()
         .expect("timezone settings validated during config load")

@@ -96,17 +96,29 @@ pub(crate) fn cache_dir(def: &LocalModelDef) -> PathBuf {
     PathBuf::from("models").join(def.short_id)
 }
 
-/// The client used for every model download, with the configured connect and read deadlines.
+/// The client used for a model download outside a booted application, with the documented default deadlines.
 ///
 /// # Errors
 /// Returns an error if the client cannot be built.
 pub fn http_client() -> reqwest::Result<reqwest::Client> {
+    configured_client(&crate::data::settings::HttpTimeouts::default())
+}
+
+/// The client used for every model download by a booted application, with the deployment's connect and read deadlines.
+///
+/// # Errors
+/// Returns an error if the client cannot be built.
+pub(crate) fn configured_client(
+    timeouts: &crate::data::settings::HttpTimeouts,
+) -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
-        .connect_timeout(crate::data::http_timeouts::deadline(
+        .connect_timeout(crate::data::http_timeouts::deadline_for(
             crate::data::http_timeouts::HttpTimeout::ModelFetchConnect,
+            *timeouts,
         ))
-        .read_timeout(crate::data::http_timeouts::deadline(
+        .read_timeout(crate::data::http_timeouts::deadline_for(
             crate::data::http_timeouts::HttpTimeout::ModelFetchRead,
+            *timeouts,
         ))
         .build()
 }
@@ -114,10 +126,13 @@ pub fn http_client() -> reqwest::Result<reqwest::Client> {
 /// The model and tokenizer paths to load from, fetching either one first if it is absent.
 ///
 /// A failed fetch fails startup.
-pub(super) async fn ensure_model_files(def: &LocalModelDef) -> anyhow::Result<(PathBuf, PathBuf)> {
+pub(super) async fn ensure_model_files(
+    def: &LocalModelDef,
+    timeouts: &crate::data::settings::HttpTimeouts,
+) -> anyhow::Result<(PathBuf, PathBuf)> {
     let dir = cache_dir(def);
 
-    let client = http_client()?;
+    let client = configured_client(timeouts)?;
     let model = ensure_file(&dir, def, &def.model, &client).await?;
     let tokenizer = ensure_file(&dir, def, &def.tokenizer, &client).await?;
     Ok((model, tokenizer))

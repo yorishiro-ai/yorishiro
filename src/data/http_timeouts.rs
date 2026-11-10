@@ -1,14 +1,13 @@
-//! Process-wide outbound HTTP and inference deadlines.
+//! Outbound HTTP and inference deadlines.
 //!
-//! The HTTP clients are shared per process and built lazily, often from paths that hold no `AppContext`, so the deadlines are installed once at start-up instead of being threaded through every constructor.
-//! A process that never installed them (a unit test, a tool) uses the documented defaults.
+//! The deadlines come from the deployment settings and travel with the client that honors them:
+//! every provider and fetcher receives the timeouts of the context that built it, so a process
+//! booting several application contexts never mixes one context's deadlines into another's clients.
+//! A client built without deployment settings (a tool, a test) uses the documented defaults.
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::data::settings::HttpTimeouts;
-
-static ACTIVE: OnceLock<HttpTimeouts> = OnceLock::new();
 
 /// Which outbound call a deadline bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,21 +20,15 @@ pub enum HttpTimeout {
     OidcDiscovery,
 }
 
-/// The first call wins: Loco builds the context twice for `start`, and both builds read the same file.
-pub(crate) fn install(timeouts: HttpTimeouts) {
-    let _ = ACTIVE.set(timeouts);
-}
-
-/// The configured deadline for `kind`, or its default when none was installed.
+/// The deadline for `kind` under an explicit set of deployment timeouts.
 #[must_use]
-pub fn deadline(kind: HttpTimeout) -> Duration {
-    let t = ACTIVE.get().copied().unwrap_or_default();
+pub(crate) fn deadline_for(kind: HttpTimeout, timeouts: HttpTimeouts) -> Duration {
     Duration::from_secs(match kind {
-        HttpTimeout::EmbeddingRequest => t.embedding_request_seconds,
-        HttpTimeout::LocalEmbedding => t.local_embedding_seconds,
-        HttpTimeout::ModelFetchConnect => t.model_fetch_connect_seconds,
-        HttpTimeout::ModelFetchRead => t.model_fetch_read_seconds,
-        HttpTimeout::InferenceRequest => t.inference_request_seconds,
-        HttpTimeout::OidcDiscovery => t.oauth_discovery_seconds,
+        HttpTimeout::EmbeddingRequest => timeouts.embedding_request_seconds,
+        HttpTimeout::LocalEmbedding => timeouts.local_embedding_seconds,
+        HttpTimeout::ModelFetchConnect => timeouts.model_fetch_connect_seconds,
+        HttpTimeout::ModelFetchRead => timeouts.model_fetch_read_seconds,
+        HttpTimeout::InferenceRequest => timeouts.inference_request_seconds,
+        HttpTimeout::OidcDiscovery => timeouts.oauth_discovery_seconds,
     })
 }

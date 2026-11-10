@@ -228,3 +228,15 @@ impl Default for DbLoadGuard {
         }
     }
 }
+
+/// The settings installed at boot, without re-parsing the config file.
+///
+/// # Errors
+/// Returns an error when the application has not installed its settings yet.
+pub(crate) fn installed(ctx: &loco_rs::app::AppContext) -> loco_rs::Result<Settings> {
+    ctx.shared_store.get::<Settings>().ok_or_else(|| {
+        loco_rs::Error::Message(
+            "application settings are not installed; boot the application first".into(),
+        )
+    })
+}

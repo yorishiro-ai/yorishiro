@@ -44,8 +44,7 @@ pub(crate) async fn set_maintenance(
         &ctx.db,
         body.mode,
         body.retry_after.unwrap_or(
-            ctx.config
-                .settings::<crate::data::settings::Settings>()
+            crate::data::settings::installed(&ctx)
                 .internal()?
                 .limits
                 .maintenance_retry_after_seconds,

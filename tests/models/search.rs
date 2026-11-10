@@ -53,16 +53,13 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
             assert_eq!(statement.sql.contains("word_similarity"), eligible, "{text}: {}", statement.sql);
         }
         let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
-        let binary = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
-        let sql = ctx.db.get_database_backend().build(&binary).sql;
-        assert!(sql.contains("<=>") && !sql.contains("halfvec"));
-        assert!(!sql.contains("binary_quantize"));
+        let high = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
+        let sql = ctx.db.get_database_backend().build(&high).sql;
+        assert!(sql.contains("<=>") && sql.contains("halfvec"), "above pgvector's vector limit the index expression is a normalized halfvec: {sql}");
         assert!(!sql.contains("\"w\".\"id\" = \"e\".\"workspace_id\""), "reindex guard must not correlate the ANN join");
         let positive = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4096], &query()).unwrap();
-        assert!(!ctx.db.get_database_backend().build(&positive).sql.contains("<~>"), "above 4000 dimensions always uses original cosine");
-        let mut signed = vec![1.0_f32;4001]; signed[0] = -1.0;
-        let exact = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
-        assert!(!ctx.db.get_database_backend().build(&exact).sql.contains("binary_quantize"));
+        let positive_sql = ctx.db.get_database_backend().build(&positive).sql;
+        assert!(positive_sql.contains("subvector"), "above the halfvec limit the index expression is the first 4000 dimensions: {positive_sql}");
         assert!(search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4097], &query()).is_err());
         let baseline = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "", query()).await.unwrap();
         let common = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "common", query()).await.unwrap();
@@ -268,12 +265,10 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                 } else {
                     let state = txn.query_one_raw(sea_orm::Statement::from_sql_and_values(
                         sea_orm::DatabaseBackend::Postgres,
-                        "SELECT dimensions, octet_length(graph) AS bytes, pending FROM entity_embedding_indexes WHERE workspace_id=$1",
-                        [fixture.workspace_id.into()],
+                        "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)",
+                        [index.clone().into()],
                     )).await.unwrap().unwrap();
-                    assert_eq!(state.try_get::<i32>("", "dimensions").unwrap(), 4096);
-                    assert!(state.try_get::<i32>("", "bytes").unwrap() > 0);
-                    assert_eq!(state.try_get::<serde_json::Value>("", "pending").unwrap(), serde_json::json!({}));
+                    assert!(state.try_get::<bool>("", "indisvalid").unwrap(), "the high-dimensional halfvec HNSW index must be valid before the recall run");
                 }
                 let started = std::time::Instant::now();
                 let hits =
@@ -475,19 +470,17 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
             .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
             sea_orm::sea_query::Expr::value(4000)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
-        let high_index = format!("ysr_hnsw_{}_d4000_nl2", fixture.workspace_id.simple());
+        let high_index = format!("ysr_hnsw_{}_d4000", fixture.workspace_id.simple());
+        let abandoned = format!("ysr_hnsw_{}_d4000_nl2", fixture.workspace_id.simple());
         let partition = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
             format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1", fixture.workspace_id)))
             .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
         // Catalog cleanup must retire an abandoned high-dimensional index.
-        ctx.db.execute_unprepared(&format!("CREATE INDEX \"{high_index}\" ON {partition}(workspace_id)")).await.unwrap();
+        ctx.db.execute_unprepared(&format!("CREATE INDEX \"{abandoned}\" ON {partition}(workspace_id)")).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        assert!(exists(high_index.clone()).await.unwrap().is_none());
-        let graph = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
-            "SELECT dimensions, octet_length(graph) AS bytes FROM entity_embedding_indexes WHERE workspace_id=$1",
-            [fixture.workspace_id.into()])).await.unwrap().unwrap();
-        assert_eq!(graph.try_get::<i32>("", "dimensions").unwrap(), 4000);
-        assert!(graph.try_get::<i32>("", "bytes").unwrap() > 0);
+        assert!(exists(abandoned.clone()).await.unwrap().is_none());
+        assert!(exists(high_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "the width change must build the halfvec index");
+        assert!(exists(index.clone()).await.unwrap().is_none(), "the old width's index must be retired");
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4000], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(positive.len(), 10);
@@ -497,78 +490,35 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
             sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(nearest)))
             .filter(vectors::Column::EntityId.eq(ids[1])).exec(&ctx.db).await.unwrap();
-        let invalidated = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
-            "SELECT graph IS NOT NULL AND pending <> '{}'::jsonb AS queued FROM entity_embedding_indexes WHERE workspace_id=$1",
-            [fixture.workspace_id.into()])).await.unwrap().unwrap();
-        assert!(invalidated.try_get::<bool>("", "queued").unwrap());
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
-        let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed.clone(), "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(reranked.len(), 10);
         assert_eq!(reranked[0].entity.id, ids[1], "high-dimensional HNSW must retain the closest original cosine");
         assert!(reranked.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
         assert!(reranked.windows(2).all(|pair| pair[0].distance <= pair[1].distance));
         tenant.rollback().await.unwrap();
-        entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        let persisted = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
-            "SELECT graph IS NOT NULL AND pending = '{}'::jsonb AS synchronized FROM entity_embedding_indexes WHERE workspace_id=$1",
-            [fixture.workspace_id.into()])).await.unwrap().unwrap();
-        assert!(persisted.try_get::<bool>("", "synchronized").unwrap());
-        let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
-        let reloaded = search::search_by_vector(&tenant, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
-        assert_eq!(reloaded[0].entity.id, ids[1], "persisted incremental update must survive graph reload");
-        tenant.rollback().await.unwrap();
-        let reader = ctx.db.begin().await.unwrap();
-        reader.execute_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
-            "SELECT pg_advisory_xact_lock_shared(hashtextextended('embedding-hnsw:' || $1::uuid::text, 0))",
-            [fixture.workspace_id.into()])).await.unwrap();
-        let delete_db = ctx.db.clone();
         let deleted_id = ids[1];
-        let deletion = tokio::spawn(async move {
-            let txn = delete_db.begin().await.unwrap();
-            let pid = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
-                "SELECT pg_backend_pid() AS pid")).await.unwrap().unwrap().try_get::<i32>("", "pid").unwrap();
-            vectors::Entity::delete_many().filter(vectors::Column::EntityId.eq(deleted_id)).exec(&txn).await.unwrap();
-            txn.commit().await.unwrap();
-            pid
-        });
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                let blocked = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
-                    "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE 'DELETE%entity_embeddings%') AS blocked"))
-                    .await.unwrap().unwrap().try_get::<bool>("", "blocked").unwrap();
-                if blocked { break; }
-                tokio::task::yield_now().await;
-            }
-        }).await.expect("vector deletion must wait for an active ANN reader");
-        reader.rollback().await.unwrap();
-        deletion.await.unwrap();
-        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
-        let after_delete = search::search_by_vector(&ctx.db, fixture.workspace_id, signed.clone(), "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        vectors::Entity::delete_many().filter(vectors::Column::EntityId.eq(deleted_id)).exec(&ctx.db).await.unwrap();
+        let after_delete = search::search_by_vector(&ctx.db, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(after_delete.len(), 10);
         assert!(after_delete.iter().all(|hit| hit.entity.id != deleted_id));
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        let after_reload = search::search_by_vector(&ctx.db, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
-        assert_eq!(after_reload.len(), 10);
-        assert!(after_reload.iter().all(|hit| hit.entity.id != deleted_id));
+        assert!(exists(high_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "a workspace below the threshold keeps its index");
         vectors::ActiveModel {
             workspace_id: Set(fixture.workspace_id), entity_id: Set(deleted_id), tenant_id: Set(fixture.tenant_id),
             embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4000]))),
         }.insert(&ctx.db).await.unwrap();
-        // 4096 dimensions use the same full-coordinate application graph.
+        // 4096 dimensions index the first 4000 half-precision coordinates.
         vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
             sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4096])))
             .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
             sea_orm::sea_query::Expr::value(4096)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        assert!(exists(high_index.clone()).await.unwrap().is_none());
-        assert!(exists(format!("ysr_hnsw_{}_d4096", fixture.workspace_id.simple())).await.unwrap().is_none());
-        let graph = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
-            "SELECT dimensions FROM entity_embedding_indexes WHERE workspace_id=$1 AND graph IS NOT NULL",
-            [fixture.workspace_id.into()])).await.unwrap().unwrap();
-        assert_eq!(graph.try_get::<i32>("", "dimensions").unwrap(), 4096);
+        let top_index = format!("ysr_hnsw_{}_d4096", fixture.workspace_id.simple());
+        assert!(exists(high_index.clone()).await.unwrap().is_none(), "the superseded halfvec index must be retired");
+        assert!(exists(top_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "the 4096 width must build the truncated halfvec index");
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         let hits = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4096], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(hits.len(), 10);
@@ -581,6 +531,8 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
             sea_orm::sea_query::Expr::value(7)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         assert!(exists(high_index).await.unwrap().is_none());
+        assert!(exists(top_index).await.unwrap().is_none(), "the 4096 index must be retired on shrinkage");
+        assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "the shrunken width rebuilds the full-precision index");
         // Publication in progress must retain the old graph even if metadata is changing.
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingReindexing,
             sea_orm::sea_query::Expr::value(true)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();

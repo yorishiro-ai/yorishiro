@@ -108,10 +108,7 @@ async fn detect_startup_reindex(ctx: &AppContext) {
 /// # Errors
 /// Returns an error if workspace enumeration or metadata resolution fails.
 pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
-    let settings = ctx
-        .config
-        .settings::<crate::data::settings::Settings>()
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let settings = crate::data::settings::installed(ctx)?;
     let workspaces = crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db)
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
