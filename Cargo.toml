@@ -91,7 +91,7 @@ uuid.workspace = true
 anyhow.workspace = true
 sha2.workspace = true
 jsonschema = { version = "=0.60.2" }
-rmcp = { version = "3.8.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 schemars = { version = "1.2.3", features = ["uuid1"] }
 # OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
 # vLLM/real OpenAI over HTTP.
