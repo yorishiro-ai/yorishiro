@@ -220,50 +220,96 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
 }
 
 /// An entity modified between `reindex_workspace`'s batch fetch and its write landing must be reported as a failure, not silently counted as reindexed, or the workspace would restamp while that row still holds a vector from before the concurrent modification: the exact stamp/data mismatch the write-time model check exists to catch, this time caused by the migration tool racing an ordinary write instead of a misconfigured deployment.
+/// A workspace stamped with an old model and two entities, returning the workspace and the first entity.
+async fn seed_two_entities(
+    request: &loco_rs::TestServer,
+    ctx: &loco_rs::app::AppContext,
+) -> (uuid::Uuid, entity_entities::EntityRecord) {
+    let workspace_id = insert_workspace(request, ctx, "nomic-ai/nomic-embed-text-v1.5").await;
+    let first = insert_entity(ctx, workspace_id, "first entity").await;
+    insert_entity(ctx, workspace_id, "second entity").await;
+    (workspace_id, first)
+}
+
+/// An OpenAI-compatible stub whose first embedding call parks until the test releases it, so the test can change the workspace while a run is in flight.
+struct GatedProvider {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Semaphore>,
+    provider: OpenAiCompatibleProvider,
+    _server: crate::http_stub::HttpStub,
+}
+
+async fn gated_provider(model: &str) -> GatedProvider {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (started, gate) = (entered.clone(), release.clone());
+    let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
+        "/embeddings",
+        axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+            let (started, gate, calls) = (started.clone(), gate.clone(), calls.clone());
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    started.notify_one();
+                    gate.acquire().await.unwrap().forget();
+                }
+                let data = body["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; 768]}))
+                    .collect::<Vec<_>>();
+                axum::Json(serde_json::json!({"data": data}))
+            }
+        }),
+    ))
+    .await;
+    let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+        base_url: server.url.clone(),
+        api_key: "test-key".into(),
+        model: model.into(),
+        dimensions: 768,
+        send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
+    });
+    GatedProvider {
+        entered,
+        release,
+        provider,
+        _server: server,
+    }
+}
+
+/// Runs `reindex` and `modify` together and requires the run to be rejected because the workspace changed underneath it.
+async fn rejected_by_concurrent_change<T, E: std::fmt::Display>(
+    reindex: impl std::future::Future<Output = Result<T, E>>,
+    modify: impl std::future::Future<Output = ()>,
+) {
+    let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(reindex, modify)
+    })
+    .await
+    .expect("concurrent reindex completes");
+    let Err(error) = outcome else {
+        panic!("concurrent mutation must reject atomic publication");
+    };
+    assert!(error.to_string().contains("changed"), "{error}");
+}
+
 #[tokio::test]
 async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let workspace_id = insert_workspace(&request, &ctx, "nomic-ai/nomic-embed-text-v1.5").await;
-        let first = insert_entity(&ctx, workspace_id, "first entity").await;
-        insert_entity(&ctx, workspace_id, "second entity").await;
+        let (workspace_id, first) = seed_two_entities(&request, &ctx).await;
 
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(tokio::sync::Semaphore::new(0));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (started, gate) = (entered.clone(), release.clone());
-        let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
-            "/embeddings",
-            axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
-                let (started, gate, calls) = (started.clone(), gate.clone(), calls.clone());
-                async move {
-                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                        started.notify_one();
-                        gate.acquire().await.unwrap().forget();
-                    }
-                    let data = body["input"].as_array().unwrap().iter().enumerate()
-                        .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; 768]}))
-                        .collect::<Vec<_>>();
-                    axum::Json(serde_json::json!({"data": data}))
-                }
-            }),
-        )).await;
-        let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-            base_url: server.url.clone(),
-            api_key: "test-key".into(),
-            model: "intfloat/multilingual-e5-base".into(),
-            dimensions: 768,
-            send_dimensions_param: false,
-            query_instruction: String::new(),
-            document_prefix: String::new(),
-        });
-        let reindex = yorishiro::db::reindex_workspace_with_lock(
-            &ctx,
-            workspace_id,
-            &provider,
-        );
-        let modify = async {
-            entered.notified().await;
-            entity_entities::update(
+        let gated = gated_provider("intfloat/multilingual-e5-base").await;
+        let (entered, release, provider) = (&gated.entered, &gated.release, &gated.provider);
+        let reindex = yorishiro::db::reindex_workspace_with_lock(&ctx, workspace_id, provider);
+        let modify =
+            async {
+                entered.notified().await;
+                entity_entities::update(
                 &ctx.db,
                 workspace_id,
                 entity_entities::UpdateEntityInput {
@@ -273,16 +319,13 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
                             expected_updated_at: None,
                 },
             ).await.expect("concurrent update");
-            release.add_permits(1);
-        };
-        let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            tokio::join!(reindex, modify)
-        })
-        .await
-        .expect("concurrent reindex completes");
-        let error = outcome.err().expect("concurrent mutation must reject atomic publication");
-        assert!(error.to_string().contains("changed"), "{error}");
-        assert!(!embedding_is_set(&ctx, first.id).await, "no partial vectors may be published");
+                release.add_permits(1);
+            };
+        rejected_by_concurrent_change(reindex, modify).await;
+        assert!(
+            !embedding_is_set(&ctx, first.id).await,
+            "no partial vectors may be published"
+        );
 
         assert_eq!(
             stamped_model(&ctx, workspace_id).await,
@@ -297,57 +340,21 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
 #[tokio::test]
 async fn reindex_rejects_entities_added_after_enumeration() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let workspace_id = insert_workspace(&request, &ctx, "nomic-ai/nomic-embed-text-v1.5").await;
-        let first = insert_entity(&ctx, workspace_id, "first entity").await;
-        insert_entity(&ctx, workspace_id, "second entity").await;
+        let (workspace_id, first) = seed_two_entities(&request, &ctx).await;
 
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(tokio::sync::Semaphore::new(0));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (started, gate) = (entered.clone(), release.clone());
-        let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
-            "/embeddings",
-            axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
-                let (started, gate, calls) = (started.clone(), gate.clone(), calls.clone());
-                async move {
-                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                        started.notify_one();
-                        gate.acquire().await.unwrap().forget();
-                    }
-                    let data = body["input"].as_array().unwrap().iter().enumerate()
-                        .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; 768]}))
-                        .collect::<Vec<_>>();
-                    axum::Json(serde_json::json!({"data": data}))
-                }
-            }),
-        )).await;
-        let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-            base_url: server.url.clone(),
-            api_key: "test-key".into(),
-            model: "intfloat/multilingual-e5-base".into(),
-            dimensions: 768,
-            send_dimensions_param: false,
-            query_instruction: String::new(),
-            document_prefix: String::new(),
-        });
-        let reindex = yorishiro::db::reindex_workspace_with_lock(
-            &ctx,
-            workspace_id,
-            &provider,
-        );
+        let gated = gated_provider("intfloat/multilingual-e5-base").await;
+        let (entered, release, provider) = (&gated.entered, &gated.release, &gated.provider);
+        let reindex = yorishiro::db::reindex_workspace_with_lock(&ctx, workspace_id, provider);
         let modify = async {
             entered.notified().await;
             insert_entity(&ctx, workspace_id, "added while provider was paused").await;
             release.add_permits(1);
         };
-        let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            tokio::join!(reindex, modify)
-        })
-        .await
-        .expect("concurrent reindex completes");
-        let error = outcome.err().expect("concurrent mutation must reject atomic publication");
-        assert!(error.to_string().contains("changed"), "{error}");
-        assert!(!embedding_is_set(&ctx, first.id).await, "no partial vectors may be published");
+        rejected_by_concurrent_change(reindex, modify).await;
+        assert!(
+            !embedding_is_set(&ctx, first.id).await,
+            "no partial vectors may be published"
+        );
 
         assert_eq!(
             stamped_model(&ctx, workspace_id).await,
@@ -362,54 +369,22 @@ async fn reindex_rejects_entities_added_after_enumeration() {
 #[tokio::test]
 async fn old_embedding_response_cannot_overwrite_completed_reindex() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let workspace_id = insert_workspace(&request, &ctx, "nomic-ai/nomic-embed-text-v1.5").await;
-        let first = insert_entity(&ctx, workspace_id, "first entity").await;
-        insert_entity(&ctx, workspace_id, "second entity").await;
+        let (workspace_id, first) = seed_two_entities(&request, &ctx).await;
 
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(tokio::sync::Semaphore::new(0));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (started, gate) = (entered.clone(), release.clone());
-        let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
-            "/embeddings",
-            axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
-                let (started, gate, calls) = (started.clone(), gate.clone(), calls.clone());
-                async move {
-                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                        started.notify_one();
-                        gate.acquire().await.unwrap().forget();
-                    }
-                    let data = body["input"].as_array().unwrap().iter().enumerate()
-                        .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; 768]}))
-                        .collect::<Vec<_>>();
-                    axum::Json(serde_json::json!({"data": data}))
-                }
-            }),
-        )).await;
-        let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-            base_url: server.url.clone(),
-            api_key: "test-key".into(),
-            model: "nomic-ai/nomic-embed-text-v1.5".into(),
-            dimensions: 768,
-            send_dimensions_param: false,
-            query_instruction: String::new(),
-            document_prefix: String::new(),
-        });
-        let reindex = entity_embeddings::sync_embedding_for_record(&ctx.db, workspace_id, &first, &provider);
+        let gated = gated_provider("nomic-ai/nomic-embed-text-v1.5").await;
+        let (entered, release, provider) = (&gated.entered, &gated.release, &gated.provider);
+        let reindex =
+            entity_embeddings::sync_embedding_for_record(&ctx.db, workspace_id, &first, provider);
         let modify = async {
             entered.notified().await;
             let (new_provider, _new_server) = http_provider("new-model", usize::MAX).await;
-            let result = entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &new_provider).await.unwrap();
+            let result = entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &new_provider)
+                .await
+                .unwrap();
             assert!(result.failures.is_empty());
             release.add_permits(1);
         };
-        let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            tokio::join!(reindex, modify)
-        })
-        .await
-        .expect("concurrent reindex completes");
-        let error = outcome.expect_err("concurrent mutation must reject atomic publication");
-        assert!(error.to_string().contains("changed"), "{error}");
+        rejected_by_concurrent_change(reindex, modify).await;
         assert!(embedding_is_set(&ctx, first.id).await);
 
         assert_eq!(
@@ -425,58 +400,21 @@ async fn old_embedding_response_cannot_overwrite_completed_reindex() {
 #[tokio::test]
 async fn newer_reindex_supersedes_a_paused_run() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let workspace_id = insert_workspace(&request, &ctx, "nomic-ai/nomic-embed-text-v1.5").await;
-        let first = insert_entity(&ctx, workspace_id, "first entity").await;
-        insert_entity(&ctx, workspace_id, "second entity").await;
+        let (workspace_id, first) = seed_two_entities(&request, &ctx).await;
 
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(tokio::sync::Semaphore::new(0));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (started, gate) = (entered.clone(), release.clone());
-        let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
-            "/embeddings",
-            axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
-                let (started, gate, calls) = (started.clone(), gate.clone(), calls.clone());
-                async move {
-                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                        started.notify_one();
-                        gate.acquire().await.unwrap().forget();
-                    }
-                    let data = body["input"].as_array().unwrap().iter().enumerate()
-                        .map(|(index, _)| serde_json::json!({"index": index, "embedding": vec![0.0_f32; 768]}))
-                        .collect::<Vec<_>>();
-                    axum::Json(serde_json::json!({"data": data}))
-                }
-            }),
-        )).await;
-        let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-            base_url: server.url.clone(),
-            api_key: "test-key".into(),
-            model: "intfloat/multilingual-e5-base".into(),
-            dimensions: 768,
-            send_dimensions_param: false,
-            query_instruction: String::new(),
-            document_prefix: String::new(),
-        });
-        let reindex = entity_embeddings::reindex_workspace(
-            &ctx.db,
-            workspace_id,
-            &provider,
-        );
+        let gated = gated_provider("intfloat/multilingual-e5-base").await;
+        let (entered, release, provider) = (&gated.entered, &gated.release, &gated.provider);
+        let reindex = entity_embeddings::reindex_workspace(&ctx.db, workspace_id, provider);
         let modify = async {
             entered.notified().await;
             let (latest, _server) = http_provider("latest-model", usize::MAX).await;
-            let result = entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &latest).await.unwrap();
+            let result = entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &latest)
+                .await
+                .unwrap();
             assert!(result.failures.is_empty());
             release.add_permits(1);
         };
-        let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            tokio::join!(reindex, modify)
-        })
-        .await
-        .expect("concurrent reindex completes");
-        let error = outcome.err().expect("concurrent mutation must reject atomic publication");
-        assert!(error.to_string().contains("changed"), "{error}");
+        rejected_by_concurrent_change(reindex, modify).await;
         assert!(embedding_is_set(&ctx, first.id).await);
 
         assert_eq!(

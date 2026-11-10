@@ -10,7 +10,7 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "f9348edf9c8b466897bf677b47eaf768c80a99105f7970f5b5f35d1509700e7f",
+    "tests": "29ca87a24a52e986d80d80f13a912ea04c740815440754a37c737747aa4c72dd",
     "src": "a09fa926ad6c1ab6d8dc7790c8c616cfd5cde42109cb3e8b709607eec8929cbd",
     "ee": "726fbc6822cf506a3adfca02d6b51470af3fe5d616c2a4489f1fea316facab23",
     "migration": "f5715a23f00a5f492f01351ad26735c4bb043d1d0d25ba22fed6b889424a47e2",
