@@ -18,7 +18,6 @@ mod requests;
 mod services;
 mod tasks;
 mod time;
-mod timezone_cli;
 mod timezone_state;
 mod workers;
 

@@ -28,7 +28,6 @@ mod m20261020_000022_inference_proposals;
 mod m20261020_000023_queue_job_lifecycles;
 mod m20261020_000024_queue_job_dispatch_outbox;
 mod m20261020_000025_query_embedding_requests;
-mod m20261020_000026_timezone_state;
 mod m20261020_000027_entity_embeddings;
 mod m20261020_000028_workspace_memberships;
 mod m20261020_000029_tenant_retirement_events;
@@ -101,7 +100,6 @@ impl MigratorTrait for Migrations {
             Box::new(m20261020_000023_queue_job_lifecycles::Migration),
             Box::new(m20261020_000024_queue_job_dispatch_outbox::Migration),
             Box::new(m20261020_000025_query_embedding_requests::Migration),
-            Box::new(m20261020_000026_timezone_state::Migration),
             Box::new(m20261020_000027_entity_embeddings::Migration),
             Box::new(m20261020_000028_workspace_memberships::Migration),
             Box::new(m20261020_000029_tenant_retirement_events::Migration),

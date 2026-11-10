@@ -25,7 +25,6 @@ pub use super::tenant_memberships::Entity as TenantMemberships;
 pub use super::tenant_reindex_schedules::Entity as TenantReindexSchedules;
 pub use super::tenant_retirement_events::Entity as TenantRetirementEvents;
 pub use super::tenant_tenants::Entity as TenantTenants;
-pub use super::timezone_state::Entity as TimezoneState;
 pub use super::user_users::Entity as UserUsers;
 pub use super::workspace_embedding_keys::Entity as WorkspaceEmbeddingKeys;
 pub use super::workspace_invites::Entity as WorkspaceInvites;

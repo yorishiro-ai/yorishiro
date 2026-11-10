@@ -62,57 +62,6 @@ async fn enqueue(
     .unwrap();
 }
 
-#[tokio::test]
-async fn timezone_state_changes_without_rewriting_lifecycle_instants() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
-        let concurrency_key = uuid::Uuid::now_v7().to_string();
-        let db = ctx.db.clone();
-        let id = uuid::Uuid::now_v7();
-        enqueue(&db, id, None, &concurrency_key).await;
-        let before = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
-
-        yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
-            .await
-            .unwrap();
-        yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
-            .await
-            .unwrap();
-        let after = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
-        assert_eq!(before.enqueue_at, after.enqueue_at);
-        let state = yorishiro::models::timezone_state::Entity::find_by_id(1)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap()
-            .active_timezone;
-        assert_eq!(state, "Asia/Tokyo");
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn timezone_state_rejects_invalid_and_missing_singleton_without_inserting() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
-        let db = ctx.db.clone();
-        assert!(
-            yorishiro::models::timezone_state::activate(&db, "Invalid/Zone")
-                .await
-                .is_err()
-        );
-        // Inject a missing singleton to verify activation fails rather than silently recreating it.
-        yorishiro::models::_entities::timezone_state::Entity::delete_many()
-            .exec(&db)
-            .await
-            .unwrap();
-        assert!(
-            yorishiro::models::timezone_state::activate(&db, "Asia/Tokyo")
-                .await
-                .is_err()
-        );
-    })
-    .await;
-}
-
 #[test]
 fn live_lease_is_duplicate_but_expired_lease_is_recoverable() {
     let now = Utc.timestamp_opt(2_000, 0).single().unwrap().fixed_offset();

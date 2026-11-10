@@ -72,13 +72,8 @@ pub(crate) fn before_run(ctx: &AppContext) {
     }
 }
 
-pub use crate::initializers::timezone::cli_requires_timezone_gate;
-
 pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
-    vec![
-        Box::new(initializers::timezone::Timezone),
-        Box::new(initializers::db_load_guard::LoadGuard),
-    ]
+    vec![Box::new(initializers::db_load_guard::LoadGuard)]
 }
 
 /// Builds the base pools and shared-store seams.
