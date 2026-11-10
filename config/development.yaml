@@ -145,22 +145,9 @@ settings:
     query_instruction: '<%= get_env(name="YORISHIRO_EMBEDDING_QUERY_INSTRUCTION", default="") | replace(from="'", to="''") %>'
     document_prefix: '<%= get_env(name="YORISHIRO_EMBEDDING_DOCUMENT_PREFIX", default="") | replace(from="'", to="''") %>'
     send_dimensions_param: <%= get_env(name="YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM", default="false") %>
-    provider_concurrency: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY", default="1") %>
     local_model: <%= get_env(name="YORISHIRO_LOCAL_MODEL", default="multilingual-e5-base") %>
-    local_max_sequence_length: <%= get_env(name="YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH", default="512") %>
   rate_limit:
     auth_max_requests: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_MAX", default="10") %>
-    auth_window_seconds: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS", default="60") %>
-    search_tokens_per_minute: <%= get_env(name="YORISHIRO_SEARCH_TOKENS_PER_MINUTE", default="100000") %>
-  db_load_guard:
-    threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
-    sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
-    poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
-  dispatch:
-    publish_concurrency: <%= get_env(name="YORISHIRO_DISPATCH_PUBLISH_CONCURRENCY", default="4") %>
-    poll_interval_ms: <%= get_env(name="YORISHIRO_DISPATCH_POLL_INTERVAL_MS", default="500") %>
-    claim_lease_seconds: <%= get_env(name="YORISHIRO_DISPATCH_CLAIM_LEASE_SECS", default="30") %>
-    enqueue_timeout_ms: <%= get_env(name="YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS", default="5000") %>
   query_embedding:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>

@@ -70,8 +70,7 @@ pub(crate) struct LoadGuardConfig {
 impl LoadGuardConfig {
     /// Reads the opt-in guard settings.
     ///
-    /// `YORISHIRO_DB_LOAD_THRESHOLD` defaults to zero, which disables the guard.
-    /// `YORISHIRO_DB_LOAD_SUSTAIN_SECS` defaults to 30 and `YORISHIRO_DB_LOAD_POLL_SECS` defaults to 5.
+    /// A zero `settings.db_load_guard.threshold` disables the guard.
     pub(crate) fn from_settings(settings: &crate::data::settings::DbLoadGuard) -> Option<Self> {
         if settings.threshold <= 0 {
             return None;

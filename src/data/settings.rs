@@ -27,7 +27,9 @@ pub struct Settings {
     #[serde(default)]
     pub(crate) mcp: Mcp,
     pub embedding: Embedding,
+    #[serde(default)]
     pub(crate) rate_limit: RateLimit,
+    #[serde(default)]
     pub(crate) db_load_guard: DbLoadGuard,
     #[serde(default)]
     pub query_embedding: QueryEmbedding,
@@ -133,10 +135,15 @@ pub struct Embedding {
     #[serde(default)]
     pub(crate) document_prefix: String,
     pub(crate) local_model: String,
+    #[serde(default = "default_local_max_sequence_length")]
     pub(crate) local_max_sequence_length: usize,
     /// Maximum concurrent provider calls in one worker process.
     #[serde(default = "default_provider_concurrency")]
     pub(crate) provider_concurrency: usize,
+}
+
+fn default_local_max_sequence_length() -> usize {
+    512
 }
 
 fn default_provider_concurrency() -> usize {
@@ -152,17 +159,38 @@ pub enum EmbeddingProvider {
 }
 
 #[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct RateLimit {
     pub(crate) auth_max_requests: u32,
     pub(crate) auth_window_seconds: u64,
     pub(crate) search_tokens_per_minute: u32,
 }
 
+impl Default for RateLimit {
+    fn default() -> Self {
+        Self {
+            auth_max_requests: 10,
+            auth_window_seconds: 60,
+            search_tokens_per_minute: 100_000,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct DbLoadGuard {
+    /// Zero disables the guard.
     pub(crate) threshold: i64,
     pub(crate) sustain_seconds: u64,
     pub(crate) poll_seconds: u64,
+}
+
+impl Default for DbLoadGuard {
+    fn default() -> Self {
+        Self {
+            threshold: 0,
+            sustain_seconds: 30,
+            poll_seconds: 5,
+        }
+    }
 }
