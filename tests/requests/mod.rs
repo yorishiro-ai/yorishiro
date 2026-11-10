@@ -159,6 +159,7 @@ fn is_sqlite_backend() -> bool {
 /// Tests of global state (first-run setup, maintenance mode, tenant cap, DB-wide monitors) use [`boot_request_isolated`].
 ///
 /// The callback is wrapped in `catch_unwind` so the pool closer always runs, even if the callback panics.
+/// Its future is boxed: nested boots (two contexts in one test) would otherwise keep every callback state machine on the test thread's small stack.
 #[allow(clippy::future_not_send)]
 #[allow(clippy::extra_unused_type_parameters)]
 pub(crate) async fn boot_request<H: Hooks, F, Fut>(callback: F)
@@ -179,8 +180,8 @@ where
     } else {
         request_with_shared_postgres::<H, _, _>(|request, ctx| {
             let booted = std::time::Instant::now();
-            let result =
-                std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
+            let result = std::panic::AssertUnwindSafe(Box::pin(callback(request, ctx.clone())))
+                .catch_unwind();
             async move {
                 let outcome = result.await;
                 let finished = std::time::Instant::now();
@@ -243,7 +244,7 @@ where
         let outcome = std::panic::AssertUnwindSafe(async {
             let (request, ctx) = serve::<H>(config).await;
             let booted = std::time::Instant::now();
-            let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone()))
+            let result = std::panic::AssertUnwindSafe(Box::pin(callback(request, ctx.clone())))
                 .catch_unwind()
                 .await;
             let finished = std::time::Instant::now();
@@ -310,7 +311,8 @@ where
         .into_owned();
     request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
         let booted = std::time::Instant::now();
-        let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
+        let result =
+            std::panic::AssertUnwindSafe(Box::pin(callback(request, ctx.clone()))).catch_unwind();
         async move {
             let outcome = result.await;
             let finished = std::time::Instant::now();
@@ -368,7 +370,7 @@ where
         .expect("load postgres config");
     config.database.auto_migrate = false;
     let (server, ctx) = serve::<H>(config).await;
-    callback(server, ctx).await;
+    Box::pin(callback(server, ctx)).await;
 }
 
 /// Boots an isolated request app while temporarily overriding its configured timezone.
@@ -410,7 +412,7 @@ where
         queue.uri = format!("sqlite://{queue_path}?mode=rwc");
     }
     let (server, ctx) = serve::<H>(config).await;
-    callback(server, ctx).await;
+    Box::pin(callback(server, ctx)).await;
 }
 
 /// Boots the app with a free port and wraps its router in a `TestServer`, as loco's own `request_internal` does.
