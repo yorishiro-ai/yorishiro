@@ -7,12 +7,10 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenant_memberships::MembershipRole;
 use crate::models::workspace_invites;
 
-const DEFAULT_INVITE_TTL_HOURS: i64 = 72;
-
 /// `cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner`
 ///
 /// `role` is one of `owner`/`admin`/`member`/`viewer`.
-/// `ttl_hours` is optional, defaulting to 72.
+/// `ttl_hours` is optional, defaulting to `settings.limits.invite_ttl_hours`.
 /// This is the invite step of the real invite→signup→login path: a key minted directly instead carries no `user_id`, so writes made with it are unattributed.
 pub(crate) struct CreateInvite;
 
@@ -21,7 +19,7 @@ impl Task for CreateInvite {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "create_invite".to_string(),
-            detail: "Issues a signup invite: cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner [ttl_hours:72]".to_string(),
+            detail: "Issues a signup invite: cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner [ttl_hours:<hours>]".to_string(),
         }
     }
 
@@ -50,7 +48,13 @@ impl Task for CreateInvite {
                 details: vec![],
                 hint: String::new(),
             })?,
-            Err(_) => DEFAULT_INVITE_TTL_HOURS,
+            Err(_) => {
+                app_context
+                    .config
+                    .settings::<crate::data::settings::Settings>()?
+                    .limits
+                    .invite_ttl_hours
+            }
         };
 
         let (invite, token) = workspace_invites::create_invite(

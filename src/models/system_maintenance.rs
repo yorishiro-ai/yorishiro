@@ -10,8 +10,6 @@ use serde::Serialize;
 use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 
-pub(crate) const DEFAULT_RETRY_AFTER_SECONDS: u32 = 300;
-
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
@@ -87,12 +85,13 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
     // Primary key is a boolean singleton (CHECK constraint enforces exactly TRUE).
     let row = Entity::find_by_id(true).one(conn).await.internal()?;
 
+    // A missing row means off, advertised with the built-in retry hint because no settings reach this reader.
     // A missing row means off.
     // Not expected once the migration's seed row exists, but a missing row should be a survivable "off", not a panic.
     let Some(row) = row else {
         return Ok(MaintenanceState {
             mode: MaintenanceMode::Off,
-            retry_after: DEFAULT_RETRY_AFTER_SECONDS,
+            retry_after: crate::data::settings::Limits::default().maintenance_retry_after_seconds,
             reason: None,
         });
     };

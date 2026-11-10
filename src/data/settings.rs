@@ -23,6 +23,8 @@ pub struct Settings {
     #[serde(default = "default_max_tenants")]
     pub(crate) max_tenants: i32,
     #[serde(default)]
+    pub(crate) limits: Limits,
+    #[serde(default)]
     pub(crate) mcp: Mcp,
     pub embedding: Embedding,
     pub(crate) rate_limit: RateLimit,
@@ -53,6 +55,26 @@ impl Default for Dispatch {
             poll_interval_ms: 500,
             claim_lease_seconds: 30,
             enqueue_timeout_ms: 5_000,
+        }
+    }
+}
+
+/// Operator-tunable defaults that used to be fixed in code.
+/// Every field has a default so a configuration file written before this section existed keeps loading.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Limits {
+    /// Lifetime of an invite minted by the `create_invite` task when `ttl_hours` is omitted.
+    pub(crate) invite_ttl_hours: i64,
+    /// `Retry-After` advertised while maintenance is on, when the caller does not name one.
+    pub(crate) maintenance_retry_after_seconds: u32,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            invite_ttl_hours: 72,
+            maintenance_retry_after_seconds: 300,
         }
     }
 }

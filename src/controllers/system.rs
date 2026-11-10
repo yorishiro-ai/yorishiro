@@ -13,9 +13,9 @@ use loco_rs::controller::Routes;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{MigrationScope, Verified};
 use crate::dtos::system::{MaintenanceResponse, SetMaintenanceRequest};
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_key_audit_log;
-use crate::models::system_maintenance::{self, DEFAULT_RETRY_AFTER_SECONDS};
+use crate::models::system_maintenance;
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/system/maintenance", responses((status = 200, body = crate::dtos::system::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub(crate) async fn get_maintenance(
@@ -43,7 +43,13 @@ pub(crate) async fn set_maintenance(
     let updated = system_maintenance::set(
         &ctx.db,
         body.mode,
-        body.retry_after.unwrap_or(DEFAULT_RETRY_AFTER_SECONDS),
+        body.retry_after.unwrap_or(
+            ctx.config
+                .settings::<crate::data::settings::Settings>()
+                .internal()?
+                .limits
+                .maintenance_retry_after_seconds,
+        ),
         body.reason,
     )
     .await?;

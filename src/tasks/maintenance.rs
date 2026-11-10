@@ -35,7 +35,13 @@ impl Task for Maintenance {
                 details: vec![],
                 hint: String::new(),
             })?,
-            Err(_) => system_maintenance::DEFAULT_RETRY_AFTER_SECONDS,
+            Err(_) => {
+                app_context
+                    .config
+                    .settings::<crate::data::settings::Settings>()?
+                    .limits
+                    .maintenance_retry_after_seconds
+            }
         };
         let reason = vars.cli_arg("reason").ok().map(str::to_string);
 
