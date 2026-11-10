@@ -132,6 +132,21 @@ pub fn validate(config: &Config) -> Result<()> {
             settings.timezone
         ))
     })?;
+    let t = &settings.http_timeouts;
+    if [
+        t.embedding_request_seconds,
+        t.local_embedding_seconds,
+        t.model_fetch_connect_seconds,
+        t.model_fetch_read_seconds,
+        t.inference_request_seconds,
+        t.oauth_discovery_seconds,
+    ]
+    .contains(&0)
+    {
+        return Err(Error::Message(
+            "settings.http_timeouts values must be greater than zero".into(),
+        ));
+    }
     if settings.limits.invite_ttl_hours <= 0 {
         return Err(Error::Message(
             "settings.limits.invite_ttl_hours must be greater than zero".into(),

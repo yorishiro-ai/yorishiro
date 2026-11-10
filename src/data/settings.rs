@@ -25,6 +25,8 @@ pub struct Settings {
     #[serde(default)]
     pub(crate) limits: Limits,
     #[serde(default)]
+    pub(crate) http_timeouts: HttpTimeouts,
+    #[serde(default)]
     pub(crate) mcp: Mcp,
     pub embedding: Embedding,
     #[serde(default)]
@@ -77,6 +79,37 @@ impl Default for Limits {
         Self {
             invite_ttl_hours: 72,
             maintenance_retry_after_seconds: 300,
+        }
+    }
+}
+
+/// Deadlines for outbound calls, in seconds.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct HttpTimeouts {
+    /// One embedding request to an OpenAI-compatible provider.
+    pub(crate) embedding_request_seconds: u64,
+    /// One batch through the in-process local embedding model.
+    pub(crate) local_embedding_seconds: u64,
+    /// Connecting to the host that serves the local model files.
+    pub(crate) model_fetch_connect_seconds: u64,
+    /// Reading from it.
+    pub(crate) model_fetch_read_seconds: u64,
+    /// One inference request to a workspace's language model.
+    pub(crate) inference_request_seconds: u64,
+    /// One OIDC discovery or token call.
+    pub(crate) oauth_discovery_seconds: u64,
+}
+
+impl Default for HttpTimeouts {
+    fn default() -> Self {
+        Self {
+            embedding_request_seconds: 30,
+            local_embedding_seconds: 30,
+            model_fetch_connect_seconds: 30,
+            model_fetch_read_seconds: 60,
+            inference_request_seconds: 120,
+            oauth_discovery_seconds: 10,
         }
     }
 }

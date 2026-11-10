@@ -415,7 +415,7 @@ pub(crate) async fn detail_for_actor(
             quotas.entities,
         ),
         schema_id: workspace.schema_id,
-        created_at: crate::time::in_timezone(workspace.created_at, crate::time::configured(ctx)),
+        created_at: crate::time::render(ctx, workspace.created_at),
         entity_count,
         relation_count,
         schema_count,

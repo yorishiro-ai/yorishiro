@@ -412,6 +412,7 @@ pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
 async fn install_services(ctx: AppContext) -> Result<AppContext> {
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
 
+    crate::data::http_timeouts::install(settings.http_timeouts);
     initializers::auth::install(&ctx);
     initializers::embedding::install(&ctx, &settings);
     initializers::rate_limit::install(&ctx, &settings);

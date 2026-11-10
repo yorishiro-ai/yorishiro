@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use super::{EmbedKind, EmbeddingProvider};
 use crate::error::{ResultExt, YorishiroError};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
 const MAX_RETRY_AFTER_SECONDS: u64 = 60;
 
@@ -43,7 +42,7 @@ impl OpenAiCompatibleProvider {
         let client = CLIENT
             .get_or_init(|| {
                 reqwest::Client::builder()
-                    .timeout(REQUEST_TIMEOUT)
+                    .timeout(crate::data::http_timeouts::embedding_request())
                     .build()
                     .expect("reqwest client configuration is static and always valid")
             })

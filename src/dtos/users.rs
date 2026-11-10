@@ -19,8 +19,7 @@ impl UserRecord {
             id: user.id,
             email: user.email,
             display_name: user.display_name,
-            created_at: crate::time::in_timezone(user.created_at, crate::time::configured(ctx))
-                .to_rfc3339(),
+            created_at: crate::time::render(ctx, user.created_at).to_rfc3339(),
         }
     }
 }

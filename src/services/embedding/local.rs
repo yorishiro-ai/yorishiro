@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Activation, VarBuilder};
@@ -20,7 +19,6 @@ const MIN_SEQUENCE_LENGTH: usize = 16;
 
 /// Upper bound on wait time for a single embed call.
 /// Inference is serialized within the process, so this guards against unbounded waits when prior requests pile up (the local equivalent of the OpenAI-compatible provider's HTTP timeout).
-const EMBED_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct LocalEmbeddingConfig {
     pub model_path: PathBuf,
@@ -340,11 +338,12 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
             .await
             .map_err(|err| internal(format!("embedding task panicked: {err}")))?
         };
-        match tokio::time::timeout(EMBED_TIMEOUT, task).await {
+        let timeout = crate::data::http_timeouts::local_embedding();
+        match tokio::time::timeout(timeout, task).await {
             Ok(result) => result,
             Err(_) => Err(internal(format!(
                 "embedding timed out after {}s (inference queue congested?)",
-                EMBED_TIMEOUT.as_secs()
+                timeout.as_secs()
             ))),
         }
     }

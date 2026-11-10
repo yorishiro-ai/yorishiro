@@ -7,11 +7,7 @@ use tempfile::tempdir;
 use yorishiro::services::embedding::model_fetch::*;
 
 fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(READ_TIMEOUT)
-        .build()
-        .unwrap()
+    http_client().unwrap()
 }
 
 fn artifact(bytes: &[u8]) -> Artifact {
