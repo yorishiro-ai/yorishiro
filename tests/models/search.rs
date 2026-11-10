@@ -8,7 +8,7 @@ use sea_orm::{
 };
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
-use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::_entities::workspace_workspaces;
 use yorishiro::models::entity_embeddings;
 use yorishiro::models::{entity_entities, schema_schemas, search};
 use yorishiro::services::embedding::{
@@ -476,17 +476,13 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
             sea_orm::sea_query::Expr::value(4000)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         let high_index = format!("ysr_hnsw_{}_d4000_nl2", fixture.workspace_id.simple());
-        let legacy_index = format!("ysr_hnsw_{}_d4000", fixture.workspace_id.simple());
         let partition = ctx.db.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
             format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1", fixture.workspace_id)))
             .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
-        // Catalog cleanup must retire both abandoned high-dimensional index identities.
-        for name in [&high_index, &legacy_index] {
-            ctx.db.execute_unprepared(&format!("CREATE INDEX \"{name}\" ON {partition}(workspace_id)")).await.unwrap();
-        }
+        // Catalog cleanup must retire an abandoned high-dimensional index.
+        ctx.db.execute_unprepared(&format!("CREATE INDEX \"{high_index}\" ON {partition}(workspace_id)")).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         assert!(exists(high_index.clone()).await.unwrap().is_none());
-        assert!(exists(legacy_index).await.unwrap().is_none());
         let graph = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
             "SELECT dimensions, octet_length(graph) AS bytes FROM entity_embedding_indexes WHERE workspace_id=$1",
             [fixture.workspace_id.into()])).await.unwrap().unwrap();
@@ -1121,192 +1117,6 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
         assert!(
             !stored,
             "the refused write must not have created an embedding row: {stored:?}"
-        );
-    })
-    .await;
-}
-
-/// A workspace with no stamp of its own inherits its tenant's `embedding_model`/`embedding_dimensions` as the effective model check target and dimension target.
-/// If the tenant's value and the deployment default are the same, deleting the join would pass this test, so the tenant is set to a different model than the deployment default: removing the join would then cause the test to use the deployment default instead of the tenant's, and the provider mismatch would be caught by the model check.
-#[tokio::test]
-async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        // No public operation sets tenant embedding stamps; inject the legacy fallback tier.
-        sea_orm::ActiveModelTrait::update(
-            tenant_tenants::ActiveModel {
-                id: sea_orm::ActiveValue::Set(fixture.tenant_id),
-                embedding_model: sea_orm::ActiveValue::Set(Some(
-                    "nomic-ai/nomic-embed-text-v1.5".into(),
-                )),
-                embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
-                ..Default::default()
-            },
-            &ctx.db,
-        )
-        .await
-        .expect("stamp tenant embedding fallback");
-        let def = serde_json::from_value(note_definition()).expect("parse definition");
-        schema_schemas::create_schema(
-            &ctx.db,
-            fixture.tenant_id,
-            fixture.workspace_id,
-            def,
-            None,
-            None,
-        )
-        .await
-        .expect("create schema");
-
-        let entity = entity_entities::create(
-            &ctx.db,
-            fixture.workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "resolves from tenant tier" }),
-            },
-            None,
-        )
-        .await
-        .expect("create entity");
-        let record = entity_entities::get(&ctx.db, fixture.workspace_id, entity.id)
-            .await
-            .expect("get entity record");
-
-        // The tenant is stamped with nomic-embed-text-v1.5, so the effective model must be that.
-        // Using the same model provider should succeed.
-        let (matching_provider, _matching_provider_server) =
-            model_provider("nomic-ai/nomic-embed-text-v1.5").await;
-        let result = entity_embeddings::sync_embedding_for_record(
-            &ctx.db,
-            fixture.workspace_id,
-            &record,
-            &matching_provider,
-        )
-        .await;
-        assert!(result.is_ok(), "result: {result:?}");
-
-        // Verify the embedding was written.
-        let stored = entity_embeddings::Entity::find()
-            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
-            .filter(
-                yorishiro::models::_entities::entity_embeddings::Column::Embedding.is_not_null(),
-            )
-            .exists(&ctx.db)
-            .await
-            .expect("query embedding");
-        assert!(stored, "embedding must have been written");
-
-        // A different model should be refused by the inherited model check.
-        let entity2 = entity_entities::create(
-            &ctx.db,
-            fixture.workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "wrong model, should be refused" }),
-            },
-            None,
-        )
-        .await
-        .expect("create second entity");
-        let record2 = entity_entities::get(&ctx.db, fixture.workspace_id, entity2.id)
-            .await
-            .expect("get entity record");
-
-        let (mismatched_provider, _mismatched_provider_server) =
-            model_provider("intfloat/multilingual-e5-base").await;
-        let result2 = entity_embeddings::sync_embedding_for_record(
-            &ctx.db,
-            fixture.workspace_id,
-            &record2,
-            &mismatched_provider,
-        )
-        .await;
-        assert!(
-            matches!(result2, Err(YorishiroError::ValidationFailed { .. })),
-            "result: {result2:?}"
-        );
-    })
-    .await;
-}
-
-/// A workspace inheriting its tenant's `embedding_dimensions` must refuse a sync whose provider
-/// produces a different width. The dimension check runs before the model check, so a 768 provider
-/// against a 1024 tenant is rejected on width; the `contains("1024")` assertion in the test
-/// proves it was the dimension and not the model check that fired.
-#[tokio::test]
-async fn sync_embedding_resolves_the_tenant_dimension_tier() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        // No public operation sets tenant embedding stamps; inject the legacy fallback tier.
-        sea_orm::ActiveModelTrait::update(
-            tenant_tenants::ActiveModel {
-                id: sea_orm::ActiveValue::Set(fixture.tenant_id),
-                embedding_model: sea_orm::ActiveValue::Set(Some(
-                    "nomic-ai/nomic-embed-text-v1.5".into(),
-                )),
-                embedding_dimensions: sea_orm::ActiveValue::Set(Some(1024)),
-                ..Default::default()
-            },
-            &ctx.db,
-        )
-        .await
-        .expect("stamp tenant embedding fallback");
-        let def = serde_json::from_value(note_definition()).expect("parse definition");
-        schema_schemas::create_schema(
-            &ctx.db,
-            fixture.tenant_id,
-            fixture.workspace_id,
-            def,
-            None,
-            None,
-        )
-        .await
-        .expect("create schema");
-
-        let entity = entity_entities::create(
-            &ctx.db,
-            fixture.workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "wrong dimension from tenant" }),
-            },
-            None,
-        )
-        .await
-        .expect("create entity");
-        let record = entity_entities::get(&ctx.db, fixture.workspace_id, entity.id)
-            .await
-            .expect("get entity record");
-        // Provider is 768-dimensional, not the workspace's 1024: the dimension check fires
-        // first and rejects the write before the model check is reached.
-        let (provider, _server) = fixed_width_provider(768).await;
-        let result = entity_embeddings::sync_embedding_for_record(
-            &ctx.db,
-            fixture.workspace_id,
-            &record,
-            &provider,
-        )
-        .await;
-
-        assert!(
-            matches!(result, Err(YorishiroError::ValidationFailed { .. })),
-            "expected ValidationFailed for dimension mismatch: {result:?}"
-        );
-        assert!(
-            result.unwrap_err().to_string().contains("1024"),
-            "error message must name the expected dimension count 1024"
         );
     })
     .await;

@@ -79,7 +79,7 @@ impl Entity {
             query_text: Set(query_text.to_owned()),
             status: Set(QueryEmbeddingStatus::Pending.as_db_str().to_owned()),
             expires_at: Set(crate::time::database_instant(crate::time::now() + ttl)),
-            deadline_at: Set(Some(deadline_at)),
+            deadline_at: Set(deadline_at),
             ..Default::default()
         }
         .insert(db)

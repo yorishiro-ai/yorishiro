@@ -21,7 +21,7 @@ impl MigrationTrait for Migration {
             .col(ColumnDef::new(Alias::new("model")).text())
             .col(ColumnDef::new(Alias::new("error")).text())
             .col(helpers::ts_tz_col(manager, Alias::new("expires_at")).not_null())
-            .col(helpers::ts_tz_col(manager, Alias::new("deadline_at")))
+            .col(helpers::ts_tz_col(manager, Alias::new("deadline_at")).not_null())
             .col(helpers::ts_tz_col(manager, Alias::new("completed_at")))
             .col(created_at)
             .col(updated_at)

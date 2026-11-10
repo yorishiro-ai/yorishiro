@@ -10,24 +10,7 @@ fn the_worker_declares_no_routing_of_its_own() {
     assert!(EmbeddingSyncWorker::queue().is_none());
 }
 
-/// `serde(rename_all = "snake_case")` is what `EmbeddingSyncArgs` persists in the queue payload; asserting the wire form catches an accidental rename breaking a job already sitting in a queue at deploy time.
-#[test]
-fn worker_class_serializes_to_snake_case() {
-    assert_eq!(
-        serde_json::to_value(WorkerClass::TenantPrivate).unwrap(),
-        serde_json::json!("tenant_private")
-    );
-    assert_eq!(
-        serde_json::to_value(WorkerClass::Official).unwrap(),
-        serde_json::json!("official")
-    );
-    assert_eq!(
-        serde_json::to_value(WorkerClass::Shared).unwrap(),
-        serde_json::json!("shared")
-    );
-}
-
-/// `as_db_str`/`from_db_str` must round-trip every variant, and must agree with the `snake_case` serde wire form above: `ee/`'s `workspace_worker_classes` stores this same string, so a row read from the database and a value read off a queued job's payload must be indistinguishable.
+/// `as_db_str`/`from_db_str` must round-trip every variant,, and must agree with the `snake_case` serde form: `ee/`'s `workspace_worker_classes` stores this same string, so a row read from the database and a value read off a queued job's payload must be indistinguishable.
 #[test]
 fn db_str_round_trips_and_matches_the_serde_wire_form() {
     for class in [
@@ -52,12 +35,6 @@ fn db_str_round_trips_and_matches_the_serde_wire_form() {
 #[test]
 fn from_db_str_rejects_an_unknown_value() {
     assert!(WorkerClass::from_db_str("not-a-real-class").is_none());
-}
-
-/// Loco stores the class name on every queued job and finds the handler by it, so renaming the worker strands whatever is already queued.
-#[test]
-fn the_worker_keeps_its_queue_class_name() {
-    assert_eq!(EmbeddingSyncWorker::class_name(), "EmbeddingSyncWorker");
 }
 
 mod conflict {

@@ -201,8 +201,6 @@ impl ActiveModelBehavior for ActiveModel {
 pub(crate) struct EmbeddingChainRow {
     pub(crate) embedding_model: Option<String>,
     pub(crate) embedding_dimensions: Option<i32>,
-    pub(crate) tenant_model: Option<String>,
-    pub(crate) tenant_dimensions: Option<i32>,
 }
 
 #[derive(Clone, sea_orm::FromQueryResult)]
@@ -236,16 +234,12 @@ pub(crate) async fn embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<EmbeddingChainRow>, YorishiroError> {
-    use crate::models::_entities::tenant_tenants::Column as TenantColumn;
     use crate::models::_entities::workspace_workspaces::Column;
 
     Entity::find()
         .select_only()
         .column(Column::EmbeddingModel)
         .column(Column::EmbeddingDimensions)
-        .column_as(TenantColumn::EmbeddingModel, "tenant_model")
-        .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
-        .left_join(crate::models::tenant_tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
         .into_model::<EmbeddingChainRow>()
         .one(conn)

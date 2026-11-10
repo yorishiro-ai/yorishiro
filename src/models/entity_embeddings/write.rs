@@ -83,20 +83,13 @@ async fn sync_embedding(
     let chain =
         super::resolution::resolve_embedding_chain(conn, workspace_id, provider.dimensions())
             .await?;
-    let expected_dimensions = chain
-        .workspace_dimensions
-        .or(chain.tenant_dimensions)
-        .unwrap_or(
-            i32::try_from(chain.deployment_dimensions)
-                .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32),
-        );
+    let expected_dimensions = chain.workspace_dimensions.unwrap_or(
+        i32::try_from(chain.deployment_dimensions)
+            .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32),
+    );
     super::validate_vector(&vector, expected_dimensions as usize)?;
 
-    let effective_model = chain
-        .workspace_model
-        .as_ref()
-        .or(chain.tenant_model.as_ref());
-    if let Some(expected) = effective_model
+    if let Some(expected) = chain.workspace_model.as_ref()
         && expected.as_str() != provider.model_name()
     {
         return Err(YorishiroError::ValidationFailed {
