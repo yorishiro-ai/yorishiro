@@ -1,105 +1,119 @@
 use super::helpers;
 use sea_orm_migration::prelude::*;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     fn use_transaction(&self) -> Option<bool> {
         helpers::use_transaction()
     }
+
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let [created_at, updated_at] = helpers::timestamps(manager);
-        let table = Table::create()
-            .table(Alias::new("workspace_schema_forks"))
-            .if_not_exists()
-            .col(helpers::uuidv7_pk(manager))
-            .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
-            .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
-            .col(helpers::uuid_col(manager, Alias::new("source_workspace_id")).not_null())
-            .col(helpers::uuid_col(manager, Alias::new("source_schema_id")).not_null())
-            .col(
-                ColumnDef::new(Alias::new("source_schema_version"))
-                    .integer()
-                    .not_null(),
-            )
-            .col(
-                ColumnDef::new(Alias::new("source_schema_name"))
-                    .text()
-                    .not_null(),
-            )
-            .col(helpers::uuid_col(manager, Alias::new("fork_schema_id")).not_null())
-            .col(
-                ColumnDef::new(Alias::new("customized"))
-                    .boolean()
-                    .not_null()
-                    .default(false),
-            )
-            .col(created_at)
-            .col(updated_at)
-            .foreign_key(
-                ForeignKey::create()
-                    .name("fk_workspace_schema_forks_tenant_id")
-                    .from(
-                        Alias::new("workspace_schema_forks"),
-                        Alias::new("tenant_id"),
-                    )
-                    .to(Alias::new("tenant_tenants"), Alias::new("id"))
-                    .on_delete(ForeignKeyAction::Cascade),
-            )
-            .foreign_key(
-                ForeignKey::create()
-                    .name("fk_workspace_schema_forks_workspace_id")
-                    .from(
-                        Alias::new("workspace_schema_forks"),
-                        Alias::new("workspace_id"),
-                    )
-                    .to(Alias::new("workspace_workspaces"), Alias::new("id"))
-                    .on_delete(ForeignKeyAction::Cascade),
-            )
-            .foreign_key(
-                ForeignKey::create()
-                    .name("fk_workspace_schema_forks_source_workspace_id")
-                    .from(
-                        Alias::new("workspace_schema_forks"),
-                        Alias::new("source_workspace_id"),
-                    )
-                    .to(Alias::new("workspace_workspaces"), Alias::new("id"))
-                    .on_delete(ForeignKeyAction::Restrict),
-            )
-            .foreign_key(
-                ForeignKey::create()
-                    .name("fk_workspace_schema_forks_source_schema_id")
-                    .from(
-                        Alias::new("workspace_schema_forks"),
-                        Alias::new("source_schema_id"),
-                    )
-                    .to(Alias::new("schema_schemas"), Alias::new("id"))
-                    .on_delete(ForeignKeyAction::Restrict),
-            )
-            .foreign_key(
-                ForeignKey::create()
-                    .name("fk_workspace_schema_forks_fork_schema_id")
-                    .from(
-                        Alias::new("workspace_schema_forks"),
-                        Alias::new("fork_schema_id"),
-                    )
-                    .to(Alias::new("schema_schemas"), Alias::new("id"))
-                    .on_delete(ForeignKeyAction::Restrict),
-            )
-            .to_owned();
+        up_workspace_schema_forks(manager).await?;
+        Ok(())
+    }
 
-        helpers::create_table_with_checks(
-            manager,
-            "workspace_schema_forks",
-            table,
-            &[(
-                "workspace_schema_forks_source_schema_version_check",
-                "source_schema_version > 0",
-            )],
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        down_workspace_schema_forks(manager).await?;
+        Ok(())
+    }
+}
+
+async fn up_workspace_schema_forks(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    let [created_at, updated_at] = helpers::timestamps(manager);
+    let table = Table::create()
+        .table(Alias::new("workspace_schema_forks"))
+        .if_not_exists()
+        .col(helpers::uuidv7_pk(manager))
+        .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
+        .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
+        .col(helpers::uuid_col(manager, Alias::new("source_workspace_id")).not_null())
+        .col(helpers::uuid_col(manager, Alias::new("source_schema_id")).not_null())
+        .col(
+            ColumnDef::new(Alias::new("source_schema_version"))
+                .integer()
+                .not_null(),
         )
-        .await?;
+        .col(
+            ColumnDef::new(Alias::new("source_schema_name"))
+                .text()
+                .not_null(),
+        )
+        .col(helpers::uuid_col(manager, Alias::new("fork_schema_id")).not_null())
+        .col(
+            ColumnDef::new(Alias::new("customized"))
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .col(created_at)
+        .col(updated_at)
+        .foreign_key(
+            ForeignKey::create()
+                .name("fk_workspace_schema_forks_tenant_id")
+                .from(
+                    Alias::new("workspace_schema_forks"),
+                    Alias::new("tenant_id"),
+                )
+                .to(Alias::new("tenant_tenants"), Alias::new("id"))
+                .on_delete(ForeignKeyAction::Cascade),
+        )
+        .foreign_key(
+            ForeignKey::create()
+                .name("fk_workspace_schema_forks_workspace_id")
+                .from(
+                    Alias::new("workspace_schema_forks"),
+                    Alias::new("workspace_id"),
+                )
+                .to(Alias::new("workspace_workspaces"), Alias::new("id"))
+                .on_delete(ForeignKeyAction::Cascade),
+        )
+        .foreign_key(
+            ForeignKey::create()
+                .name("fk_workspace_schema_forks_source_workspace_id")
+                .from(
+                    Alias::new("workspace_schema_forks"),
+                    Alias::new("source_workspace_id"),
+                )
+                .to(Alias::new("workspace_workspaces"), Alias::new("id"))
+                .on_delete(ForeignKeyAction::Restrict),
+        )
+        .foreign_key(
+            ForeignKey::create()
+                .name("fk_workspace_schema_forks_source_schema_id")
+                .from(
+                    Alias::new("workspace_schema_forks"),
+                    Alias::new("source_schema_id"),
+                )
+                .to(Alias::new("schema_schemas"), Alias::new("id"))
+                .on_delete(ForeignKeyAction::Restrict),
+        )
+        .foreign_key(
+            ForeignKey::create()
+                .name("fk_workspace_schema_forks_fork_schema_id")
+                .from(
+                    Alias::new("workspace_schema_forks"),
+                    Alias::new("fork_schema_id"),
+                )
+                .to(Alias::new("schema_schemas"), Alias::new("id"))
+                .on_delete(ForeignKeyAction::Restrict),
+        )
+        .to_owned();
 
-        helpers::pg_only(
+    helpers::create_table_with_checks(
+        manager,
+        "workspace_schema_forks",
+        table,
+        &[(
+            "workspace_schema_forks_source_schema_version_check",
+            "source_schema_version > 0",
+        )],
+    )
+    .await?;
+
+    helpers::pg_only(
                 manager,
                 "CREATE FUNCTION workspace_schema_fork_source_by_id(p_tenant_id uuid, p_source_workspace_id uuid, p_source_schema_id uuid)
                  RETURNS SETOF schema_schemas
@@ -140,7 +154,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        helpers::pg_only(
+    helpers::pg_only(
                 manager,
                 "CREATE FUNCTION check_workspace_schema_fork_integrity() RETURNS TRIGGER AS $$
                  BEGIN
@@ -174,9 +188,9 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        helpers::sqlite_only(
-            manager,
-            "CREATE TRIGGER workspace_schema_forks_integrity_insert
+    helpers::sqlite_only(
+        manager,
+        "CREATE TRIGGER workspace_schema_forks_integrity_insert
                  BEFORE INSERT ON workspace_schema_forks
                  BEGIN
                    SELECT CASE WHEN NOT EXISTS (
@@ -226,78 +240,78 @@ impl MigrationTrait for Migration {
                        AND name = NEW.source_schema_name
                    ) THEN RAISE(ABORT, 'workspace_schema_forks fork schema mismatch') END;
                  END;",
+    )
+    .await?;
+
+    manager
+        .create_index(
+            Index::create()
+                .name("workspace_schema_forks_workspace_source_name_key")
+                .table(Alias::new("workspace_schema_forks"))
+                .col(Alias::new("workspace_id"))
+                .col(Alias::new("source_workspace_id"))
+                .col(Alias::new("source_schema_name"))
+                .unique()
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .create_index(
+            Index::create()
+                .name("workspace_schema_forks_workspace_idx")
+                .table(Alias::new("workspace_schema_forks"))
+                .col(Alias::new("workspace_id"))
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .create_index(
+            Index::create()
+                .name("workspace_schema_forks_source_schema_idx")
+                .table(Alias::new("workspace_schema_forks"))
+                .col(Alias::new("source_schema_id"))
+                .col(Alias::new("source_schema_version"))
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .create_index(
+            Index::create()
+                .name("workspace_schema_forks_fork_schema_idx")
+                .table(Alias::new("workspace_schema_forks"))
+                .col(Alias::new("fork_schema_id"))
+                .to_owned(),
         )
         .await?;
 
-        manager
-            .create_index(
-                Index::create()
-                    .name("workspace_schema_forks_workspace_source_name_key")
-                    .table(Alias::new("workspace_schema_forks"))
-                    .col(Alias::new("workspace_id"))
-                    .col(Alias::new("source_workspace_id"))
-                    .col(Alias::new("source_schema_name"))
-                    .unique()
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_index(
-                Index::create()
-                    .name("workspace_schema_forks_workspace_idx")
-                    .table(Alias::new("workspace_schema_forks"))
-                    .col(Alias::new("workspace_id"))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_index(
-                Index::create()
-                    .name("workspace_schema_forks_source_schema_idx")
-                    .table(Alias::new("workspace_schema_forks"))
-                    .col(Alias::new("source_schema_id"))
-                    .col(Alias::new("source_schema_version"))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_index(
-                Index::create()
-                    .name("workspace_schema_forks_fork_schema_idx")
-                    .table(Alias::new("workspace_schema_forks"))
-                    .col(Alias::new("fork_schema_id"))
-                    .to_owned(),
-            )
-            .await?;
+    helpers::enable_rls_with_policy(
+        manager,
+        "workspace_schema_forks",
+        "workspace_schema_forks_isolation",
+        "workspace_id",
+        "app.current_workspace",
+        true,
+    )
+    .await?;
+    helpers::grant(
+        manager,
+        "SELECT, INSERT, UPDATE, DELETE",
+        "workspace_schema_forks",
+    )
+    .await?;
 
-        helpers::enable_rls_with_policy(
-            manager,
-            "workspace_schema_forks",
-            "workspace_schema_forks_isolation",
-            "workspace_id",
-            "app.current_workspace",
-            true,
-        )
-        .await?;
-        helpers::grant(
-            manager,
-            "SELECT, INSERT, UPDATE, DELETE",
-            "workspace_schema_forks",
+    Ok(())
+}
+
+async fn down_workspace_schema_forks(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    helpers::pg_only(manager,"DROP FUNCTION workspace_schema_fork_edges(uuid, uuid); DROP FUNCTION workspace_schema_fork_latest_source(uuid, uuid, text); DROP FUNCTION workspace_schema_fork_source_by_id(uuid, uuid, uuid); DROP TRIGGER workspace_schema_forks_integrity ON workspace_schema_forks; DROP FUNCTION check_workspace_schema_fork_integrity();").await?;
+    manager
+        .drop_table(
+            Table::drop()
+                .table(Alias::new("workspace_schema_forks"))
+                .to_owned(),
         )
         .await?;
 
-        Ok(())
-    }
-    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        helpers::pg_only(manager,"DROP FUNCTION workspace_schema_fork_edges(uuid, uuid); DROP FUNCTION workspace_schema_fork_latest_source(uuid, uuid, text); DROP FUNCTION workspace_schema_fork_source_by_id(uuid, uuid, uuid); DROP TRIGGER workspace_schema_forks_integrity ON workspace_schema_forks; DROP FUNCTION check_workspace_schema_fork_integrity();").await?;
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("workspace_schema_forks"))
-                    .to_owned(),
-            )
-            .await?;
-
-        Ok(())
-    }
+    Ok(())
 }
