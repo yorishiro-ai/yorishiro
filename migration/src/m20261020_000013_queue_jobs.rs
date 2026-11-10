@@ -12,16 +12,16 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_queue_job_lifecycles(manager).await?;
-        up_queue_job_dispatch_outbox(manager).await?;
-        up_query_embedding_requests(manager).await?;
+        Box::pin(up_queue_job_lifecycles(manager)).await?;
+        Box::pin(up_queue_job_dispatch_outbox(manager)).await?;
+        Box::pin(up_query_embedding_requests(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_query_embedding_requests(manager).await?;
-        down_queue_job_dispatch_outbox(manager).await?;
-        down_queue_job_lifecycles(manager).await?;
+        Box::pin(down_query_embedding_requests(manager)).await?;
+        Box::pin(down_queue_job_dispatch_outbox(manager)).await?;
+        Box::pin(down_queue_job_lifecycles(manager)).await?;
         Ok(())
     }
 }

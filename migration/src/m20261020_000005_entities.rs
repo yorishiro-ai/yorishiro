@@ -12,12 +12,12 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_entities(manager).await?;
+        Box::pin(up_entities(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_entities(manager).await?;
+        Box::pin(down_entities(manager)).await?;
         Ok(())
     }
 }

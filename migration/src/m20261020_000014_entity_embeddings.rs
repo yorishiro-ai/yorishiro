@@ -12,14 +12,14 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_entity_embeddings(manager).await?;
-        up_entity_embedding_indexes(manager).await?;
+        Box::pin(up_entity_embeddings(manager)).await?;
+        Box::pin(up_entity_embedding_indexes(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_entity_embedding_indexes(manager).await?;
-        down_entity_embeddings(manager).await?;
+        Box::pin(down_entity_embedding_indexes(manager)).await?;
+        Box::pin(down_entity_embeddings(manager)).await?;
         Ok(())
     }
 }

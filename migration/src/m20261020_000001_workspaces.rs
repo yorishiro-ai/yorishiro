@@ -12,16 +12,16 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_workspaces(manager).await?;
-        up_workspace_invites(manager).await?;
-        up_workspace_memberships(manager).await?;
+        Box::pin(up_workspaces(manager)).await?;
+        Box::pin(up_workspace_invites(manager)).await?;
+        Box::pin(up_workspace_memberships(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_workspace_memberships(manager).await?;
-        down_workspace_invites(manager).await?;
-        down_workspaces(manager).await?;
+        Box::pin(down_workspace_memberships(manager)).await?;
+        Box::pin(down_workspace_invites(manager)).await?;
+        Box::pin(down_workspaces(manager)).await?;
         Ok(())
     }
 }

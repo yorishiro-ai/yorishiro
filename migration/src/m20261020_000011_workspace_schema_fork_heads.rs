@@ -11,12 +11,12 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_workspace_schema_fork_heads(manager).await?;
+        Box::pin(up_workspace_schema_fork_heads(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_workspace_schema_fork_heads(manager).await?;
+        Box::pin(down_workspace_schema_fork_heads(manager)).await?;
         Ok(())
     }
 }

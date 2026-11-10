@@ -11,14 +11,14 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_billing(manager).await?;
-        up_compute_credit_ledger(manager).await?;
+        Box::pin(up_billing(manager)).await?;
+        Box::pin(up_compute_credit_ledger(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_compute_credit_ledger(manager).await?;
-        down_billing(manager).await?;
+        Box::pin(down_compute_credit_ledger(manager)).await?;
+        Box::pin(down_billing(manager)).await?;
         Ok(())
     }
 }

@@ -12,16 +12,16 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_entity_relations(manager).await?;
-        up_entity_snapshots(manager).await?;
-        up_entity_column_preferences(manager).await?;
+        Box::pin(up_entity_relations(manager)).await?;
+        Box::pin(up_entity_snapshots(manager)).await?;
+        Box::pin(up_entity_column_preferences(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_entity_column_preferences(manager).await?;
-        down_entity_snapshots(manager).await?;
-        down_entity_relations(manager).await?;
+        Box::pin(down_entity_column_preferences(manager)).await?;
+        Box::pin(down_entity_snapshots(manager)).await?;
+        Box::pin(down_entity_relations(manager)).await?;
         Ok(())
     }
 }

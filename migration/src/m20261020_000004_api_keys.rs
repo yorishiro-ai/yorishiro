@@ -11,14 +11,14 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_api_keys(manager).await?;
-        up_api_key_audit_log(manager).await?;
+        Box::pin(up_api_keys(manager)).await?;
+        Box::pin(up_api_key_audit_log(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_api_key_audit_log(manager).await?;
-        down_api_keys(manager).await?;
+        Box::pin(down_api_key_audit_log(manager)).await?;
+        Box::pin(down_api_keys(manager)).await?;
         Ok(())
     }
 }

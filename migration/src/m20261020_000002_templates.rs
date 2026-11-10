@@ -11,14 +11,14 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_templates(manager).await?;
-        up_template_catalog(manager).await?;
+        Box::pin(up_templates(manager)).await?;
+        Box::pin(up_template_catalog(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_template_catalog(manager).await?;
-        down_templates(manager).await?;
+        Box::pin(down_template_catalog(manager)).await?;
+        Box::pin(down_templates(manager)).await?;
         Ok(())
     }
 }

@@ -11,16 +11,16 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_tenants(manager).await?;
-        up_users(manager).await?;
-        up_tenant_memberships(manager).await?;
+        Box::pin(up_tenants(manager)).await?;
+        Box::pin(up_users(manager)).await?;
+        Box::pin(up_tenant_memberships(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_tenant_memberships(manager).await?;
-        down_users(manager).await?;
-        down_tenants(manager).await?;
+        Box::pin(down_tenant_memberships(manager)).await?;
+        Box::pin(down_users(manager)).await?;
+        Box::pin(down_tenants(manager)).await?;
         Ok(())
     }
 }

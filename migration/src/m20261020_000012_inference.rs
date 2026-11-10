@@ -11,14 +11,14 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        up_inference_jobs(manager).await?;
-        up_inference_proposals(manager).await?;
+        Box::pin(up_inference_jobs(manager)).await?;
+        Box::pin(up_inference_proposals(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        down_inference_proposals(manager).await?;
-        down_inference_jobs(manager).await?;
+        Box::pin(down_inference_proposals(manager)).await?;
+        Box::pin(down_inference_jobs(manager)).await?;
         Ok(())
     }
 }
