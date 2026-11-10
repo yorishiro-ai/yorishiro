@@ -102,8 +102,12 @@ pub(crate) fn cache_dir(def: &LocalModelDef) -> PathBuf {
 /// Returns an error if the client cannot be built.
 pub fn http_client() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
-        .connect_timeout(crate::data::http_timeouts::model_fetch_connect())
-        .read_timeout(crate::data::http_timeouts::model_fetch_read())
+        .connect_timeout(crate::data::http_timeouts::deadline(
+            crate::data::http_timeouts::HttpTimeout::ModelFetchConnect,
+        ))
+        .read_timeout(crate::data::http_timeouts::deadline(
+            crate::data::http_timeouts::HttpTimeout::ModelFetchRead,
+        ))
         .build()
 }
 

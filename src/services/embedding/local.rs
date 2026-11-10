@@ -17,9 +17,6 @@ use crate::error::YorishiroError;
 /// Model-independent (a tokenizer property), unlike the upper bound, which comes from the selected [`LocalModelDef::max_sequence_length`].
 const MIN_SEQUENCE_LENGTH: usize = 16;
 
-/// Upper bound on wait time for a single embed call.
-/// Inference is serialized within the process, so this guards against unbounded waits when prior requests pile up (the local equivalent of the OpenAI-compatible provider's HTTP timeout).
-
 pub struct LocalEmbeddingConfig {
     pub model_path: PathBuf,
     pub tokenizer_path: PathBuf,
@@ -338,7 +335,9 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
             .await
             .map_err(|err| internal(format!("embedding task panicked: {err}")))?
         };
-        let timeout = crate::data::http_timeouts::local_embedding();
+        let timeout = crate::data::http_timeouts::deadline(
+            crate::data::http_timeouts::HttpTimeout::LocalEmbedding,
+        );
         match tokio::time::timeout(timeout, task).await {
             Ok(result) => result,
             Err(_) => Err(internal(format!(

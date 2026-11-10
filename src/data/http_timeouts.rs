@@ -10,35 +10,32 @@ use crate::data::settings::HttpTimeouts;
 
 static ACTIVE: OnceLock<HttpTimeouts> = OnceLock::new();
 
+/// Which outbound call a deadline bounds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HttpTimeout {
+    EmbeddingRequest,
+    LocalEmbedding,
+    ModelFetchConnect,
+    ModelFetchRead,
+    InferenceRequest,
+    OidcDiscovery,
+}
+
 /// The first call wins: Loco builds the context twice for `start`, and both builds read the same file.
 pub(crate) fn install(timeouts: HttpTimeouts) {
     let _ = ACTIVE.set(timeouts);
 }
 
-fn active() -> HttpTimeouts {
-    ACTIVE.get().copied().unwrap_or_default()
-}
-
-pub(crate) fn embedding_request() -> Duration {
-    Duration::from_secs(active().embedding_request_seconds)
-}
-
-pub(crate) fn local_embedding() -> Duration {
-    Duration::from_secs(active().local_embedding_seconds)
-}
-
-pub(crate) fn model_fetch_connect() -> Duration {
-    Duration::from_secs(active().model_fetch_connect_seconds)
-}
-
-pub(crate) fn model_fetch_read() -> Duration {
-    Duration::from_secs(active().model_fetch_read_seconds)
-}
-
-pub(crate) fn inference_request() -> Duration {
-    Duration::from_secs(active().inference_request_seconds)
-}
-
-pub(crate) fn oauth_discovery() -> Duration {
-    Duration::from_secs(active().oauth_discovery_seconds)
+/// The configured deadline for `kind`, or its default when none was installed.
+#[must_use]
+pub fn deadline(kind: HttpTimeout) -> Duration {
+    let t = ACTIVE.get().copied().unwrap_or_default();
+    Duration::from_secs(match kind {
+        HttpTimeout::EmbeddingRequest => t.embedding_request_seconds,
+        HttpTimeout::LocalEmbedding => t.local_embedding_seconds,
+        HttpTimeout::ModelFetchConnect => t.model_fetch_connect_seconds,
+        HttpTimeout::ModelFetchRead => t.model_fetch_read_seconds,
+        HttpTimeout::InferenceRequest => t.inference_request_seconds,
+        HttpTimeout::OidcDiscovery => t.oauth_discovery_seconds,
+    })
 }

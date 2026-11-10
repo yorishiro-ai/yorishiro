@@ -42,7 +42,9 @@ impl OpenAiCompatibleProvider {
         let client = CLIENT
             .get_or_init(|| {
                 reqwest::Client::builder()
-                    .timeout(crate::data::http_timeouts::embedding_request())
+                    .timeout(crate::data::http_timeouts::deadline(
+                        crate::data::http_timeouts::HttpTimeout::EmbeddingRequest,
+                    ))
                     .build()
                     .expect("reqwest client configuration is static and always valid")
             })

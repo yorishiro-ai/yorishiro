@@ -36,7 +36,9 @@ pub fn redirect_policy() -> reqwest::redirect::Policy {
 
 fn http_client() -> Client {
     Client::builder()
-        .timeout(crate::data::http_timeouts::oauth_discovery())
+        .timeout(crate::data::http_timeouts::deadline(
+            crate::data::http_timeouts::HttpTimeout::OidcDiscovery,
+        ))
         .redirect(redirect_policy())
         .build()
         .expect("reqwest client configuration is static and always valid")

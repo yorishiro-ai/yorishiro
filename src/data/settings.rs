@@ -96,6 +96,7 @@ pub(crate) struct HttpTimeouts {
     /// Reading from it.
     pub(crate) model_fetch_read_seconds: u64,
     /// One inference request to a workspace's language model.
+    /// Longer than an embedding call: a chat completion over several fields is slower, and the work already runs behind a job id.
     pub(crate) inference_request_seconds: u64,
     /// One OIDC discovery or token call.
     pub(crate) oauth_discovery_seconds: u64,

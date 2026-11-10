@@ -13,8 +13,6 @@ use serde_json::Value;
 use crate::error::YorishiroError;
 use crate::services::embedding::openai::{redact, retry_after};
 
-/// Longer than the embedding provider's 30s: a chat completion over several fields is a slower call than embedding one string, and the work is already asynchronous behind a job id, so a caller is not sitting on this.
-
 /// An OpenAI-compatible chat-completions endpoint, configured per workspace.
 ///
 /// The same shape `crate::services::embedding::OpenAiCompatibleConfig` takes, so a deployment pointing at Ollama or LM Studio configures both the same way.
@@ -42,7 +40,9 @@ impl InferenceClient {
         let client = CLIENT
             .get_or_init(|| {
                 reqwest::Client::builder()
-                    .timeout(crate::data::http_timeouts::inference_request())
+                    .timeout(crate::data::http_timeouts::deadline(
+                        crate::data::http_timeouts::HttpTimeout::InferenceRequest,
+                    ))
                     // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
                     // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at.
                     .redirect(reqwest::redirect::Policy::none())
