@@ -1,16 +1,16 @@
-# Loco 1.2.0 upstream bug fixes
+# Loco 1.3.1 upstream bug fixes
 
-This directory contains upstream queue defect corrections for the published Loco 1.2.0 crate.
+This directory contains upstream queue defect corrections for the published Loco 1.3.1 crate.
 Application CLI routing, pool options and queue configuration live outside this patch.
 
 ## Provenance and application
 
-`source/` is ignored generated material: the published `loco-rs` 1.2.0 crate with `fixes.patch` applied.
+`source/` is ignored generated material: the published `loco-rs` 1.3.1 crate with `fixes.patch` applied.
 Only the patch, provenance and restoration script are tracked in Git.
 Run `python3 patches/loco-rs/verify.py --prepare` before direct Cargo commands on a fresh checkout.
 Make build/check targets, CI toolchain setup and Docker builds restore it automatically.
-The archive SHA-256 is `5386baf405736a2620001f4561b00fa4874dae99eac3ccf01713fabc9ef13af4`, matching the registry checksum before the path override.
-The crate's upstream revision is `43b3fe60db487758c195d6947f1c37e5246cedf2` in [loco-rs/loco](https://github.com/loco-rs/loco).
+The archive SHA-256 is `8aa30671d3a487b08a61cec5e9d9b9764cdf73e7df074fd1618811935214e076`, matching the registry checksum before the path override.
+The crate's upstream revision is `3ddc279740ebf0516403ca8f7028ce481d616a02` in [loco-rs/loco](https://github.com/loco-rs/loco).
 Its Apache-2.0 licence remains in `source/LICENSE`.
 The upstream files, including their original whitespace and `Cargo.lock`, are retained byte for byte except for `fixes.patch`.
 The `.gitattributes` whitespace exception preserves the unified diff's required context prefixes; the verifier still compares every byte.
@@ -32,7 +32,6 @@ Changing the pinned version requires reviewing these fixes against the new upstr
 | LQ-03 | A reaper could overwrite a job completed or reclaimed after its read; a stale worker could overwrite the replacement attempt. | Reaper transitions compare the exact record and set membership atomically; completion/failure compare the attempt token atomically. | The same regression test holds two real workers across redelivery and checks both stale success and failure. |
 | LQ-04 | Completion/failure persistence errors logged the entire job, including import bodies and credentials. | Log the job ID instead of `Debug`-formatting its payload. | Review `fixes.patch`; this changes diagnostic fields, not stored job arguments. |
 | LQ-05 | Queue shutdown only cancelled polling; SQL pools and handlers retaining `AppContext` were not released. | Add awaited `close()`, clear retained handlers and close SQL pools; boot calls it after workers drain. | `sql_queue_close_releases_pool_and_retained_worker_context` and real request teardown. |
-| LQ-06 | PostgreSQL queue initialisation checked for the table and then created it, so processes sharing a database that start together failed on duplicate catalog entries. | Serialise initialisation with a transaction-scoped advisory lock. | `postgres_queue_initialisation_tolerates_concurrent_first_starts` fails without the lock and passes with it. |
 
 `shutdown()` remains a stop signal.
 Call `close().await` after the `run()` future has drained; do not close a SQL pool underneath active jobs.
@@ -40,6 +39,12 @@ The force-quit signal intentionally still bypasses graceful draining.
 These fixes do not make job effects exactly-once: application transactions and idempotence remain necessary.
 They do not prove or fix the separate, unexplained PostgreSQL authentication/cleanup delays seen in previous tests.
 Do not mix patched and unpatched Redis workers during rollout: drain and replace the worker fleet because unpatched workers do not participate in attempt fencing.
+
+## Fixes retired by upstream
+
+Loco 1.3.0 serialises PostgreSQL queue initialisation under a transaction-scoped advisory lock, so the former LQ-06 fix is gone.
+The local test-database cleanup runtime change, the `converge` refactor, the extra PostgreSQL queue indexes and the private Redis `connect` signature change were not defect fixes and were dropped with the 1.3.1 port.
+Each remaining fix was re-checked against the 1.3.1 source: the Redis enqueue, claim, reaper and error-log defects and the missing awaited `close()` are all still present upstream.
 
 ## Removal condition
 

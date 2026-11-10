@@ -1,19 +1,6 @@
 --- a/src/bgworker/mod.rs
 +++ b/src/bgworker/mod.rs
-@@ -22,11 +22,9 @@
- #[cfg(all(feature = "worker", feature = "db-sqlite"))]
- pub mod sqlt;
- 
--#[cfg(feature = "db-sqlite")]
--use crate::config::SqliteQueueConfig;
- use crate::{
-     app::AppContext,
--    config::{self, Config, PostgresQueueConfig, QueueConfig, RedisQueueConfig, WorkerMode},
-+    config::{self, Config, QueueConfig, WorkerMode},
-     Error, Result,
- };
- 
-@@ -284,6 +282,14 @@
+@@ -347,6 +347,14 @@
      /// Does not currently return an error, but implementations might, so
      /// using Result here as return type.
      fn shutdown(&self) -> Result<()>;
@@ -28,7 +15,7 @@
  }
  
  /// Process worker task handles and handle any errors.
-@@ -584,6 +590,15 @@
+@@ -750,6 +758,15 @@
      pub fn shutdown(&self) -> Result<()> {
          tracing::info!("Shutting down background job processing");
          self.0.shutdown()
@@ -43,63 +30,10 @@
 +        self.0.close().await
      }
  
-     async fn get_jobs(
-@@ -920,49 +935,9 @@
- /// This function will return an error if it fails
- pub async fn converge(queue: &Queue, config: &QueueConfig) -> Result<()> {
-     queue.setup().await?;
--    match config {
--        QueueConfig::Postgres(PostgresQueueConfig {
--            dangerously_flush,
--            uri: _,
--            max_connections: _,
--            enable_logging: _,
--            connect_timeout: _,
--            idle_timeout: _,
--            poll_interval_sec: _,
--            num_workers: _,
--            min_connections: _,
--            reaper: _,
--        })
--        | QueueConfig::Redis(RedisQueueConfig {
--            dangerously_flush,
--            uri: _,
--            queues: _,
--            num_workers: _,
--            reaper: _,
--        }) => {
--            if *dangerously_flush {
--                tracing::warn!("Flush mode enabled - clearing all jobs from queue");
--                queue.clear().await?;
--            }
--        }
--        #[cfg(feature = "db-sqlite")]
--        QueueConfig::Sqlite(SqliteQueueConfig {
--            dangerously_flush,
--            uri: _,
--            max_connections: _,
--            enable_logging: _,
--            connect_timeout: _,
--            idle_timeout: _,
--            poll_interval_sec: _,
--            num_workers: _,
--            min_connections: _,
--            reaper: _,
--        }) => {
--            if *dangerously_flush {
--                tracing::warn!("Flush mode enabled - clearing all jobs from queue");
--                queue.clear().await?;
--            }
--        }
-+    if config.dangerously_flush() {
-+        tracing::warn!("Flush mode enabled - clearing all jobs from queue");
-+        queue.clear().await?;
-     }
-     Ok(())
- }
+     pub(crate) async fn get_jobs(
 --- a/src/bgworker/pg.rs
 +++ b/src/bgworker/pg.rs
-@@ -178,6 +178,14 @@
+@@ -247,6 +247,14 @@
          self.token.cancel();
          Ok(())
      }
@@ -114,67 +48,6 @@
  }
  
  async fn connect(cfg: &PostgresQueueConfig) -> Result<PgPool> {
-@@ -203,6 +211,13 @@
- pub async fn initialize_database(pool: &PgPool) -> Result<()> {
-     debug!("Initializing job database tables");
- 
-+    // Processes sharing one database start concurrently; check-then-create otherwise races on the
-+    // table's catalog entries. The transaction-scoped lock serialises initialisation.
-+    let mut tx = pool.begin().await?;
-+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('pg_loco_queue'))")
-+        .execute(&mut *tx)
-+        .await?;
-+
-     // Check if the table already exists.
-     let table_exists: bool = sqlx::query_scalar(
-         "SELECT EXISTS (
-@@ -210,7 +225,7 @@
-             WHERE table_name = 'pg_loco_queue'
-         )",
-     )
--    .fetch_one(pool)
-+    .fetch_one(&mut *tx)
-     .await?;
- 
-     if table_exists {
-@@ -222,13 +237,13 @@
-                 AND column_name = 'priority'
-             )",
-         )
--        .fetch_one(pool)
-+        .fetch_one(&mut *tx)
-         .await?;
- 
-         if !priority_exists {
-             debug!("Adding priority column to existing pg_loco_queue table");
-             sqlx::query("ALTER TABLE pg_loco_queue ADD COLUMN priority INT NOT NULL DEFAULT 0")
--                .execute(pool)
-+                .execute(&mut *tx)
-                 .await?;
-         }
-     } else {
-@@ -249,10 +264,20 @@
-                 ",
-             JobStatus::Queued
-         )))
--        .execute(pool)
-+        .execute(&mut *tx)
-         .await?;
-     }
- 
-+    // Retained completed jobs must not turn every dequeue or acknowledgement into a table scan.
-+    // The existing startup lock also serializes index upgrades on older installations.
-+    sqlx::raw_sql(
-+        "CREATE INDEX IF NOT EXISTS pg_loco_queue_id_idx ON pg_loco_queue (id);
-+         CREATE INDEX IF NOT EXISTS pg_loco_queue_dequeue_idx ON pg_loco_queue (status, priority DESC, run_at, id);",
-+    )
-+    .execute(&mut *tx)
-+    .await?;
-+
-+    tx.commit().await?;
-     Ok(())
- }
- 
 --- a/src/bgworker/redis.rs
 +++ b/src/bgworker/redis.rs
 @@ -140,7 +140,7 @@
@@ -224,19 +97,7 @@
                                      }
                                  }
                              }
-@@ -192,9 +206,8 @@
-     }
- }
- 
--fn connect(url: &str) -> Result<RedisPool> {
--    let client = Client::open(url.to_string())?;
--    Ok(client)
-+fn connect(config: &RedisQueueConfig) -> Result<RedisPool> {
-+    Ok(Client::open(config.uri.clone())?)
- }
- 
- /// How long a single worker connection attempt may take.
-@@ -315,8 +328,14 @@
+@@ -336,8 +350,14 @@
      // Store job in Redis queue (ZSET, scored by priority) and in its job key.
      let score = calculate_score(job.priority);
      let job_key = format!("{JOB_KEY_PREFIX}{}", job.id);
@@ -253,7 +114,7 @@
  
      Ok(job_id)
  }
-@@ -384,11 +403,14 @@
+@@ -405,11 +425,14 @@
  local queue_key = KEYS[1]
  local processing_key = KEYS[2]
  local job_id = ARGV[1]
@@ -270,7 +131,7 @@
      return score
  else
      return nil
-@@ -399,7 +421,7 @@
+@@ -420,7 +443,7 @@
      conn: &mut Connection,
      queues: &[String],
      tags: &[String],
@@ -279,7 +140,7 @@
      // Paging bounds for scanning the priority-ordered queue.
      const BATCH_SIZE: isize = 50;
      const MAX_SEARCH: isize = 1000;
-@@ -417,7 +439,7 @@
+@@ -438,7 +461,7 @@
          // Page through the queue (ordered by ZSET score = priority) collecting
          // jobs whose tags match the worker's tag filter.
          let mut offset = 0;
@@ -288,7 +149,7 @@
          while offset < MAX_SEARCH {
              let job_ids: Vec<String> = conn
                  .zrange(&queue_key, offset, offset + BATCH_SIZE - 1)
-@@ -462,7 +484,7 @@
+@@ -483,7 +506,7 @@
                                      "Job not due yet, skipping"
                                  );
                              } else {
@@ -297,7 +158,7 @@
                              }
                          }
                          Err(err) => {
-@@ -488,7 +510,7 @@
+@@ -509,7 +532,7 @@
          // 1. Higher priority first.
          // 2. Earlier `run_at` first for equal priority.
          // 3. Smaller id first as a final deterministic tiebreaker.
@@ -306,7 +167,7 @@
              job_b
                  .priority
                  .cmp(&job_a.priority)
-@@ -496,18 +518,26 @@
+@@ -517,18 +540,26 @@
                  .then_with(|| id_a.cmp(id_b))
          });
  
@@ -335,7 +196,7 @@
              }
          }
      }
-@@ -519,6 +549,7 @@
+@@ -540,6 +571,7 @@
      id: &JobId,
      queue_name: &str,
      interval_ms: Option<i64>,
@@ -343,7 +204,7 @@
  ) -> Result<()> {
      let job_key = format!("{JOB_KEY_PREFIX}{id}");
      let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue_name}");
-@@ -533,18 +564,22 @@
+@@ -554,18 +586,22 @@
              let new_json = job.to_json()?;
              let queue_key = format!("{QUEUE_KEY_PREFIX}{queue_name}");
              let score = calculate_score(job.priority);
@@ -374,7 +235,7 @@
      }
      Ok(())
  }
-@@ -554,6 +589,7 @@
+@@ -575,6 +611,7 @@
      id: &JobId,
      queue_name: &str,
      error: &crate::Error,
@@ -382,7 +243,7 @@
  ) -> Result<()> {
      let job_key = format!("{JOB_KEY_PREFIX}{id}");
      let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue_name}");
-@@ -576,9 +612,41 @@
+@@ -597,9 +634,41 @@
          job.status = JobStatus::Failed;
          job.updated_at = Some(Utc::now());
          let updated_json = job.to_json()?;
@@ -427,7 +288,7 @@
      Ok(())
  }
  
-@@ -724,7 +792,7 @@
+@@ -745,7 +814,7 @@
                  && status.contains(&job.status)
              {
                  let _: () = conn.zrem(&queue_key, &job_id).await?;
@@ -436,7 +297,7 @@
              }
          }
      }
-@@ -742,7 +810,7 @@
+@@ -763,7 +832,7 @@
                  }
                  if status.contains(&job.status) {
                      let _: () = conn.srem(&processing_key, &job_id).await?;
@@ -445,7 +306,7 @@
                  }
              }
          }
-@@ -754,7 +822,7 @@
+@@ -775,7 +844,7 @@
              && let Ok(job) = Job::from_json(&json)
              && status.contains(&job.status)
          {
@@ -454,7 +315,7 @@
          }
      }
  
-@@ -816,7 +884,7 @@
+@@ -837,7 +906,7 @@
                  });
                  if should_remove {
                      let _: () = conn.zrem(&queue_key, &job_id).await?;
@@ -463,7 +324,7 @@
                  }
              }
          }
-@@ -838,7 +906,7 @@
+@@ -859,7 +928,7 @@
                  });
                  if should_remove {
                      let _: () = conn.srem(&processing_key, &job_id).await?;
@@ -472,7 +333,7 @@
                  }
              }
          }
-@@ -853,7 +921,7 @@
+@@ -874,7 +943,7 @@
                  created_at < cutoff_date && status.is_none_or(|s| s.contains(&job.status))
              });
              if should_remove {
@@ -481,7 +342,7 @@
              }
          }
      }
-@@ -914,6 +982,39 @@
+@@ -935,6 +1004,39 @@
  /// # Errors
  ///
  /// This function will return an error if it fails to interact with Redis
@@ -521,7 +382,7 @@
  pub async fn requeue(client: &RedisPool, age_minutes: &i64) -> Result<()> {
      let mut conn = get_connection(client).await?;
      let cutoff_time = Utc::now() - chrono::Duration::minutes(*age_minutes);
-@@ -944,22 +1045,32 @@
+@@ -965,22 +1067,32 @@
              if let Some(json) = job_json
                  && let Ok(mut job) = Job::from_json(&json)
              {
@@ -565,7 +426,7 @@
                  }
              }
          }
-@@ -992,10 +1103,19 @@
+@@ -1013,10 +1125,19 @@
                      job.updated_at = Some(Utc::now());
                      let updated_json = job.to_json()?;
                      let score = calculate_score(job.priority);
@@ -589,56 +450,20 @@
                  }
              }
          }
-@@ -1201,6 +1321,12 @@
+@@ -1220,6 +1341,12 @@
+ 
+     fn shutdown(&self) -> Result<()> {
          self.token.cancel();
-         Ok(())
-     }
++        Ok(())
++    }
 +
 +    async fn close(&self) -> Result<()> {
 +        self.token.cancel();
 +        *self.registry.lock().await = JobRegistry::new();
-+        Ok(())
-+    }
- }
- 
- /// Builds the [`RedisQueue`] provider (client, registry, run options, token)
-@@ -1208,7 +1334,7 @@
- /// resulting `run_opts` without needing to downcast the opaque [`Queue`].
- #[allow(clippy::unused_async)]
- async fn build_provider(qcfg: &RedisQueueConfig) -> Result<RedisQueue> {
--    let client = connect(&qcfg.uri)?;
-+    let client = connect(qcfg)?;
-     let registry = JobRegistry::new();
-     let token = CancellationToken::new();
-     let run_opts = RunOpts {
-@@ -1252,7 +1378,7 @@
-     async fn connect_worker_honours_cancellation() {
-         // Port 1 is never a Redis. The point is that cancellation short-circuits
-         // before any attempt is made, so the address is irrelevant.
--        let client = Client::open("redis://127.0.0.1:1/").expect("client opens");
-+        let client = connect(&serde_json::from_value(serde_json::json!({"uri":"redis://127.0.0.1:1/"})).unwrap()).expect("client opens");
-         let token = CancellationToken::new();
-         token.cancel();
- 
-@@ -1272,7 +1398,7 @@
-     /// returned, so this fails if a fixed budget comes back.
-     #[tokio::test]
-     async fn connect_worker_retries_until_cancelled() {
--        let client = Client::open("redis://127.0.0.1:1/").expect("client opens");
-+        let client = connect(&serde_json::from_value(serde_json::json!({"uri":"redis://127.0.0.1:1/"})).unwrap()).expect("client opens");
-         let token = CancellationToken::new();
- 
-         let task = tokio::spawn({
-@@ -1299,7 +1425,7 @@
- 
-     async fn setup_redis() -> (RedisPool, ContainerAsync<GenericImage>) {
-         let (redis_url, container) = setup_redis_container().await;
--        let client = connect(&redis_url).expect("connect to redis");
-+        let client = connect(&serde_json::from_value(serde_json::json!({"uri":redis_url})).unwrap()).expect("connect to redis");
-         (client, container)
+         Ok(())
      }
- 
-@@ -1499,7 +1625,7 @@
+ }
+@@ -1532,7 +1659,7 @@
  
          let queues = vec!["default".to_string()];
          for expected_user in [2, 1, 3] {
@@ -647,7 +472,7 @@
                  .await
                  .expect("dequeue")
                  .expect("a batched job must be dequeueable");
-@@ -1508,7 +1634,7 @@
+@@ -1541,7 +1668,7 @@
                  Some(&serde_json::json!(expected_user)),
                  "batched jobs must be dequeued by priority"
              );
@@ -656,7 +481,7 @@
                  .await
                  .expect("complete job");
          }
-@@ -1561,13 +1687,13 @@
+@@ -1594,13 +1721,13 @@
              "an untagged worker must not see tagged jobs"
          );
          for _ in 0..2 {
@@ -672,7 +497,7 @@
                  .await
                  .expect("complete job");
          }
-@@ -1591,12 +1717,14 @@
+@@ -1624,12 +1751,14 @@
          let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
              .await
              .expect("dequeue");
@@ -691,7 +516,7 @@
  
          // Verify job is not in processing set
          let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue}");
-@@ -1635,11 +1763,11 @@
+@@ -1668,11 +1797,11 @@
          let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
              .await
              .expect("dequeue");
@@ -705,7 +530,7 @@
                  .await
                  .is_ok()
          );
-@@ -1680,13 +1808,15 @@
+@@ -1713,13 +1842,15 @@
          let job_opt = dequeue_with_conn(&mut conn, &queues, &[])
              .await
              .expect("dequeue");
@@ -725,7 +550,7 @@
  
          // Verify job is not in processing set
          let processing_key = format!("{PROCESSING_KEY_PREFIX}{queue}");
-@@ -1729,13 +1859,19 @@
+@@ -1762,13 +1893,19 @@
          .expect("enqueue");
  
          let mut conn = get_test_connection(&client).await;
@@ -749,7 +574,7 @@
  
          let failed = get_jobs(&client, Some(&vec![JobStatus::Failed]), None)
              .await
-@@ -1761,13 +1897,19 @@
+@@ -1794,13 +1931,19 @@
          .expect("enqueue");
  
          let mut conn = get_test_connection(&client).await;
@@ -773,7 +598,7 @@
  
          assert_eq!(retry_failed(&client, None).await.expect("retry"), 1);
          assert!(get_jobs(&client, Some(&vec![JobStatus::Failed]), None)
-@@ -1777,7 +1919,7 @@
+@@ -1810,7 +1953,7 @@
  
          // Queued is not enough: the id must be back in a queue ZSET, or no
          // worker will ever see it again.
@@ -782,7 +607,7 @@
              .await
              .expect("dequeue")
              .expect("the retried job is dequeueable");
-@@ -2168,7 +2310,7 @@
+@@ -2201,7 +2344,7 @@
  
          let queues = vec!["default".to_string()];
          for expected_index in [1, 2, 3, 4, 5] {
@@ -791,7 +616,7 @@
                  .await
                  .expect("dequeue failed")
                  .expect("expected a job");
-@@ -2176,7 +2318,7 @@
+@@ -2209,7 +2352,7 @@
                  job.data.get("index"),
                  Some(&serde_json::json!(expected_index))
              );
@@ -800,7 +625,7 @@
                  .await
                  .expect("complete job");
          }
-@@ -2262,17 +2404,17 @@
+@@ -2295,17 +2438,17 @@
          let mut conn = get_test_connection(&client).await;
  
          // Zero priority is dequeued before the negative one.
@@ -821,7 +646,7 @@
              .await
              .expect("dequeue failed")
              .expect("expected a job");
-@@ -2319,7 +2461,7 @@
+@@ -2352,7 +2495,7 @@
          let _: () = conn.zadd(&queue_key, "job2", score2).await.unwrap();
  
          let queues = vec!["default".to_string()];
@@ -832,7 +657,7 @@
              .expect("should have dequeued the untagged job");
 --- a/src/bgworker/sqlt.rs
 +++ b/src/bgworker/sqlt.rs
-@@ -181,6 +181,13 @@
+@@ -252,6 +252,13 @@
          self.token.cancel();
          Ok(())
      }
@@ -848,7 +673,7 @@
  async fn connect(cfg: &SqliteQueueConfig) -> Result<SqlitePool> {
 --- a/src/boot.rs
 +++ b/src/boot.rs
-@@ -190,7 +190,11 @@
+@@ -194,7 +194,11 @@
  
      println!("press ctrl-c again to force quit");
      select! {
@@ -863,7 +688,7 @@
      Ok(())
 --- a/src/testing/db.rs
 +++ b/src/testing/db.rs
-@@ -125,6 +125,7 @@
+@@ -134,6 +134,7 @@
                  .execute(&pool)
                  .await
                  .expect("create DB schema");
@@ -871,19 +696,7 @@
          })
      }
  
-@@ -139,7 +140,10 @@
-         // safe to call from `Drop::drop` since nothing here is `.await`ed on
-         // the caller's runtime.
-         std::thread::spawn(move || {
--            let rt = tokio::runtime::Runtime::new().expect("create cleanup runtime");
-+            let rt = tokio::runtime::Builder::new_current_thread()
-+                .enable_all()
-+                .build()
-+                .expect("create cleanup runtime");
- 
-             rt.block_on(async {
-                 let pool = Pool::<Postgres>::connect(&connection_string)
-@@ -150,6 +154,7 @@
+@@ -162,6 +163,7 @@
                      .execute(&pool)
                      .await
                      .expect("Drop database");

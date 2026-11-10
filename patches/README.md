@@ -13,7 +13,7 @@ Do not describe maintenance warnings as vulnerabilities or claim to have fixed f
 
 | Directory | Original dependency | Bug fix | Removal condition |
 |---|---|---|---|
-| `loco-rs/` | `loco-rs` 1.2.0 | Queue bug fixes, restorable upstream source, reproducible diff and verifier. | See [the defect/removal checklist](loco-rs/README.md). |
+| `loco-rs/` | `loco-rs` 1.3.1 | Queue bug fixes, restorable upstream source, reproducible diff and verifier. | See [the defect/removal checklist](loco-rs/README.md). |
 
 The maintenance-only `paste` and YAML compatibility overrides have been removed.
 Their upstream dependencies remain unchanged; maintenance warnings are not claimed resolved.
