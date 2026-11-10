@@ -61,7 +61,6 @@ serial_test = { version = "4.0.1" }
 sha2 = { version = "0.11.1" }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["json"] }
-tracing-appender = "0.2.5"
 # sea-orm and uuid take different feature sets on each side (root needs sqlx-sqlite/postgres-vector and uuid's v7 that ee/ does not use directly), so the table carries the union of what either side needs.
 sea-orm = { version = "2.0.4", features = [
   "sqlx-sqlite",
@@ -83,7 +82,6 @@ futures = "0.3.34"
 axum.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-tracing-appender.workspace = true
 sea-orm.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true

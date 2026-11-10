@@ -88,6 +88,16 @@ fn test_environment(environment: &Environment) -> Environment {
 /// Returns an error when a setting is invalid.
 pub fn validate(config: &Config) -> Result<()> {
     validate_queue_policy(config)?;
+    if config
+        .logger
+        .file_appender
+        .as_ref()
+        .is_some_and(|file| file.enable)
+    {
+        return Err(Error::Message(
+            "logger.file_appender is not supported; the application logs to stdout only".into(),
+        ));
+    }
     if let Some(cors) = config
         .server
         .middlewares
