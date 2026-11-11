@@ -49,7 +49,7 @@ sea-orm-migration = { version = "2.0.4", features = [
 # `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is environment-switchable, and `Redis` is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot.
 # Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
 # It is not loco-rs's own default and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust).
-loco-rs = { version = "=1.3.1", default-features = false, features = ["cli", "with-db", "auth", "db-sqlite", "db-postgres", "mailer", "worker_redis"] }
+loco-rs = { version = "=1.3.1", default-features = false, features = ["cli", "with-db", "auth", "db-sqlite", "db-postgres", "worker_redis"] }
 anyhow = { version = "1.0.104" }
 axum = { version = "0.8.9" }
 chrono = { version = "0.4.45", features = ["serde"] }

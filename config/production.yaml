@@ -195,30 +195,6 @@ settings:
     retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
 
 
-# Mailer Configuration.
-#
-# Opt-in: the whole block renders only when MAILER_HOST is set to something non-empty.
-# Nothing in this application sends mail today, and `Config.mailer` is an `Option`, so an absent block is a supported state rather than a missing one.
-# It has to be a template conditional rather than variables with defaults: `boot.rs` builds an `EmailSender` from this block whenever `smtp.enable` is true and propagates the failure, so a rendered block pointing at a placeholder host would fail the boot immediately.
-<% if get_env(name="MAILER_HOST", default="") != "" %>
-mailer:
-  # SMTP mailer configuration.
-  smtp:
-    # Enable/Disable smtp mailer.
-    enable: true
-    # SMTP server host. e.x localhost, smtp.gmail.com
-    host: <%= get_env(name="MAILER_HOST") %>
-    # SMTP server port
-    port: <%= get_env(name="MAILER_PORT", default="587") %>
-    # Use secure connection (SSL/TLS).
-    secure: true
-    auth:
-      user: <%= get_env(name="MAILER_USER") %>
-      password: <%= get_env(name="MAILER_PASSWORD") %>
-    # Override the SMTP hello name (default is the machine's hostname)
-    # hello_name:
-<% endif %>
-
 # Initializers Configuration
 # initializers:
 #  oauth2:
