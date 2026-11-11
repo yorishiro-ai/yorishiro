@@ -2,14 +2,14 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::dtos::members::{AddMemberRequest, MemberAccessResponse};
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
 use crate::models::user_users;
@@ -168,12 +168,64 @@ async fn add_member(
             member: MembershipRecord {
                 user_id: user.id,
                 email: user.email,
+                user_name: user.user_name,
                 display_name: user.display_name,
                 role: body.role,
             },
             keys,
         }),
     ))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/users", request_body = crate::dtos::members::CreateTenantUserRequest, responses((status = 201, body = MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+/// Creates a user bound to the caller's tenant, signed in with tenant id, user name and password.
+///
+/// # Errors
+/// Returns an error for non-administrators, invalid credentials or a duplicate name.
+async fn create_tenant_user(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Json(body): Json<crate::dtos::members::CreateTenantUserRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, &auth).await?;
+    let user = tenant_memberships::create_tenant_user_member(
+        &txn,
+        auth.tenant_id,
+        &body.user_name,
+        &body.password,
+        body.display_name.as_deref(),
+        body.role,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok((
+        StatusCode::CREATED,
+        Json(MembershipRecord {
+            user_id: user.id,
+            email: None,
+            user_name: user.user_name,
+            display_name: user.display_name,
+            role: body.role,
+        }),
+    ))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/members/users/{user_id}/password", params(("user_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::ResetTenantUserPasswordRequest, responses((status = 204, description = "Password replaced and the user's keys revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+/// Replaces a tenant user's password.
+///
+/// # Errors
+/// Returns an error for non-administrators, a weak password or a user outside the tenant.
+async fn reset_tenant_user_password(
+    State(ctx): State<AppContext>,
+    AuthContext(auth): AuthContext,
+    Path(user_id): Path<uuid::Uuid>,
+    Json(body): Json<crate::dtos::members::ResetTenantUserPasswordRequest>,
+) -> Result<StatusCode, ApiError> {
+    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    tenant_memberships::reset_tenant_user_password(&ctx.db, &auth, user_id, &body.password).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/{user_id}", params(("user_id" = uuid::Uuid, Path)), responses((status = 204, description = "Membership absent and attributed tenant keys revoked; repeated removal is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
@@ -194,6 +246,8 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_transfer_ownership),
         super::route_inventory::path_doc(__path_add_member),
         super::route_inventory::path_doc(__path_remove_member),
+        super::route_inventory::path_doc(__path_create_tenant_user),
+        super::route_inventory::path_doc(__path_reset_tenant_user_password),
         super::route_inventory::path_doc(__path_preview_removal),
         super::route_inventory::path_doc(__path_preview_role_change),
         super::route_inventory::path_doc(__path_create_invite),
@@ -209,6 +263,8 @@ pub fn routes() -> Routes {
         .add("/", get(list_members))
         .add("/transfer-ownership", post(transfer_ownership))
         .add("/", post(add_member))
+        .add("/users", post(create_tenant_user))
+        .add("/users/{user_id}/password", put(reset_tenant_user_password))
         .add("/{user_id}", delete(remove_member))
         .add("/{user_id}/removal-preview", get(preview_removal))
         .add("/{user_id}/role-preview", post(preview_role_change))

@@ -67,7 +67,7 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
         let (_, token) = workspace_invites::create_invite(
             &ctx.db,
             target.id,
-            &user.email,
+            user.email.as_deref().unwrap(),
             MembershipRole::Member,
             chrono::Duration::hours(1),
         )
@@ -124,7 +124,7 @@ async fn disabled_tenant_invites_cannot_accept_or_register_accounts() {
         let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("disabled-invite-existing"), "test-password", None).await.unwrap();
         let email = super::fixtures::unique_email("disabled-invite-new");
         let mut invites = Vec::new();
-        for recipient in [&user.email, &email] {
+        for recipient in [user.email.as_deref().unwrap(), email.as_str()] {
             invites.push(workspace_invites::create_invite(&ctx.db, tenant.tenant_id, recipient, MembershipRole::Member, chrono::Duration::hours(1)).await.unwrap());
         }
         let before = tenant_tenants::retirement::inventory(&ctx.db, tenant.tenant_id).await.unwrap();
@@ -151,7 +151,7 @@ async fn existing_account_invite_acceptance_requires_credentials_and_consumes_on
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("accept-invite"), "test-password", None).await.unwrap();
-        let (_, token) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, &user.email, MembershipRole::Member, chrono::Duration::hours(1)).await.unwrap();
+        let (_, token) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, user.email.as_deref().unwrap(), MembershipRole::Member, chrono::Duration::hours(1)).await.unwrap();
         let wrong = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":token,"email":user.email,"password":"wrong"})).await;
         assert_eq!(wrong.status_code(), StatusCode::UNAUTHORIZED);
         let other = user_users::create_user(&ctx.db, &super::fixtures::unique_email("other-invite"), "test-password", None).await.unwrap();
@@ -163,7 +163,7 @@ async fn existing_account_invite_acceptance_requires_credentials_and_consumes_on
         assert_eq!(accepted.json::<serde_json::Value>()["user_id"], user.id.to_string());
         let replay = request.post("/auth/invites/accept").json(&body).await;
         assert_eq!(replay.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
-        let (_, duplicate) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, &user.email, MembershipRole::Viewer, chrono::Duration::hours(1)).await.unwrap();
+        let (_, duplicate) = workspace_invites::create_invite(&ctx.db, tenant.tenant_id, user.email.as_deref().unwrap(), MembershipRole::Viewer, chrono::Duration::hours(1)).await.unwrap();
         let conflict = request.post("/auth/invites/accept").json(&serde_json::json!({"invite_token":duplicate,"email":user.email,"password":"test-password"})).await;
         assert_eq!(conflict.status_code(), StatusCode::CONFLICT);
         assert_eq!(user_users::Entity::find_by_id(user.id).one(&ctx.db).await.unwrap().unwrap().password_hash, user.password_hash);

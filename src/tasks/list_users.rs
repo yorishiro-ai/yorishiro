@@ -27,7 +27,7 @@ impl Task for ListUsers {
         for user in users {
             println!(
                 "{}",
-                serde_json::json!({"id":user.id,"email":user.email,"display_name":user.display_name,"created_at":user.created_at})
+                serde_json::json!({"id":user.id,"email":user.email,"tenant_id":user.tenant_id,"user_name":user.user_name,"display_name":user.display_name,"created_at":user.created_at})
             );
         }
         Ok(())

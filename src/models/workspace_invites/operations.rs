@@ -209,7 +209,7 @@ pub(crate) async fn accept_in_transaction(
             details: vec![],
             hint: "ask a tenant admin for a fresh invite".into(),
         })?;
-    if invite.email != user.email {
+    if Some(&invite.email) != user.email.as_ref() {
         return Err(YorishiroError::Unauthenticated);
     }
     if crate::models::tenant_memberships::get_membership_role(txn, invite.tenant_id, user.id)

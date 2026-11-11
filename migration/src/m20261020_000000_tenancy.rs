@@ -76,30 +76,56 @@ async fn up_users(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .table(Alias::new("user_users"))
         .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
-        .col(
-            ColumnDef::new(Alias::new("email"))
-                .text()
-                .not_null()
-                .unique_key(),
-        )
+        .col(ColumnDef::new(Alias::new("email")).text().unique_key())
         .col(ColumnDef::new(Alias::new("password_hash")).text())
         .col(ColumnDef::new(Alias::new("display_name")).text())
         .col(ColumnDef::new(Alias::new("oauth_provider")).text())
         .col(ColumnDef::new(Alias::new("oauth_subject_id")).text())
+        .col(helpers::uuid_col(manager, Alias::new("tenant_id")))
+        .col(ColumnDef::new(Alias::new("user_name")).text())
         .col(helpers::created_at(manager))
+        .foreign_key(
+            ForeignKey::create()
+                .name("fk_user_users_tenant_id")
+                .from(Alias::new("user_users"), Alias::new("tenant_id"))
+                .to(Alias::new("tenant_tenants"), Alias::new("id"))
+                .on_delete(ForeignKeyAction::Cascade),
+        )
         .to_owned();
 
     helpers::create_table_with_checks(
         manager,
         "user_users",
         table,
-        &[(
-            "user_users_auth_method_check",
-            "(password_hash IS NOT NULL AND oauth_provider IS NULL AND oauth_subject_id IS NULL) \
+        &[
+            (
+                "user_users_auth_method_check",
+                "(password_hash IS NOT NULL AND oauth_provider IS NULL AND oauth_subject_id IS NULL) \
                      OR (oauth_provider IS NOT NULL AND oauth_subject_id IS NOT NULL)",
-        )],
+            ),
+            // A root user has an email and no tenant; a tenant-bound user has a tenant, a name, a password and no email or OAuth identity.
+            (
+                "user_users_kind_check",
+                "(tenant_id IS NULL AND user_name IS NULL AND email IS NOT NULL) \
+                     OR (tenant_id IS NOT NULL AND user_name IS NOT NULL AND email IS NULL \
+                         AND password_hash IS NOT NULL AND oauth_provider IS NULL)",
+            ),
+        ],
     )
     .await?;
+
+    manager
+        .create_index(
+            Index::create()
+                .name("uq_user_users_tenant_id_user_name")
+                .unique()
+                .table(Alias::new("user_users"))
+                .col(Alias::new("tenant_id"))
+                .col(Alias::new("user_name"))
+                .and_where(Expr::col(Alias::new("tenant_id")).is_not_null())
+                .to_owned(),
+        )
+        .await?;
 
     manager
         .create_index(

@@ -5,7 +5,9 @@ use uuid::Uuid;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct UserRecord {
     pub(crate) id: Uuid,
-    pub(crate) email: String,
+    pub(crate) email: Option<String>,
+    pub(crate) tenant_id: Option<Uuid>,
+    pub(crate) user_name: Option<String>,
     pub(crate) display_name: Option<String>,
     pub(crate) created_at: String,
 }
@@ -18,6 +20,8 @@ impl UserRecord {
         Self {
             id: user.id,
             email: user.email,
+            tenant_id: user.tenant_id,
+            user_name: user.user_name,
             display_name: user.display_name,
             created_at: crate::time::render(ctx, user.created_at).to_rfc3339(),
         }

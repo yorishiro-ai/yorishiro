@@ -104,7 +104,7 @@ async fn signup_with_invite(
         StatusCode::CREATED,
         Json(SignupResponse {
             user_id: user.id,
-            email: user.email,
+            email: user.root_email(),
             tenant_id: invite.tenant_id,
             role: invite.role,
             workspaces,
@@ -146,7 +146,7 @@ async fn signup_without_invite(
         StatusCode::CREATED,
         Json(SignupResponse {
             user_id: user.id,
-            email: user.email,
+            email: user.root_email(),
             tenant_id,
             role: MembershipRole::Owner,
             workspaces: vec![],
@@ -171,9 +171,23 @@ async fn login(
     Json(body): Json<LoginRequest>,
 ) -> Result<Response, ApiError> {
     // Credentials are checked before the workspace is looked up, so a request with a bad password never reveals whether workspace_id exists.
-    let user = user_users::verify_login(&ctx.db, &body.email, &body.password)
-        .await?
-        .ok_or(YorishiroError::Unauthenticated)?;
+    let user = match (&body.email, body.tenant_id, &body.user_name) {
+        (Some(email), None, None) => {
+            user_users::verify_login(&ctx.db, email, &body.password).await?
+        }
+        (None, Some(tenant_id), Some(user_name)) => {
+            user_users::verify_tenant_login(&ctx.db, tenant_id, user_name, &body.password).await?
+        }
+        _ => {
+            return Err(YorishiroError::ValidationFailed {
+                message: "send either email, or tenant_id together with user_name".into(),
+                details: vec![],
+                hint: "use email for a root user, tenant_id and user_name for a tenant user".into(),
+            }
+            .into());
+        }
+    }
+    .ok_or(YorishiroError::Unauthenticated)?;
 
     let workspace_id = match tenancy::resolve_login_workspace(&ctx.db, user.id, body.workspace_id)
         .await?

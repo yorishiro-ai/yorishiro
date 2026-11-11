@@ -85,3 +85,24 @@ pub(crate) struct MemberAccessResponse {
     /// Snapshot of existing attributed keys at the role update, not a key-issuance fence.
     pub(crate) keys: Vec<crate::models::tenant_memberships::MembershipKeyAccess>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub(crate) struct CreateTenantUserRequest {
+    /// Unique within the tenant: 1 to 64 letters, digits, `.`, `_` or `-`.
+    pub(crate) user_name: String,
+    /// At least 12 characters.
+    pub(crate) password: String,
+    pub(crate) display_name: Option<String>,
+    /// Admin, member or viewer; a tenant user cannot own the tenant.
+    pub(crate) role: MembershipRole,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub(crate) struct ResetTenantUserPasswordRequest {
+    /// At least 12 characters. Every key issued to the user is revoked.
+    pub(crate) password: String,
+}

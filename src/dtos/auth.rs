@@ -55,7 +55,13 @@ pub struct SignupResponse {
 #[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LoginRequest {
-    pub email: String,
+    /// Root user sign-in: the account's email.
+    /// Send either `email`, or `tenant_id` together with `user_name`.
+    pub email: Option<String>,
+    /// Tenant user sign-in: the tenant the user belongs to.
+    pub tenant_id: Option<Uuid>,
+    /// Tenant user sign-in: the user's name within that tenant.
+    pub user_name: Option<String>,
     pub password: String,
     /// Which of the account's workspaces to issue an API key for.
     /// Omit this when the account can only reach one workspace; it resolves automatically.

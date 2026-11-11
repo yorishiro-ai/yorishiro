@@ -98,7 +98,7 @@ pub(crate) async fn setup_first_account(
     txn.commit().await.internal()?;
     Ok(SetupAccount {
         user_id: user.id,
-        email: user.email,
+        email: user.root_email(),
         tenant_id: tenant.id,
         workspace_id: workspace.id,
     })

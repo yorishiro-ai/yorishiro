@@ -158,7 +158,7 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
         )
         .await;
         let user = user_users::ActiveModel {
-            email: Set(super::fixtures::unique_email("oauth-callback-invite")),
+            email: Set(Some(super::fixtures::unique_email("oauth-callback-invite"))),
             oauth_provider: Set(Some("oidc".into())),
             oauth_subject_id: Set(Some(subject)),
             ..Default::default()
@@ -208,7 +208,7 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
         let (invite, token) = workspace_invites::create_invite(
             &ctx.db,
             tenant.tenant_id,
-            &user.email,
+            user.email.as_deref().unwrap(),
             MembershipRole::Viewer,
             chrono::Duration::hours(1),
         )
@@ -554,7 +554,7 @@ async fn verified_subject_accepts_invite_without_workspace_or_key() {
         .await;
         let subject = uuid::Uuid::new_v4().to_string();
         let user = user_users::ActiveModel {
-            email: Set(super::fixtures::unique_email("oauth-invite-only")),
+            email: Set(Some(super::fixtures::unique_email("oauth-invite-only"))),
             oauth_provider: Set(Some("oidc".into())),
             oauth_subject_id: Set(Some(subject.clone())),
             ..Default::default()
@@ -565,7 +565,7 @@ async fn verified_subject_accepts_invite_without_workspace_or_key() {
         let (invite, token) = workspace_invites::create_invite(
             &ctx.db,
             tenant.tenant_id,
-            &user.email,
+            user.email.as_deref().unwrap(),
             MembershipRole::Viewer,
             chrono::Duration::hours(1),
         )
@@ -573,7 +573,7 @@ async fn verified_subject_accepts_invite_without_workspace_or_key() {
         .unwrap();
         let mut identity = CallbackIdentity {
             subject_id: uuid::Uuid::new_v4().to_string(),
-            email: Some(user.email.clone()),
+            email: Some(user.email.clone().unwrap()),
             display_name: None,
         };
         assert!(matches!(

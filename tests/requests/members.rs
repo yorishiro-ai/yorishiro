@@ -17,7 +17,7 @@ async fn invite_cancellation_and_acceptance_have_one_committed_outcome() {
             &ctx.db, &super::fixtures::unique_email("cancel-accept-race"), "test-password", None,
         ).await.unwrap();
         let (invite, token) = workspace_invites::create_invite(
-            &ctx.db, tenant.tenant_id, &user.email, MembershipRole::Viewer, chrono::Duration::hours(1),
+            &ctx.db, tenant.tenant_id, user.email.as_deref().unwrap(), MembershipRole::Viewer, chrono::Duration::hours(1),
         ).await.unwrap();
         let barrier = tokio::sync::Barrier::new(2);
         let cancel = async {
@@ -681,7 +681,7 @@ async fn owner_can_list_and_add_members() {
             .map(|m| m["email"].as_str().unwrap())
             .collect();
         assert!(emails.contains(&owner_email.as_str()));
-        assert!(emails.contains(&invitee.email.as_str()));
+        assert!(emails.contains(&invitee.email.as_deref().unwrap()));
     })
     .await;
 }
@@ -1020,4 +1020,50 @@ async fn workspace_key_issuance_cannot_survive_concurrent_membership_removal() {
 #[tokio::test]
 async fn tenant_key_issuance_cannot_survive_concurrent_membership_removal() {
     issuance_and_removal_are_serialized(true).await;
+}
+
+#[tokio::test]
+async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let auth = format!("Bearer {}", tenant.api_key);
+        let create = |body: serde_json::Value| {
+            request
+                .post("/api/members/users")
+                .add_header("Authorization", &auth)
+                .json(&body)
+        };
+        let password = "tenant-user-password";
+        let created = create(serde_json::json!({"user_name":"alice","password":password,"role":"admin"})).await;
+        created.assert_status(StatusCode::CREATED);
+        let body: serde_json::Value = created.json();
+        assert!(body["email"].is_null());
+        assert_eq!(body["user_name"], "alice");
+        let user_id = body["user_id"].as_str().unwrap().to_owned();
+
+        // Ownership, duplicates and weak passwords are refused.
+        create(serde_json::json!({"user_name":"bob","password":password,"role":"owner"})).await.assert_status(StatusCode::CONFLICT);
+        create(serde_json::json!({"user_name":"alice","password":password,"role":"member"})).await.assert_status(StatusCode::CONFLICT);
+        create(serde_json::json!({"user_name":"carol","password":"short","role":"member"})).await.assert_status(StatusCode::CONFLICT);
+
+        let login = |body: serde_json::Value| request.post("/auth/login").json(&body);
+        let signed_in = login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":password,"workspace_id":tenant.workspace_id})).await;
+        signed_in.assert_status(StatusCode::OK);
+        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":"wrong-password-here"})).await.assert_status(StatusCode::UNAUTHORIZED);
+        // The two sign-in forms cannot be mixed.
+        login(serde_json::json!({"email":"a@example.com","tenant_id":tenant.tenant_id,"user_name":"alice","password":password})).await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+
+        // A password reset replaces the credential and revokes keys issued earlier.
+        let old_key = signed_in.json::<serde_json::Value>()["api_key"].as_str().unwrap().to_owned();
+        request.put(&format!("/api/members/users/{user_id}/password")).add_header("Authorization", &auth)
+            .json(&serde_json::json!({"password":"replacement-password"})).await.assert_status(StatusCode::NO_CONTENT);
+        request.get("/api/members").add_header("Authorization", &format!("Bearer {old_key}")).await.assert_status(StatusCode::UNAUTHORIZED);
+        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":password})).await.assert_status(StatusCode::UNAUTHORIZED);
+        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":"replacement-password","workspace_id":tenant.workspace_id})).await.assert_status(StatusCode::OK);
+
+        // Removing the membership removes the account.
+        request.delete(&format!("/api/members/{user_id}")).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
+        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":"replacement-password"})).await.assert_status(StatusCode::UNAUTHORIZED);
+    })
+    .await;
 }

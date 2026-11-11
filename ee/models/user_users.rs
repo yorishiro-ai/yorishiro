@@ -114,7 +114,7 @@ pub(crate) async fn create_oauth_user(
     subject_id: &str,
 ) -> Result<OAuthUser, CreateOauthUserError> {
     let active = user_users::ActiveModel {
-        email: ActiveValue::Set(email.to_string()),
+        email: ActiveValue::Set(Some(email.to_string())),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
         oauth_provider: ActiveValue::Set(Some(provider.to_string())),
         oauth_subject_id: ActiveValue::Set(Some(subject_id.to_string())),
