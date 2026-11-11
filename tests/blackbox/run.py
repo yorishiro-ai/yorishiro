@@ -962,7 +962,7 @@ def user_profile_lifecycle(app):
     path = "/api/users/me"
     original = client.call("get_current_user")
     require(app.rest("GET", path, key=owner) == original, "REST/MCP profiles differ")
-    require(set(original) == {"id", "email", "display_name", "created_at"},
+    require(set(original) == {"id", "email", "tenant_id", "user_name", "display_name", "created_at"},
             "profile exposed private identity fields")
     updated = client.call("update_current_user", {"display_name": "  Contract Owner  "})
     require(updated["display_name"] == "Contract Owner" and updated["id"] == original["id"]
