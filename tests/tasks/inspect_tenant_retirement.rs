@@ -537,7 +537,10 @@ async fn retirement_inventory_is_read_only_and_target_specific() {
         assert!(before.workspace_ids.contains(&tenant.workspace_id));
         assert!(before.memberships > 0);
         assert!(before.api_keys > 0);
-        assert_eq!(before.identity_policy, "retain_all_user_accounts");
+        assert_eq!(
+            before.identity_policy,
+            "retain_root_accounts_delete_tenant_users"
+        );
         let serialized = serde_json::to_value(&before).unwrap();
         assert!(!serialized.to_string().contains(&tenant.api_key));
         assert!(!serialized.to_string().contains("key_hash"));

@@ -288,3 +288,126 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn deleting_the_only_owner_deletes_the_disabled_tenant_and_its_tenant_users() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::api_keys::ApiKeyScope;
+    use yorishiro::models::tenant_memberships::{self, MembershipRole};
+    use yorishiro::models::{tenant_tenants::retirement, user_users};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let other = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let txn = ctx.db.begin().await.unwrap();
+        let tenant_user = tenant_memberships::create_tenant_user_member(
+            &txn,
+            target.tenant_id,
+            "retiring-user",
+            "tenant-user-password",
+            None,
+            MembershipRole::Member,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+
+        // An enabled tenant protects its owner.
+        assert!(
+            user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id)
+                .await
+                .is_err()
+        );
+        retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
+            .await
+            .unwrap();
+
+        // Another tenant membership must be removed first, and nothing is deleted meanwhile.
+        let guest = user_users::create_user(
+            &ctx.db,
+            &crate::requests::fixtures::unique_email("retiring-guest"),
+            "guest-password",
+            None,
+        )
+        .await
+        .unwrap();
+        tenant_memberships::add_member(&ctx.db, other.tenant_id, guest.id, MembershipRole::Member)
+            .await
+            .unwrap();
+        tenant_memberships::add_member(&ctx.db, target.tenant_id, guest.id, MembershipRole::Member)
+            .await
+            .unwrap();
+        assert!(
+            user_users::delete_by_operator(&ctx.db, guest.id, guest.id)
+                .await
+                .is_err()
+        );
+        assert!(
+            tenant_tenants::Entity::find_by_id(target.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id)
+            .await
+            .unwrap();
+        assert!(
+            tenant_tenants::Entity::find_by_id(target.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            user_users::Entity::find_by_id(tenant_user.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            user_users::Entity::find_by_id(target.owner_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // Root accounts that only held a membership survive the tenant's deletion; the other tenant is untouched.
+        assert!(
+            user_users::Entity::find_by_id(guest.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            tenant_tenants::Entity::find_by_id(other.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    })
+    .await;
+}

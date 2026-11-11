@@ -9,12 +9,10 @@ mod operations;
 
 pub use operations::preview_removal;
 pub use operations::preview_role_change;
-pub use operations::reset_tenant_user_password;
 pub use operations::transfer_ownership;
 pub use operations::{add_member, remove_member, remove_member_as, update_member_access};
-pub(crate) use operations::{
-    add_member_in_transaction, create_tenant_user_member, get_membership_role, list_members,
-};
+pub(crate) use operations::{add_member_in_transaction, get_membership_role, list_members};
+pub use operations::{create_tenant_user_member, reset_tenant_user_password};
 
 db_enum! {
     /// Mirrors the `tenant_memberships.role` check constraint.

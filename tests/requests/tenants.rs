@@ -27,7 +27,10 @@ async fn owner_can_inspect_and_confirm_disablement_without_deleting_data() {
         assert_eq!(before.status_code(), StatusCode::OK);
         let before = before.json::<Value>();
         assert_eq!(before["tenant_id"], target.tenant_id.to_string());
-        assert_eq!(before["identity_policy"], "retain_all_user_accounts");
+        assert_eq!(
+            before["identity_policy"],
+            "retain_root_accounts_delete_tenant_users"
+        );
         assert!(!before.to_string().contains(&other.tenant_id.to_string()));
         assert!(!before.to_string().contains(&target.api_key));
         request

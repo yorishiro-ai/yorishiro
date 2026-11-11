@@ -4,7 +4,7 @@ use loco_rs::hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
 };
-use sea_orm::{Condition, QueryOrder, QuerySelect};
+use sea_orm::{Condition, PaginatorTrait, QueryOrder, QuerySelect};
 
 use super::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
@@ -24,7 +24,12 @@ pub(crate) async fn list_by_operator(
         .internal()
 }
 
-pub(crate) async fn delete_by_operator(
+/// Deletes an account with a trusted operator identity.
+/// A root user who is the only owner of a tenant takes that disabled tenant, and the users bound to it, along with them.
+///
+/// # Errors
+/// Rejects a mismatched confirmation, an enabled owned tenant, and any other tenant membership.
+pub async fn delete_by_operator(
     db: &sea_orm::DatabaseConnection,
     user_id: uuid::Uuid,
     confirmed_user_id: uuid::Uuid,
@@ -43,16 +48,38 @@ pub(crate) async fn delete_by_operator(
         .internal()?
         .ok_or_else(|| YorishiroError::not_found("user not found"))?;
     use crate::models::_entities::tenant_memberships as memberships;
-    if memberships::Entity::find()
+    // A root user who is the only owner of a tenant takes that tenant with them; any other membership must be removed first.
+    let held = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))
-        .one(&txn)
+        .all(&txn)
         .await
-        .internal()?
-        .is_some()
-    {
-        return Err(YorishiroError::Conflict {
-            message: "remove every tenant membership before deleting a global user account".into(),
-        });
+        .internal()?;
+    let mut owned_tenants = Vec::new();
+    for membership in held {
+        let owners = memberships::Entity::find()
+            .filter(memberships::Column::TenantId.eq(membership.tenant_id))
+            .filter(
+                memberships::Column::Role
+                    .eq(crate::models::tenant_memberships::MembershipRole::Owner.as_db_str()),
+            )
+            .count(&txn)
+            .await
+            .internal()?;
+        if membership.role == crate::models::tenant_memberships::MembershipRole::Owner.as_db_str()
+            && owners == 1
+        {
+            owned_tenants.push(membership.tenant_id);
+        } else {
+            return Err(YorishiroError::Conflict {
+                message: format!(
+                    "remove the user's membership in tenant {} before deleting the account",
+                    membership.tenant_id
+                ),
+            });
+        }
+    }
+    for tenant_id in owned_tenants {
+        crate::models::tenant_tenants::retirement::delete_owned_by_user(&txn, tenant_id).await?;
     }
     // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
     crate::models::api_keys::Entity::revoke_matching(

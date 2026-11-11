@@ -213,7 +213,7 @@ async fn guard_tenant_bound_user(
 ///
 /// # Errors
 /// Rejects owner role, invalid credentials, and duplicate names.
-pub(crate) async fn create_tenant_user_member(
+pub async fn create_tenant_user_member(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_name: &str,
