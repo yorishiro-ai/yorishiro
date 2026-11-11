@@ -10,17 +10,17 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "9c8faf7327da330cc58cefe654f8d6c9573ee5e7c0094bd34d110b99c2da8408",
-    "src": "1e8cbe13ba613eb812d26ad6d5b3bac6e57ff707a54d04a5f8eaeae79e821c12",
+    "tests": "fbe49d710d2005a88f407ec8b82f3a667cf854163459dbf3b814b96431641490",
+    "src": "c6630a2ca7912809c23db1b8efed76bbb8f314f8d5c6fcb574b682c666daf006",
     "ee": "cef3fec43b63cdaf1fe4207e32f99e1e68bc2f82b4550b173a9f5f66bf3da93f",
     "migration": "6112d307cc249c14e8dbdf0caa18d21e6edf4a237cce7416778db2e0f4902ed2",
-    "Cargo.toml": "3eced87f212f040bc763689f32a7c4a7c8322a3db5ebf10b9c34e6e23ef813c9",
+    "Cargo.toml": "a06ffb45220e1bc32677ee0b07e58bd817ad9b147f01e8d1ff8a1255e8f49cd0",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
-    "Cargo.lock": "ddeb71eac1e16c1705a7631fa42d494c584697273a44a0deae7589aa6fd6817e",
+    "Cargo.lock": "86d0dc5dd02f73cfb4a112e1d0def0e4cc0973032475a8264e9d7d810a035617",
     ".cargo/config.toml": "0e69d92faa2874685d4439f53254384399e451afa5b406c41e4747ff66d0ae38",
     "patches/loco-rs/fixes.patch": "f37454e70ae3f0e6701f064f1c98ad94e92e531f9a80bf48c035231924880d3b",
     "patches/loco-rs/verify.py": "2c4eedfdbcf7f85e577b96f02f5e27afd8cf8727589eb6d3ef7de65bbb936faf",
-    "config": "05106d9e46e727a7afc66c12fbc9ce8b8b4257d68ce20140bfca50756a2f7970",
+    "config": "084d6b993a04a1cea4f929fdfb059d35f2e9cd746d0aacdc00b1309c860887c3",
     "tests/fixtures": "37f8ca65b7b01b684a290a688ec76a09da74da7619c40c74236c1cff5f03294c"
   },
   "targets": [

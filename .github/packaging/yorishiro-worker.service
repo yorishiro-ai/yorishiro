@@ -19,7 +19,6 @@ User=yorishiro
 Group=yorishiro
 WorkingDirectory=/var/lib/yorishiro
 Environment=LOCO_ENV=production
-Environment=YORISHIRO_LOG_OUTPUT=journald
 Environment=LOCO_CONFIG_FOLDER=/etc/yorishiro
 ExecStart=/usr/bin/yorishiro start --worker=worker-target:shared
 Restart=on-failure

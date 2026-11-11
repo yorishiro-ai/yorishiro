@@ -11,7 +11,6 @@ User=yorishiro
 Group=yorishiro
 WorkingDirectory=/var/lib/yorishiro
 Environment=LOCO_ENV=production
-Environment=YORISHIRO_LOG_OUTPUT=journald
 Environment=LOCO_CONFIG_FOLDER=/etc/yorishiro
 ExecStart=/usr/bin/yorishiro scheduler
 Restart=on-failure

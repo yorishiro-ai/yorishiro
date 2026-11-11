@@ -60,8 +60,6 @@ settings:
   # Deployment routing declaration, not live worker discovery.
   worker_targets: <%= get_env(name="YORISHIRO_WORKER_TARGETS", default='["worker-target:shared"]') %>
   timezone: <%= get_env(name="YORISHIRO_TIMEZONE", default="UTC") %>
-  # stdout or journald (the systemd journal, which stamps its own time).
-  log_output: <%= get_env(name="YORISHIRO_LOG_OUTPUT", default="stdout") %>
   mcp:
     allowed_hosts: "<%= get_env(name="YORISHIRO_MCP_ALLOWED_HOSTS", default="") %>"
   max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="0") %>

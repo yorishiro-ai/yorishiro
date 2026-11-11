@@ -1,8 +1,6 @@
 //! Application logging policy, installed through Loco's logger hook.
 //!
-//! Logger settings and filtering come from Loco's configuration.
-//! `settings.log_output` selects stdout (default) or the systemd journal; `logger.file_appender` is rejected at config load.
-//! The journal stamps its own time, so only the stdout layer uses the configured timezone.
+//! Logger settings and filtering come from Loco's configuration; only stdout is supported (`logger.file_appender` is rejected at config load).
 //! Events use tracing with stable messages and structured fields, including `error` for failures.
 //! CLI results remain on stdout; operational diagnostics belong in tracing events.
 //! Error response rendering and internal-error reporting live in `crate::error`.
@@ -10,8 +8,6 @@
 use std::fmt;
 
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
-
-use crate::data::settings::LogOutput;
 
 pub struct ConfiguredTimer(chrono_tz::Tz);
 
@@ -37,26 +33,12 @@ pub(crate) fn init<H: loco_rs::app::Hooks>(
     if config.enable {
         let filter =
             loco_rs::logger::init_env_filter::<H>(config.override_filter.as_ref(), &config.level);
-        let output = crate::data::settings::configured(ctx)?.log_output;
-        let journal = (output == LogOutput::Journald)
-            .then(tracing_journald::layer)
-            .and_then(Result::ok)
-            .map(|layer| {
-                Box::new(layer)
-                    as Box<
-                        dyn tracing_subscriber::Layer<tracing_subscriber::Registry> + Sync + Send,
-                    >
-            });
-        // Without a reachable journal socket the process still logs, to stdout.
-        let sink = journal.unwrap_or_else(|| {
-            layer(
+        tracing_subscriber::registry()
+            .with(layer(
                 &config.format,
                 std::io::stdout,
                 crate::time::configured(ctx),
-            )
-        });
-        tracing_subscriber::registry()
-            .with(sink)
+            ))
             .with(filter)
             .try_init()
             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;

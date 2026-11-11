@@ -9,17 +9,6 @@ pub enum ConsumerRole {
     Jobs,
 }
 
-/// Where application logs go.
-#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LogOutput {
-    /// Standard output in the Loco `logger.format`.
-    #[default]
-    Stdout,
-    /// The systemd journal, with levels and fields mapped natively.
-    Journald,
-}
-
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
@@ -31,8 +20,6 @@ pub struct Settings {
     pub worker_targets: Vec<String>,
     #[serde(default = "default_timezone")]
     pub timezone: String,
-    #[serde(default)]
-    pub log_output: LogOutput,
     #[serde(default = "default_max_tenants")]
     pub(crate) max_tenants: i32,
     #[serde(default)]
