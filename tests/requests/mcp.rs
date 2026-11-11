@@ -2963,3 +2963,57 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let auth = format!("Bearer {}", tenant.api_key);
+        let created = request.post("/api/members/users").add_header("Authorization", &auth)
+            .json(&json!({"user_name":"mcp-member","password":"tenant-user-password","role":"admin"})).await;
+        created.assert_status(StatusCode::CREATED);
+        let user_id = created.json::<Value>()["user_id"].as_str().unwrap().to_owned();
+        let session = initialize(&request).await;
+
+        // Listing shows the name and no email; the role cannot become owner through any tool.
+        let listed = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"list_members","arguments":{}})).await;
+        let member = tool_result_json(&listed).as_array().unwrap().iter().find(|m| m["user_name"] == "mcp-member").cloned().expect("tenant user listed");
+        assert!(member["email"].is_null());
+        for (id, name, args) in [
+            (3, "set_member_role", json!({"user_id":user_id,"role":"owner"})),
+            (4, "transfer_ownership", json!({"successor_user_id":user_id})),
+        ] {
+            let refused = mcp_call(&request, &session, &tenant.api_key, id, "tools/call", json!({"name":name,"arguments":args})).await;
+            assert_eq!(refused["result"]["isError"], true, "{refused}");
+        }
+
+        // The tenant user's own key reads its tenant-bound profile.
+        let login = request.post("/auth/login")
+            .json(&json!({"tenant_id":tenant.tenant_id,"user_name":"mcp-member","password":"tenant-user-password","workspace_id":tenant.workspace_id})).await;
+        login.assert_status_ok();
+        let own_key = login.json::<Value>()["api_key"].as_str().unwrap().to_owned();
+        let profile = mcp_call(&request, &session, &own_key, 5, "tools/call", json!({"name":"get_current_user","arguments":{}})).await;
+        let profile = tool_result_json(&profile);
+        assert_eq!(profile["user_name"], "mcp-member");
+        assert!(profile["email"].is_null());
+
+        // Removing the membership removes the account.
+        let removed = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"remove_member","arguments":{"user_id":user_id}})).await;
+        assert_eq!(tool_result_json(&removed)["removed"], true);
+        request.post("/auth/login")
+            .json(&json!({"tenant_id":tenant.tenant_id,"user_name":"mcp-member","password":"tenant-user-password"})).await
+            .assert_status(StatusCode::UNAUTHORIZED);
+
+        // A tenant user belongs to its own tenant only.
+        #[cfg(feature = "enterprise")]
+        {
+            let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+            let created = request.post("/api/members/users").add_header("Authorization", &auth)
+                .json(&json!({"user_name":"stay-home","password":"tenant-user-password","role":"member"})).await;
+            created.assert_status(StatusCode::CREATED);
+            let home_user = created.json::<Value>()["user_id"].as_str().unwrap().to_owned();
+            let joined = mcp_call(&request, &session, &other.api_key, 7, "tools/call", json!({"name":"set_member_role","arguments":{"user_id":home_user,"role":"member"}})).await;
+            assert_eq!(joined["result"]["isError"], true, "{joined}");
+        }
+    }).await;
+}

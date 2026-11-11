@@ -294,7 +294,6 @@ async fn deleting_the_only_owner_deletes_the_disabled_tenant_and_its_tenant_user
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::TransactionTrait;
     use yorishiro::models::api_keys::ApiKeyScope;
     use yorishiro::models::tenant_memberships::{self, MembershipRole};
     use yorishiro::models::{tenant_tenants::retirement, user_users};
@@ -318,18 +317,11 @@ async fn deleting_the_only_owner_deletes_the_disabled_tenant_and_its_tenant_user
             },
         )
         .await;
-        let txn = ctx.db.begin().await.unwrap();
-        let tenant_user = tenant_memberships::create_tenant_user_member(
-            &txn,
-            target.tenant_id,
-            "retiring-user",
-            "tenant-user-password",
-            None,
-            MembershipRole::Member,
-        )
-        .await
-        .unwrap();
-        txn.commit().await.unwrap();
+        let created = request.post("/api/members/users")
+            .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .json(&serde_json::json!({"user_name":"retiring-user","password":"tenant-user-password","role":"member"})).await;
+        created.assert_status(axum::http::StatusCode::CREATED);
+        let tenant_user_id: uuid::Uuid = created.json::<serde_json::Value>()["user_id"].as_str().unwrap().parse().unwrap();
 
         // An enabled tenant protects its owner.
         assert!(
@@ -380,7 +372,7 @@ async fn deleting_the_only_owner_deletes_the_disabled_tenant_and_its_tenant_user
                 .is_none()
         );
         assert!(
-            user_users::Entity::find_by_id(tenant_user.id)
+            user_users::Entity::find_by_id(tenant_user_id)
                 .one(&ctx.db)
                 .await
                 .unwrap()

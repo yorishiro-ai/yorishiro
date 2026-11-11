@@ -228,7 +228,7 @@ async fn reset_tenant_user_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/{user_id}", params(("user_id" = uuid::Uuid, Path)), responses((status = 204, description = "Membership absent and attributed tenant keys revoked; repeated removal is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/{user_id}", params(("user_id" = uuid::Uuid, Path)), responses((status = 204, description = "Membership absent and attributed tenant keys revoked; a tenant user's account is deleted; repeated removal is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 async fn remove_member(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,

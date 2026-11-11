@@ -11,7 +11,7 @@ use crate::models::api_keys::ApiKeyScope;
 
 #[tool_router(vis = "pub(crate)", router = tool_router_users)]
 impl YorishiroMcpServer {
-    #[tool(meta = super::scope_requirement(ApiKeyScope::Read), description = "Read your own global user profile without exposing password hashes or OAuth subjects; service credentials are denied (requires read scope)")]
+    #[tool(meta = super::scope_requirement(ApiKeyScope::Read), description = "Read your own user profile, including a tenant user's name and tenant, without exposing password hashes or OAuth subjects; service credentials are denied (requires read scope)")]
     pub(crate) async fn get_current_user(
         &self,
         Extension(parts): Extension<Parts>,
@@ -32,7 +32,7 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = super::scope_requirement(ApiKeyScope::Read), description = "Update or clear your own global display name across all tenants, not another user's identity; email, password and OAuth subjects cannot be changed here (requires read scope)")]
+    #[tool(meta = super::scope_requirement(ApiKeyScope::Read), description = "Update or clear your own display name (shared across tenants for a root user), not another user's identity; email, password and OAuth subjects cannot be changed here (requires read scope)")]
     pub(crate) async fn update_current_user(
         &self,
         Parameters(input): Parameters<UpdateUserRequest>,
