@@ -144,3 +144,17 @@ fn dispatch_timing_is_validated_before_workers_start() {
         );
     }
 }
+
+#[test]
+fn log_output_defaults_to_stdout_and_accepts_journald() {
+    use yorishiro::data::settings::LogOutput;
+    let default: Settings = serde_json::from_value(settings()).unwrap();
+    assert!(default.log_output == LogOutput::Stdout);
+    let mut value = settings();
+    value["log_output"] = "journald".into();
+    let journald: Settings = serde_json::from_value(value).unwrap();
+    assert!(journald.log_output == LogOutput::Journald);
+    let mut value = settings();
+    value["log_output"] = "file".into();
+    assert!(serde_json::from_value::<Settings>(value).is_err());
+}
