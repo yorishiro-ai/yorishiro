@@ -251,7 +251,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
 
 /// Performs one diagnostic task invocation without changing maintenance mode.
 pub(crate) async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
-    let settings = crate::data::settings::installed(ctx)?;
+    let settings = crate::data::settings::configured(ctx)?;
     let Some(config) = LoadGuardConfig::from_settings(&settings.db_load_guard) else {
         return Ok(());
     };

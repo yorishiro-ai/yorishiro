@@ -49,7 +49,7 @@ impl Task for CreateInvite {
                 hint: String::new(),
             })?,
             Err(_) => {
-                crate::data::settings::installed(app_context)?
+                crate::data::settings::configured(app_context)?
                     .limits
                     .invite_ttl_hours
             }

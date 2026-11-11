@@ -334,7 +334,7 @@ pub(crate) async fn connect_workers(
     queue: &loco_rs::bgworker::Queue,
     workers: &WorkerRegistry,
 ) -> Result<()> {
-    let role = crate::data::settings::installed(ctx)?.consumer_role;
+    let role = crate::data::settings::configured(ctx)?.consumer_role;
     if role == crate::data::settings::ConsumerRole::Embedding {
         initializers::embedding::install_provider(ctx).await?;
     }
@@ -419,7 +419,7 @@ async fn install_services(ctx: AppContext) -> Result<AppContext> {
     initializers::auth::install(&ctx);
     initializers::embedding::install(&ctx, &settings);
     initializers::rate_limit::install(&ctx, &settings);
-    // One parse per boot: every later reader, per-record timestamp rendering included, takes the installed copy.
+    // One zone parse per boot: per-record timestamp rendering takes the installed copy.
     ctx.shared_store.insert(settings);
     ctx.shared_store.insert(zone);
     Ok(ctx)

@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_embeddings::{
-    PGVECTOR_HNSW_HALFVEC_MAX_DIMS, PGVECTOR_HNSW_VECTOR_MAX_DIMS,
+    MAX_EMBEDDING_DIMENSIONS, PGVECTOR_HNSW_HALFVEC_MAX_DIMS, PGVECTOR_HNSW_VECTOR_MAX_DIMS,
 };
 
 /// Name prefix of every index this maintenance creates and retires.
@@ -105,7 +105,7 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 // No declared width: no index is wanted; owned leftovers are retired in cleanup.
                 continue;
             };
-            if !(1..=PGVECTOR_HNSW_HALFVEC_MAX_DIMS as i32).contains(&dimensions) {
+            if !(1..=MAX_EMBEDDING_DIMENSIONS as i32).contains(&dimensions) {
                 continue;
             }
             if candidate.embedded < PROMOTION_THRESHOLD && !candidate.indexed {

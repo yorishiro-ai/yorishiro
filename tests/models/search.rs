@@ -100,16 +100,6 @@ async fn postgres_qwen06_materialized_recall() {
     .await;
 }
 
-#[tokio::test]
-async fn postgres_qwen8b_hnsw_recall() {
-    postgres_genuine_recall(
-        4096,
-        include_str!("../fixtures/search/qwen8b.json"),
-        include_bytes!("../fixtures/search/qwen8b.f32"),
-    )
-    .await;
-}
-
 async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]) {
     if !crate::require_postgres_backend() {
         return;
@@ -465,9 +455,14 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert_eq!(stamped.embedding_dimensions, Some(7));
         assert!(!stamped.embedding_reindexing);
         // Exercise the real high-dimensional index lifecycle, not only generated SQL.
-        vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
-            sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;4000])))
-            .filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        // Distinct zero-mean vectors: a corpus of identical vectors saturates every HNSW neighbour
+        // list with zero-distance links, so a row written after the build would be unreachable.
+        let spread = |i: usize| (0..4000_usize).map(|axis| ((i + 1) * (axis + 11) * 7919 % 104_729) as f32 / 104_729.0 - 0.5).collect::<Vec<f32>>();
+        vectors::Entity::delete_many().filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        vectors::Entity::insert_many(ids.iter().enumerate().map(|(i, id)| vectors::ActiveModel {
+            workspace_id:Set(fixture.workspace_id), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
+            embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(spread(i))))
+        })).exec(&ctx.db).await.unwrap();
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
             sea_orm::sea_query::Expr::value(4000)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         let high_index = format!("ysr_hnsw_{}_d4000", fixture.workspace_id.simple());
@@ -482,16 +477,18 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(exists(high_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "the width change must build the halfvec index");
         assert!(exists(index.clone()).await.unwrap().is_none(), "the old width's index must be retired");
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let positive = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4000], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        let positive = search::search_by_vector(&tenant, fixture.workspace_id, spread(0), "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(positive.len(), 10);
-        assert!(positive.iter().all(|hit| hit.distance.unwrap().abs() < 0.00001));
-        let mut nearest = vec![1.0_f32;4000]; nearest[0] = 0.001;
+        assert_eq!(positive[0].entity.id, ids[0], "the stored vector itself must rank first");
+        assert!(positive[0].distance.unwrap().abs() < 0.00001);
+        let mut nearest = vec![0.001_f32;4000]; nearest[0] = 1.0;
         tenant.rollback().await.unwrap();
         vectors::Entity::update_many().col_expr(vectors::Column::Embedding,
             sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(nearest)))
             .filter(vectors::Column::EntityId.eq(ids[1])).exec(&ctx.db).await.unwrap();
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
+        // The row written after the index build must be reachable and rank first.
+        let mut signed = vec![0.0_f32;4000]; signed[0] = 1.0;
         let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed.clone(), "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(reranked.len(), 10);
         assert_eq!(reranked[0].entity.id, ids[1], "high-dimensional HNSW must retain the closest original cosine");

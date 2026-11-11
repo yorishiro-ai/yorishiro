@@ -115,7 +115,7 @@ async fn perform_infer_fill(
     .internal()?;
     schema_txn.commit().await.internal()?;
 
-    let timeouts = crate::data::settings::installed(ctx)
+    let timeouts = crate::data::settings::configured(ctx)
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?
         .http_timeouts;
     let client = InferenceClient::with_timeouts(config, timeouts);

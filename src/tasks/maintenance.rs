@@ -36,7 +36,7 @@ impl Task for Maintenance {
                 hint: String::new(),
             })?,
             Err(_) => {
-                crate::data::settings::installed(app_context)?
+                crate::data::settings::configured(app_context)?
                     .limits
                     .maintenance_retry_after_seconds
             }

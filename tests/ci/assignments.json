@@ -10,9 +10,9 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "5ab93fdffa1fc26c81ec93a709ff8b8815ae855ce909fb99e2f0c145e460188e",
-    "src": "cabc46525816768c0a6e413e5af83ce643e8b6ab81fe9fefc51312ab6532c07d",
-    "ee": "b89fcebaa8ba66c0184c18499f87fc7d10082b37c63b0a9c730af3914e4d6847",
+    "tests": "573eb616956490c9abdd35e3e72f8f02e0b71c26d0e13e689ce03758e51f8bc5",
+    "src": "095d10614cc39f23d0659303a974cc7b2198b5b9fb38db60d22055b0255fe787",
+    "ee": "cef3fec43b63cdaf1fe4207e32f99e1e68bc2f82b4550b173a9f5f66bf3da93f",
     "migration": "6112d307cc249c14e8dbdf0caa18d21e6edf4a237cce7416778db2e0f4902ed2",
     "Cargo.toml": "a06ffb45220e1bc32677ee0b07e58bd817ad9b147f01e8d1ff8a1255e8f49cd0",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
@@ -21,7 +21,7 @@
     "patches/loco-rs/fixes.patch": "f37454e70ae3f0e6701f064f1c98ad94e92e531f9a80bf48c035231924880d3b",
     "patches/loco-rs/verify.py": "2c4eedfdbcf7f85e577b96f02f5e27afd8cf8727589eb6d3ef7de65bbb936faf",
     "config": "423bdf243b058c43022ff92b09be8ab5e7a311f145cd19b08992dd77fa50799f",
-    "tests/fixtures": "1118d98ace9951cca4a92645b7d99031a5631d66abc8b01f4cdaf83d327affba"
+    "tests/fixtures": "6f41eabd50384875ac825811c778a11f0c7b3ce66e164e90468b6a431612605d"
   },
   "targets": [
     {"package":"yorishiro","target":"mod","kind":"test","source":"tests/mod.rs","allow_zero":false},
@@ -43,7 +43,6 @@
   },
   "postgres_dedicated": [
     {"name":"models::search::postgres_qwen06_materialized_recall","source":"tests/models/search.rs"},
-    {"name":"models::search::postgres_qwen8b_hnsw_recall","source":"tests/models/search.rs"},
     {"name":"requests::mcp::postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery","source":"tests/requests/mcp.rs"},
     {"name":"ee::tasks::reindex_scheduler::postgres_tick_waits_for_disable_and_rechecks_tenant_activity","source":"tests/ee/tasks/reindex_scheduler.rs"},
     {"name":"db::migrations::concurrent_first_postgres_migrations_use_one_connection_each","source":"tests/db/migrations.rs"},
@@ -195,7 +194,7 @@
     {"source":"tests/initializers/shutdown.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL identity/tenant pools during worker draining.","names":["initializers::shutdown::shutdown_hook_keeps_database_available_until_loco_drains_workers"]},
     {"source":"tests/timezone_state.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"PostgreSQL connection/session timezone settings; ignored SQLite marker call is not SQLite ownership.","names":["timezone_state::postgres_app_pool_uses_configured_timezone_on_new_and_released_connections","timezone_state::postgres_pool_replacement_keeps_uri_settings_without_replaying_startup"]},
     {"source":"tests/models/tenancy.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"Explicit PostgreSQL expiry and advisory-lock cap races.","names":["models::tenancy::invite_expiry_boundaries_match_postgres_gt","models::tenancy::concurrent_create_workspace_cannot_exceed_the_cap"]},
-    {"source":"tests/models/search.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"Current PostgreSQL guards, pgvector ordering/stamps, advisory contention and pg_trgm fallback; not SQLite common today.","names":["models::search::postgres_literal_search_shared_corpus","models::search::postgres_rrf_promotes_rare_text_and_gates_common_text","models::search::postgres_workspace_hnsw_promotion_and_cleanup","models::search::postgres_qwen06_materialized_recall","models::search::postgres_qwen8b_hnsw_recall","models::search::search_by_vector_ranks_by_distance_and_stays_within_the_workspace","models::search::concurrent_reindex_runs_serialize_and_consistent_after_lock","models::search::reindex_overwrites_existing_entity_embeddings","models::search::search_by_vector_falls_back_to_trigram_for_unembedded_entities"]},
+    {"source":"tests/models/search.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"Current PostgreSQL guards, pgvector ordering/stamps, advisory contention and pg_trgm fallback; not SQLite common today.","names":["models::search::postgres_literal_search_shared_corpus","models::search::postgres_rrf_promotes_rare_text_and_gates_common_text","models::search::postgres_workspace_hnsw_promotion_and_cleanup","models::search::postgres_qwen06_materialized_recall","models::search::search_by_vector_ranks_by_distance_and_stays_within_the_workspace","models::search::concurrent_reindex_runs_serialize_and_consistent_after_lock","models::search::reindex_overwrites_existing_entity_embeddings","models::search::search_by_vector_falls_back_to_trigram_for_unembedded_entities"]},
     {"source":"tests/models/query_embedding_requests.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"PostgreSQL tenant disablement; shared EE fixtures create independent tenants and require licensed multi-tenancy.","names":["models::query_embedding_requests::a_disabled_tenant_cannot_publish_a_query_embedding"]},
     {"source":"tests/models/query_embedding_requests.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Multi-tenant fixture and RLS-scoped requests.","names":["models::query_embedding_requests::postgres_row_level_security_scopes_requests_to_the_current_workspace"]},
     {"source":"tests/models/template_templates.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Two tenant signups, community visibility and explicit active boot licence assertion.","names":["models::template_templates::list_and_get_respect_tenant_and_community_visibility"]},

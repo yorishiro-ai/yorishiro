@@ -2725,10 +2725,15 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 workspace_id: Set(setup.workspace_id),
                 entity_id: Set(document.id),
                 tenant_id: Set(setup.tenant_id),
-                embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![
-                    1.0;
-                    4000
-                ]))),
+                // Distinct zero-mean decoys: a corpus of identical vectors saturates every HNSW
+                // neighbour list with zero-distance links, which no approximate index can traverse.
+                embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(
+                    (0..4000_usize)
+                        .map(|axis| {
+                            ((i + 1) * (axis + 11) * 7919 % 104_729) as f32 / 104_729.0 - 0.5
+                        })
+                        .collect::<Vec<_>>(),
+                ))),
             });
         }
         vectors::Entity::insert_many(embeddings)
