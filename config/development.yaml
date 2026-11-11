@@ -62,6 +62,10 @@ scheduler:
       run: "recover_worker_dispatches"
       schedule: "0 * * * * *"
       run_on_start: true
+    embedding_index_maintenance:
+      run: "embedding_index_maintenance"
+      schedule: "0 */10 * * * *"
+      run_on_start: true
 
 # Run HTTP and worker processes separately. Start a worker with an explicit target, such as
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.

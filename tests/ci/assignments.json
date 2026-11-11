@@ -10,8 +10,8 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "293cf6838afda605a4bbed2d9e99a66652d74eb799f7b29379dd9671bec68bdc",
-    "src": "b76998f8bfaad4147c9384a149fe4102f5e9700a6e57d7bd866f23188745be39",
+    "tests": "ac75c066685d097ef545540d5744298ee3ea7514913819bfd02a632aa0cc905d",
+    "src": "c6630a2ca7912809c23db1b8efed76bbb8f314f8d5c6fcb574b682c666daf006",
     "ee": "cef3fec43b63cdaf1fe4207e32f99e1e68bc2f82b4550b173a9f5f66bf3da93f",
     "migration": "6112d307cc249c14e8dbdf0caa18d21e6edf4a237cce7416778db2e0f4902ed2",
     "Cargo.toml": "a06ffb45220e1bc32677ee0b07e58bd817ad9b147f01e8d1ff8a1255e8f49cd0",
@@ -20,7 +20,7 @@
     ".cargo/config.toml": "0e69d92faa2874685d4439f53254384399e451afa5b406c41e4747ff66d0ae38",
     "patches/loco-rs/fixes.patch": "f37454e70ae3f0e6701f064f1c98ad94e92e531f9a80bf48c035231924880d3b",
     "patches/loco-rs/verify.py": "2c4eedfdbcf7f85e577b96f02f5e27afd8cf8727589eb6d3ef7de65bbb936faf",
-    "config": "423bdf243b058c43022ff92b09be8ab5e7a311f145cd19b08992dd77fa50799f",
+    "config": "084d6b993a04a1cea4f929fdfb059d35f2e9cd746d0aacdc00b1309c860887c3",
     "tests/fixtures": "37f8ca65b7b01b684a290a688ec76a09da74da7619c40c74236c1cff5f03294c"
   },
   "targets": [
@@ -164,6 +164,7 @@
     {"module":"tasks::inspect_tenant_retirement","source":"tests/tasks/inspect_tenant_retirement.rs"},
     {"module":"tasks::queue_tasks","source":"tests/tasks/queue_tasks.rs"},
     {"module":"tasks::reindex_embeddings","source":"tests/tasks/reindex_embeddings.rs"},
+    {"module":"tasks::scheduler_config","source":"tests/tasks/scheduler_config.rs"},
     {"module":"tasks::tenant_reindex_scheduler","source":"tests/tasks/tenant_reindex_scheduler.rs"},
     {"module":"tasks::users","source":"tests/tasks/users.rs"},
     {"module":"time","source":"tests/time.rs"},
