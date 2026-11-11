@@ -91,11 +91,11 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
 }
 
 #[tokio::test]
-async fn postgres_qwen06_materialized_recall() {
+async fn postgres_materialized_recall_1024() {
     postgres_genuine_recall(
         1024,
-        include_str!("../fixtures/search/qwen06.json"),
-        include_bytes!("../fixtures/search/qwen06.f32"),
+        include_str!("../fixtures/search/recall_1024.json"),
+        include_bytes!("../fixtures/search/recall_1024.f32"),
     )
     .await;
 }

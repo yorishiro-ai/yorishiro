@@ -1,5 +1,5 @@
 {
-  "model": "qwen-embedding-3-0.6b",
+  "model": "recall-fixture",
   "dimensions": 1024,
   "documents": [
     "PostgreSQL database backup and point-in-time recovery. Case 0: investigation notes and maintenance procedure.",
