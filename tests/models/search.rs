@@ -552,6 +552,12 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
             .exec(&ctx.db).await.unwrap();
         workspace_workspaces::Entity::update_many().col_expr(workspace_workspaces::Column::EmbeddingDimensions,
             sea_orm::sea_query::Expr::value(13)).filter(workspace_workspaces::Column::Id.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
+        // Restore the vector deleted during shrinkage so the workspace is back at the promotion threshold:
+        // the rebuild checks below start from an unindexed workspace.
+        vectors::ActiveModel {
+            workspace_id: Set(fixture.workspace_id), entity_id: Set(ids[0]), tenant_id: Set(fixture.tenant_id),
+            embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0_f32;13]))),
+        }.insert(&ctx.db).await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         assert!(exists(index.clone()).await.unwrap().is_none());
         // Failed concurrent builds leave invalid indexes; recreate that catalog state using a failed unique build.
