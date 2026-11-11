@@ -43,8 +43,7 @@ impl Task for CreateUser {
                 display_name,
                 role,
             )
-            .await
-            .internal()?;
+            .await?;
             txn.commit().await.internal()?;
             println!("user id:   {}", user.id);
             println!("tenant id: {tenant_id}");
