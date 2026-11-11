@@ -115,7 +115,10 @@ async fn perform_infer_fill(
     .internal()?;
     schema_txn.commit().await.internal()?;
 
-    let client = InferenceClient::new(config);
+    let timeouts = crate::data::settings::configured(ctx)
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .http_timeouts;
+    let client = InferenceClient::with_timeouts(config, timeouts);
 
     let mut proposed = 0i64;
     let mut skipped = 0i64;

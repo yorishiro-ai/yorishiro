@@ -75,6 +75,10 @@ scheduler:
       run: "recover_worker_dispatches"
       schedule: "0 * * * * *"
       run_on_start: true
+    embedding_index_maintenance:
+      run: "embedding_index_maintenance"
+      schedule: "0 */10 * * * *"
+      run_on_start: true
 # SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
 # PostgreSQL scheduler replicas use a detached session advisory lock and may run concurrently.
 
@@ -120,6 +124,12 @@ queue:
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
+  # Loco deletes finished SQL queue rows after these ages; queued and processing jobs are never touched.
+  retention:
+    completed_days: 7
+    cancelled_days: 7
+    failed_days: 30
+    interval_seconds: 3600
 <% else %>
 queue:
   kind: Postgres
@@ -149,6 +159,12 @@ queue:
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
+  # Loco deletes finished SQL queue rows after these ages; queued and processing jobs are never touched.
+  retention:
+    completed_days: 7
+    cancelled_days: 7
+    failed_days: 30
+    interval_seconds: 3600
 <% endif %>
 
 workers:
@@ -167,52 +183,17 @@ settings:
     base_url: <%= get_env(name="YORISHIRO_EMBEDDING_BASE_URL", default="") %>
     api_key: '<%= get_env(name="YORISHIRO_EMBEDDING_API_KEY", default="") %>'
     model: <%= get_env(name="YORISHIRO_EMBEDDING_MODEL", default="") %>
+    query_instruction: '<%= get_env(name="YORISHIRO_EMBEDDING_QUERY_INSTRUCTION", default="") | replace(from="'", to="''") %>'
+    document_prefix: '<%= get_env(name="YORISHIRO_EMBEDDING_DOCUMENT_PREFIX", default="") | replace(from="'", to="''") %>'
     send_dimensions_param: <%= get_env(name="YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM", default="false") %>
-    provider_concurrency: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY", default="1") %>
     local_model: <%= get_env(name="YORISHIRO_LOCAL_MODEL", default="multilingual-e5-base") %>
-    local_max_sequence_length: <%= get_env(name="YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH", default="512") %>
   rate_limit:
     auth_max_requests: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_MAX", default="10") %>
-    auth_window_seconds: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS", default="60") %>
-    search_tokens_per_minute: <%= get_env(name="YORISHIRO_SEARCH_TOKENS_PER_MINUTE", default="100000") %>
-  db_load_guard:
-    threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
-    sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
-    poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
-  dispatch:
-    publish_concurrency: <%= get_env(name="YORISHIRO_DISPATCH_PUBLISH_CONCURRENCY", default="4") %>
-    poll_interval_ms: <%= get_env(name="YORISHIRO_DISPATCH_POLL_INTERVAL_MS", default="500") %>
-    claim_lease_seconds: <%= get_env(name="YORISHIRO_DISPATCH_CLAIM_LEASE_SECS", default="30") %>
-    enqueue_timeout_ms: <%= get_env(name="YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS", default="5000") %>
   query_embedding:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
     retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
 
-
-# Mailer Configuration.
-#
-# Opt-in: the whole block renders only when MAILER_HOST is set to something non-empty.
-# Nothing in this application sends mail today, and `Config.mailer` is an `Option`, so an absent block is a supported state rather than a missing one.
-# It has to be a template conditional rather than variables with defaults: `boot.rs` builds an `EmailSender` from this block whenever `smtp.enable` is true and propagates the failure, so a rendered block pointing at a placeholder host would fail the boot immediately.
-<% if get_env(name="MAILER_HOST", default="") != "" %>
-mailer:
-  # SMTP mailer configuration.
-  smtp:
-    # Enable/Disable smtp mailer.
-    enable: true
-    # SMTP server host. e.x localhost, smtp.gmail.com
-    host: <%= get_env(name="MAILER_HOST") %>
-    # SMTP server port
-    port: <%= get_env(name="MAILER_PORT", default="587") %>
-    # Use secure connection (SSL/TLS).
-    secure: true
-    auth:
-      user: <%= get_env(name="MAILER_USER") %>
-      password: <%= get_env(name="MAILER_PASSWORD") %>
-    # Override the SMTP hello name (default is the machine's hostname)
-    # hello_name:
-<% endif %>
 
 # Initializers Configuration
 # initializers:

@@ -34,7 +34,7 @@ The EE composition scenario adopts a library template, changes its upstream defi
 It then creates a second-workspace fork, checks scoped visibility and stale-head rejection, updates and deletes the fork without changing source history.
 
 Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
-The CLI suite first verifies that a real work command fails timezone preparation before migration, then proves migration and normal tasks succeed.
+The CLI suite proves migration and normal tasks succeed.
 It starts one server and reuses it for the whole suite.
 Loco 1.2.0 defaults `start --no-banner` to server-only mode.
 REST and MCP additionally start a separate `--environment test_sqlite start --worker=job-target:shared --no-banner` process only after import submission and queued/empty-destination assertions.

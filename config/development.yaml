@@ -62,6 +62,10 @@ scheduler:
       run: "recover_worker_dispatches"
       schedule: "0 * * * * *"
       run_on_start: true
+    embedding_index_maintenance:
+      run: "embedding_index_maintenance"
+      schedule: "0 */10 * * * *"
+      run_on_start: true
 
 # Run HTTP and worker processes separately. Start a worker with an explicit target, such as
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.
@@ -142,51 +146,17 @@ settings:
     base_url: <%= get_env(name="YORISHIRO_EMBEDDING_BASE_URL", default="") %>
     api_key: '<%= get_env(name="YORISHIRO_EMBEDDING_API_KEY", default="") %>'
     model: <%= get_env(name="YORISHIRO_EMBEDDING_MODEL", default="") %>
+    query_instruction: '<%= get_env(name="YORISHIRO_EMBEDDING_QUERY_INSTRUCTION", default="") | replace(from="'", to="''") %>'
+    document_prefix: '<%= get_env(name="YORISHIRO_EMBEDDING_DOCUMENT_PREFIX", default="") | replace(from="'", to="''") %>'
     send_dimensions_param: <%= get_env(name="YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM", default="false") %>
-    provider_concurrency: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER_CONCURRENCY", default="1") %>
     local_model: <%= get_env(name="YORISHIRO_LOCAL_MODEL", default="multilingual-e5-base") %>
-    local_max_sequence_length: <%= get_env(name="YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH", default="512") %>
   rate_limit:
     auth_max_requests: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_MAX", default="10") %>
-    auth_window_seconds: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS", default="60") %>
-    search_tokens_per_minute: <%= get_env(name="YORISHIRO_SEARCH_TOKENS_PER_MINUTE", default="100000") %>
-  db_load_guard:
-    threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
-    sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
-    poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
-  dispatch:
-    publish_concurrency: <%= get_env(name="YORISHIRO_DISPATCH_PUBLISH_CONCURRENCY", default="4") %>
-    poll_interval_ms: <%= get_env(name="YORISHIRO_DISPATCH_POLL_INTERVAL_MS", default="500") %>
-    claim_lease_seconds: <%= get_env(name="YORISHIRO_DISPATCH_CLAIM_LEASE_SECS", default="30") %>
-    enqueue_timeout_ms: <%= get_env(name="YORISHIRO_DISPATCH_ENQUEUE_TIMEOUT_MS", default="5000") %>
   query_embedding:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
     retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
 
-
-# Mailer Configuration.
-mailer:
-  # Sending mail in development needs something listening on the port below.
-  # Run a local catcher — mailpit, MailHog or maildev all default to SMTP on
-  # 1025 with a web inbox on 8025 — e.g. `docker run -p 1025:1025 -p 8025:8025
-  # axllent/mailpit`, then read the mail at http://localhost:8025.
-  # Test environments omit this provider block rather than sending mail.
-  # SMTP mailer configuration.
-  smtp:
-    # Enable/Disable smtp mailer.
-    enable: true
-    # SMTP server host. e.x localhost, smtp.gmail.com
-    host: <%= get_env(name="MAILER_HOST", default="localhost") %>
-    # SMTP server port
-    port: 1025
-    # Use secure connection (SSL/TLS).
-    secure: false
-    # auth:
-    #   user:
-    #   password:
-    # Override the SMTP hello name (default is the machine's hostname)
-    # hello_name:
 
 # Initializers Configuration
 # initializers:

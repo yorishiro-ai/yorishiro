@@ -88,7 +88,9 @@ async fn detect_startup_reindex(ctx: &AppContext) {
             continue;
         }
         let provider_model = provider.model_name();
-        if !workspace.is_stamped_with_other_embedding(&provider_model, provider.dimensions()) {
+        if !workspace.is_stamped_with_other_embedding(&provider_model, provider.dimensions())
+            && !workspace.has_other_document_prefix(provider.document_prefix())
+        {
             continue;
         }
         tracing::info!(
@@ -106,10 +108,7 @@ async fn detect_startup_reindex(ctx: &AppContext) {
 /// # Errors
 /// Returns an error if workspace enumeration or metadata resolution fails.
 pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
-    let settings = ctx
-        .config
-        .settings::<crate::data::settings::Settings>()
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let settings = crate::data::settings::configured(ctx)?;
     let workspaces = crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db)
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
@@ -123,7 +122,8 @@ pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
             }
         };
         let Some(metadata) = metadata else { continue };
-        if workspace.is_stamped_with_other_embedding(&metadata.model, metadata.dimensions)
+        if (workspace.is_stamped_with_other_embedding(&metadata.model, metadata.dimensions)
+            || workspace.has_other_document_prefix(&metadata.document_prefix))
             && let Err(error) = enqueue_metadata_reindex(ctx, workspace.id).await
         {
             failures.push(format!("workspace {}: {error}", workspace.id));

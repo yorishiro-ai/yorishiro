@@ -4,10 +4,9 @@ use loco_rs::prelude::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use super::EmbeddingProvider;
+use super::{EmbedKind, EmbeddingProvider};
 use crate::error::{ResultExt, YorishiroError};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
 const MAX_RETRY_AFTER_SECONDS: u64 = 60;
 
@@ -19,6 +18,8 @@ pub struct OpenAiCompatibleConfig {
     pub dimensions: usize,
     /// Some OpenAI-compatible implementations (vLLM, Ollama, LM Studio) don't recognize the `dimensions` parameter, so callers can explicitly choose whether to include it.
     pub send_dimensions_param: bool,
+    pub query_instruction: String,
+    pub document_prefix: String,
 }
 
 pub struct OpenAiCompatibleProvider {
@@ -28,22 +29,36 @@ pub struct OpenAiCompatibleProvider {
     model: String,
     dimensions: usize,
     send_dimensions_param: bool,
+    query_instruction: String,
+    document_prefix: String,
 }
 
 impl OpenAiCompatibleProvider {
     ///
+    /// Builds the provider around its own HTTP client with the documented default deadlines,
+    /// for callers without deployment settings (tests, tools).
+    ///
     /// # Panics
-    /// Panics if an internal invariant required by this operation is violated.
+    /// Panics if the reqwest client cannot be built from the static configuration.
     pub fn new(config: OpenAiCompatibleConfig) -> Self {
-        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-        let client = CLIENT
-            .get_or_init(|| {
-                reqwest::Client::builder()
-                    .timeout(REQUEST_TIMEOUT)
-                    .build()
-                    .expect("reqwest client configuration is static and always valid")
-            })
-            .clone();
+        Self::with_timeouts(config, crate::data::settings::HttpTimeouts::default())
+    }
+
+    /// Builds the provider with the deployment's outbound deadlines.
+    ///
+    /// # Panics
+    /// Panics if the reqwest client cannot be built from the static configuration.
+    pub(crate) fn with_timeouts(
+        config: OpenAiCompatibleConfig,
+        timeouts: crate::data::settings::HttpTimeouts,
+    ) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(crate::data::http_timeouts::deadline_for(
+                crate::data::http_timeouts::HttpTimeout::EmbeddingRequest,
+                timeouts,
+            ))
+            .build()
+            .expect("reqwest client configuration is static and always valid");
 
         Self::with_client(config, client)
     }
@@ -56,6 +71,8 @@ impl OpenAiCompatibleProvider {
             model: config.model,
             dimensions: config.dimensions,
             send_dimensions_param: config.send_dimensions_param,
+            query_instruction: config.query_instruction,
+            document_prefix: config.document_prefix,
         }
     }
 }
@@ -81,6 +98,18 @@ struct EmbeddingDatum {
 
 #[async_trait]
 impl EmbeddingProvider for OpenAiCompatibleProvider {
+    fn document_prefix(&self) -> &str {
+        &self.document_prefix
+    }
+
+    async fn embed_as(&self, kind: EmbedKind, text: &str) -> Result<Vec<f32>, YorishiroError> {
+        let prefix = match kind {
+            EmbedKind::Query => &self.query_instruction,
+            EmbedKind::Document => &self.document_prefix,
+        };
+        self.embed(&format!("{prefix}{text}")).await
+    }
+
     fn dimensions(&self) -> usize {
         self.dimensions
     }

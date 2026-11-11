@@ -21,7 +21,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub error: Option<String>,
     pub expires_at: DateTimeWithTimeZone,
-    pub deadline_at: Option<DateTimeWithTimeZone>,
+    pub deadline_at: DateTimeWithTimeZone,
     pub completed_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

@@ -2,16 +2,12 @@
 //!
 //! URL policy, timeout, response parsing, and error redaction stay in the production client.
 
-use std::time::Duration;
-
 use jsonwebtoken::jwk::JwkSet;
 use reqwest::Client;
 use serde::Deserialize;
 
 use crate::YorishiroError;
 use crate::error::ResultExt;
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// `true` for a host that only ever means "this machine": the one case an `http://` OIDC endpoint is legitimate.
 /// Every other host must be reached over `https://`, see `redirect_policy`.
@@ -38,9 +34,13 @@ pub fn redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
+// The OAuth flow has no application context at this layer, so it uses the documented default deadline.
 fn http_client() -> Client {
     Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(crate::data::http_timeouts::deadline_for(
+            crate::data::http_timeouts::HttpTimeout::OidcDiscovery,
+            crate::data::settings::HttpTimeouts::default(),
+        ))
         .redirect(redirect_policy())
         .build()
         .expect("reqwest client configuration is static and always valid")

@@ -7,16 +7,11 @@
 //! The credentials belong to a workspace, not to the deployment: this product does not pay for inference, so a workspace that wants inferred values brings its own key.
 //! A workspace with no key configured gets a `ValidationFailed` rather than a silent fall back to `default` values: a caller who asked for inference and received defaults would have no way to tell that nothing was inferred.
 
-use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::YorishiroError;
 use crate::services::embedding::openai::{redact, retry_after};
-
-/// Longer than the embedding provider's 30s: a chat completion over several fields is a slower call than embedding one string, and the work is already asynchronous behind a job id, so a caller is not sitting on this.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// An OpenAI-compatible chat-completions endpoint, configured per workspace.
 ///
@@ -37,22 +32,32 @@ pub struct InferenceClient {
 }
 
 impl InferenceClient {
+    /// Builds the client with the documented default deadlines, for callers without deployment settings (tests, tools).
     ///
     /// # Panics
-    /// Panics if an internal invariant required by this operation is violated.
+    /// Panics if the reqwest client cannot be built from the static configuration.
     pub fn new(config: InferenceConfig) -> Self {
-        static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-        let client = CLIENT
-            .get_or_init(|| {
-                reqwest::Client::builder()
-                    .timeout(REQUEST_TIMEOUT)
-                    // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
-                    // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at.
-                    .redirect(reqwest::redirect::Policy::none())
-                    .build()
-                    .expect("reqwest client configuration is static and always valid")
-            })
-            .clone();
+        Self::with_timeouts(config, crate::data::settings::HttpTimeouts::default())
+    }
+
+    /// Builds the client with the deployment's outbound deadline.
+    ///
+    /// # Panics
+    /// Panics if the reqwest client cannot be built from the static configuration.
+    pub(crate) fn with_timeouts(
+        config: InferenceConfig,
+        timeouts: crate::data::settings::HttpTimeouts,
+    ) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(crate::data::http_timeouts::deadline_for(
+                crate::data::http_timeouts::HttpTimeout::InferenceRequest,
+                timeouts,
+            ))
+            // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
+            // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("reqwest client configuration is static and always valid");
 
         Self::with_client(config, client)
     }

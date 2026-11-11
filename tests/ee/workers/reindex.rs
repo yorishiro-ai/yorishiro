@@ -36,6 +36,8 @@ async fn provider(
         model: model.into(),
         dimensions: width,
         send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
     });
     (Arc::new(provider), server)
 }
@@ -124,7 +126,7 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     } else {
         "vector_dims"
     })).arg(Expr::col(entity_embeddings::Column::Embedding));
-    let stored_length = entity_embeddings::Entity::find_by_id(entity.id)
+    let stored_length = entity_embeddings::Entity::find().filter(entity_embeddings::Column::EntityId.eq(entity.id))
         .select_only()
         .expr(length)
         .into_tuple::<i32>()

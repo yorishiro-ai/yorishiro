@@ -16,7 +16,7 @@ pub(crate) fn start_relay(ctx: &AppContext) -> loco_rs::Result<()> {
     if ctx.shared_store.get_ref::<Relay>().is_some() {
         return Ok(());
     }
-    let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
+    let settings = crate::data::settings::configured(ctx)?;
     let poll_interval = std::time::Duration::from_millis(settings.dispatch.poll_interval_ms);
     let ctx_for_task = ctx.clone();
     let (stop, mut stopped) = tokio::sync::watch::channel(false);

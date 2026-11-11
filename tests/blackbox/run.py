@@ -214,9 +214,6 @@ class App:
         return output_field(out, "api key id", True), key
 
     def boot(self):
-        if self.args.suite == "cli":
-            out, err = self.cli("task", "create_tenant", "name:before-migrate", ok=False)
-            require("timezone_state" in (out + err), "unmigrated task must fail timezone preparation")
         self.cli("db", "migrate")
         tenant = output_field(self.task("create_tenant", name="blackbox"), "tenant id", True)
         self.tenant = tenant

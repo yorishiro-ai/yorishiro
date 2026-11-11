@@ -5,6 +5,8 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
+const DISABLED_REASON: &str = "tenant disabled";
+
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
     api_keys, entity_entities, entity_relations, queue_job_dispatch_outbox, queue_job_lifecycles,
@@ -304,7 +306,9 @@ pub async fn cancel_work(
     queue_job_lifecycles::Entity::update_many()
         .col_expr(
             queue_job_lifecycles::Column::Status,
-            Expr::value("cancelled"),
+            Expr::value(
+                crate::models::queue_job_lifecycles::LifecycleStatus::Cancelled.as_db_str(),
+            ),
         )
         .col_expr(queue_job_lifecycles::Column::CancelledAt, Expr::value(now))
         .col_expr(queue_job_lifecycles::Column::UpdatedAt, Expr::value(now))
@@ -314,10 +318,13 @@ pub async fn cancel_work(
         )
         .col_expr(
             queue_job_lifecycles::Column::Error,
-            Expr::value("tenant disabled"),
+            Expr::value(DISABLED_REASON),
         )
         .filter(queue_job_lifecycles::Column::WorkspaceId.is_in(workspaces.clone()))
-        .filter(queue_job_lifecycles::Column::Status.is_not_in(["completed", "cancelled"]))
+        .filter(queue_job_lifecycles::Column::Status.is_not_in([
+            crate::models::queue_job_lifecycles::LifecycleStatus::Completed.as_db_str(),
+            crate::models::queue_job_lifecycles::LifecycleStatus::Cancelled.as_db_str(),
+        ]))
         .exec(txn)
         .await
         .internal()?;
@@ -329,11 +336,13 @@ pub async fn cancel_work(
     query_embedding_requests::Entity::update_many()
         .col_expr(
             query_embedding_requests::Column::Status,
-            Expr::value("failed"),
+            Expr::value(
+                crate::models::query_embedding_requests::QueryEmbeddingStatus::Failed.as_db_str(),
+            ),
         )
         .col_expr(
             query_embedding_requests::Column::Error,
-            Expr::value("tenant disabled"),
+            Expr::value(DISABLED_REASON),
         )
         .col_expr(
             query_embedding_requests::Column::CompletedAt,
@@ -344,7 +353,11 @@ pub async fn cancel_work(
             Expr::value(now),
         )
         .filter(query_embedding_requests::Column::WorkspaceId.is_in(workspaces))
-        .filter(query_embedding_requests::Column::Status.eq("pending"))
+        .filter(
+            query_embedding_requests::Column::Status.eq(
+                crate::models::query_embedding_requests::QueryEmbeddingStatus::Pending.as_db_str(),
+            ),
+        )
         .exec(txn)
         .await
         .internal()?;
@@ -422,7 +435,11 @@ pub async fn inventory(
         .filter(queue_job_lifecycles::Column::WorkspaceId.is_in(workspace_ids.clone()));
     let jobs = jobs_query.clone().count(conn).await.internal()?;
     let active_jobs = jobs_query
-        .filter(queue_job_lifecycles::Column::Status.is_in(["queued", "running", "retrying"]))
+        .filter(queue_job_lifecycles::Column::Status.is_in([
+            crate::models::queue_job_lifecycles::LifecycleStatus::Queued.as_db_str(),
+            crate::models::queue_job_lifecycles::LifecycleStatus::Running.as_db_str(),
+            crate::models::queue_job_lifecycles::LifecycleStatus::Retrying.as_db_str(),
+        ]))
         .count(conn)
         .await
         .internal()?;

@@ -393,6 +393,8 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
             model: "priority-test".into(),
             dimensions: 768,
             send_dimensions_param: false,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
         })) as Arc<dyn EmbeddingProvider>;
         ctx.shared_store.insert(provider);
         let mut worker_ctx = ctx.clone();

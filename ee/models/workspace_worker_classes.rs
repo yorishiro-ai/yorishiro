@@ -32,10 +32,7 @@ pub async fn set(
     worker_class: WorkerClass,
 ) -> Result<(), YorishiroError> {
     let target = WorkerTarget::for_job(&ctx.db, worker_class, workspace_id).await?;
-    let settings = ctx
-        .config
-        .settings::<crate::data::settings::Settings>()
-        .internal()?;
+    let settings = crate::data::settings::configured(ctx).internal()?;
     if !settings.worker_targets.contains(&target.tag()) {
         return Err(YorishiroError::ValidationFailed {
             message: format!(

@@ -172,11 +172,8 @@ impl YorishiroMcpServer {
                 records
                     .into_iter()
                     .map(|record| workspace_workspaces::WorkspaceRecord {
-                        created_at: crate::time::in_timezone(
-                            record.created_at,
-                            crate::time::configured(self.app_context()),
-                        )
-                        .fixed_offset(),
+                        created_at: crate::time::render(self.app_context(), record.created_at)
+                            .fixed_offset(),
                         ..record
                     })
                     .collect::<Vec<_>>(),

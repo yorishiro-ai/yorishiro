@@ -13,8 +13,8 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-VERSION = "1.2.0"
-SHA256 = "5386baf405736a2620001f4561b00fa4874dae99eac3ccf01713fabc9ef13af4"
+VERSION = "1.3.1"
+SHA256 = "8aa30671d3a487b08a61cec5e9d9b9764cdf73e7df074fd1618811935214e076"
 
 
 def files(root):

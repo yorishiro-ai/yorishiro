@@ -64,12 +64,17 @@ pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco
     let zone = crate::time::configured(ctx);
     if ctx.is_sqlite() {
         require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
+        // Keep Loco's per-connection PRAGMAs and its busy_timeout-aware acquire budget.
+        let loco_pool = ctx.db.get_sqlite_connection_pool();
+        let loco_options = (*loco_pool.connect_options()).clone();
+        options.acquire_timeout(loco_pool.options().get_acquire_timeout());
         // Close before reopening SQLite so connection-local functions own the configured zone.
         ctx.db.close_by_ref().await.map_err(|error| {
             loco_rs::Error::Message(format!(
                 "failed to close Loco's default SQLite app pool: {error}"
             ))
         })?;
+        options.map_sqlx_sqlite_opts(move |_| loco_options.clone());
         options.map_sqlx_sqlite_pool_opts(move |pool| {
             pool.after_connect(move |conn, _meta| {
                 Box::pin(async move {

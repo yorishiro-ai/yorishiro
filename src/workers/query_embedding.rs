@@ -95,12 +95,8 @@ async fn embed(
     ctx: &AppContext,
     workspace_id: Uuid,
     query_text: &str,
-    deadline_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    deadline_at: chrono::DateTime<chrono::FixedOffset>,
 ) -> Result<(Vec<f32>, String), YorishiroError> {
-    let deadline_at = deadline_at.ok_or_else(|| YorishiroError::ProviderBusy {
-        message: "legacy query request has no durable caller deadline".into(),
-        retry_after: RETRY_AFTER,
-    })?;
     let provider = crate::models::workspace_workspaces::embedding_provider(ctx, workspace_id)
         .await?
         .ok_or_else(|| YorishiroError::BackendUnavailable {

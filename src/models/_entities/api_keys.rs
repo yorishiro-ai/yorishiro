@@ -20,10 +20,10 @@ pub struct Model {
     pub scope: String,
     pub created_at: DateTimeWithTimeZone,
     pub last_used_at: Option<DateTimeWithTimeZone>,
-    pub audit: bool,
     pub expires_at: Option<DateTimeWithTimeZone>,
     pub revoked_at: Option<DateTimeWithTimeZone>,
     pub replaced_by_id: Option<Uuid>,
+    pub audit: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

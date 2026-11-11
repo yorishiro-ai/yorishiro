@@ -124,47 +124,30 @@ fn first_sample_does_not_count_as_poll_time() {
     );
 }
 
-#[test]
-fn measurement_error_resets_the_sustain_window_through_run_step() {
+/// A failed reading (of the load, or of the maintenance state) forgets the time already spent over the threshold.
+fn failed_reading_resets_the_sustain_window(load_fails: bool) {
     let sustain = Duration::from_secs(30);
     let start = Instant::now();
     let mut history = LoadHistory::default();
     let current = state(MaintenanceMode::Off, None);
+    let over = |history: &mut LoadHistory, at| {
+        run_step(history, Ok(10), Ok(current.clone()), 10, sustain, at)
+    };
+    assert!(matches!(over(&mut history, start), StepOutcome::Continue));
+    let load = if load_fails { Err(()) } else { Ok(10) };
     assert!(matches!(
-        run_step(
-            &mut history,
-            Ok(10),
-            Ok(current.clone()),
-            10,
-            sustain,
-            start
-        ),
+        run_step(&mut history, load, Err(()), 10, sustain, start + sustain),
         StepOutcome::Continue
     ));
     assert!(matches!(
-        run_step(&mut history, Err(()), Err(()), 10, sustain, start + sustain),
-        StepOutcome::Continue
-    ));
-    assert!(matches!(
-        run_step(
+        over(
             &mut history,
-            Ok(10),
-            Ok(current.clone()),
-            10,
-            sustain,
             start + sustain + sustain - Duration::from_secs(1)
         ),
         StepOutcome::Continue
     ));
     assert!(matches!(
-        run_step(
-            &mut history,
-            Ok(10),
-            Ok(current),
-            10,
-            sustain,
-            start + sustain + sustain + sustain
-        ),
+        over(&mut history, start + sustain + sustain + sustain),
         StepOutcome::Transition {
             mode: MaintenanceMode::ReadOnly,
             ..
@@ -173,49 +156,11 @@ fn measurement_error_resets_the_sustain_window_through_run_step() {
 }
 
 #[test]
+fn measurement_error_resets_the_sustain_window_through_run_step() {
+    failed_reading_resets_the_sustain_window(true);
+}
+
+#[test]
 fn maintenance_state_error_resets_the_sustain_window_through_run_step() {
-    let sustain = Duration::from_secs(30);
-    let start = Instant::now();
-    let mut history = LoadHistory::default();
-    let current = state(MaintenanceMode::Off, None);
-    assert!(matches!(
-        run_step(
-            &mut history,
-            Ok(10),
-            Ok(current.clone()),
-            10,
-            sustain,
-            start
-        ),
-        StepOutcome::Continue
-    ));
-    assert!(matches!(
-        run_step(&mut history, Ok(10), Err(()), 10, sustain, start + sustain),
-        StepOutcome::Continue
-    ));
-    assert!(matches!(
-        run_step(
-            &mut history,
-            Ok(10),
-            Ok(current.clone()),
-            10,
-            sustain,
-            start + sustain + sustain - Duration::from_secs(1)
-        ),
-        StepOutcome::Continue
-    ));
-    assert!(matches!(
-        run_step(
-            &mut history,
-            Ok(10),
-            Ok(current),
-            10,
-            sustain,
-            start + sustain + sustain + sustain
-        ),
-        StepOutcome::Transition {
-            mode: MaintenanceMode::ReadOnly,
-            ..
-        }
-    ));
+    failed_reading_resets_the_sustain_window(false);
 }

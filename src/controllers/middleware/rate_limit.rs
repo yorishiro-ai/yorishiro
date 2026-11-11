@@ -41,8 +41,7 @@ impl RateLimiter {
         self
     }
 
-    /// `YORISHIRO_AUTH_RATE_LIMIT_MAX` (default 10) requests per
-    /// `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` (default 60) seconds, per client IP.
+    /// `settings.rate_limit.auth_max_requests` requests per `auth_window_seconds`, per client IP.
     pub(crate) fn auth(config: &crate::data::settings::Settings) -> Self {
         Self::new(
             config.rate_limit.auth_max_requests,
@@ -50,7 +49,7 @@ impl RateLimiter {
         )
     }
 
-    /// `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` (default 100000) tokens per minute, per workspace.
+    /// `settings.rate_limit.search_tokens_per_minute` tokens per minute, per workspace.
     ///
     /// Keyed by workspace rather than by IP: a search is authenticated, so the workspace is known and is the thing whose consumption matters.
     /// The default is high enough that ordinary use never reaches it: it is there to bound a runaway agent, not to ration.
@@ -113,7 +112,7 @@ pub fn charge_search_tokens(
     Err(crate::error::YorishiroError::ValidationFailed {
         message: "this workspace has spent its search token budget for the minute".to_string(),
         details: vec![],
-        hint: "retry shortly, or raise YORISHIRO_SEARCH_TOKENS_PER_MINUTE".to_string(),
+        hint: "retry shortly, or raise settings.rate_limit.search_tokens_per_minute".to_string(),
     })
 }
 

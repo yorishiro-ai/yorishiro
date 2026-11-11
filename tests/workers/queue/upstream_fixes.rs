@@ -113,6 +113,8 @@ async fn redis_claim_refreshes_age_and_fences_reaped_completion_and_failure() {
                         model: "claim-fencing".into(),
                         dimensions: 768,
                         send_dimensions_param: false,
+                        query_instruction: String::new(),
+                        document_prefix: String::new(),
                     })) as Arc<dyn EmbeddingProvider>,
                 );
             let mut worker_ctx = ctx.clone();

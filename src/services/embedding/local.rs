@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Activation, VarBuilder};
@@ -17,10 +16,6 @@ use crate::error::YorishiroError;
 /// There's no practical use for an extremely short sequence length either, so we reject with a comfortable margin.
 /// Model-independent (a tokenizer property), unlike the upper bound, which comes from the selected [`LocalModelDef::max_sequence_length`].
 const MIN_SEQUENCE_LENGTH: usize = 16;
-
-/// Upper bound on wait time for a single embed call.
-/// Inference is serialized within the process, so this guards against unbounded waits when prior requests pile up (the local equivalent of the OpenAI-compatible provider's HTTP timeout).
-const EMBED_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct LocalEmbeddingConfig {
     pub model_path: PathBuf,
@@ -61,6 +56,8 @@ pub struct LocalEmbeddingProvider {
     inner: Arc<Inner>,
     // Bound activation memory before allocating tensors or occupying a blocking thread.
     inference: Arc<tokio::sync::Semaphore>,
+    // The deployment's outbound deadlines; production builds set them after the model loads.
+    timeouts: crate::data::settings::HttpTimeouts,
 }
 
 struct Inner {
@@ -151,7 +148,14 @@ impl LocalEmbeddingProvider {
         Ok(Self {
             inner: Arc::new(inner),
             inference: Arc::new(tokio::sync::Semaphore::new(1)),
+            timeouts: crate::data::settings::HttpTimeouts::default(),
         })
+    }
+
+    /// Sets the deployment's outbound deadlines on a loaded provider.
+    pub(crate) fn with_timeouts(mut self, timeouts: crate::data::settings::HttpTimeouts) -> Self {
+        self.timeouts = timeouts;
+        self
     }
 }
 
@@ -340,11 +344,15 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
             .await
             .map_err(|err| internal(format!("embedding task panicked: {err}")))?
         };
-        match tokio::time::timeout(EMBED_TIMEOUT, task).await {
+        let timeout = crate::data::http_timeouts::deadline_for(
+            crate::data::http_timeouts::HttpTimeout::LocalEmbedding,
+            self.timeouts,
+        );
+        match tokio::time::timeout(timeout, task).await {
             Ok(result) => result,
             Err(_) => Err(internal(format!(
                 "embedding timed out after {}s (inference queue congested?)",
-                EMBED_TIMEOUT.as_secs()
+                timeout.as_secs()
             ))),
         }
     }

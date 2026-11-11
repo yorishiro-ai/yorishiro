@@ -59,7 +59,7 @@ async fn recover_pending_on_while(
     db: &sea_orm::DatabaseConnection,
     keep_running: impl Fn() -> bool,
 ) {
-    let timing = match ctx.config.settings::<crate::data::settings::Settings>() {
+    let timing = match crate::data::settings::configured(ctx) {
         Ok(settings) => settings.dispatch,
         Err(error) => {
             tracing::error!(error = %error, "dispatch outbox: invalid application settings");

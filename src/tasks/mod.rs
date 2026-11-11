@@ -6,6 +6,7 @@ pub mod create_user;
 pub mod create_workspace;
 pub(crate) mod db_load_guard;
 pub(crate) mod delete_user;
+pub(crate) mod embedding_index_maintenance;
 pub(crate) mod list_api_keys;
 pub mod list_members;
 pub(crate) mod list_tenants;

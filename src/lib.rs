@@ -127,9 +127,8 @@ pub mod edition {
 
         async fn after_context(ctx: AppContext) -> Result<AppContext> {
             let ctx = base::after_context(ctx).await?;
-            crate::initializers::timezone::prepare_cli(&ctx).await?;
             active::compose_context(&ctx)?;
-            let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
+            let settings = crate::data::settings::configured(&ctx)?;
             let cap = active::tenant_creation_cap(settings.max_tenants, &ctx);
             ctx.shared_store
                 .insert(crate::data::tenant_policy::TenantCap::new(cap));

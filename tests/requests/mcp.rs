@@ -190,78 +190,139 @@ async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
     }).await;
 }
 
-#[tokio::test]
-async fn llm_provider_tools_keep_secrets_private_and_match_rest() {
+/// One provider kind's MCP tools: the secret never comes back, REST agrees with MCP, a read key cannot write, and an invalid input leaves the saved value untouched.
+async fn provider_tools_keep_secrets_private_and_match_rest(
+    kind: &str,
+    rest_path: &str,
+    input: Value,
+    secret: &str,
+    shown: (&str, Value),
+    invalid: (&str, Value),
+) {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
-        let input = json!({"base_url":"https://llm.example.invalid/v1","model":"test-llm","api_key":"test-only-llm-secret"});
-        let saved = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"set_llm_provider","arguments":input})).await;
+        let tool = |action: &str| format!("{action}_{kind}_provider");
+        let saved = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            2,
+            "tools/call",
+            json!({"name":tool("set"),"arguments":input}),
+        )
+        .await;
         assert_eq!(tool_result_json(&saved)["saved"], true);
-        assert!(!saved.to_string().contains("test-only-llm-secret"));
-        let read_key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false).await.unwrap().plaintext;
-        let current = mcp_call(&request, &session, &read_key, 3, "tools/call", json!({"name":"get_llm_provider","arguments":{}})).await;
+        assert!(!saved.to_string().contains(secret));
+        let read_key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .plaintext;
+        let current = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({"name":tool("get"),"arguments":{}}),
+        )
+        .await;
         let metadata = tool_result_json(&current);
         assert!(metadata.get("api_key").is_none());
-        assert!(!current.to_string().contains("test-only-llm-secret"));
-        assert_eq!(metadata["model"], "test-llm");
-        let rest = request.get("/api/workspace/llm-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        assert!(!current.to_string().contains(secret));
+        assert_eq!(metadata[shown.0], shown.1);
+        let rest = request
+            .get(rest_path)
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await;
         rest.assert_status_ok();
         assert_eq!(metadata, rest.json::<Value>());
         for (id, name, arguments) in [
-            (4, "set_llm_provider", input.clone()),
-            (5, "reset_llm_provider", json!({})),
+            (4, tool("set"), input.clone()),
+            (5, tool("reset"), json!({})),
         ] {
-            let denied = mcp_call(&request, &session, &read_key, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
+            let denied = mcp_call(
+                &request,
+                &session,
+                &read_key,
+                id,
+                "tools/call",
+                json!({"name":name,"arguments":arguments}),
+            )
+            .await;
             assert_eq!(denied["result"]["isError"], true);
         }
-        let mut invalid = input;
-        invalid["api_key"] = json!("");
-        let rejected = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"set_llm_provider","arguments":invalid})).await;
+        let mut bad = input;
+        bad[invalid.0] = invalid.1;
+        let rejected = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            6,
+            "tools/call",
+            json!({"name":tool("set"),"arguments":bad}),
+        )
+        .await;
         assert_eq!(rejected["result"]["isError"], true);
-        let unchanged = mcp_call(&request, &session, &read_key, 7, "tools/call", json!({"name":"get_llm_provider","arguments":{}})).await;
+        let unchanged = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            7,
+            "tools/call",
+            json!({"name":tool("get"),"arguments":{}}),
+        )
+        .await;
         assert_eq!(tool_result_json(&unchanged), metadata);
-        let reset = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"reset_llm_provider","arguments":{}})).await;
+        let reset = mcp_call(
+            &request,
+            &session,
+            &tenant.api_key,
+            8,
+            "tools/call",
+            json!({"name":tool("reset"),"arguments":{}}),
+        )
+        .await;
         assert_eq!(tool_result_json(&reset)["reset"], true);
-        request.get("/api/workspace/llm-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::NOT_FOUND);
-    }).await;
+        request
+            .get(rest_path)
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn llm_provider_tools_keep_secrets_private_and_match_rest() {
+    provider_tools_keep_secrets_private_and_match_rest(
+        "llm",
+        "/api/workspace/llm-key",
+        json!({"base_url":"https://llm.example.invalid/v1","model":"test-llm","api_key":"test-only-llm-secret"}),
+        "test-only-llm-secret",
+        ("model", json!("test-llm")),
+        ("api_key", json!("")),
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn embedding_provider_tools_keep_secrets_private_and_match_rest() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let session = initialize(&request).await;
-        let input = json!({"base_url":"https://embedding.example.invalid/v1","model":"test-embedding","api_key":"test-only-provider-secret","dimensions":32});
-        let saved = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"set_embedding_provider","arguments":input})).await;
-        assert_eq!(tool_result_json(&saved)["saved"], true);
-        assert!(!saved.to_string().contains("test-only-provider-secret"));
-        let read_key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false).await.unwrap().plaintext;
-        let current = mcp_call(&request, &session, &read_key, 3, "tools/call", json!({"name":"get_embedding_provider","arguments":{}})).await;
-        let metadata = tool_result_json(&current);
-        assert!(metadata.get("api_key").is_none());
-        assert!(!current.to_string().contains("test-only-provider-secret"));
-        assert_eq!(metadata["dimensions"], 32);
-        let rest = request.get("/api/workspace/embedding-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
-        rest.assert_status_ok();
-        assert_eq!(metadata, rest.json::<Value>());
-        for (id, name, arguments) in [
-            (4, "set_embedding_provider", input.clone()),
-            (5, "reset_embedding_provider", json!({})),
-        ] {
-            let denied = mcp_call(&request, &session, &read_key, id, "tools/call", json!({"name":name,"arguments":arguments})).await;
-            assert_eq!(denied["result"]["isError"], true);
-        }
-        let mut invalid = input;
-        invalid["dimensions"] = json!(0);
-        let rejected = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"set_embedding_provider","arguments":invalid})).await;
-        assert_eq!(rejected["result"]["isError"], true);
-        let unchanged = mcp_call(&request, &session, &read_key, 7, "tools/call", json!({"name":"get_embedding_provider","arguments":{}})).await;
-        assert_eq!(tool_result_json(&unchanged), metadata);
-        let reset = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"reset_embedding_provider","arguments":{}})).await;
-        assert_eq!(tool_result_json(&reset)["reset"], true);
-        request.get("/api/workspace/embedding-key").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status(StatusCode::NOT_FOUND);
-    }).await;
+    provider_tools_keep_secrets_private_and_match_rest(
+        "embedding",
+        "/api/workspace/embedding-key",
+        json!({"base_url":"https://embedding.example.invalid/v1","model":"test-embedding","api_key":"test-only-provider-secret","dimensions":32}),
+        "test-only-provider-secret",
+        ("dimensions", json!(32)),
+        ("dimensions", json!(0)),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -765,7 +826,7 @@ pub(super) async fn initialize(request: &TestServer) -> String {
     session
 }
 
-async fn mcp_call(
+pub(super) async fn mcp_call(
     request: &TestServer,
     session: &str,
     api_key: &str,
@@ -797,7 +858,7 @@ fn tool_inventory(response: &Value) -> Vec<Value> {
         .clone()
 }
 
-fn tool_result_json(response: &Value) -> Value {
+pub(super) fn tool_result_json(response: &Value) -> Value {
     serde_json::from_str(
         response["result"]["content"][0]["text"]
             .as_str()
@@ -2596,6 +2657,137 @@ async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
     .await;
 }
 
+/// High-dimensional HNSW retains the nearest original cosine through both transports.
+#[tokio::test]
+async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
+    use super::query_worker::boot_with_query_worker;
+    use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::{_entities::entity_embeddings as vectors, entity_embeddings};
+
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    let (provider, _server, _) = crate::http_stub::keyword_provider(4000).await;
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let definition = serde_json::from_value(json!({
+            "name":"note", "entity_types":{"note":{"fields":{
+                "title":{"type":"string", "required":true, "x-embed":true}
+            }}}
+        }))
+        .unwrap();
+        schema_schemas::create_schema(
+            &ctx.db,
+            setup.tenant_id,
+            setup.workspace_id,
+            definition,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let nearest = entity_entities::create(
+            &ctx.db,
+            setup.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: json!({"title":"nearest document"}),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            setup.workspace_id,
+            &nearest,
+            provider.as_ref(),
+        )
+        .await
+        .unwrap();
+        let mut embeddings = Vec::new();
+        // Exceed the former candidate cap to protect against reintroducing candidate loss.
+        for i in 0..2000 {
+            let document = entity_entities::create(
+                &ctx.db,
+                setup.workspace_id,
+                entity_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: json!({"title":format!("decoy {i}")}),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            embeddings.push(vectors::ActiveModel {
+                workspace_id: Set(setup.workspace_id),
+                entity_id: Set(document.id),
+                tenant_id: Set(setup.tenant_id),
+                // Distinct zero-mean decoys: a corpus of identical vectors saturates every HNSW
+                // neighbour list with zero-distance links, which no approximate index can traverse.
+                embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(
+                    (0..4000_usize)
+                        .map(|axis| {
+                            ((i + 1) * (axis + 11) * 7919 % 104_729) as f32 / 104_729.0 - 0.5
+                        })
+                        .collect::<Vec<_>>(),
+                ))),
+            });
+        }
+        vectors::Entity::insert_many(embeddings)
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        entity_embeddings::maintain_workspace_indexes(&ctx.db)
+            .await
+            .unwrap();
+        let session = initialize(&request).await;
+        for (phase, background) in [(0, 0.001_f32), (1, -0.001_f32)] {
+            let mut vector = vec![background; 4000];
+            vector[1] = 1.0;
+            vectors::Entity::update_many()
+                .col_expr(
+                    vectors::Column::Embedding,
+                    sea_orm::sea_query::Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
+                )
+                .filter(vectors::Column::EntityId.eq(nearest.id))
+                .exec(&ctx.db)
+                .await
+                .unwrap();
+            let rest = request
+                .get("/api/search?query_text=beta&limit=10")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key));
+            let mcp = mcp_call(
+                &request,
+                &session,
+                &setup.api_key,
+                10 + phase,
+                "tools/call",
+                json!({"name":"search_entities","arguments":{"query_text":"beta","limit":10}}),
+            );
+            // Concurrent transports share preparation but retain independent authorization and ranking.
+            let (rest, mcp) = tokio::join!(async { rest.await }, mcp);
+            rest.assert_status(StatusCode::OK);
+            let hits = rest.json::<Value>();
+            assert_eq!(hits.as_array().unwrap().len(), 10);
+            assert_eq!(
+                hits[0]["entity"]["id"],
+                nearest.id.to_string(),
+                "phase {phase}: {hits}"
+            );
+            assert_eq!(mcp["result"]["isError"], false, "{mcp}");
+            assert_eq!(
+                tool_result_json(&mcp),
+                hits,
+                "phase {phase}: transport results agree"
+            );
+        }
+    })
+    .await;
+}
+
 /// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
 #[tokio::test]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {
@@ -2603,7 +2795,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use crate::http_stub::{keyword_provider, unavailable_provider};
     use yorishiro::models::entity_embeddings;
 
-    let (provider, _server, inputs) = keyword_provider(768).await;
+    let (provider, _server, inputs) = keyword_provider(4096).await;
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
         let TestTenant {
             tenant_id,
@@ -2663,6 +2855,58 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             hits[0]["entity"]["data"]["title"], "beta plan",
             "nearest entity first: {hits}"
         );
+        let rest = request
+            .get("/api/search?query_text=beta&limit=2")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(
+            rest.json::<Value>(),
+            hits,
+            "search results agree across transports"
+        );
+        let filtered = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            5,
+            "tools/call",
+            json!({ "name": "search_entities", "arguments": {
+                "query_text": "beta", "entity_type": "note",
+                "filter": { "title": "alpha plan" }, "limit": 1
+            } }),
+        )
+        .await;
+        let rest = request
+            .get("/api/search")
+            .add_query_param("query_text", "beta")
+            .add_query_param("entity_type", "note")
+            .add_query_param("filter", r#"{"title":"alpha plan"}"#)
+            .add_query_param("limit", "1")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            assert_eq!(filtered["result"]["isError"], true, "{filtered}");
+            assert!(
+                filtered["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("content filtering is not supported on SQLite")
+            );
+            rest.assert_status(StatusCode::NOT_IMPLEMENTED);
+            assert_eq!(rest.json::<Value>()["error"]["code"], "backend_unsupported");
+        } else {
+            assert_eq!(filtered["result"]["isError"], false, "{filtered}");
+            let filtered_hits = tool_result_json(&filtered);
+            assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
+            assert_eq!(filtered_hits[0]["entity"]["id"], candidates[0].to_string());
+            rest.assert_status(StatusCode::OK);
+            assert_eq!(
+                rest.json::<Value>(),
+                filtered_hits,
+                "filters agree across transports"
+            );
+        }
         let calls = inputs.lock().unwrap().len();
         let (failed_provider, _failed_server) = unavailable_provider().await;
         let reindex =

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Install the pinned sea-orm-cli with --features postgres-vector to retain vector column types.
 cd "$(dirname "$0")/.."
 container=
 cleanup() {

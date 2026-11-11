@@ -88,6 +88,16 @@ fn test_environment(environment: &Environment) -> Environment {
 /// Returns an error when a setting is invalid.
 pub fn validate(config: &Config) -> Result<()> {
     validate_queue_policy(config)?;
+    if config
+        .logger
+        .file_appender
+        .as_ref()
+        .is_some_and(|file| file.enable)
+    {
+        return Err(Error::Message(
+            "logger.file_appender is not supported; the application logs to stdout only".into(),
+        ));
+    }
     if let Some(cors) = config
         .server
         .middlewares
@@ -122,6 +132,26 @@ pub fn validate(config: &Config) -> Result<()> {
             settings.timezone
         ))
     })?;
+    let t = &settings.http_timeouts;
+    if [
+        t.embedding_request_seconds,
+        t.local_embedding_seconds,
+        t.model_fetch_connect_seconds,
+        t.model_fetch_read_seconds,
+        t.inference_request_seconds,
+        t.oauth_discovery_seconds,
+    ]
+    .contains(&0)
+    {
+        return Err(Error::Message(
+            "settings.http_timeouts values must be greater than zero".into(),
+        ));
+    }
+    if settings.limits.invite_ttl_hours <= 0 {
+        return Err(Error::Message(
+            "settings.limits.invite_ttl_hours must be greater than zero".into(),
+        ));
+    }
     if settings.max_tenants < 0 {
         return Err(Error::Message(
             "settings.max_tenants must not be negative".into(),

@@ -72,13 +72,8 @@ pub(crate) fn before_run(ctx: &AppContext) {
     }
 }
 
-pub use crate::initializers::timezone::cli_requires_timezone_gate;
-
 pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
-    vec![
-        Box::new(initializers::timezone::Timezone),
-        Box::new(initializers::db_load_guard::LoadGuard),
-    ]
+    vec![Box::new(initializers::db_load_guard::LoadGuard)]
 }
 
 /// Builds the base pools and shared-store seams.
@@ -339,10 +334,7 @@ pub(crate) async fn connect_workers(
     queue: &loco_rs::bgworker::Queue,
     workers: &WorkerRegistry,
 ) -> Result<()> {
-    let role = ctx
-        .config
-        .settings::<crate::data::settings::Settings>()?
-        .consumer_role;
+    let role = crate::data::settings::configured(ctx)?.consumer_role;
     if role == crate::data::settings::ConsumerRole::Embedding {
         initializers::embedding::install_provider(ctx).await?;
     }
@@ -374,6 +366,7 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::revoke_api_key::RevokeApiKey);
     tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
     tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
+    tasks.register(tasks::embedding_index_maintenance::EmbeddingIndexMaintenance);
     tasks.register(tasks::maintenance::Maintenance);
     tasks.register(tasks::maintenance_status::MaintenanceStatus);
     tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
@@ -416,10 +409,18 @@ pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
 /// Loco builds a context twice for `yorishiro start`, so anything built here would be built twice.
 async fn install_services(ctx: AppContext) -> Result<AppContext> {
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
-
+    // The pools install before this hook and already parse the zone; `config::validate` accepted it at load.
+    let zone = crate::time::parse_timezone(&settings.timezone).map_err(|error| {
+        loco_rs::Error::Message(format!(
+            "settings.timezone '{}': {error}",
+            settings.timezone
+        ))
+    })?;
     initializers::auth::install(&ctx);
     initializers::embedding::install(&ctx, &settings);
     initializers::rate_limit::install(&ctx, &settings);
+    // One zone parse per boot: per-record timestamp rendering takes the installed copy.
     ctx.shared_store.insert(settings);
+    ctx.shared_store.insert(zone);
     Ok(ctx)
 }

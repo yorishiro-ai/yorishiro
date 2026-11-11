@@ -19,7 +19,8 @@ use crate::models::search;
 pub(crate) struct SearchEntitiesArgs {
     /// Natural-language query text.
     /// Vectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.
-    /// Also used, as-is, for an auxiliary pg_trgm fuzzy text match against entities that have no embedding.
+    /// PostgreSQL also fuses NFKC-normalized literal text matches when at most 20 entities match.
+    /// SQLite fills remaining slots from unembedded entities using quoted FTS5 terms of at least three characters.
     pub query_text: String,
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
@@ -32,7 +33,7 @@ pub(crate) struct SearchEntitiesArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Vector similarity search over entities using a natural-language query (requires read scope)"
+        description = "Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope)"
     )]
     pub(crate) async fn search_entities(
         &self,

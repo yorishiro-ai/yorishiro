@@ -57,15 +57,11 @@ async fn accept_invite(
         &config.state_signing_key,
         payload.as_bytes(),
     );
-    let secure = if config.cookies_require_secure() {
-        "; Secure"
-    } else {
-        ""
-    };
-    let invite_cookie = format!(
-        "{INVITE_COOKIE_NAME}={payload}.{signature}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age={}{}",
+    let invite_cookie = oauth_cookie(
+        INVITE_COOKIE_NAME,
+        &format!("{payload}.{signature}"),
         state_token::STATE_TTL_SECS,
-        secure
+        config.cookies_require_secure(),
     );
     Ok((
         AppendHeaders([
@@ -95,17 +91,21 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// Builds a `Set-Cookie` header value for the CSRF cookie: `HttpOnly`, `SameSite=Lax`, scoped to the callback path only, `Secure` when the configured redirect URI is itself `https://` (see `OAuthConfig::cookies_require_secure`), and expiring with the `state` it is bound to.
 fn csrf_set_cookie(value: &str, secure: bool) -> String {
+    oauth_cookie(CSRF_COOKIE_NAME, value, state_token::STATE_TTL_SECS, secure)
+}
+
+/// One `Set-Cookie` value for every OAuth cookie: `HttpOnly`, `SameSite=Lax`, scoped to the callback path, `Secure` when asked.
+/// An empty value with `max_age` 0 clears the cookie on the same path it was set with.
+fn oauth_cookie(name: &str, value: &str, max_age: i64, secure: bool) -> String {
     let secure_attr = if secure { "; Secure" } else { "" };
-    let max_age = state_token::STATE_TTL_SECS;
     format!(
-        "{CSRF_COOKIE_NAME}={value}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; \
-         Max-Age={max_age}{secure_attr}",
+        "{name}={value}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age={max_age}{secure_attr}"
     )
 }
 
 /// Clears the CSRF cookie: `Max-Age=0` on the same path it was set with, so the browser drops it immediately rather than leaving it to expire naturally.
 fn csrf_clear_cookie() -> String {
-    format!("{CSRF_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=0")
+    oauth_cookie(CSRF_COOKIE_NAME, "", 0, false)
 }
 
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
@@ -139,15 +139,11 @@ async fn authorize(
         &config.state_signing_key,
         payload.as_bytes(),
     );
-    let secure = if config.cookies_require_secure() {
-        "; Secure"
-    } else {
-        ""
-    };
-    let workspace_cookie = format!(
-        "{WORKSPACE_COOKIE_NAME}={payload}.{signature}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age={}{}",
+    let workspace_cookie = oauth_cookie(
+        WORKSPACE_COOKIE_NAME,
+        &format!("{payload}.{signature}"),
         state_token::STATE_TTL_SECS,
-        secure
+        config.cookies_require_secure(),
     );
 
     Ok((
@@ -349,9 +345,7 @@ fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {
 }
 
 fn clear_workspace_cookie() -> String {
-    format!(
-        "{WORKSPACE_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=0"
-    )
+    oauth_cookie(WORKSPACE_COOKIE_NAME, "", 0, false)
 }
 
 fn login_failure_redirect(clear_cookie: String) -> Response {
@@ -368,7 +362,7 @@ fn login_failure_redirect(clear_cookie: String) -> Response {
 }
 
 fn clear_invite_cookie() -> String {
-    format!("{INVITE_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=0")
+    oauth_cookie(INVITE_COOKIE_NAME, "", 0, false)
 }
 
 pub fn routes() -> Routes {

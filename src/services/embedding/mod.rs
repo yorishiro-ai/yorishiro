@@ -11,6 +11,7 @@ pub(crate) const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 pub struct EmbeddingMetadata {
     pub model: String,
     pub dimensions: usize,
+    pub document_prefix: String,
 }
 
 /// Resolves deployment provider identity without loading local model files.
@@ -21,10 +22,15 @@ pub fn deployment_embedding_metadata(
     settings: &crate::data::settings::Settings,
 ) -> anyhow::Result<Option<EmbeddingMetadata>> {
     let config = &settings.embedding;
+    anyhow::ensure!(
+        (1..=4096).contains(&config.dimensions),
+        "embedding dimensions must be between 1 and 4096"
+    );
     if let (Some(_), Some(model)) = (&config.base_url, &config.model) {
         return Ok(Some(EmbeddingMetadata {
             model: model.clone(),
             dimensions: config.dimensions,
+            document_prefix: config.document_prefix.clone(),
         }));
     }
     match config.provider {
@@ -46,6 +52,7 @@ pub fn deployment_embedding_metadata(
             Ok(Some(EmbeddingMetadata {
                 model: def.id.to_owned(),
                 dimensions: def.dimensions,
+                document_prefix: String::new(),
             }))
         }
     }
@@ -81,6 +88,11 @@ pub enum EmbeddingProviderAvailability {
 /// Storage accepts any nonempty finite vector with the workspace's effective width.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    /// Prefix affecting persisted document vectors, not query-only instructions.
+    fn document_prefix(&self) -> &str {
+        ""
+    }
+
     /// Generation captured when resolving a mutable workspace assignment.
     fn workspace_revision(&self) -> Option<i64> {
         None
@@ -180,10 +192,14 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 /// # Errors
 /// Returns an error when the selected provider cannot be built, for example an unknown local model or model files that cannot be fetched.
 pub async fn build_embedding_provider(
-    config: &crate::data::settings::Settings,
+    settings: &crate::data::settings::Settings,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
-    let config = &config.embedding;
+    let config = &settings.embedding;
     let dimensions = config.dimensions;
+    anyhow::ensure!(
+        (1..=4096).contains(&dimensions),
+        "embedding dimensions must be between 1 and 4096"
+    );
 
     // Check base_url/model presence before PROVIDER so that the documented
     // shape (PROVIDER unset, base_url+model set) reaches the OpenAI-compatible
@@ -192,13 +208,18 @@ pub async fn build_embedding_provider(
     let model = config.model.clone();
 
     if let (Some(base_url), Some(model)) = (base_url, model) {
-        let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-            base_url: base_url.clone(),
-            api_key: config.api_key.clone(),
-            model: model.clone(),
-            dimensions,
-            send_dimensions_param: config.send_dimensions_param,
-        });
+        let provider = OpenAiCompatibleProvider::with_timeouts(
+            OpenAiCompatibleConfig {
+                base_url: base_url.clone(),
+                api_key: config.api_key.clone(),
+                model: model.clone(),
+                dimensions,
+                send_dimensions_param: config.send_dimensions_param,
+                query_instruction: config.query_instruction.clone(),
+                document_prefix: config.document_prefix.clone(),
+            },
+            settings.http_timeouts,
+        );
         tracing::info!(provider = "openai", %base_url, %model, dimensions, "embedding provider configured");
         return Ok(std::sync::Arc::new(provider));
     }
@@ -213,7 +234,9 @@ pub async fn build_embedding_provider(
                 remedy: "YORISHIRO_EMBEDDING_PROVIDER is set to \"none\"; unset it or set YORISHIRO_EMBEDDING_PROVIDER=local or YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL to enable embeddings",
             }))
         }
-        crate::data::settings::EmbeddingProvider::Local => build_local_provider(config).await,
+        crate::data::settings::EmbeddingProvider::Local => {
+            build_local_provider(config, &settings.http_timeouts).await
+        }
         crate::data::settings::EmbeddingProvider::Openai => {
             tracing::info!(
                 "no explicit embedding configuration (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL/YORISHIRO_EMBEDDING_PROVIDER unset); defaulting to local provider with recommended model"
@@ -245,6 +268,7 @@ fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::
 /// Missing model files are downloaded and verified before loading.
 async fn build_local_provider(
     config: &crate::data::settings::Embedding,
+    timeouts: &crate::data::settings::HttpTimeouts,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let dimensions = config.dimensions;
     let def = resolve_local_model(&config.local_model)?;
@@ -258,7 +282,7 @@ async fn build_local_provider(
         );
     }
     let max_sequence_length = config.local_max_sequence_length;
-    let (model_path, tokenizer_path) = model_fetch::ensure_model_files(def).await?;
+    let (model_path, tokenizer_path) = model_fetch::ensure_model_files(def, timeouts).await?;
     let model_path = model_path.display().to_string();
     let tokenizer_path = tokenizer_path.display().to_string();
 
@@ -278,7 +302,8 @@ async fn build_local_provider(
              '{tokenizer_path}', or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an \
              OpenAI-compatible endpoint instead"
                 )
-            })?;
+            })?
+            .with_timeouts(*timeouts);
     tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");
     Ok(std::sync::Arc::new(provider))
 }

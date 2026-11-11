@@ -769,11 +769,10 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
                         &ctx.db, setup.tenant_id, user_id,
                         yorishiro::models::tenant_memberships::MembershipRole::Member,
                     ).await.unwrap();
-                    let txn = ctx.db.begin().await.unwrap();
-                    yorishiro::models::workspace_memberships::Model::revoke(
-                        &txn, setup.workspace_id, user_id,
-                    ).await.unwrap();
-                    txn.commit().await.map_err(|error| yorishiro::YorishiroError::Internal(error.into()))
+                    let response = request.delete(&format!("/api/workspaces/{}/members/{user_id}", setup.workspace_id))
+                        .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
+                    assert_eq!(response.status_code(), 204, "{}", response.text());
+                    Ok(())
                 } else if let Some(user_id) = user_id {
                     yorishiro::models::tenant_memberships::add_member(&ctx.db, setup.tenant_id, user_id,
                         yorishiro::models::tenant_memberships::MembershipRole::Viewer).await

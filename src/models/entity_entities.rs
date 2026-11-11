@@ -129,6 +129,7 @@ pub(crate) async fn missing_embeddings(
     let embedded = Query::select()
         .column(Alias::new("entity_id"))
         .from(Alias::new(crate::models::entity_embeddings::TABLE))
+        .and_where(Expr::col(Alias::new("workspace_id")).eq(workspace_id))
         .to_owned();
     Entity::find()
         .select_only()
