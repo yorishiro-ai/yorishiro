@@ -5,7 +5,7 @@ pub(crate) struct DeleteUser;
 #[async_trait]
 impl Task for DeleteUser {
     fn task(&self) -> TaskInfo {
-        TaskInfo { name: "delete_user".into(), detail: "Delete a global account with no tenant memberships: user_id:<uuid> confirmed_user_id:<same-uuid>".into() }
+        TaskInfo { name: "delete_user".into(), detail: "Delete an account after removing every tenant membership: user_id:<uuid> confirmed_user_id:<same-uuid>".into() }
     }
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
         let user_id = vars

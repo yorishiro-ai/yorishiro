@@ -80,12 +80,8 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match schema_schemas::archive(
-            authorized.txn(),
-            authorized.ctx.workspace_id,
-            args.schema_id,
-        )
-        .await
+        match schema_schemas::archive(authorized.txn(), authorized.workspace_id(), args.schema_id)
+            .await
         {
             Ok(schema) => {
                 authorized.commit().await?;
@@ -113,12 +109,8 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match schema_schemas::delete(
-            authorized.txn(),
-            authorized.ctx.workspace_id,
-            args.schema_id,
-        )
-        .await
+        match schema_schemas::delete(authorized.txn(), authorized.workspace_id(), args.schema_id)
+            .await
         {
             Ok(()) => {
                 authorized.commit().await?;
@@ -149,7 +141,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let summaries = match schema_schemas::list(authorized.txn(), workspace_id, page).await {
             Ok(value) => value,
@@ -178,7 +170,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let record =
             match schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name)
                 .await
@@ -209,7 +201,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let record =
             match schema_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await {
                 Ok(value) => value,
@@ -288,7 +280,7 @@ impl YorishiroMcpServer {
         };
 
         let tenant_id = authorized.auth_context().tenant_id;
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let (record, diff) = match schema_schemas::create_schema(
             authorized.txn(),
             tenant_id,
@@ -380,7 +372,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let record = match schema_schemas::get_active_schema(
             authorized.txn(),
             workspace_id,

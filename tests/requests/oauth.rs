@@ -158,7 +158,7 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
         )
         .await;
         let user = user_users::ActiveModel {
-            email: Set(super::fixtures::unique_email("oauth-callback-invite")),
+            email: Set(Some(super::fixtures::unique_email("oauth-callback-invite"))),
             oauth_provider: Set(Some("oidc".into())),
             oauth_subject_id: Set(Some(subject)),
             ..Default::default()
@@ -208,7 +208,7 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
         let (invite, token) = workspace_invites::create_invite(
             &ctx.db,
             tenant.tenant_id,
-            &user.email,
+            user.email.as_deref().unwrap(),
             MembershipRole::Viewer,
             chrono::Duration::hours(1),
         )
@@ -352,10 +352,9 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
             .json(&serde_json::json!({"name":"oauth-selection-sibling"}))
             .await
             .assert_status(StatusCode::CREATED);
-        for (selection, tamper, expected) in [
-            (None, false, StatusCode::UNPROCESSABLE_ENTITY),
-            (Some(tenant.workspace_id), true, StatusCode::UNAUTHORIZED),
-            (Some(tenant.workspace_id), false, StatusCode::FOUND),
+        for (selection, expected) in [
+            (None, StatusCode::FOUND),
+            (Some(tenant.workspace_id), StatusCode::FOUND),
         ] {
             let mut start = request.get("/auth/oauth/authorize");
             if let Some(id) = selection {
@@ -382,17 +381,13 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
                 .get_all(header::SET_COOKIE)
                 .iter()
                 .map(|cookie| {
-                    let mut value = cookie
+                    cookie
                         .to_str()
                         .unwrap()
                         .split(';')
                         .next()
                         .unwrap()
-                        .to_owned();
-                    if tamper && value.starts_with("ysr_oauth_workspace=") {
-                        value.push('0');
-                    }
-                    value
+                        .to_owned()
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
@@ -554,7 +549,7 @@ async fn verified_subject_accepts_invite_without_workspace_or_key() {
         .await;
         let subject = uuid::Uuid::new_v4().to_string();
         let user = user_users::ActiveModel {
-            email: Set(super::fixtures::unique_email("oauth-invite-only")),
+            email: Set(Some(super::fixtures::unique_email("oauth-invite-only"))),
             oauth_provider: Set(Some("oidc".into())),
             oauth_subject_id: Set(Some(subject.clone())),
             ..Default::default()
@@ -565,7 +560,7 @@ async fn verified_subject_accepts_invite_without_workspace_or_key() {
         let (invite, token) = workspace_invites::create_invite(
             &ctx.db,
             tenant.tenant_id,
-            &user.email,
+            user.email.as_deref().unwrap(),
             MembershipRole::Viewer,
             chrono::Duration::hours(1),
         )
@@ -573,7 +568,7 @@ async fn verified_subject_accepts_invite_without_workspace_or_key() {
         .unwrap();
         let mut identity = CallbackIdentity {
             subject_id: uuid::Uuid::new_v4().to_string(),
-            email: Some(user.email.clone()),
+            email: Some(user.email.clone().unwrap()),
             display_name: None,
         };
         assert!(matches!(
@@ -902,7 +897,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
     super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
+        let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
             &txn,
             "oidc",
             "a-first-login-subject",
@@ -916,7 +911,10 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         txn.commit().await.expect("commit provisioning");
 
         let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
-            provisioned.workspace_id,
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
+                .await
+                .unwrap()[0]
+                .id,
         )
         .one(&ctx.db)
         .await
@@ -934,7 +932,10 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 
         let schema = yorishiro::models::schema_schemas::get_active_schema(
             &ctx.db,
-            provisioned.workspace_id,
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
+                .await
+                .unwrap()[0]
+                .id,
             "general-notes",
         )
         .await
@@ -987,7 +988,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
         super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
             require_licence(&ctx);
             let txn = ctx.db.begin().await.expect("begin");
-            let provisioned = yorishiro::edition::ee::models::user_users::find_or_create(
+            let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
                 &txn,
                 "oidc",
                 &format!("policy-subject-{index}"),
@@ -999,7 +1000,10 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             .expect("provisioning");
             txn.commit().await.expect("commit");
             let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
-                provisioned.workspace_id,
+                yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
+                    .await
+                    .unwrap()[0]
+                    .id,
             )
             .one(&ctx.db)
             .await

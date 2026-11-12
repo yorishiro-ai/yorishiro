@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from check_blackbox_reports import (
+    REJECTION_ONLY_TOOLS,
     SUITES,
     load_reports,
     require_owned_successes,
@@ -17,11 +18,11 @@ from check_blackbox_reports import (
 
 
 class ReportGateTests(unittest.TestCase):
-    def test_owned_success_gate_partitions_all_tools_and_rejects_missing_or_denied_only(self):
+    def test_owned_outcome_gate_partitions_all_tools_and_rejects_missing_outcomes(self):
         reviewed = json.loads((Path(__file__).resolve().parents[1] / "blackbox/tools.json").read_text())
         owners = []
         for edition in ("ce", "ee"):
-            calls = [{"tool": tool, "outcome": "succeeded"}
+            calls = [{"tool": tool, "outcome": "rejected" if tool in REJECTION_ONLY_TOOLS else "succeeded"}
                      for tool in reviewed["ce"] + reviewed["ee_additions"]]
             owned = require_owned_successes(reviewed, edition, calls)
             owners.append(owned)
@@ -29,8 +30,9 @@ class ReportGateTests(unittest.TestCase):
                 incomplete = [call for call in calls if call["tool"] != tool]
                 with self.subTest(edition=edition, tool=tool), self.assertRaises(ValueError):
                     require_owned_successes(reviewed, edition, incomplete)
+                wrong = "succeeded" if tool in REJECTION_ONLY_TOOLS else "rejected"
                 with self.assertRaises(ValueError):
-                    require_owned_successes(reviewed, edition, incomplete + [{"tool": tool, "outcome": "rejected"}])
+                    require_owned_successes(reviewed, edition, incomplete + [{"tool": tool, "outcome": wrong}])
         self.assertFalse(owners[0] & owners[1])
         self.assertEqual(owners[0] | owners[1], set(reviewed["ce"] + reviewed["ee_additions"]))
 

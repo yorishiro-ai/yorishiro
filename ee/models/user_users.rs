@@ -17,29 +17,6 @@ pub(crate) struct OAuthUser {
     pub(crate) id: Uuid,
 }
 
-pub(crate) async fn login_key(
-    db: &sea_orm::DatabaseConnection,
-    user_id: Uuid,
-    workspace_id: Uuid,
-) -> Result<crate::models::api_keys::CreatedApiKey, YorishiroError> {
-    let tenant_id =
-        crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?;
-    let access = crate::models::access::workspace_access(db, tenant_id, workspace_id, user_id)
-        .await?
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this account has no access to the selected workspace".into(),
-            hint: "ask a tenant admin for a workspace grant".into(),
-        })?;
-    crate::models::api_keys::IdentityApiKeys::create_api_key(
-        db,
-        workspace_id,
-        access.max_scope,
-        Some(user_id),
-        false,
-    )
-    .await
-}
-
 /// Accepts an invitation for an existing account identified by a verified OAuth callback.
 /// This trusted boundary never resolves identity from an email claim or provisions a new account.
 ///
@@ -85,6 +62,7 @@ pub(crate) async fn find_by_oauth_identity(
     subject_id: &str,
 ) -> Result<Option<OAuthUser>, YorishiroError> {
     let user = user_users::Entity::find()
+        .filter(user_users::Column::TenantId.is_null())
         .filter(user_users::Column::OauthProvider.eq(provider))
         .filter(user_users::Column::OauthSubjectId.eq(subject_id))
         .one(conn)
@@ -114,7 +92,7 @@ pub(crate) async fn create_oauth_user(
     subject_id: &str,
 ) -> Result<OAuthUser, CreateOauthUserError> {
     let active = user_users::ActiveModel {
-        email: ActiveValue::Set(email.to_string()),
+        email: ActiveValue::Set(Some(email.to_string())),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
         oauth_provider: ActiveValue::Set(Some(provider.to_string())),
         oauth_subject_id: ActiveValue::Set(Some(subject_id.to_string())),

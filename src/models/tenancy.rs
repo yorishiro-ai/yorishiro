@@ -18,6 +18,73 @@ pub(crate) struct SetupAccount {
     pub(crate) workspace_id: Uuid,
 }
 
+/// Issues a tenant-scoped login credential after rechecking the account and membership.
+///
+/// # Errors
+/// Rejects missing, ambiguous or disabled memberships and changed credentials.
+pub async fn issue_login_key(
+    db: &sea_orm::DatabaseConnection,
+    user_id: Uuid,
+    expected_password_hash: Option<&str>,
+    expected_tenant: Option<Uuid>,
+) -> Result<
+    (
+        crate::models::api_keys::CreatedTenantApiKey,
+        Uuid,
+        crate::models::api_keys::ApiKeyScope,
+    ),
+    YorishiroError,
+> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let memberships = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::UserId.eq(user_id))
+        .all(&txn)
+        .await
+        .internal()?;
+    let [membership] = memberships.as_slice() else {
+        return Err(YorishiroError::ScopeInsufficient {
+            message: "this account must belong to exactly one tenant".into(),
+            hint: "ask a tenant administrator to resolve the account membership".into(),
+        });
+    };
+    let tenant_id = membership.tenant_id;
+    if expected_tenant.is_some_and(|expected| expected != tenant_id) {
+        return Err(YorishiroError::Unauthenticated);
+    }
+    crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    crate::db::lock_for_update(&txn, &format!("user-membership:{user_id}"))
+        .await
+        .internal()?;
+    let current = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::UserId.eq(user_id))
+        .all(&txn)
+        .await
+        .internal()?;
+    if current.len() != 1 || current[0].tenant_id != tenant_id {
+        return Err(YorishiroError::Unauthenticated);
+    }
+    let user = crate::models::user_users::Entity::find_by_id(user_id)
+        .one(&txn)
+        .await
+        .internal()?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    if expected_password_hash.is_some_and(|hash| user.password_hash.as_deref() != Some(hash))
+        || user.tenant_id.is_some_and(|id| id != tenant_id)
+    {
+        return Err(YorishiroError::Unauthenticated);
+    }
+    let role = crate::models::tenant_memberships::get_membership_role(&txn, tenant_id, user_id)
+        .await?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let scope = role.max_scope();
+    let key =
+        crate::models::api_keys::Entity::create_login_key(&txn, tenant_id, user_id, scope).await?;
+    txn.commit().await.internal()?;
+    Ok((key, tenant_id, scope))
+}
+
 /// Creates an account and its membership in the caller's transaction.
 ///
 /// # Errors
@@ -98,16 +165,16 @@ pub(crate) async fn setup_first_account(
     txn.commit().await.internal()?;
     Ok(SetupAccount {
         user_id: user.id,
-        email: user.email,
+        email: user.root_email(),
         tenant_id: tenant.id,
         workspace_id: workspace.id,
     })
 }
 
 /// Every workspace `user_id` can log into through inherited authority or a direct grant.
-/// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
+/// Used by sign-in to list explicit workspace choices.
 ///
-/// Deliberately unpaginated: this drives sign-in, not a browsing UI, and its own caller (`resolve_login_workspace`) needs the true, complete set to tell "exactly one, resolve to it" from "more than one, the caller must say which."
+/// Deliberately unpaginated: sign-in must show every reachable workspace.
 /// A default `LIMIT` here would silently hide a membership from a user who holds more workspaces than the page size, rather than list them.
 ///
 /// # Errors
@@ -145,27 +212,42 @@ pub async fn discover_workspaces(
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Vec<LoginWorkspace>, YorishiroError> {
     let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
-    if let Some(user_id) = current.user_id {
-        let (_, workspaces) = login_options(conn, user_id).await?;
-        return Ok(workspaces
-            .into_iter()
-            .filter(|workspace| workspace.tenant_id == current.tenant_id)
-            .collect());
-    }
-    let workspace = workspace_workspaces::Entity::find_by_id(current.workspace_id)
-        .filter(workspace_workspaces::Column::TenantId.eq(current.tenant_id))
-        .find_also_related(crate::models::_entities::tenant_tenants::Entity)
+    let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
         .one(conn)
         .await
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
-    let tenant = workspace.1.ok_or(YorishiroError::Unauthenticated)?;
-    Ok(vec![LoginWorkspace {
-        workspace_id: workspace.0.id,
-        workspace_name: workspace.0.name,
-        tenant_id: tenant.id,
-        tenant_name: tenant.name,
-    }])
+    if let Some(user_id) = current.user_id {
+        let (_, workspaces) = login_options(conn, user_id).await?;
+        return Ok(workspaces
+            .into_iter()
+            .filter(|workspace| {
+                workspace.tenant_id == current.tenant_id
+                    && key
+                        .workspace_id
+                        .is_none_or(|id| id == workspace.workspace_id)
+            })
+            .collect());
+    }
+    let workspaces = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.eq(current.tenant_id))
+        .find_also_related(crate::models::_entities::tenant_tenants::Entity)
+        .all(conn)
+        .await
+        .internal()?;
+    workspaces
+        .into_iter()
+        .filter(|(workspace, _)| key.workspace_id.is_none_or(|id| id == workspace.id))
+        .map(|(workspace, tenant)| {
+            let tenant = tenant.ok_or(YorishiroError::Unauthenticated)?;
+            Ok(LoginWorkspace {
+                workspace_id: workspace.id,
+                workspace_name: workspace.name,
+                tenant_id: tenant.id,
+                tenant_name: tenant.name,
+            })
+        })
+        .collect()
 }
 
 #[derive(serde::Serialize)]
@@ -174,96 +256,6 @@ pub struct LoginMembership {
     pub tenant_id: Uuid,
     pub tenant_name: String,
     pub role: crate::models::tenant_memberships::MembershipRole,
-}
-
-/// Workspace discovery is a domain state, not a malformed request field.
-pub enum LoginWorkspaceState {
-    Selected(Uuid),
-    Recovery {
-        reason: LoginRecoveryReason,
-        memberships: Vec<LoginMembership>,
-        workspaces: Vec<LoginWorkspace>,
-    },
-}
-
-#[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum LoginRecoveryReason {
-    TenantMembershipRequired,
-    WorkspaceProvisioningRequired,
-    WorkspaceAccessRequired,
-    WorkspaceSelectionRequired,
-}
-
-/// Resolves explicit selection or discovers the authenticated user's next action.
-///
-/// # Errors
-/// Returns an error when workspace or membership discovery fails.
-pub async fn resolve_login_workspace(
-    conn: &impl ConnectionTrait,
-    user_id: Uuid,
-    requested: Option<Uuid>,
-) -> Result<LoginWorkspaceState, YorishiroError> {
-    if let Some(workspace_id) = requested {
-        crate::models::workspace_workspaces::get_workspace_tenant(conn, workspace_id).await?;
-        return Ok(LoginWorkspaceState::Selected(workspace_id));
-    }
-    let (memberships, workspaces) = login_options(conn, user_id).await?;
-    if let [workspace] = workspaces.as_slice() {
-        return Ok(LoginWorkspaceState::Selected(workspace.workspace_id));
-    }
-    let reason = if memberships.is_empty() {
-        LoginRecoveryReason::TenantMembershipRequired
-    } else if workspaces.is_empty() {
-        if memberships
-            .iter()
-            .any(|membership| membership.role.administers_tenant())
-        {
-            LoginRecoveryReason::WorkspaceProvisioningRequired
-        } else {
-            LoginRecoveryReason::WorkspaceAccessRequired
-        }
-    } else {
-        LoginRecoveryReason::WorkspaceSelectionRequired
-    };
-    Ok(LoginWorkspaceState::Recovery {
-        reason,
-        memberships,
-        workspaces,
-    })
-}
-
-/// The workspaces a tenant-scoped key can act on for this tenant: the attributed user's accessible workspaces, or every workspace in the tenant for a service key.
-///
-/// # Errors
-/// Returns an error when membership or workspace discovery fails.
-pub(crate) async fn reachable_workspace_ids(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    user_id: Option<Uuid>,
-) -> Result<Vec<Uuid>, YorishiroError> {
-    match user_id {
-        Some(user_id) => Ok(login_options(conn, user_id)
-            .await?
-            .1
-            .into_iter()
-            .filter(|workspace| workspace.tenant_id == tenant_id)
-            .map(|workspace| workspace.workspace_id)
-            .collect()),
-        None => {
-            use crate::models::_entities::workspace_workspaces;
-            let workspaces = workspace_workspaces::Entity::find()
-                .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
-                .all(conn)
-                .await
-                .internal()?;
-            Ok(workspaces
-                .into_iter()
-                .map(|workspace| workspace.id)
-                .collect())
-        }
-    }
 }
 
 /// Discovers recovery options only after the caller has verified credentials.
@@ -462,6 +454,14 @@ pub async fn delete_workspace_as(
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    let key = crate::models::api_keys::Entity::find_by_id(actor.api_key_id)
+        .one(&txn)
+        .await
+        .internal()?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    if key.workspace_id.is_some_and(|id| id != workspace_id) {
+        return Err(YorishiroError::not_found("workspace not found"));
+    }
     if crate::models::workspace_workspaces::get_workspace_tenant(&txn, workspace_id).await?
         != actor.tenant_id
     {

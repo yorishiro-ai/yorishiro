@@ -23,7 +23,7 @@ pub(crate) async fn search_entities(
         limit: params.limit.unwrap_or(default.limit),
     };
 
-    let workspace_id = verified.ctx.workspace_id;
+    let workspace_id = verified.ctx.require_workspace()?;
     search::ensure_available(&ctx.db, workspace_id).await?;
     let limiter = search_token_limiter(&ctx)?;
     charge_search_tokens(&limiter, workspace_id, &params.query_text)?;

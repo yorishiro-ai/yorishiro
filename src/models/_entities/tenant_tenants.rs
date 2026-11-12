@@ -33,6 +33,8 @@ pub enum Relation {
     TenantMemberships,
     #[sea_orm(has_one = "super::tenant_reindex_schedules::Entity")]
     TenantReindexSchedules,
+    #[sea_orm(has_many = "super::user_users::Entity")]
+    UserUsers,
     #[sea_orm(has_many = "super::workspace_invites::Entity")]
     WorkspaceInvites,
     #[sea_orm(has_many = "super::workspace_schema_forks::Entity")]
@@ -86,6 +88,12 @@ impl Related<super::tenant_memberships::Entity> for Entity {
 impl Related<super::tenant_reindex_schedules::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::TenantReindexSchedules.def()
+    }
+}
+
+impl Related<super::user_users::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::UserUsers.def()
     }
 }
 

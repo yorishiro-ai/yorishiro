@@ -4,8 +4,7 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
@@ -13,13 +12,12 @@ use loco_rs::controller::Routes;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::dtos::auth::{
-    AcceptInviteRequest, AcceptInviteResponse, LoginRecovery, LoginRecoveryCode,
-    LoginRecoveryResponse, LoginRequest, LoginResponse, SignupRequest, SignupResponse,
+    AcceptInviteRequest, AcceptInviteResponse, LoginResponse, RootLoginRequest, SignupRequest,
+    SignupResponse, TenantLoginRequest,
 };
 use crate::error::YorishiroError;
-use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenant_memberships::MembershipRole;
-use crate::models::{tenancy, user_users, workspace_invites, workspace_workspaces};
+use crate::models::{tenancy, user_users, workspace_invites};
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/invites/accept-authenticated", request_body = crate::dtos::auth::AcceptAuthenticatedInviteRequest, responses((status = 200, body = crate::dtos::auth::AcceptInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 async fn accept_authenticated_invite(
@@ -104,7 +102,7 @@ async fn signup_with_invite(
         StatusCode::CREATED,
         Json(SignupResponse {
             user_id: user.id,
-            email: user.email,
+            email: user.root_email(),
             tenant_id: invite.tenant_id,
             role: invite.role,
             workspaces,
@@ -114,7 +112,7 @@ async fn signup_with_invite(
 
 /// No invite: creates a brand-new tenant and joins the caller as `Owner`, but no workspace.
 ///
-/// An operator must run `cargo loco task create_workspace tenant_id:<id> name:...`, after which `/auth/login` can issue a user key.
+/// The new tenant can be managed using a tenant-scoped login key.
 async fn signup_without_invite(
     ctx: &AppContext,
     body: &SignupRequest,
@@ -146,7 +144,7 @@ async fn signup_without_invite(
         StatusCode::CREATED,
         Json(SignupResponse {
             user_id: user.id,
-            email: user.email,
+            email: user.root_email(),
             tenant_id,
             role: MembershipRole::Owner,
             workspaces: vec![],
@@ -154,85 +152,64 @@ async fn signup_without_invite(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(
-    post,
-    path = "/auth/login",
-    request_body = crate::dtos::auth::LoginRequest,
-    responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = crate::dtos::auth::LoginRecoveryResponse), (status = 422, description = "Workspace selection required (JSON recovery) or invalid request fields (plain-text JSON extraction error)", content((crate::dtos::auth::LoginRecoveryResponse = "application/json"), (String = "text/plain")))),
-    security(()),
-    tag = "community"
-))]
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-///
-async fn login(
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/root/login", request_body = crate::dtos::auth::RootLoginRequest, responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+async fn root_login(
     State(ctx): State<AppContext>,
-    Json(body): Json<LoginRequest>,
-) -> Result<Response, ApiError> {
-    // Credentials are checked before the workspace is looked up, so a request with a bad password never reveals whether workspace_id exists.
+    Json(body): Json<RootLoginRequest>,
+) -> Result<Json<LoginResponse>, ApiError> {
     let user = user_users::verify_login(&ctx.db, &body.email, &body.password)
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
+    finish_login(&ctx, user, None).await
+}
 
-    let workspace_id = match tenancy::resolve_login_workspace(&ctx.db, user.id, body.workspace_id)
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/tenant/login", params(("x-tenant-id" = uuid::Uuid, Header)), request_body = crate::dtos::auth::TenantLoginRequest, responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+async fn tenant_login(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(body): Json<TenantLoginRequest>,
+) -> Result<Json<LoginResponse>, ApiError> {
+    let mut tenant_headers = headers.get_all("x-tenant-id").iter();
+    let tenant_id = tenant_headers
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+        .ok_or(YorishiroError::Unauthenticated)?;
+    if tenant_headers.next().is_some() {
+        return Err(YorishiroError::Unauthenticated.into());
+    }
+    let user = user_users::verify_tenant_login(&ctx.db, tenant_id, &body.user_name, &body.password)
         .await?
-    {
-        tenancy::LoginWorkspaceState::Selected(workspace_id) => workspace_id,
-        tenancy::LoginWorkspaceState::Recovery {
-            reason,
-            memberships,
-            workspaces,
-        } => {
-            let status = match reason {
-                LoginRecoveryCode::WorkspaceSelectionRequired => StatusCode::UNPROCESSABLE_ENTITY,
-                LoginRecoveryCode::TenantMembershipRequired
-                | LoginRecoveryCode::WorkspaceAccessRequired
-                | LoginRecoveryCode::WorkspaceProvisioningRequired => StatusCode::FORBIDDEN,
-            };
-            return Ok((
-                status,
-                Json(LoginRecoveryResponse {
-                    error: LoginRecovery::new(reason, memberships, workspaces),
-                }),
-            )
-                .into_response());
-        }
-    };
+        .ok_or(YorishiroError::Unauthenticated)?;
+    finish_login(&ctx, user, Some(tenant_id)).await
+}
 
-    let tenant_id = workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id).await?;
-    let access = crate::models::access::workspace_access(&ctx.db, tenant_id, workspace_id, user.id)
-        .await?
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this account has no access to the selected workspace".into(),
-            hint: "ask a tenant admin for a workspace grant".into(),
-        })?;
-
-    let created = IdentityApiKeys::create_api_key(
-        &ctx.db,
-        workspace_id,
-        access.max_scope,
-        Some(user.id),
-        false,
-    )
-    .await?;
-
+async fn finish_login(
+    ctx: &AppContext,
+    user: user_users::Model,
+    expected_tenant: Option<uuid::Uuid>,
+) -> Result<Json<LoginResponse>, ApiError> {
+    let hash = user
+        .password_hash
+        .as_deref()
+        .ok_or(YorishiroError::Unauthenticated)?;
+    let (created, tenant_id, scope) =
+        tenancy::issue_login_key(&ctx.db, user.id, Some(hash), expected_tenant).await?;
     Ok(Json(LoginResponse {
         api_key: created.plaintext,
         api_key_id: created.id,
-        // Login credentials are always bound to the selected workspace.
-        workspace_id,
-        scope: created.scope,
+        tenant_id,
+        scope,
         user_id: user.id,
-    })
-    .into_response())
+    }))
 }
 
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("auth")
         .add("/signup", post(signup))
-        .add("/login", post(login))
+        .add("/root/login", post(root_login))
+        .add("/tenant/login", post(tenant_login))
         .add("/invites/accept", post(accept_invite))
         .add(
             "/invites/accept-authenticated",
@@ -244,7 +221,8 @@ pub fn routes() -> Routes {
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_signup),
-        super::route_inventory::path_doc(__path_login),
+        super::route_inventory::path_doc(__path_root_login),
+        super::route_inventory::path_doc(__path_tenant_login),
         super::route_inventory::path_doc(__path_accept_invite),
         super::route_inventory::path_doc(__path_accept_authenticated_invite),
     ]

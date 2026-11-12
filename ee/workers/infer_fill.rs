@@ -467,7 +467,7 @@ pub async fn enqueue_infer_fill(
     auth: &crate::models::api_keys::AuthContext,
     schema_name: String,
 ) -> loco_rs::Result<String> {
-    let workspace_id = auth.workspace_id;
+    let workspace_id = auth.require_workspace()?;
     if ctx.queue_provider.is_none() {
         return Err(loco_rs::Error::Message(
             "infer-fill requires a queue provider (configure queue: in the server config)".into(),

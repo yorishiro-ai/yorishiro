@@ -909,13 +909,15 @@ def human_key_management(app):
     require(described["name"] == "renamed" and described["max_entities"] == 5,
             "workspace update not persisted")
     member_path = f"{path}/members/{account['user_id']}"
-    app.rest("PUT", member_path, {"role": "viewer"}, status=204, key=owner)
+    app.rest("PUT", member_path, {"role": "viewer"}, status=403, key=owner)
+    app.rest("PUT", member_path, {"role": "viewer"}, status=204, key=selected)
     require(any(member["user_id"] == account["user_id"] and member["role"] == "viewer"
-                for member in app.rest("GET", f"{path}/members", key=owner)), "workspace grant missing")
-    app.rest("DELETE", member_path, status=204, key=owner)
+                for member in app.rest("GET", f"{path}/members", key=selected)), "workspace grant missing")
+    app.rest("DELETE", member_path, status=204, key=selected)
     require(not any(member["user_id"] == account["user_id"]
-                    for member in app.rest("GET", f"{path}/members", key=owner)), "workspace revoke missing")
-    app.rest("DELETE", path, status=204, key=owner)
+                    for member in app.rest("GET", f"{path}/members", key=selected)), "workspace revoke missing")
+    app.rest("DELETE", path, status=404, key=owner)
+    app.rest("DELETE", path, status=204, key=selected)
     app.rest("GET", path, status=404, key=owner)
     app.rest("GET", "/api/whoami", status=401, key=selected)
     require(not any(item["id"] == workspace["id"] for item in app.rest("GET", "/api/workspaces", key=owner)),
@@ -962,7 +964,7 @@ def user_profile_lifecycle(app):
     path = "/api/users/me"
     original = client.call("get_current_user")
     require(app.rest("GET", path, key=owner) == original, "REST/MCP profiles differ")
-    require(set(original) == {"id", "email", "display_name", "created_at"},
+    require(set(original) == {"id", "email", "tenant_id", "user_name", "display_name", "created_at"},
             "profile exposed private identity fields")
     updated = client.call("update_current_user", {"display_name": "  Contract Owner  "})
     require(updated["display_name"] == "Contract Owner" and updated["id"] == original["id"]
@@ -1088,6 +1090,12 @@ def workspace_key_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
     identity = client.call("whoami")
+    login = app.rest("POST", "/auth/root/login", {
+        "email": "owner@example.invalid", "password": "blackbox-owned-password",
+    })
+    tenant_key = login["api_key"]
+    app.secrets.append(tenant_key)
+    tenant_client = MCP(app, tenant_key)
     capabilities = client.call("capabilities")
     require(capabilities["tenant_admin"] and not capabilities["constraints"]["discovery_authorizes_requests"],
             "capabilities confused discovery with authorization")
@@ -1098,12 +1106,15 @@ def workspace_key_lifecycle(app):
     client.call("revoke_api_key", {"key_id": created["id"]})
     delegated.call("whoami", error=True)
     app.rest("GET", "/api/whoami", key=created["full_key"], status=401)
-    workspace = client.call("create_workspace", {"name": "mcp-managed"})
+    workspace = tenant_client.call("create_workspace", {"name": "mcp-managed"})
     workspace_id = workspace["id"]
-    require(any(row["id"] == workspace_id for row in client.call("list_workspaces")),
-            "MCP-created workspace not listed")
+    require(any(row["id"] == workspace_id for row in tenant_client.call("list_workspaces")),
+            "MCP-created workspace not listed for tenant credential")
+    require(not any(row["id"] == workspace_id for row in client.call("list_workspaces"))
+            and not any(row["id"] == workspace_id for row in app.rest("GET", "/api/workspaces", key=owner)),
+            "workspace-bound credential listed another workspace")
     require(any(row["workspace_id"] == workspace_id and row["tenant_id"] == app.tenant
-                for row in client.call("discover_workspaces")),
+                for row in tenant_client.call("discover_workspaces")),
             "human discovery omitted tenant workspace")
     issued = app.task("create_api_key", workspace_id=workspace_id, scope="schema", user_id=identity["user_id"])
     selected_key = output_field(issued, "api key (shown once)")
@@ -1117,15 +1128,15 @@ def workspace_key_lifecycle(app):
     require(app.rest("GET", f"/api/workspaces/{workspace_id}", key=selected_key) == detail,
             "workspace detail differs across transports")
     args = {"workspace_id": workspace_id, "user_id": identity["user_id"]}
-    client.call("grant_workspace_member", {**args, "role": "viewer"})
-    require(any(row["user_id"] == identity["user_id"] for row in client.call("list_workspace_members", {
+    tenant_client.call("grant_workspace_member", {**args, "role": "viewer"})
+    require(any(row["user_id"] == identity["user_id"] for row in tenant_client.call("list_workspace_members", {
         "workspace_id": workspace_id,
     })), "MCP workspace grant missing")
-    client.call("revoke_workspace_member", args)
-    require(not any(row["user_id"] == identity["user_id"] for row in client.call("list_workspace_members", {
+    tenant_client.call("revoke_workspace_member", args)
+    require(not any(row["user_id"] == identity["user_id"] for row in tenant_client.call("list_workspace_members", {
         "workspace_id": workspace_id,
     })), "MCP workspace grant survived revocation")
-    client.call("delete_workspace", {"workspace_id": workspace_id})
+    tenant_client.call("delete_workspace", {"workspace_id": workspace_id})
     app.rest("GET", f"/api/workspaces/{workspace_id}", key=owner, status=404)
     selected.call("whoami", error=True)
     require(client.call("whoami")["user_id"] == identity["user_id"], "workspace deletion invalidated unrelated key")
@@ -1521,7 +1532,7 @@ def enterprise_search(app):
     writer.call("reset_embedding_provider")
 
 
-def cross_tenant_acceptance(app):
+def cross_tenant_rejection(app):
     account, key = human_owner(app)
     client = MCP(app, key)
     before = client.call("whoami")
@@ -1532,33 +1543,39 @@ def cross_tenant_acceptance(app):
     token = output_field(invitation, "invite token (shown once)")
     app.secrets.append(token)
     client.call("accept_invite", {"invite_token": token}, key=app.key, error=True)
-    accepted = client.call("accept_invite", {"invite_token": token})
-    require(accepted == {"user_id": account["user_id"], "tenant_id": target, "role": "admin"},
-            "acceptance lost authenticated-user or target-tenant attribution")
-    client.call("accept_invite", {"invite_token": token}, error=True)
+    rejected = client.call("accept_invite", {"invite_token": token}, error=True)
+    require("an account cannot belong to more than one tenant" in json.dumps(rejected),
+            "cross-tenant acceptance did not report the membership conflict")
+    app.rest("POST", "/auth/invites/accept-authenticated", {"invite_token": token}, status=409, key=key)
     require(client.call("whoami") == before and app.rest("GET", "/api/whoami", key=key) == before,
-            "acceptance retargeted the existing credential")
-    output = app.task("create_api_key", workspace_id=workspace, scope="schema", user_id=account["user_id"])
+            "rejected acceptance retargeted the existing credential")
+    password = "blackbox-target-password"
+    app.secrets.append(password)
+    invitation = app.task("create_invite", tenant_id=target, email="target@example.invalid", role="owner")
+    owner_token = output_field(invitation, "invite token (shown once)")
+    app.secrets.append(owner_token)
+    target_owner = app.rest("POST", "/auth/signup", {"invite_token": owner_token, "password": password}, status=201)
+    output = app.task("create_api_key", workspace_id=workspace, scope="schema", user_id=target_owner["user_id"])
     target_key = output_field(output, "api key (shown once)")
     app.secrets.append(target_key)
     member = MCP(app, target_key)
     identity = member.call("whoami")
-    require(identity["tenant_id"] == target and identity["workspace_id"] == workspace
-            and identity["user_id"] == account["user_id"], "accepted membership cannot select its target")
+    require(identity["tenant_id"] == target and identity["workspace_id"] == workspace,
+            "target administrator selected the wrong workspace")
     members = member.call("list_members")
     require(members == app.rest("GET", "/api/members", key=target_key)
-            and any(row["user_id"] == account["user_id"] and row["role"] == "admin" for row in members),
-            "accepted membership is missing or differs across transports")
+            and not any(row["user_id"] == account["user_id"] for row in members),
+            "rejected membership exists or differs across transports")
     history = member.call("list_invites")
-    require(len(history) == 1 and history[0]["used_at"] is not None
-            and token not in json.dumps(history), "acceptance history missing or disclosed token")
+    require(any(row["email"] == "owner@example.invalid" and row["used_at"] is None for row in history)
+            and token not in json.dumps(history), "rejected invitation was consumed or disclosed")
 
 
 def scenarios(suite, edition="ce"):
     if edition == "ee":
         if suite == "tenant-postgres":
             return [("server.bootstrap", lambda app: app.boot()),
-                    ("ee.authenticated-cross-tenant-acceptance", cross_tenant_acceptance)]
+                    ("ee.authenticated-cross-tenant-rejection", cross_tenant_rejection)]
         require(suite == "mcp", "EE owns only its dedicated MCP delta suite")
         return [("server.bootstrap", lambda app: app.boot()),
                 ("ee.discovery-auth-scope-input", mcp_suite),

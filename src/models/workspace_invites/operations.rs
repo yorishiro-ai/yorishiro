@@ -123,7 +123,7 @@ pub(crate) async fn list_invites(
     actor: &crate::models::api_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<Model>, YorishiroError> {
-    crate::models::access::require_tenant_admin(conn, actor.tenant_id, actor.user_id).await?;
+    crate::models::access::require_tenant_admin_as(conn, actor).await?;
     Entity::find()
         .filter(Column::TenantId.eq(actor.tenant_id))
         .order_by_desc(Column::CreatedAt)
@@ -209,7 +209,7 @@ pub(crate) async fn accept_in_transaction(
             details: vec![],
             hint: "ask a tenant admin for a fresh invite".into(),
         })?;
-    if invite.email != user.email {
+    if Some(&invite.email) != user.email.as_ref() {
         return Err(YorishiroError::Unauthenticated);
     }
     if crate::models::tenant_memberships::get_membership_role(txn, invite.tenant_id, user.id)

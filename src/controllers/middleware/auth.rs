@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use axum::http::request::Parts;
+use axum::http::{HeaderMap, request::Parts};
 use loco_rs::app::AppContext;
 use loco_rs::prelude::async_trait;
 use sea_orm::DatabaseTransaction;
@@ -16,17 +16,22 @@ use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity, WORKSPACE_HEADER
 use uuid::Uuid;
 
 /// Copies readable request headers into the authenticator input shape.
-pub(crate) fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
-    parts
-        .headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_owned(), value.to_owned()))
-        })
-        .collect()
+pub(crate) fn header_pairs(headers: &HeaderMap) -> Result<Vec<(String, String)>, YorishiroError> {
+    let mut pairs = Vec::new();
+    for (name, value) in headers {
+        match value.to_str() {
+            Ok(value) => pairs.push((name.as_str().to_owned(), value.to_owned())),
+            Err(_) if name == "x-tenant-id" || name == WORKSPACE_HEADER => {
+                return Err(YorishiroError::ValidationFailed {
+                    message: format!("{name} is not a valid UUID"),
+                    details: Vec::new(),
+                    hint: "send a UUID or omit the header".into(),
+                });
+            }
+            Err(_) => {}
+        }
+    }
+    Ok(pairs)
 }
 
 /// Extracts the bearer credential from an Authorization header.
@@ -69,28 +74,30 @@ pub trait Authenticator: Send + Sync {
     ) -> Result<AuthContext, YorishiroError>;
 }
 
-/// This crate's own rule: a workspace-scoped key resolves to the workspace recorded on it, and a tenant-scoped key resolves the workspace named in the `WORKSPACE_HEADER` request header, or the single workspace it can reach.
+/// This crate's own rule: a workspace-scoped key resolves to the workspace recorded on it, and a tenant-scoped key resolves the workspace named in the `WORKSPACE_HEADER` request header, when present, without selecting a workspace implicitly.
 pub(crate) struct DefaultAuthenticator;
 
 /// Reads the workspace a request asks a tenant-scoped key to act on.
 /// A present-but-unparseable value is a validation error, never "not sent": treating it as absent would send a request meant for one workspace to whichever one the key happens to resolve to.
 fn requested_workspace(headers: &[(String, String)]) -> Result<Option<Uuid>, YorishiroError> {
-    let Some(value) = headers
-        .iter()
-        .find(|(name, _)| name == WORKSPACE_HEADER)
-        .map(|(_, value)| value.trim())
-    else {
-        return Ok(None);
-    };
-    Uuid::parse_str(value)
-        .map(Some)
-        .map_err(|_| YorishiroError::ValidationFailed {
-            message: format!("{WORKSPACE_HEADER} is not a valid UUID"),
-            details: Vec::new(),
-            hint: "send the workspace's UUID, or omit the header to use a \
-                workspace-scoped key"
-                .into(),
-        })
+    let mut requested = None;
+    for (_, value) in headers.iter().filter(|(name, _)| name == WORKSPACE_HEADER) {
+        let workspace =
+            Uuid::parse_str(value.trim()).map_err(|_| YorishiroError::ValidationFailed {
+                message: format!("{WORKSPACE_HEADER} is not a valid UUID"),
+                details: Vec::new(),
+                hint: "send one workspace UUID or omit the header".into(),
+            })?;
+        if requested.is_some_and(|previous| previous != workspace) {
+            return Err(YorishiroError::ValidationFailed {
+                message: format!("conflicting {WORKSPACE_HEADER} values"),
+                details: Vec::new(),
+                hint: "send one workspace UUID".into(),
+            });
+        }
+        requested = Some(workspace);
+    }
+    Ok(requested)
 }
 
 #[async_trait]
@@ -141,7 +148,19 @@ impl<'a> RequestAuth<'a> {
             .shared_store
             .get::<Arc<dyn Authenticator>>()
             .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("Authenticator missing")))?;
-        authenticator.authenticate(self.app, key, headers).await
+        let ctx = authenticator.authenticate(self.app, key, headers).await?;
+        for (_, value) in headers.iter().filter(|(name, _)| name == "x-tenant-id") {
+            let tenant_id =
+                Uuid::parse_str(value.trim()).map_err(|_| YorishiroError::ValidationFailed {
+                    message: "x-tenant-id is not a valid UUID".into(),
+                    details: Vec::new(),
+                    hint: "send the tenant's UUID or omit the header".into(),
+                })?;
+            if tenant_id != ctx.tenant_id {
+                return Err(YorishiroError::Unauthenticated);
+            }
+        }
+        Ok(ctx)
     }
 
     pub(crate) async fn authenticate(
@@ -192,12 +211,13 @@ impl<'a> RequestAuth<'a> {
         ctx: AuthContext,
         write: bool,
     ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
+        let workspace_id = ctx.require_workspace()?;
         // Touch independently: read handlers roll their workspace transaction back on drop.
         Entity::touch_authenticated(self.app, &ctx).await?;
         let txn = if write {
-            crate::db::begin_workspace_write(self.app, ctx.tenant_id, ctx.workspace_id).await?
+            crate::db::begin_workspace_write(self.app, ctx.tenant_id, workspace_id).await?
         } else {
-            crate::db::begin_workspace(self.app, ctx.tenant_id, ctx.workspace_id).await?
+            crate::db::begin_workspace(self.app, ctx.tenant_id, workspace_id).await?
         };
         Ok((ctx, txn))
     }

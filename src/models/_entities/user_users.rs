@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(column_type = "Text", unique)]
-    pub email: String,
+    #[sea_orm(column_type = "Text", nullable, unique)]
+    pub email: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub password_hash: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
@@ -18,6 +18,9 @@ pub struct Model {
     pub oauth_provider: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub oauth_subject_id: Option<String>,
+    pub tenant_id: Option<Uuid>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub user_name: Option<String>,
     pub created_at: DateTimeWithTimeZone,
 }
 
@@ -33,8 +36,16 @@ pub enum Relation {
     TemplateTemplates,
     #[sea_orm(has_many = "super::template_versions::Entity")]
     TemplateVersions,
-    #[sea_orm(has_many = "super::tenant_memberships::Entity")]
+    #[sea_orm(has_one = "super::tenant_memberships::Entity")]
     TenantMemberships,
+    #[sea_orm(
+        belongs_to = "super::tenant_tenants::Entity",
+        from = "Column::TenantId",
+        to = "super::tenant_tenants::Column::Id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    TenantTenants,
     #[sea_orm(has_many = "super::workspace_memberships::Entity")]
     WorkspaceMemberships,
 }
@@ -72,6 +83,12 @@ impl Related<super::template_versions::Entity> for Entity {
 impl Related<super::tenant_memberships::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::TenantMemberships.def()
+    }
+}
+
+impl Related<super::tenant_tenants::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::TenantTenants.def()
     }
 }
 

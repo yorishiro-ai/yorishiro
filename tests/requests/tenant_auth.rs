@@ -30,7 +30,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     .await;
 }
 
-/// A tenant-scoped key (`workspace_id` NULL) names its workspace per request with `X-Workspace-Id`, and without the header it resolves the tenant's single workspace.
+/// Tenant keys need a workspace only for workspace-scoped operations.
 #[tokio::test]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
     if !super::super::require_postgres_backend() {
@@ -72,7 +72,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             plaintext: replacement["full_key"].as_str().unwrap().to_owned(),
         };
 
-        // Without the header the key resolves the tenant's single workspace, so this is a normal authorized request, not a validation error naming the header.
+        // Tenant-level discovery works without selecting a workspace.
         let no_header = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -95,6 +95,27 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             "response: {:?}",
             with_header.text()
         );
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, workspace_id.to_string())
+            .add_header("x-tenant-id", tenant_id.to_string())
+            .await
+            .assert_status(StatusCode::OK);
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, workspace_id.to_string())
+            .add_header("x-tenant-id", uuid::Uuid::new_v4().to_string())
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, workspace_id.to_string())
+            .add_header("x-tenant-id", "invalid")
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
         use sea_orm::EntityTrait;
         let persisted = yorishiro::models::api_keys::Entity::find_by_id(tenant_key.id)
             .one(&identity)
@@ -110,6 +131,24 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .await;
         assert_eq!(missing_target.status_code(), 200);
+        let tenant_identity = missing_target.json::<serde_json::Value>();
+        assert!(tenant_identity["workspace_id"].is_null());
+        assert!(tenant_identity["workspace_access"].is_null());
+        request
+            .get("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        request
+            .get("/api/search?query_text=test")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        request
+            .get("/api/tenants/current")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .await
+            .assert_status(StatusCode::OK);
         let response = request
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -128,7 +167,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
         assert!(!response.text().contains(&tenant_key.plaintext));
         assert!(!response.text().contains("key_hash"));
-        // Over MCP the header and the single-workspace resolution agree on the same identity.
+        // Each MCP call resolves its own headers, including calls in the same session.
         let session = super::mcp::initialize(&request).await;
         for (id, with_header) in [(2u64, true), (3, false)] {
             let mut call = request
@@ -152,10 +191,40 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             let mcp: serde_json::Value =
                 serde_json::from_str(body["result"]["content"][0]["text"].as_str().unwrap())
                     .unwrap();
-            assert_eq!(mcp, identity);
+            assert_eq!(
+                mcp,
+                if with_header {
+                    &identity
+                } else {
+                    &tenant_identity
+                }
+                .clone()
+            );
             assert!(!response.text().contains(&tenant_key.plaintext));
             assert!(!response.text().contains("key_hash"));
         }
+        let response = request
+            .post("/mcp")
+            .add_header("Accept", "application/json, text/event-stream")
+            .add_header("MCP-Session-Id", session.clone())
+            .add_header("MCP-Protocol-Version", "2025-03-26")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .json(&serde_json::json!({"jsonrpc":"2.0", "id":4, "method":"tools/call", "params":{"name":"list_schemas","arguments":{}}}))
+            .await;
+        let body = super::mcp::rpc_body(&response.text());
+        assert_eq!(body["result"]["isError"], true, "{body}");
+        assert!(body.to_string().contains("x-workspace-id"), "{body}");
+        let response = request
+            .post("/mcp")
+            .add_header("Accept", "application/json, text/event-stream")
+            .add_header("MCP-Session-Id", session)
+            .add_header("MCP-Protocol-Version", "2025-03-26")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .json(&serde_json::json!({"jsonrpc":"2.0", "id":5, "method":"tools/call", "params":{"name":"search_entities","arguments":{"query_text":"test"}}}))
+            .await;
+        let body = super::mcp::rpc_body(&response.text());
+        assert_eq!(body["result"]["isError"], true, "{body}");
+        assert!(body.to_string().contains("x-workspace-id"), "{body}");
     })
     .await;
 }
@@ -220,6 +289,17 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let caller = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let foreign = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let membership = yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            foreign.tenant_id,
+            caller.owner_id,
+            yorishiro::models::tenant_memberships::MembershipRole::Viewer,
+        )
+        .await;
+        assert!(matches!(
+            membership,
+            Err(yorishiro::YorishiroError::Conflict { .. })
+        ));
 
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());

@@ -51,9 +51,9 @@ Cleanup terminates the process group, escalates to kill after five seconds, wait
 
 These scenarios cover selected workflows, not the entire advertised MCP surface.
 Successful tool calls are not exhaustive behavioral coverage; cross-tenant acceptance and remaining fault and concurrency cases retain explicit owners outside these SQLite scenarios.
-The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL URL and signed licence, checks successful authenticated invite acceptance, token consumption, membership readback and unchanged original credential selection.
-The required census assigns CE tools to CE suites except `search_entities` and `accept_invite`, whose successful calls belong to the owned provider and licensed PostgreSQL EE suites.
-EE owns all enterprise additions; each edition fails verification if any owned tool lacks a successful attributed call, even when discovery or rejection checks passed.
+The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL URL and signed licence, and checks that authenticated cross-tenant invite acceptance is rejected without consuming the token, adding a membership or changing the original credential selection.
+The required census assigns CE tools to CE suites except `search_entities` and `accept_invite`, which belong to the owned provider and licensed PostgreSQL EE suites.
+EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite`, which requires a rejected call because a valid attributed credential already requires tenant membership.
 This partitions all registered tools without replaying the full CE suite under EE, and does not claim exhaustive behavior coverage.
 Its required GHA job owns a non-superuser PostgreSQL service and its own database; ordinary SQLite suites never inherit that database or licence.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.

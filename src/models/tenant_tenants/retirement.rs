@@ -35,7 +35,7 @@ pub struct RetirementInventory {
     pub relations: u64,
     pub schemas: u64,
     pub templates: u64,
-    /// Identities are always retained, including accounts belonging to no other tenant.
+    /// Root accounts are always retained, including those belonging to no other tenant; users bound to this tenant are deleted with it.
     pub identity_policy: &'static str,
 }
 
@@ -144,7 +144,7 @@ async fn disable_in_transaction(
 }
 
 /// Irreversibly removes a disabled tenant using a trusted operator identity connection.
-/// User identities and durable retirement evidence are always retained.
+/// Root user accounts and durable retirement evidence are retained; users bound to the tenant are deleted with it.
 ///
 /// # Errors
 /// Rejects unconfirmed, active or infrastructure tenants and unresolved external forks.
@@ -155,8 +155,6 @@ pub async fn delete_by_operator(
     confirmed_tenant_id: Uuid,
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::tenant_retirement_events;
-    use crate::models::_entities::workspace_schema_fork_heads;
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, sea_query::Expr};
 
     if tenant_id != confirmed_tenant_id || tenant_id == super::INFRASTRUCTURE_TENANT_ID {
         return Err(YorishiroError::ValidationFailed {
@@ -197,29 +195,41 @@ pub async fn delete_by_operator(
             message: "disable the tenant before irreversible deletion".into(),
         });
     }
-    crate::db::lock_for_update(&txn, "schema-fork-cycle")
+    delete_disabled_in(&txn, tenant_id).await?;
+    txn.commit().await.internal()
+}
+
+/// Deletes a disabled tenant and records the durable evidence inside the caller's transaction.
+async fn delete_disabled_in(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::workspace_schema_fork_heads;
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, sea_query::Expr};
+
+    crate::db::lock_for_update(txn, "schema-fork-cycle")
         .await
         .internal()?;
-    let snapshot = inventory(&txn, tenant_id).await?;
+    let snapshot = inventory(txn, tenant_id).await?;
     if snapshot.external_workspace_forks != 0 {
         return Err(YorishiroError::Conflict {
             message: "external workspace forks must be resolved before tenant deletion".into(),
         });
     }
-    cancel_work(&txn, tenant_id).await?;
+    cancel_work(txn, tenant_id).await?;
     api_keys::Entity::delete_many()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     workspace_schema_fork_heads::Entity::delete_many()
         .filter(workspace_schema_fork_heads::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     workspace_schema_forks::Entity::delete_many()
         .filter(workspace_schema_forks::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     // Break workspace/schema and entity/schema dependencies before workspace cascades run.
@@ -229,31 +239,31 @@ pub async fn delete_by_operator(
             Expr::value(Option::<Uuid>::None),
         )
         .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     entity_entities::Entity::delete_many()
         .filter(entity_entities::Column::WorkspaceId.is_in(snapshot.workspace_ids.clone()))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     queue_job_lifecycles::Entity::delete_many()
         .filter(queue_job_lifecycles::Column::WorkspaceId.is_in(snapshot.workspace_ids))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     template_templates::Entity::delete_many()
         .filter(template_templates::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     workspace_workspaces::Entity::delete_many()
         .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     super::Entity::delete_by_id(tenant_id)
-        .exec(&txn)
+        .exec(txn)
         .await
         .internal()?;
     crate::models::tenant_retirement_events::ActiveModel {
@@ -262,10 +272,10 @@ pub async fn delete_by_operator(
         action: Set("deleted".into()),
         ..Default::default()
     }
-    .insert(&txn)
+    .insert(txn)
     .await
     .internal()?;
-    txn.commit().await.internal()
+    Ok(())
 }
 
 /// Cancels retained background work for an already-disabled tenant.
@@ -485,6 +495,6 @@ pub async fn inventory(
         relations,
         schemas,
         templates,
-        identity_policy: "retain_all_user_accounts",
+        identity_policy: "retain_root_accounts_delete_tenant_users",
     })
 }

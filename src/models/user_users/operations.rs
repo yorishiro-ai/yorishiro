@@ -24,7 +24,12 @@ pub(crate) async fn list_by_operator(
         .internal()
 }
 
-pub(crate) async fn delete_by_operator(
+/// Deletes an account with a trusted operator identity.
+/// Every tenant membership must be removed before deleting the account.
+///
+/// # Errors
+/// Rejects a mismatched confirmation or any remaining tenant membership.
+pub async fn delete_by_operator(
     db: &sea_orm::DatabaseConnection,
     user_id: uuid::Uuid,
     confirmed_user_id: uuid::Uuid,
@@ -43,15 +48,17 @@ pub(crate) async fn delete_by_operator(
         .internal()?
         .ok_or_else(|| YorishiroError::not_found("user not found"))?;
     use crate::models::_entities::tenant_memberships as memberships;
-    if memberships::Entity::find()
+    if let Some(membership) = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))
         .one(&txn)
         .await
         .internal()?
-        .is_some()
     {
         return Err(YorishiroError::Conflict {
-            message: "remove every tenant membership before deleting a global user account".into(),
+            message: format!(
+                "remove the user's membership in tenant {} before deleting the account",
+                membership.tenant_id
+            ),
         });
     }
     // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
@@ -122,6 +129,15 @@ pub async fn create_user(
     password: &str,
     display_name: Option<&str>,
 ) -> Result<Model, YorishiroError> {
+    if password.chars().count() < MIN_TENANT_PASSWORD_CHARS {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!(
+                "password must contain at least {MIN_TENANT_PASSWORD_CHARS} characters"
+            ),
+            details: vec![],
+            hint: "choose a longer password".into(),
+        });
+    }
     let password = password.to_owned();
     let password_hash = tokio::task::spawn_blocking(move || hash::hash_password(&password))
         .await
@@ -129,7 +145,7 @@ pub async fn create_user(
         .internal()?;
 
     let active = ActiveModel {
-        email: ActiveValue::Set(email.to_string()),
+        email: ActiveValue::Set(Some(email.to_string())),
         password_hash: ActiveValue::Set(Some(password_hash)),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
         ..Default::default()
@@ -146,7 +162,7 @@ pub async fn create_user(
     })
 }
 
-/// Verifies an email/password pair against the stored Argon2id hash, returning the matching user on success.
+/// Verifies an email/password pair against the stored Argon2id hash, returning the matching root user on success.
 /// A passwordless account (`password_hash = NULL`) never matches, same as a wrong password: `loco_rs::hash::verify_password` needs a hash to compare against.
 pub(crate) async fn verify_login(
     conn: &impl ConnectionTrait,
@@ -155,14 +171,36 @@ pub(crate) async fn verify_login(
 ) -> Result<Option<Model>, YorishiroError> {
     let user = Entity::find()
         .filter(Column::Email.eq(email))
+        .filter(Column::TenantId.is_null())
         .one(conn)
         .await
         .internal()?;
+    check_password(user, password).await
+}
 
+/// Verifies a tenant-bound user's name and password within one tenant.
+pub(crate) async fn verify_tenant_login(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    user_name: &str,
+    password: &str,
+) -> Result<Option<Model>, YorishiroError> {
+    let user = Entity::find()
+        .filter(Column::TenantId.eq(tenant_id))
+        .filter(Column::UserName.eq(user_name))
+        .one(conn)
+        .await
+        .internal()?;
+    check_password(user, password).await
+}
+
+async fn check_password(
+    user: Option<Model>,
+    password: &str,
+) -> Result<Option<Model>, YorishiroError> {
     let Some(user) = user else {
         return Ok(None);
     };
-
     let Some(password_hash) = user.password_hash.clone() else {
         return Ok(None);
     };
@@ -171,9 +209,109 @@ pub(crate) async fn verify_login(
         tokio::task::spawn_blocking(move || hash::verify_password(&password, &password_hash))
             .await
             .internal()?;
-
     Ok(matches.then_some(user))
 }
+
+const MIN_TENANT_PASSWORD_CHARS: usize = 12;
+const MAX_USER_NAME_CHARS: usize = 64;
+
+fn validate_tenant_credentials(user_name: &str, password: &str) -> Result<(), YorishiroError> {
+    if user_name.is_empty()
+        || user_name.chars().count() > MAX_USER_NAME_CHARS
+        || !user_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "user_name must contain 1 to {MAX_USER_NAME_CHARS} letters, digits, '.', '_' or '-'"
+            ),
+        });
+    }
+    if password.chars().count() < MIN_TENANT_PASSWORD_CHARS {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "password must contain at least {MIN_TENANT_PASSWORD_CHARS} characters"
+            ),
+        });
+    }
+    Ok(())
+}
+
+async fn hash_blocking(password: &str) -> Result<String, YorishiroError> {
+    let password = password.to_owned();
+    tokio::task::spawn_blocking(move || hash::hash_password(&password))
+        .await
+        .internal()?
+        .internal()
+}
+
+/// Creates a user bound to one tenant, identified by `user_name` within it.
+/// Creates the user row only; the caller adds the membership in the same transaction.
+///
+/// # Errors
+/// Rejects an invalid name or password and a name already used in the tenant.
+pub(crate) async fn create_tenant_user(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    user_name: &str,
+    password: &str,
+    display_name: Option<&str>,
+) -> Result<Model, YorishiroError> {
+    validate_tenant_credentials(user_name, password)?;
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(Some(tenant_id)),
+        user_name: ActiveValue::Set(Some(user_name.to_string())),
+        password_hash: ActiveValue::Set(Some(hash_blocking(password).await?)),
+        display_name: ActiveValue::Set(display_name.map(str::to_string)),
+        ..Default::default()
+    };
+    active.insert(conn).await.map_err(|err| {
+        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
+            YorishiroError::Conflict {
+                message: format!("a user named '{user_name}' already exists in this tenant"),
+            }
+        } else {
+            YorishiroError::Internal(err.into())
+        }
+    })
+}
+
+/// Replaces a tenant-bound user's password and revokes every key issued to them.
+///
+/// # Errors
+/// Rejects a weak password and users that are not bound to `tenant_id`.
+pub(crate) async fn reset_tenant_password(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    password: &str,
+) -> Result<(), YorishiroError> {
+    if password.chars().count() < MIN_TENANT_PASSWORD_CHARS {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "password must contain at least {MIN_TENANT_PASSWORD_CHARS} characters"
+            ),
+        });
+    }
+    let user = Entity::find_by_id(user_id)
+        .filter(Column::TenantId.eq(tenant_id))
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("tenant user not found"))?;
+    let mut active: ActiveModel = user.into();
+    active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
+    active.update(conn).await.internal()?;
+    crate::models::api_keys::Entity::revoke_matching(
+        conn,
+        Condition::all()
+            .add(crate::models::_entities::api_keys::Column::TenantId.eq(tenant_id))
+            .add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+    )
+    .await
+}
+
 /// Looks up a user by email, for `POST /api/members` (which attaches an *existing* account by email, never creates one).
 pub(crate) async fn get_user_by_email(
     conn: &impl ConnectionTrait,

@@ -19,11 +19,11 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
 
     crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let key = api_keys::Entity::create_api_key(
-            &ctx.db, target.workspace_id, api_keys::ApiKeyScope::Read, Some(target.owner_id), false,
+        let key = api_keys::Entity::create_tenant_api_key(
+            &ctx.db, target.tenant_id, api_keys::ApiKeyScope::Read, Some(target.owner_id), false, "retirement-owner",
         ).await.unwrap();
         let actor = api_keys::AuthContext {
-            api_key_id: key.id, workspace_id: target.workspace_id, tenant_id: target.tenant_id,
+            api_key_id: key.id, workspace_id: None, tenant_id: target.tenant_id,
             user_id: Some(target.owner_id), scope: api_keys::ApiKeyScope::Read, audit: false,
         };
         let job_id = uuid::Uuid::now_v7();
@@ -74,27 +74,36 @@ async fn confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence(
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let key = api_keys::Entity::create_api_key(
+        let key = api_keys::Entity::create_tenant_api_key(
             &ctx.db,
-            target.workspace_id,
+            target.tenant_id,
             api_keys::ApiKeyScope::Read,
             Some(target.owner_id),
             false,
+            "retirement-owner",
         )
         .await
         .unwrap();
         let actor = api_keys::AuthContext {
             api_key_id: key.id,
-            workspace_id: target.workspace_id,
+            workspace_id: None,
             tenant_id: target.tenant_id,
             user_id: Some(target.owner_id),
             scope: api_keys::ApiKeyScope::Read,
             audit: false,
         };
+        let second_owner = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &crate::requests::fixtures::unique_email("retirement-second-owner"),
+            "test-password",
+            None,
+        )
+        .await
+        .unwrap();
         tenant_memberships::add_member(
             &ctx.db,
             target.tenant_id,
-            other.owner_id,
+            second_owner.id,
             MembershipRole::Owner,
         )
         .await
@@ -416,26 +425,28 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
-async fn retirement_inventory_counts_shared_accounts_without_exposing_them() {
+async fn retirement_inventory_does_not_expose_accounts() {
     if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            second.tenant_id,
-            first.owner_id,
-            yorishiro::models::tenant_memberships::MembershipRole::Viewer,
-        )
-        .await
-        .unwrap();
+        assert!(
+            yorishiro::models::tenant_memberships::add_member(
+                &ctx.db,
+                second.tenant_id,
+                first.owner_id,
+                yorishiro::models::tenant_memberships::MembershipRole::Viewer,
+            )
+            .await
+            .is_err()
+        );
         for tenant in [&first, &second] {
             let inventory = retirement::inventory(&ctx.db, tenant.tenant_id)
                 .await
                 .unwrap();
-            assert_eq!(inventory.shared_user_accounts, 1);
+            assert_eq!(inventory.shared_user_accounts, 0);
             assert_eq!(inventory.external_workspace_forks, 0);
             let body = serde_json::to_value(inventory).unwrap();
             assert!(!body.to_string().contains(&first.owner_id.to_string()));
@@ -537,7 +548,10 @@ async fn retirement_inventory_is_read_only_and_target_specific() {
         assert!(before.workspace_ids.contains(&tenant.workspace_id));
         assert!(before.memberships > 0);
         assert!(before.api_keys > 0);
-        assert_eq!(before.identity_policy, "retain_all_user_accounts");
+        assert_eq!(
+            before.identity_policy,
+            "retain_root_accounts_delete_tenant_users"
+        );
         let serialized = serde_json::to_value(&before).unwrap();
         assert!(!serialized.to_string().contains(&tenant.api_key));
         assert!(!serialized.to_string().contains("key_hash"));

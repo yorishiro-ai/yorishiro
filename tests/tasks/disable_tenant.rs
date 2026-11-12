@@ -108,7 +108,7 @@ async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
 }
 
 #[tokio::test]
-async fn irreversible_cleanup_requires_disablement_and_preserves_shared_identities() {
+async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities() {
     if !crate::require_postgres_backend() {
         return;
     }
@@ -118,14 +118,16 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_shared_identiti
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        tenant_memberships::add_member(
-            &ctx.db,
-            other.tenant_id,
-            target.owner_id,
-            MembershipRole::Viewer,
-        )
-        .await
-        .unwrap();
+        assert!(
+            tenant_memberships::add_member(
+                &ctx.db,
+                other.tenant_id,
+                target.owner_id,
+                MembershipRole::Viewer,
+            )
+            .await
+            .is_err()
+        );
         assert!(
             retirement::delete_by_operator(&ctx.db, target.tenant_id, other.tenant_id)
                 .await
@@ -165,16 +167,14 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_shared_identiti
                 .unwrap()
                 .is_some()
         );
-        assert_eq!(
+        assert!(
             tenant_memberships::Entity::find()
                 .filter(MembershipColumn::TenantId.eq(other.tenant_id))
                 .filter(MembershipColumn::UserId.eq(target.owner_id))
                 .one(&ctx.db)
                 .await
                 .unwrap()
-                .unwrap()
-                .role,
-            "viewer"
+                .is_none()
         );
         let events = tenant_retirement_events::Entity::find()
             .filter(Column::TenantId.eq(target.tenant_id))
@@ -285,6 +285,121 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(axum::http::StatusCode::OK);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    use yorishiro::models::api_keys::ApiKeyScope;
+    use yorishiro::models::tenant_memberships::{self, MembershipRole};
+    use yorishiro::models::{tenant_tenants::retirement, user_users};
+
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let target = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let other = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let created = request.post("/api/members/users")
+            .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password","role":"member"})).await;
+        created.assert_status(axum::http::StatusCode::CREATED);
+        let tenant_user_id: uuid::Uuid = created.json::<serde_json::Value>()["user_id"].as_str().unwrap().parse().unwrap();
+
+        // An enabled tenant protects its owner.
+        assert!(
+            user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id)
+                .await
+                .is_err()
+        );
+        retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
+            .await
+            .unwrap();
+
+        // A member of another tenant cannot also join the retiring tenant.
+        let guest = user_users::create_user(
+            &ctx.db,
+            &crate::requests::fixtures::unique_email("retiring-guest"),
+            "guest-password",
+            None,
+        )
+        .await
+        .unwrap();
+        tenant_memberships::add_member(&ctx.db, other.tenant_id, guest.id, MembershipRole::Member)
+            .await
+            .unwrap();
+        assert!(tenant_memberships::add_member(&ctx.db, target.tenant_id, guest.id, MembershipRole::Member)
+            .await.is_err());
+        assert!(
+            user_users::delete_by_operator(&ctx.db, guest.id, guest.id)
+                .await
+                .is_err()
+        );
+        assert!(
+            tenant_tenants::Entity::find_by_id(target.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        assert!(user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id).await.is_err());
+        retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
+            .await
+            .unwrap();
+        assert!(
+            tenant_tenants::Entity::find_by_id(target.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            user_users::Entity::find_by_id(tenant_user_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            user_users::Entity::find_by_id(target.owner_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        // Root accounts that only held a membership survive the tenant's deletion; the other tenant is untouched.
+        assert!(
+            user_users::Entity::find_by_id(guest.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            tenant_tenants::Entity::find_by_id(other.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
     })
     .await;
 }

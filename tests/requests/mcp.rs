@@ -19,6 +19,7 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
         let definition = json!({"name":"workspace-fork", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
         let txn = ctx.db.begin().await.unwrap();
@@ -35,7 +36,7 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
             fork_schema_id: Set(target.id), customized: Set(false), ..Default::default()
         }.insert(&txn).await.unwrap();
         txn.commit().await.unwrap();
-        let denied = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+        let denied = mcp_call(&request, &session, &tenant_admin_key, 2, "tools/call",
             json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
         assert_eq!(denied["result"]["isError"], true);
         assert!(denied.to_string().contains("schema forks"), "{denied}");
@@ -44,7 +45,7 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
             .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
         fork.delete(&ctx.db).await.unwrap();
         let destination_key = issue_api_key(&ctx, destination.id, tenant.owner_id, ApiKeyScope::Read, false).await;
-        let deleted = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+        let deleted = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
         request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
@@ -58,11 +59,13 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
 async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
         let overview = mcp_call(
             &request,
             &session,
-            &tenant.api_key,
+            &tenant_admin_key,
             2,
             "tools/call",
             json!({"name":"get_tenant_overview","arguments":{}}),
@@ -71,7 +74,7 @@ async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
         let overview = tool_result_json(&overview);
         let rest = request
             .get("/api/tenant/overview")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         rest.assert_status_ok();
         assert_eq!(overview, rest.json::<Value>());
@@ -110,14 +113,15 @@ async fn invite_acceptance_rejects_service_identity_and_duplicate_membership() {
         use sea_orm::EntityTrait;
         use yorishiro::models::{api_keys, user_users};
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
         let owner = user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap();
-        let created = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
+        let created = mcp_call(&request, &session, &tenant_admin_key, 2, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
         let invite = tool_result_json(&created);
         let service = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false).await.unwrap();
         let denied = mcp_call(&request, &session, &service.plaintext, 3, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
         assert_eq!(denied["result"]["isError"], true);
-        let duplicate = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
+        let duplicate = mcp_call(&request, &session, &tenant_admin_key, 4, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
         assert_eq!(duplicate["result"]["isError"], true);
     }).await;
 }
@@ -135,14 +139,13 @@ async fn cross_tenant_invite_acceptance_uses_current_human_identity_without_reta
         let owner = user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap();
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(tenant.tenant_id, target.tenant_id);
-        let created = mcp_call(&request, &session, &target.api_key, 5, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
+        let target_admin = super::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
+        let created = mcp_call(&request, &session, &target_admin, 5, "tools/call", json!({"name":"create_invite","arguments":{"email":owner.email,"role":"member","expires_at":Utc::now()+chrono::Duration::hours(1)}})).await;
         let invite = tool_result_json(&created);
         let wrong = mcp_call(&request, &session, &target.api_key, 6, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
         assert_eq!(wrong["result"]["isError"], true);
         let accepted = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
-        let accepted = tool_result_json(&accepted);
-        assert_eq!(accepted["user_id"], json!(tenant.owner_id));
-        assert_eq!(accepted["tenant_id"], json!(target.tenant_id));
+        assert_eq!(accepted["result"]["isError"], true);
         let replay = mcp_call(&request, &session, &tenant.api_key, 9, "tools/call", json!({"name":"accept_invite","arguments":{"invite_token":invite["token"]}})).await;
         assert_eq!(replay["result"]["isError"], true);
         let identity = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"whoami","arguments":{}})).await;
@@ -154,11 +157,12 @@ async fn cross_tenant_invite_acceptance_uses_current_human_identity_without_reta
 async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
         let source = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"template_id":"task-management"})).await;
         source.assert_status(StatusCode::CREATED);
         let source: Value = source.json();
-        let target = request.post("/api/workspaces").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"name":"fork target"})).await;
+        let target = request.post("/api/workspaces").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).json(&json!({"name":"fork target"})).await;
         target.assert_status(StatusCode::CREATED);
         let target: Value = target.json();
         let workspace_id = target["id"].as_str().unwrap().parse().unwrap();
@@ -871,23 +875,24 @@ pub(super) fn tool_result_json(response: &Value) -> Value {
 async fn tenant_metadata_tools_match_rest_and_keep_updates_atomic() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
-        let updated = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"update_tenant","arguments":{"name":" managed tenant ","replace_max_workspaces":true,"max_workspaces":0}})).await;
+        let updated = mcp_call(&request, &session, &tenant_admin_key, 2, "tools/call", json!({"name":"update_tenant","arguments":{"name":" managed tenant ","replace_max_workspaces":true,"max_workspaces":0}})).await;
         let record = tool_result_json(&updated);
         assert_eq!(record["name"], "managed tenant");
         assert_eq!(record["max_workspaces"], 0);
-        let rest = request.get("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        let rest = request.get("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await;
         rest.assert_status_ok();
         assert_eq!(record, rest.json::<Value>());
-        let blocked = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"create_workspace","arguments":{"name":"blocked"}})).await;
+        let blocked = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call", json!({"name":"create_workspace","arguments":{"name":"blocked"}})).await;
         assert_eq!(blocked["result"]["isError"], true);
         for arguments in [json!({"name":"rollback","replace_max_workspaces":true,"max_workspaces":-1}), json!({"name":"rollback","max_workspaces":5}), json!({"name":" "})] {
-            let invalid = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call", json!({"name":"update_tenant","arguments":arguments})).await;
+            let invalid = mcp_call(&request, &session, &tenant_admin_key, 4, "tools/call", json!({"name":"update_tenant","arguments":arguments})).await;
             assert_eq!(invalid["result"]["isError"], true);
         }
-        let detail = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"get_tenant","arguments":{}})).await;
+        let detail = mcp_call(&request, &session, &tenant_admin_key, 5, "tools/call", json!({"name":"get_tenant","arguments":{}})).await;
         assert_eq!(tool_result_json(&detail), record);
-        let cleared = request.put("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"replace_max_workspaces":true,"max_workspaces":null})).await;
+        let cleared = request.put("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).json(&json!({"replace_max_workspaces":true,"max_workspaces":null})).await;
         cleared.assert_status_ok();
         assert!(cleared.json::<Value>()["max_workspaces"].is_null());
         let user = yorishiro::models::user_users::create_user(&ctx.db, &super::fixtures::unique_email("tenant-viewer"), "test-password", None).await.unwrap();
@@ -1133,6 +1138,40 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
+        use axum::http::HeaderValue;
+        for header in ["x-tenant-id", "x-workspace-id"] {
+            let invalid = HeaderValue::from_bytes(b"\xff").unwrap();
+            let rest = request.get("/api/whoami")
+                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .add_header(header, invalid.clone()).await;
+            assert_eq!(rest.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+
+            #[cfg(feature = "enterprise")]
+            request.get("/api/schemas/upstream-changes")
+                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .add_header(header, invalid.clone()).await
+                .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+
+            for (id, tool) in [(2, "whoami"), (3, "list_schemas"), (4, "list_audit_log")] {
+                let response = request.post("/mcp")
+                    .add_header("Accept", "application/json, text/event-stream")
+                    .add_header("MCP-Session-Id", session.clone())
+                    .add_header("MCP-Protocol-Version", "2025-03-26")
+                    .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                    .add_header(header, invalid.clone())
+                    .json(&json!({"jsonrpc":"2.0", "id":id, "method":"tools/call", "params":{"name":tool,"arguments":{}}}))
+                    .await;
+                let body = rpc_body(&response.text());
+                assert_eq!(body["error"]["code"], -32602, "{body}");
+                assert!(body["error"]["message"].as_str().unwrap().contains(header));
+            }
+        }
+        let tenant_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let missing = mcp_call(&request, &session, &tenant_key, 20, "tools/call", json!({"name":"list_schemas","arguments":{}})).await;
+        assert_eq!(missing["result"]["isError"], true);
+        assert!(missing.to_string().contains("x-workspace-id"));
+        let tenant_detail = mcp_call(&request, &session, &tenant.api_key, 21, "tools/call", json!({"name":"get_tenant","arguments":{}})).await;
+        assert_ne!(tenant_detail["result"]["isError"], true);
         let detail = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"get_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
         let rest = request.get(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
         assert_eq!(tool_result_json(&detail),rest.json::<Value>());
@@ -1154,7 +1193,11 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
         let list = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"list_workspaces","arguments":{}})).await;
         let rest = request.get("/api/workspaces").add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
         assert_eq!(tool_result_json(&list),rest.json::<Value>());
-        let deleted = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"delete_workspace","arguments":{"workspace_id":second}})).await;
+        let denied = mcp_call(&request, &session, &tenant.api_key, 8, "tools/call", json!({"name":"delete_workspace","arguments":{"workspace_id":second}})).await;
+        assert_eq!(denied["result"]["isError"],true);
+        let targeted = mcp_call(&request, &session, &tenant_key, 9, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":second,"name":"targeted"}})).await;
+        assert_eq!(tool_result_json(&targeted)["name"], "targeted");
+        let deleted = mcp_call(&request, &session, &tenant_key, 10, "tools/call", json!({"name":"delete_workspace","arguments":{"workspace_id":second}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"],true);
     }).await;
 }
@@ -1163,17 +1206,18 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
 async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
-        let created = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+        let created = mcp_call(&request, &session, &tenant_admin_key, 2, "tools/call",
             json!({"name":"create_template_library_item","arguments":{"name":format!("mcp-template-{}",Uuid::now_v7()),"definition":{"name":"note","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}}}})).await;
         let created = tool_result_json(&created);
         let id = created["id"].as_str().unwrap();
-        let updated = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+        let updated = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"update_template_library_item","arguments":{"id":id,"description":"updated through MCP"}})).await;
-        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant.api_key)).await;
+        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant_admin_key)).await;
         rest.assert_status_ok();
         assert_eq!(tool_result_json(&updated), rest.json::<Value>());
-        let fork = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call",
+        let fork = mcp_call(&request, &session, &tenant_admin_key, 4, "tools/call",
             json!({"name":"fork_template_library_item","arguments":{"id":id,"name":format!("fork-{}",Uuid::now_v7())}})).await;
         let fork = tool_result_json(&fork);
         assert_ne!(fork["id"], created["id"]);
@@ -1181,12 +1225,12 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
         let denied = mcp_call(&request, &session, &service.plaintext, 5, "tools/call",
             json!({"name":"delete_template_library_item","arguments":{"id":id}})).await;
         assert_eq!(denied["result"]["isError"], true);
-        let deleted = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call",
+        let deleted = mcp_call(&request, &session, &tenant_admin_key, 6, "tools/call",
             json!({"name":"delete_template_library_item","arguments":{"id":id}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
-        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant.api_key)).await;
+        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant_admin_key)).await;
         rest.assert_status(StatusCode::NOT_FOUND);
-        let rest = request.get(&format!("/api/template-library/{}",fork["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {}",tenant.api_key)).await;
+        let rest = request.get(&format!("/api/template-library/{}",fork["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {}",tenant_admin_key)).await;
         rest.assert_status_ok();
     }).await;
 }
@@ -1195,11 +1239,13 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
 async fn tenant_retirement_tools_require_confirmation_and_revoke_the_caller() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
         let inventory = mcp_call(
             &request,
             &session,
-            &tenant.api_key,
+            &tenant_admin_key,
             2,
             "tools/call",
             json!({"name":"tenant_retirement_inventory","arguments":{}}),
@@ -1207,14 +1253,14 @@ async fn tenant_retirement_tools_require_confirmation_and_revoke_the_caller() {
         .await;
         let rest = request
             .get("/api/tenants/current/retirement")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         rest.assert_status_ok();
         assert_eq!(tool_result_json(&inventory), rest.json::<Value>());
         let wrong = mcp_call(
             &request,
             &session,
-            &tenant.api_key,
+            &tenant_admin_key,
             3,
             "tools/call",
             json!({"name":"disable_tenant","arguments":{"confirmed_tenant_id":Uuid::now_v7()}}),
@@ -1224,7 +1270,7 @@ async fn tenant_retirement_tools_require_confirmation_and_revoke_the_caller() {
         let disabled = mcp_call(
             &request,
             &session,
-            &tenant.api_key,
+            &tenant_admin_key,
             4,
             "tools/call",
             json!({"name":"disable_tenant","arguments":{"confirmed_tenant_id":tenant.tenant_id}}),
@@ -1233,7 +1279,7 @@ async fn tenant_retirement_tools_require_confirmation_and_revoke_the_caller() {
         assert_eq!(tool_result_json(&disabled)["disabled"], true);
         let revoked = request
             .get("/api/whoami")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         revoked.assert_status(StatusCode::UNAUTHORIZED);
     })
@@ -1244,28 +1290,29 @@ async fn tenant_retirement_tools_require_confirmation_and_revoke_the_caller() {
 async fn tenant_invitation_tools_rotate_tokens_and_match_rest_inventory() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let session = initialize(&request).await;
         let email = super::fixtures::unique_email("mcp-invite");
         let expires_at = Utc::now() + chrono::Duration::hours(1);
-        let created = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
+        let created = mcp_call(&request, &session, &tenant_admin_key, 2, "tools/call",
             json!({"name":"create_invite","arguments":{"email":email,"role":"member","expires_at":expires_at}})).await;
         let created = tool_result_json(&created);
         let id = created["id"].as_str().unwrap();
         assert_eq!(created["email"], email);
         assert!(!created["token"].as_str().unwrap().is_empty());
-        let listed = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+        let listed = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"list_invites","arguments":{}})).await;
-        let rest = request.get("/api/members/invites").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        let rest = request.get("/api/members/invites").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await;
         rest.assert_status_ok();
         assert_eq!(tool_result_json(&listed), rest.json::<Value>());
         assert!(!listed.to_string().contains(created["token"].as_str().unwrap()));
-        let reissued = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call",
+        let reissued = mcp_call(&request, &session, &tenant_admin_key, 4, "tools/call",
             json!({"name":"reissue_invite","arguments":{"invite_id":id,"expires_at":expires_at}})).await;
         let reissued = tool_result_json(&reissued);
         assert_ne!(created["token"], reissued["token"]);
         let old = request.post("/auth/invites/accept").json(&json!({"invite_token":created["token"],"email":email,"password":"test-password"})).await;
         assert!(!old.status_code().is_success());
-        let revoked = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call",
+        let revoked = mcp_call(&request, &session, &tenant_admin_key, 5, "tools/call",
             json!({"name":"revoke_invite","arguments":{"invite_id":id}})).await;
         assert_eq!(tool_result_json(&revoked)["revoked"], true);
         let cancelled = request.post("/auth/invites/accept").json(&json!({"invite_token":reissued["token"],"email":email,"password":"test-password"})).await;
@@ -1291,19 +1338,26 @@ async fn tenant_membership_management_matches_rest_and_protects_owners() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("mcp-managed"), "test-password", None).await.unwrap();
         let session = initialize(&request).await;
-        let set = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call",
-            json!({"name":"set_member_role","arguments":{"user_id":user.id,"role":"viewer"}})).await;
-        assert_eq!(tool_result_json(&set)["role"], "viewer");
-        let listed = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call",
+        let set = mcp_call(&request, &session, &tenant_admin_key, 2, "tools/call",
+            json!({"name":"set_member_role","arguments":{"user_id":user.id,"role":"member"}})).await;
+        assert_eq!(tool_result_json(&set)["role"], "member");
+        let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
+            &ctx.db, tenant.tenant_id, ApiKeyScope::Write, Some(user.id), false, "role-preview",
+        ).await.unwrap();
+        let listed = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"list_members","arguments":{}})).await;
-        let rest = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+        let rest = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await;
         rest.assert_status_ok();
         assert_eq!(tool_result_json(&listed), rest.json::<Value>());
-        let preview = mcp_call(&request, &session, &tenant.api_key, 4, "tools/call",
-            json!({"name":"preview_member_role_change","arguments":{"user_id":user.id,"role":"member"}})).await;
-        assert_eq!(tool_result_json(&preview)["requested_role"], "member");
+        let preview = mcp_call(&request, &session, &tenant_admin_key, 4, "tools/call",
+            json!({"name":"preview_member_role_change","arguments":{"user_id":user.id,"role":"viewer"}})).await;
+        let preview = tool_result_json(&preview);
+        assert_eq!(preview["requested_role"], "viewer");
+        assert!(preview["keys"].as_array().unwrap().iter().any(|key|
+            key["api_key_id"] == tenant_key.id.to_string() && key["effective_scope"] == "read"));
 
         super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id,
             yorishiro::models::workspace_memberships::WorkspaceRole::Viewer).await;
@@ -1317,23 +1371,23 @@ async fn tenant_membership_management_matches_rest_and_protects_owners() {
             let denied = mcp_call(&request, &session, &viewer_key, id, "tools/call", json!({"name":name,"arguments":args})).await;
             assert_eq!(denied["result"]["isError"], true, "{denied}");
         }
-        let preview = mcp_call(&request, &session, &tenant.api_key, 9, "tools/call",
+        let preview = mcp_call(&request, &session, &tenant_admin_key, 9, "tools/call",
             json!({"name":"preview_member_removal","arguments":{"user_id":tenant.owner_id}})).await;
         assert_eq!(tool_result_json(&preview)["blocked_by_last_owner"], true);
-        let protected = mcp_call(&request, &session, &tenant.api_key, 10, "tools/call",
+        let protected = mcp_call(&request, &session, &tenant_admin_key, 10, "tools/call",
             json!({"name":"remove_member","arguments":{"user_id":tenant.owner_id}})).await;
         assert_eq!(protected["result"]["isError"], true);
-        let removed = mcp_call(&request, &session, &tenant.api_key, 11, "tools/call",
+        let removed = mcp_call(&request, &session, &tenant_admin_key, 11, "tools/call",
             json!({"name":"remove_member","arguments":{"user_id":user.id}})).await;
         assert_eq!(tool_result_json(&removed)["removed"], true);
         assert!(user_users::Entity::find_by_id(user.id).one(&ctx.db).await.unwrap().is_some());
         let revoked = request.get("/api/whoami").add_header("Authorization", format!("Bearer {viewer_key}")).await;
         revoked.assert_status(StatusCode::UNAUTHORIZED);
-        let members = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.json::<Value>();
+        let members = request.get("/api/members").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await.json::<Value>();
         assert!(!members.as_array().unwrap().iter().any(|member| member["user_id"] == user.id.to_string()));
         // Re-add the existing identity before exercising the atomic ownership transition.
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Member).await.unwrap();
-        let transferred = mcp_call(&request, &session, &tenant.api_key, 12, "tools/call",
+        let transferred = mcp_call(&request, &session, &tenant_admin_key, 12, "tools/call",
             json!({"name":"transfer_ownership","arguments":{"successor_user_id":user.id}})).await;
         assert_eq!(tool_result_json(&transferred)["transferred"], true);
     }).await;
@@ -1599,13 +1653,13 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
             .await
             .assert_status(StatusCode::NOT_FOUND);
         let login = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&json!({"email":user.email,"password":"hunter2-hunter2"}))
             .await;
         assert_eq!(login.status_code(), StatusCode::OK, "{}", login.text());
         assert_eq!(
-            login.json::<Value>()["workspace_id"],
-            candidates[0]["workspace_id"]
+            login.json::<Value>()["tenant_id"],
+            tenant.tenant_id.to_string()
         );
         let identity = mcp_call(
             &request,
@@ -2960,6 +3014,149 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
                 .is_some_and(|text| text.contains("HTTP 503"))
         );
         assert!(!failed.to_string().contains("private upstream diagnostic"));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let user_name = format!("mcp-member-{}", uuid::Uuid::new_v4());
+        let auth = format!("Bearer {}", tenant_admin_key);
+        let created = request
+            .post("/api/members/users")
+            .add_header("Authorization", &auth)
+            .json(&json!({"user_name":user_name,"password":"tenant-user-password","role":"admin"}))
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let user_id = created.json::<Value>()["user_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let session = initialize(&request).await;
+
+        // Listing shows the name and no email; the role cannot become owner through any tool.
+        let listed = mcp_call(
+            &request,
+            &session,
+            &tenant_admin_key,
+            2,
+            "tools/call",
+            json!({"name":"list_members","arguments":{}}),
+        )
+        .await;
+        let member = tool_result_json(&listed)
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["user_name"] == user_name)
+            .cloned()
+            .expect("tenant user listed");
+        assert!(member["email"].is_null());
+        for (id, name, args) in [
+            (
+                3,
+                "set_member_role",
+                json!({"user_id":user_id,"role":"owner"}),
+            ),
+            (
+                4,
+                "transfer_ownership",
+                json!({"successor_user_id":user_id}),
+            ),
+        ] {
+            let refused = mcp_call(
+                &request,
+                &session,
+                &tenant_admin_key,
+                id,
+                "tools/call",
+                json!({"name":name,"arguments":args}),
+            )
+            .await;
+            assert_eq!(refused["result"]["isError"], true, "{refused}");
+        }
+
+        // The tenant user's own key reads its tenant-bound profile.
+        let login = request
+            .post("/auth/tenant/login")
+            .add_header("x-tenant-id", tenant.tenant_id.to_string())
+            .json(&json!({"user_name":user_name,"password":"tenant-user-password"}))
+            .await;
+        login.assert_status_ok();
+        let own_key = login.json::<Value>()["api_key"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let profile = mcp_call(
+            &request,
+            &session,
+            &own_key,
+            5,
+            "tools/call",
+            json!({"name":"get_current_user","arguments":{}}),
+        )
+        .await;
+        let profile = tool_result_json(&profile);
+        assert_eq!(profile["user_name"], user_name);
+        assert!(profile["email"].is_null());
+
+        // Removing the membership removes the account.
+        let removed = mcp_call(
+            &request,
+            &session,
+            &tenant_admin_key,
+            6,
+            "tools/call",
+            json!({"name":"remove_member","arguments":{"user_id":user_id}}),
+        )
+        .await;
+        assert_eq!(tool_result_json(&removed)["removed"], true);
+        request
+            .post("/auth/tenant/login")
+            .add_header("x-tenant-id", tenant.tenant_id.to_string())
+            .json(&json!({"user_name":user_name,"password":"tenant-user-password"}))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mcp_tenant_users_cannot_join_another_tenant() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user_name = format!("stay-home-{}", uuid::Uuid::new_v4());
+        let auth = format!("Bearer {}", tenant.api_key);
+        let session = initialize(&request).await;
+        // A tenant user belongs to its own tenant only.
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let created = request
+            .post("/api/members/users")
+            .add_header("Authorization", &auth)
+            .json(&json!({"user_name":user_name,"password":"tenant-user-password","role":"member"}))
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let home_user = created.json::<Value>()["user_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let joined = mcp_call(
+            &request,
+            &session,
+            &other.api_key,
+            7,
+            "tools/call",
+            json!({"name":"set_member_role","arguments":{"user_id":home_user,"role":"member"}}),
+        )
+        .await;
+        assert_eq!(joined["result"]["isError"], true, "{joined}");
     })
     .await;
 }

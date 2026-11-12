@@ -120,7 +120,7 @@ impl YorishiroMcpServer {
 
         let input = args.into();
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let created_by = authorized.auth_context().user_id;
         let quotas =
             match crate::quotas(self.app_context(), authorized.auth_context().tenant_id).await {
@@ -172,7 +172,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let record = match entity_entities::get(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -198,7 +198,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let updated_by = authorized.auth_context().user_id;
         let record = match entity_entities::update(
             authorized.txn(),
@@ -247,7 +247,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         match entity_entities::delete(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -279,7 +279,7 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let records = match entity_entities::list(authorized.txn(), workspace_id, query).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -311,7 +311,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let drift = match entity_entities::drift(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -344,7 +344,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let report =
             match entity_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name)
                 .await
@@ -414,7 +414,7 @@ impl YorishiroMcpServer {
         };
         match crate::models::queue_job_lifecycles::migration_job_status(
             authorized.txn(),
-            authorized.auth_context().workspace_id,
+            authorized.workspace_id(),
             args.job_id,
         )
         .await

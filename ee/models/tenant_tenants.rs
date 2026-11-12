@@ -60,8 +60,7 @@ pub(crate) async fn overview_as(
     use crate::edition::ee::models::{tenant_billing, tenant_tenants};
     use crate::models::tenant_memberships;
     let current = crate::models::api_keys::Model::current_context(&ctx.db, actor).await?;
-    crate::models::access::require_tenant_admin(&ctx.db, current.tenant_id, current.user_id)
-        .await?;
+    crate::models::access::require_tenant_admin_as(&ctx.db, &current).await?;
     let tenant_id = current.tenant_id;
     let tenant = crate::models::tenant_tenants::Model::find_by_id(&ctx.db, tenant_id).await?;
     let billing = tenant_billing::get_billing(&ctx.db, tenant_id).await?;

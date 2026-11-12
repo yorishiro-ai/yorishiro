@@ -46,7 +46,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let query = recall::RecallQuery {
             limit: args.limit.unwrap_or(DEFAULT_RECALL_LIMIT),
             full: args.full.unwrap_or(false),

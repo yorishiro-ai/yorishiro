@@ -170,16 +170,16 @@ pub(crate) async fn enqueue_requested(
     api_key_audit_log::record(
         txn,
         AuditActor {
-            workspace_id: actor.workspace_id,
+            workspace_id: actor.require_workspace()?,
             tenant_id: actor.tenant_id,
             api_key_id: actor.api_key_id,
             user_id: actor.user_id,
         },
         AuditAction::ReindexEmbeddings,
-        serde_json::json!({"workspace_id":actor.workspace_id}),
+        serde_json::json!({"workspace_id":actor.require_workspace()?}),
     )
     .await?;
-    enqueue_reindex(ctx, actor.workspace_id, Some(txn))
+    enqueue_reindex(ctx, actor.require_workspace()?, Some(txn))
         .await
         .internal()
 }

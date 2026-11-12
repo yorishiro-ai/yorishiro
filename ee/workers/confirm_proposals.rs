@@ -107,17 +107,18 @@ pub(crate) async fn enqueue(
 ) -> Result<Uuid, YorishiroError> {
     crate::edition::ee::models::inference_proposals::require_completed_job(
         txn,
-        auth.workspace_id,
+        auth.require_workspace()?,
         inference_job_id,
     )
     .await?;
-    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, auth.workspace_id)
-        .await
-        .map_err(|error| error.0)?;
+    let worker_class =
+        crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
+            .await
+            .map_err(|error| error.0)?;
     let args = ConfirmProposalsArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
-        workspace_id: auth.workspace_id,
+        workspace_id: auth.require_workspace()?,
         api_key_id: auth.api_key_id,
         user_id: auth.user_id,
         inference_job_id,
@@ -127,7 +128,7 @@ pub(crate) async fn enqueue(
         ctx,
         JobSpec {
             job_name: "confirm_proposals",
-            workspace_id: auth.workspace_id,
+            workspace_id: auth.require_workspace()?,
             class: worker_class,
             worker_name: ConfirmProposalsWorker::class_name(),
             dispatch_payload: serde_json::to_value(args).internal()?,

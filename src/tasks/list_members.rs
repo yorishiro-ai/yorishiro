@@ -50,7 +50,11 @@ impl Task for ListMembers {
                 "{}  {:<8} {}",
                 member.user_id,
                 member.role.as_db_str(),
-                member.email,
+                member
+                    .email
+                    .as_deref()
+                    .or(member.user_name.as_deref())
+                    .unwrap_or_default(),
             );
         }
         Ok(())

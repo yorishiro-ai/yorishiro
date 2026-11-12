@@ -109,14 +109,15 @@ pub(crate) async fn enqueue(
     auth: &AuthContext,
     snapshot_job_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
-    entity_entities::require_job_snapshots(txn, auth.workspace_id, snapshot_job_id).await?;
-    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, auth.workspace_id)
-        .await
-        .map_err(|error| error.0)?;
+    entity_entities::require_job_snapshots(txn, auth.require_workspace()?, snapshot_job_id).await?;
+    let worker_class =
+        crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
+            .await
+            .map_err(|error| error.0)?;
     let args = UndoArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
-        workspace_id: auth.workspace_id,
+        workspace_id: auth.require_workspace()?,
         api_key_id: auth.api_key_id,
         user_id: auth.user_id,
         snapshot_job_id,
@@ -126,7 +127,7 @@ pub(crate) async fn enqueue(
         ctx,
         JobSpec {
             job_name: "undo",
-            workspace_id: auth.workspace_id,
+            workspace_id: auth.require_workspace()?,
             class: worker_class,
             worker_name: UndoWorker::class_name(),
             dispatch_payload: serde_json::to_value(args).internal()?,

@@ -27,7 +27,7 @@ async fn set_embedding_key(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
-    workspace_embedding_keys::configure(&ctx, auth_ctx.workspace_id, body).await?;
+    workspace_embedding_keys::configure(&ctx, auth_ctx.require_workspace()?, body).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -39,7 +39,7 @@ async fn get_embedding_key(
 ) -> Result<Json<EmbeddingKeyDescription>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = workspace_embedding_keys::describe(&ctx.db, auth_ctx.workspace_id)
+    let described = workspace_embedding_keys::describe(&ctx.db, auth_ctx.require_workspace()?)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found("no embedding provider configured for this workspace")
@@ -55,7 +55,7 @@ async fn delete_embedding_key(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_embedding_keys::remove(&ctx, auth_ctx.workspace_id).await?;
+    workspace_embedding_keys::remove(&ctx, auth_ctx.require_workspace()?).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

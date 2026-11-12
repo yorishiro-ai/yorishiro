@@ -73,7 +73,7 @@ Input schema:
 
 ### `create_api_key`
 
-Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (per-request X-Workspace-Id) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
+Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
 
 Input schema:
 
@@ -128,7 +128,7 @@ Input schema:
     },
     "tenant_scoped": {
       "default": false,
-      "description": "Issue a tenant-scoped key (no workspace binding, per-request `X-Workspace-Id`) instead of a workspace-bound one.\nRequires tenant Admin or Owner and a tenant-scoped issuing credential.",
+      "description": "Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.\nRequires tenant Admin or Owner and a tenant-scoped issuing credential.",
       "type": "boolean"
     }
   },
@@ -495,7 +495,7 @@ Input schema:
 
 ### `discover_workspaces`
 
-Discover workspace candidates within the current credential's tenant; service credentials list only the selected workspace, and discovery does not grant access (requires read scope)
+Discover workspace candidates within the current credential's tenant; workspace-bound credentials list only their bound workspace, and discovery does not grant access (requires read scope)
 
 Input schema:
 
@@ -591,7 +591,7 @@ Input schema:
 
 ### `get_current_user`
 
-Read your own global user profile without exposing password hashes or OAuth subjects; service credentials are denied (requires read scope)
+Read your own user profile, including a tenant user's name and tenant, without exposing password hashes or OAuth subjects; service credentials are denied (requires read scope)
 
 Input schema:
 
@@ -1399,7 +1399,7 @@ Input schema:
 
 ### `remove_member`
 
-Remove a current-tenant membership and revoke attributed tenant credentials, retaining the global user account (requires read scope and tenant Admin or Owner; last Owner is protected)
+Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant Admin or Owner; last Owner is protected)
 
 Input schema:
 
@@ -1558,7 +1558,7 @@ Input schema:
 
 ### `set_member_role`
 
-Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata (requires read scope and tenant Admin or Owner; Owner changes require Owner)
+Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant Admin or Owner; Owner changes require Owner)
 
 Input schema:
 
@@ -1682,7 +1682,7 @@ Input schema:
 
 ### `update_current_user`
 
-Update or clear your own global display name across all tenants, not another user's identity; email, password and OAuth subjects cannot be changed here (requires read scope)
+Update or clear your own display name (shared across tenants for a root user), not another user's identity; email, password and OAuth subjects cannot be changed here (requires read scope)
 
 Input schema:
 

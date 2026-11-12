@@ -113,7 +113,7 @@ impl YorishiroMcpServer {
 
         let input = args.into();
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let record = match entity_relations::create(authorized.txn(), workspace_id, input).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -140,7 +140,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let record = match entity_relations::get(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -166,7 +166,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         match entity_relations::delete(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -198,7 +198,7 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let records = match entity_relations::list(authorized.txn(), workspace_id, query).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
@@ -229,7 +229,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let status = match entity_relations::parse_relation_status(&args.status) {
             Ok(status) => status,
             Err(err) => return Ok(err_to_tool_result(err)),

@@ -18,7 +18,7 @@ pub(crate) async fn create_relation(
     authorized: Authorized<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let input = body.into();
     let record = entity_relations::create(authorized.txn(), workspace_id, input).await?;
     authorized.commit().await?;
@@ -30,7 +30,7 @@ pub(crate) async fn get_relation(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<RelationRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let record = entity_relations::get(authorized.txn(), workspace_id, id).await?;
     Ok(Json(record))
 }
@@ -40,7 +40,7 @@ pub(crate) async fn delete_relation(
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     entity_relations::delete(authorized.txn(), workspace_id, id).await?;
     authorized.commit().await?;
     Ok(StatusCode::NO_CONTENT)
@@ -53,7 +53,7 @@ pub(crate) async fn list_relations(
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
     let query = params.try_into()?;
 
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let records = entity_relations::list(authorized.txn(), workspace_id, query).await?;
     Ok(Json(records))
 }
@@ -64,7 +64,7 @@ pub(crate) async fn set_relation_status(
     Path(id): Path<Uuid>,
     Json(body): Json<SetRelationStatusRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let record = entity_relations::set_status(
         authorized.txn(),
         workspace_id,

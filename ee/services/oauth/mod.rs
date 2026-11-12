@@ -1,4 +1,4 @@
-//! OAuth2/OIDC login: an additional, optional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/login` (email/password).
+//! OAuth2/OIDC login: an additional, optional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/root/login` (email/password).
 //! Configuration lives in `data::oauth`; browser state lives beside `controllers::oauth`; user provisioning lives in `models::user_users`.
 
 pub mod discovery;

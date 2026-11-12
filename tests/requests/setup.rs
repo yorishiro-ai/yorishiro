@@ -143,10 +143,11 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
             assert_eq!(body["email"], "owner@example.com");
             let api_key = body["api_key"].as_str().unwrap().to_string();
 
-            // The issued key actually works, without naming a workspace: it is tenant-scoped and resolves the tenant's single workspace.
+            // The tenant-scoped key requires the returned workspace ID in the header.
             let whoami = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {api_key}"))
+                .add_header("x-workspace-id", body["workspace_id"].as_str().unwrap())
                 .await;
             assert_eq!(whoami.status_code(), StatusCode::OK);
             let identity: serde_json::Value = whoami.json();
@@ -159,6 +160,7 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
             let audit_log = request
                 .get("/api/audit-log")
                 .add_header("Authorization", format!("Bearer {api_key}"))
+                .add_header("x-workspace-id", body["workspace_id"].as_str().unwrap())
                 .await;
             assert_eq!(
                 audit_log.status_code(),
@@ -194,7 +196,7 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
     .await;
 }
 
-/// The setup key is tenant-scoped: it names its workspace per request, resolves the tenant's single workspace without a header, refuses to guess between several, and a workspace-scoped key still refuses a foreign workspace header.
+/// The setup key does not select a workspace implicitly; workspace-scoped keys retain their binding.
 #[tokio::test]
 #[serial(process_environment)]
 async fn setup_key_resolves_the_workspace_per_request() {
@@ -212,19 +214,37 @@ async fn setup_key_resolves_the_workspace_per_request() {
             let api_key = body["api_key"].as_str().unwrap().to_string();
             let workspace_id: uuid::Uuid = body["workspace_id"].as_str().unwrap().parse().unwrap();
 
-            // With one workspace, no header is needed.
+            // Even with one workspace, tenant authentication does not select it.
+            let no_workspace = request
+                .get("/api/whoami")
+                .add_header("Authorization", format!("Bearer {api_key}"))
+                .await;
+            no_workspace.assert_status(StatusCode::OK);
+            assert!(no_workspace.json::<serde_json::Value>()["workspace_id"].is_null());
+            request
+                .get("/api/tenants/current")
+                .add_header("Authorization", format!("Bearer {api_key}"))
+                .await
+                .assert_status(StatusCode::OK);
+            request
+                .get("/api/schemas")
+                .add_header("Authorization", format!("Bearer {api_key}"))
+                .await
+                .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
             let whoami = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {api_key}"))
+                .add_header("x-workspace-id", workspace_id.to_string())
                 .await;
             assert_eq!(whoami.status_code(), StatusCode::OK, "{}", whoami.text());
             let identity: serde_json::Value = whoami.json();
             assert_eq!(identity["workspace_id"], workspace_id.to_string());
 
-            // A second workspace makes the no-header request ambiguous.
+            // A second workspace can also be selected explicitly.
             let created = request
                 .post("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {api_key}"))
+                .add_header("x-workspace-id", workspace_id.to_string())
                 .json(&serde_json::json!({ "name": "Second" }))
                 .await;
             assert_eq!(created.status_code(), 201, "{}", created.text());
@@ -238,7 +258,8 @@ async fn setup_key_resolves_the_workspace_per_request() {
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await;
-            assert_eq!(ambiguous.status_code(), 422, "{}", ambiguous.text());
+            assert_eq!(ambiguous.status_code(), 200, "{}", ambiguous.text());
+            assert!(ambiguous.json::<serde_json::Value>()["workspace_id"].is_null());
 
             for workspace in [workspace_id, second_id] {
                 let whoami = request
@@ -262,6 +283,11 @@ async fn setup_key_resolves_the_workspace_per_request() {
             )
             .await
             .unwrap();
+            request
+                .get("/api/tenants/current")
+                .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
+                .await
+                .assert_status(StatusCode::OK);
             // A foreign header is a scope denial (403), not a validation failure (422).
             let scoped = request
                 .get("/api/whoami")

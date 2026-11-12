@@ -4,9 +4,18 @@ use sea_orm::entity::prelude::*;
 mod operations;
 
 pub use operations::create_user;
+pub use operations::delete_by_operator;
+pub(crate) use operations::list_by_operator;
+pub(crate) use operations::{create_tenant_user, reset_tenant_password};
 pub(crate) use operations::{current_profile, update_profile};
-pub(crate) use operations::{delete_by_operator, list_by_operator};
-pub(crate) use operations::{get_user_by_email, verify_login};
+pub(crate) use operations::{get_user_by_email, verify_login, verify_tenant_login};
+
+impl Model {
+    /// The email of a root user, which every root user has.
+    pub(crate) fn root_email(&self) -> String {
+        self.email.clone().unwrap_or_default()
+    }
+}
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {

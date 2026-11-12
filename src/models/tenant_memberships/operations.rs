@@ -160,6 +160,22 @@ pub(crate) async fn add_member_in_transaction(
     use sea_orm::sea_query::OnConflict;
 
     protect_owner(conn, tenant_id, user_id, Some(role)).await?;
+    crate::db::lock_for_update(conn, &format!("user-membership:{user_id}"))
+        .await
+        .internal()?;
+    if Entity::find()
+        .filter(Column::UserId.eq(user_id))
+        .filter(Column::TenantId.ne(tenant_id))
+        .one(conn)
+        .await
+        .internal()?
+        .is_some()
+    {
+        return Err(YorishiroError::Conflict {
+            message: "an account cannot belong to more than one tenant".into(),
+        });
+    }
+    guard_tenant_bound_user(conn, tenant_id, user_id, role).await?;
 
     // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
     let active = ActiveModel {
@@ -170,16 +186,97 @@ pub(crate) async fn add_member_in_transaction(
         ..Default::default()
     };
 
-    Entity::insert(active)
+    let affected = Entity::insert(active)
         .on_conflict(
-            OnConflict::columns([Column::TenantId, Column::UserId])
+            OnConflict::column(Column::UserId)
                 .update_column(Column::Role)
+                .action_and_where(Column::TenantId.eq(tenant_id))
                 .to_owned(),
         )
-        .exec(conn)
+        .exec_without_returning(conn)
         .await
         .internal()?;
+    if affected == 0 {
+        return Err(YorishiroError::Conflict {
+            message: "an account cannot belong to more than one tenant".into(),
+        });
+    }
 
+    Ok(())
+}
+
+/// A tenant-bound user belongs to its own tenant only and can never own it.
+async fn guard_tenant_bound_user(
+    conn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    role: MembershipRole,
+) -> Result<(), YorishiroError> {
+    let Some(user) = user_users::Entity::find_by_id(user_id)
+        .one(conn)
+        .await
+        .internal()?
+    else {
+        return Ok(());
+    };
+    match user.tenant_id {
+        Some(bound) if bound != tenant_id => Err(YorishiroError::Conflict {
+            message: "a tenant user cannot join another tenant".into(),
+        }),
+        Some(_) if role == MembershipRole::Owner => Err(YorishiroError::Conflict {
+            message: "a tenant user cannot be an owner".into(),
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// Creates a tenant-bound user and its membership in the caller's transaction.
+///
+/// # Errors
+/// Rejects owner role, invalid credentials, and duplicate names.
+pub async fn create_tenant_user_member(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_name: &str,
+    password: &str,
+    display_name: Option<&str>,
+    role: MembershipRole,
+) -> Result<user_users::Model, YorishiroError> {
+    if role == MembershipRole::Owner {
+        return Err(YorishiroError::Conflict {
+            message: "a tenant user cannot be an owner".into(),
+        });
+    }
+    let user = crate::models::user_users::create_tenant_user(
+        txn,
+        tenant_id,
+        user_name,
+        password,
+        display_name,
+    )
+    .await?;
+    add_member_in_transaction(txn, tenant_id, user.id, role).await?;
+    Ok(user)
+}
+
+/// Resets a tenant user's password as a current administrator.
+///
+/// # Errors
+/// Rejects stale credentials; only an owner may reset an administrator's password.
+pub async fn reset_tenant_user_password(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    user_id: Uuid,
+    password: &str,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    if get_membership_role(&txn, actor.tenant_id, user_id).await? == Some(MembershipRole::Admin) {
+        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    }
+    crate::models::user_users::reset_tenant_password(&txn, actor.tenant_id, user_id, password)
+        .await?;
+    txn.commit().await.internal()?;
     Ok(())
 }
 
@@ -293,7 +390,7 @@ async fn key_access(
                 .await?
                 .map(|access| stored_scope.min(access.max_scope))
         } else {
-            None
+            Some(crate::models::access::effective_scope(stored_scope, role))
         };
         access.push(super::MembershipKeyAccess {
             api_key_id: key.id,
@@ -372,6 +469,13 @@ async fn remove_member_in_transaction(
             .add(api_keys::Column::UserId.eq(user_id)),
     )
     .await?;
+    // A tenant-bound user has no life outside its tenant: removing the membership removes the account.
+    user_users::Entity::delete_many()
+        .filter(user_users::Column::Id.eq(user_id))
+        .filter(user_users::Column::TenantId.eq(tenant_id))
+        .exec(txn)
+        .await
+        .internal()?;
     Ok(())
 }
 
@@ -399,6 +503,7 @@ pub(crate) async fn list_members(
             Some(MembershipRecord {
                 user_id: user.id,
                 email: user.email,
+                user_name: user.user_name,
                 display_name: user.display_name,
                 role,
             })

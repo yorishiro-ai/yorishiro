@@ -12,7 +12,7 @@ use crate::models::export;
 pub(crate) async fn export_jsonl(
     authorized: Authorized<ReadScope>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let body = export::export_jsonl(authorized.txn(), workspace_id).await?;
 
     Ok(([(header::CONTENT_TYPE, "application/x-ndjson")], body))

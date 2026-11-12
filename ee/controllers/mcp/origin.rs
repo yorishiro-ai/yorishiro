@@ -64,7 +64,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.auth_context().workspace_id;
+        let workspace_id = authorized.workspace_id();
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let changes = match crate::edition::ee::models::schema_schemas::list_with_upstream_changes(
             &self.app_context().db,
@@ -106,7 +106,10 @@ impl YorishiroMcpServer {
             authorized.txn(),
             self.app_context(),
             auth_ctx.tenant_id,
-            auth_ctx.workspace_id,
+            match auth_ctx.require_workspace() {
+                Ok(workspace_id) => workspace_id,
+                Err(error) => return Ok(err_to_tool_result(error)),
+            },
             args.schema_id,
         )
         .await
@@ -146,7 +149,10 @@ impl YorishiroMcpServer {
             authorized.txn(),
             self.app_context(),
             auth_ctx.tenant_id,
-            auth_ctx.workspace_id,
+            match auth_ctx.require_workspace() {
+                Ok(workspace_id) => workspace_id,
+                Err(error) => return Ok(err_to_tool_result(error)),
+            },
             args.schema_id,
         )
         .await

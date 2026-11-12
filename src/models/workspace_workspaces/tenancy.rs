@@ -10,7 +10,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces::Column;
 
 use super::{Entity, Model};
-/// A workspace's id and owning tenant, for `/auth/login`'s explicit `workspace_id` path.
+/// A workspace's id and owning tenant, used for workspace authorization.
 pub(crate) async fn get_workspace_tenant(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

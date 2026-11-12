@@ -32,6 +32,7 @@ pub(crate) async fn set_maintenance(
     authorized: Verified<MigrationScope>,
     body: Result<Json<SetMaintenanceRequest>, JsonRejection>,
 ) -> Result<Json<MaintenanceResponse>, ApiError> {
+    let workspace_id = authorized.ctx.require_workspace()?;
     let Json(body) = body.map_err(|err| {
         ApiError(YorishiroError::ValidationFailed {
             message: err.body_text(),
@@ -57,7 +58,7 @@ pub(crate) async fn set_maintenance(
     api_key_audit_log::record(
         &ctx.db,
         api_key_audit_log::AuditActor {
-            workspace_id: authorized.ctx.workspace_id,
+            workspace_id,
             tenant_id: authorized.ctx.tenant_id,
             api_key_id: authorized.ctx.api_key_id,
             user_id: authorized.ctx.user_id,

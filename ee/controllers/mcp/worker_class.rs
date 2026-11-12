@@ -30,7 +30,15 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(actor) => actor,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match workspace_worker_classes::describe(&self.app_context().db, actor.workspace_id).await {
+        match workspace_worker_classes::describe(
+            &self.app_context().db,
+            match actor.require_workspace() {
+                Ok(workspace_id) => workspace_id,
+                Err(error) => return Ok(err_to_tool_result(error)),
+            },
+        )
+        .await
+        {
             Ok(Some(record)) => ok_json(record),
             Ok(None) => Ok(err_to_tool_result(YorishiroError::not_found(
                 "no worker class assignment configured for this workspace",
@@ -57,7 +65,10 @@ impl YorishiroMcpServer {
         };
         match workspace_worker_classes::set(
             self.app_context(),
-            actor.workspace_id,
+            match actor.require_workspace() {
+                Ok(workspace_id) => workspace_id,
+                Err(error) => return Ok(err_to_tool_result(error)),
+            },
             input.worker_class,
         )
         .await
@@ -82,7 +93,15 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(actor) => actor,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match workspace_worker_classes::clear(&self.app_context().db, actor.workspace_id).await {
+        match workspace_worker_classes::clear(
+            &self.app_context().db,
+            match actor.require_workspace() {
+                Ok(workspace_id) => workspace_id,
+                Err(error) => return Ok(err_to_tool_result(error)),
+            },
+        )
+        .await
+        {
             Ok(()) => ok_json(serde_json::json!({"reset":true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }

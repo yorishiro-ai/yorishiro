@@ -21,8 +21,12 @@ pub(crate) async fn archive_schema(
     authorized: Authorized<SchemaScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let schema =
-        schema_schemas::archive(authorized.txn(), authorized.ctx.workspace_id, schema_id).await?;
+    let schema = schema_schemas::archive(
+        authorized.txn(),
+        authorized.ctx.require_workspace()?,
+        schema_id,
+    )
+    .await?;
     authorized.commit().await?;
     Ok(Json(schema))
 }
@@ -32,7 +36,12 @@ pub(crate) async fn delete_schema(
     authorized: Authorized<SchemaScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    schema_schemas::delete(authorized.txn(), authorized.ctx.workspace_id, schema_id).await?;
+    schema_schemas::delete(
+        authorized.txn(),
+        authorized.ctx.require_workspace()?,
+        schema_id,
+    )
+    .await?;
     authorized.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -42,7 +51,7 @@ pub(crate) async fn list_schemas(
     authorized: Authorized<ReadScope>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let summaries = schema_schemas::list(authorized.txn(), workspace_id, page.try_into()?).await?;
     Ok(Json(summaries))
 }
@@ -76,7 +85,7 @@ async fn create_schema(
         }
     };
 
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let (schema, diff) = schema_schemas::create_schema(
         authorized.txn(),
         tenant_id,
@@ -101,7 +110,7 @@ async fn get_active_schema(
     authorized: Authorized<ReadScope>,
     Path(name): Path<String>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let record = schema_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
     Ok(Json(record))
 }
@@ -111,7 +120,7 @@ pub(crate) async fn get_schema_by_id(
     authorized: Authorized<ReadScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let record = schema_schemas::get_by_id(authorized.txn(), workspace_id, schema_id).await?;
     Ok(Json(record))
 }
@@ -140,7 +149,7 @@ pub(crate) async fn get_entity_type_json_schema(
     authorized: Authorized<ReadScope>,
     Path((name, entity_type)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let record = schema_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
 
     let entity_type_def = record

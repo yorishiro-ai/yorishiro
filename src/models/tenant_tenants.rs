@@ -16,7 +16,7 @@ pub(crate) async fn detail_as(
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Model, crate::error::YorishiroError> {
     let current = crate::models::api_keys::Model::current_context(db, actor).await?;
-    crate::models::access::require_tenant_admin(db, current.tenant_id, current.user_id).await?;
+    crate::models::access::require_tenant_admin_as(db, &current).await?;
     Model::find_by_id(db, current.tenant_id).await
 }
 

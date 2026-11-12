@@ -11,11 +11,11 @@ use crate::models::tenant_memberships::{self, MembershipRole};
 /// Persisted, secret-free identity and target information shared by transports.
 pub struct AccessIdentity {
     pub current: AuthContext,
-    pub workspace_name: String,
+    pub workspace_name: Option<String>,
     pub tenant_name: String,
     pub stored_scope: ApiKeyScope,
     pub bound_workspace_id: Option<Uuid>,
-    pub workspace_access: WorkspaceAccess,
+    pub workspace_access: Option<WorkspaceAccess>,
 }
 
 /// Resolves names and binding after revalidating the credential and membership.
@@ -28,12 +28,18 @@ pub async fn identity(
 ) -> Result<AccessIdentity, YorishiroError> {
     use sea_orm::EntityTrait;
     let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
-    let workspace = crate::models::workspace_workspaces::Entity::find_by_id(current.workspace_id)
-        .one(conn)
-        .await
-        .internal()?
-        .filter(|workspace| workspace.tenant_id == current.tenant_id)
-        .ok_or(YorishiroError::Unauthenticated)?;
+    let workspace = if let Some(workspace_id) = current.workspace_id {
+        Some(
+            crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
+                .one(conn)
+                .await
+                .internal()?
+                .filter(|workspace| workspace.tenant_id == current.tenant_id)
+                .ok_or(YorishiroError::Unauthenticated)?,
+        )
+    } else {
+        None
+    };
     let tenant = crate::models::tenant_tenants::Model::find_by_id(conn, current.tenant_id).await?;
     let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
         .one(conn)
@@ -44,7 +50,7 @@ pub async fn identity(
     let workspace_access = current_workspace_access(conn, &current).await?;
     Ok(AccessIdentity {
         current,
-        workspace_name: workspace.name,
+        workspace_name: workspace.map(|workspace| workspace.name),
         tenant_name: tenant.name,
         stored_scope: grant.scope,
         bound_workspace_id: grant.workspace_id,
@@ -60,7 +66,7 @@ pub struct AccessCapabilities {
     pub scopes: Vec<ApiKeyScope>,
     pub audit: bool,
     pub tenant_admin: bool,
-    pub workspace_access: WorkspaceAccess,
+    pub workspace_access: Option<WorkspaceAccess>,
 }
 
 /// Inspects current grants using the same decisions as protected operations.
@@ -81,7 +87,7 @@ pub async fn capabilities(
     .into_iter()
     .filter(|scope| require_scope(&current, *scope).is_ok())
     .collect();
-    let tenant_admin = match require_tenant_admin(conn, current.tenant_id, current.user_id).await {
+    let tenant_admin = match require_tenant_admin_as(conn, &current).await {
         Ok(()) => true,
         Err(YorishiroError::Unauthenticated | YorishiroError::ScopeInsufficient { .. }) => false,
         Err(error) => return Err(error),
@@ -119,7 +125,7 @@ pub(crate) async fn require_job_actor(
     let presented = AuthContext {
         api_key_id: actor.api_key_id,
         tenant_id: actor.tenant_id,
-        workspace_id: actor.workspace_id,
+        workspace_id: Some(actor.workspace_id),
         user_id: actor.user_id,
         scope: required,
         audit: false,
@@ -150,16 +156,20 @@ pub struct WorkspaceAccess {
 async fn current_workspace_access(
     conn: &impl ConnectionTrait,
     current: &AuthContext,
-) -> Result<WorkspaceAccess, YorishiroError> {
+) -> Result<Option<WorkspaceAccess>, YorishiroError> {
+    let Some(workspace_id) = current.workspace_id else {
+        return Ok(None);
+    };
     match current.user_id {
-        Some(user_id) => workspace_access(conn, current.tenant_id, current.workspace_id, user_id)
+        Some(user_id) => workspace_access(conn, current.tenant_id, workspace_id, user_id)
             .await?
+            .map(Some)
             .ok_or(YorishiroError::Unauthenticated),
-        None => Ok(WorkspaceAccess {
+        None => Ok(Some(WorkspaceAccess {
             max_scope: current.scope,
             source: "service_key",
             workspace_admin: false,
-        }),
+        })),
     }
 }
 
@@ -222,6 +232,18 @@ pub(crate) async fn require_current_workspace_admin(
         .await
         .internal()?;
     let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
+    use sea_orm::EntityTrait;
+    let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
+        .one(txn)
+        .await
+        .internal()?
+        .ok_or(YorishiroError::Unauthenticated)?;
+    if key.workspace_id.is_some_and(|bound| bound != workspace_id) {
+        return Err(YorishiroError::ScopeInsufficient {
+            message: "workspace administration exceeds the credential's binding".into(),
+            hint: "use a credential that can access the target workspace".into(),
+        });
+    }
     if let Some(user_id) = current.user_id
         && workspace_access(txn, current.tenant_id, workspace_id, user_id)
             .await?
@@ -244,7 +266,15 @@ pub(crate) async fn require_current_tenant_admin(
         .await
         .internal()?;
     let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
-    require_tenant_admin(txn, current.tenant_id, current.user_id).await
+    require_tenant_admin_as(txn, &current).await
+}
+
+pub(crate) async fn require_tenant_admin_as(
+    conn: &impl ConnectionTrait,
+    actor: &AuthContext,
+) -> Result<(), YorishiroError> {
+    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    require_tenant_admin(conn, current.tenant_id, current.user_id).await
 }
 
 /// Requires current owner authority under the shared membership fence.

@@ -50,7 +50,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let actor = authorized.auth_context();
-        match model::list(authorized.txn(), actor.tenant_id, actor.workspace_id).await {
+        match model::list(authorized.txn(), actor.tenant_id, authorized.workspace_id()).await {
             Ok(records) => ok_json(records),
             Err(error) => Ok(err_to_tool_result(error)),
         }
@@ -76,7 +76,7 @@ impl YorishiroMcpServer {
         match model::get(
             authorized.txn(),
             actor.tenant_id,
-            actor.workspace_id,
+            authorized.workspace_id(),
             args.fork_id,
         )
         .await
@@ -103,12 +103,17 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let actor = authorized.auth_context();
-        let record =
-            match model::create(authorized.txn(), actor.tenant_id, actor.workspace_id, input).await
-            {
-                Ok(record) => record,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            };
+        let record = match model::create(
+            authorized.txn(),
+            actor.tenant_id,
+            authorized.workspace_id(),
+            input,
+        )
+        .await
+        {
+            Ok(record) => record,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
         authorized.commit().await?;
         ok_json(record)
     }
@@ -145,7 +150,7 @@ impl YorishiroMcpServer {
         let record = match model::update(
             authorized.txn(),
             actor.tenant_id,
-            actor.workspace_id,
+            authorized.workspace_id(),
             args.fork_id,
             input,
         )
@@ -178,7 +183,7 @@ impl YorishiroMcpServer {
         if let Err(error) = model::delete(
             authorized.txn(),
             actor.tenant_id,
-            actor.workspace_id,
+            authorized.workspace_id(),
             args.fork_id,
         )
         .await
