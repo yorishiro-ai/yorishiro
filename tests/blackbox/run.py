@@ -1108,8 +1108,11 @@ def workspace_key_lifecycle(app):
     app.rest("GET", "/api/whoami", key=created["full_key"], status=401)
     workspace = tenant_client.call("create_workspace", {"name": "mcp-managed"})
     workspace_id = workspace["id"]
-    require(any(row["id"] == workspace_id for row in client.call("list_workspaces")),
-            "MCP-created workspace not listed")
+    require(any(row["id"] == workspace_id for row in tenant_client.call("list_workspaces")),
+            "MCP-created workspace not listed for tenant credential")
+    require(not any(row["id"] == workspace_id for row in client.call("list_workspaces"))
+            and not any(row["id"] == workspace_id for row in app.rest("GET", "/api/workspaces", key=owner)),
+            "workspace-bound credential listed another workspace")
     require(any(row["workspace_id"] == workspace_id and row["tenant_id"] == app.tenant
                 for row in tenant_client.call("discover_workspaces")),
             "human discovery omitted tenant workspace")

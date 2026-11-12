@@ -36,7 +36,7 @@ pub enum Relation {
     TemplateTemplates,
     #[sea_orm(has_many = "super::template_versions::Entity")]
     TemplateVersions,
-    #[sea_orm(has_many = "super::tenant_memberships::Entity")]
+    #[sea_orm(has_one = "super::tenant_memberships::Entity")]
     TenantMemberships,
     #[sea_orm(
         belongs_to = "super::tenant_tenants::Entity",

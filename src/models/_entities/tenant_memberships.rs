@@ -10,7 +10,7 @@ pub struct Model {
     pub id: Uuid,
     #[sea_orm(unique_key = "uq_tenant_memberships_tenant_id_user_id")]
     pub tenant_id: Uuid,
-    #[sea_orm(unique_key = "uq_tenant_memberships_tenant_id_user_id")]
+    #[sea_orm(unique)]
     pub user_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub role: String,
