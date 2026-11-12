@@ -116,43 +116,89 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
             .await
             .is_ok()
         );
-        let barrier = tokio::sync::Barrier::new(2);
-        let (reset, login) = tokio::join!(
-            async {
-                barrier.wait().await;
-                user_users::reset_root_password_by_operator(
-                    &ctx.db,
-                    tenant.owner_id,
-                    tenant.owner_id,
-                    "another-root-password",
-                )
-                .await
-            },
-            async {
-                barrier.wait().await;
-                yorishiro::models::tenancy::issue_login_key(
-                    &ctx.db,
-                    tenant.owner_id,
-                    after.password_hash.as_deref(),
-                    None,
-                )
-                .await
-            },
-        );
-        reset.unwrap();
-        if let Ok((key, _, _)) = login {
-            assert!(
-                api_keys::Entity::find_by_id(key.id)
-                    .one(&ctx.db)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .revoked_at
-                    .is_some()
-            );
-        }
     })
     .await;
+}
+
+#[tokio::test]
+async fn postgres_root_reset_fences_login_waiting_with_verified_old_password() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        use sea_orm::{QuerySelect, TransactionTrait};
+
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let row_lock = ctx.db.begin().await.unwrap();
+        let before = user_users::Entity::find_by_id(tenant.owner_id)
+            .lock_exclusive()
+            .one(&row_lock)
+            .await
+            .unwrap()
+            .unwrap();
+        let fence = format!("tenant-membership:{}", tenant.tenant_id);
+        let reset = user_users::reset_root_password_by_operator(
+            &ctx.db,
+            tenant.owner_id,
+            tenant.owner_id,
+            NEW_PASSWORD,
+        );
+        let login_after_reset_locks = async {
+            // Reset owns the membership fence but cannot update the password until we release the row.
+            wait_for_membership_lock(&ctx.db, &fence, true).await;
+            let login = yorishiro::models::tenancy::issue_login_key(
+                &ctx.db,
+                tenant.owner_id,
+                before.password_hash.as_deref(),
+                None,
+            );
+            let release_reset = async {
+                wait_for_membership_lock(&ctx.db, &fence, false).await;
+                row_lock.rollback().await.unwrap();
+            };
+            let (login, ()) = tokio::join!(login, release_reset);
+            assert!(matches!(
+                login,
+                Err(yorishiro::error::YorishiroError::Unauthenticated)
+            ));
+        };
+        let (reset, ()) = tokio::join!(reset, login_after_reset_locks);
+        reset.unwrap();
+        let after = user_users::Entity::find_by_id(tenant.owner_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(loco_rs::hash::verify_password(
+            NEW_PASSWORD,
+            after.password_hash.as_deref().unwrap()
+        ));
+    })
+    .await;
+}
+
+async fn wait_for_membership_lock(db: &sea_orm::DatabaseConnection, fence: &str, granted: bool) {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let row = db
+                .query_one_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted = $2 AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS observed",
+                    [fence.into(), granted.into()],
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            if row.try_get::<bool>("", "observed").unwrap() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("expected membership fence holder or waiter was not observed");
 }
 
 #[tokio::test]

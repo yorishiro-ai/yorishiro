@@ -10,7 +10,7 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "67f3525def3af86d074437c65e85ece83a9548a80c5cd086b81f8150a8df0ee1",
+    "tests": "5b86f026bf599116e17c10a0603314461d0772d0259202c56d2653cf1cd36e8a",
     "src": "4c6421d70e20f0870616d0f64ecda76ea4cbd38f7b1ca005d845337267b41f2e",
     "ee": "cc84e8126706d27982e04bc78e4a27968b657c3535656bed1590d65b4f700e83",
     "migration": "ad54b4dc417cca46b82f31ab09fce5079fdc4ba3569a44b89025c20751d79e5a",
@@ -42,6 +42,7 @@
     "resource-live":{"database":"sqlite","queue":"sqlite","manual_external":true,"status":"opt-in-not-required","requires":"Explicitly configured private live endpoint; retained opt-in ignored coverage, never reported as passed by ordinary CI."}
   },
   "postgres_dedicated": [
+    {"name":"tasks::root_password::postgres_root_reset_fences_login_waiting_with_verified_old_password","source":"tests/tasks/root_password.rs"},
     {"name":"models::search::postgres_materialized_recall_1024","source":"tests/models/search.rs"},
     {"name":"requests::mcp::postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery","source":"tests/requests/mcp.rs"},
     {"name":"ee::tasks::reindex_scheduler::postgres_tick_waits_for_disable_and_rechecks_tenant_activity","source":"tests/ee/tasks/reindex_scheduler.rs"},
@@ -238,6 +239,7 @@
     {"source":"tests/ee/services/oauth/mod.rs","editions":["ee"],"role":"common","jobs":["common-sqlite"],"reason":"Exact direct module-entry discovery integration with mocked provider, not a signed boot route.","names":["ee::services::oauth::authorize_uses_production_discovery","ee::services::oauth::callback_uses_production_discovery_exchange_and_jwks_before_verifying_token"]}
   ],
   "exceptions": [
+    {"name":"tasks::root_password::postgres_root_reset_fences_login_waiting_with_verified_old_password","source":"tests/tasks/root_password.rs","editions":["ce","ee"],"role":"postgres","jobs":["postgres"],"reason":"Owned PostgreSQL fixture observes reset holding and login waiting on the membership advisory fence before releasing the password row lock; stale verified credentials must be rejected."},
     {"name":"requests::official_templates::hooks_seed_creates_the_official_tenant_without_publishing_templates","source":"tests/requests/official_templates.rs","editions":["ee"],"role":"common","jobs":["common-sqlite"],"reason":"Current source adds this ungated Hooks::seed test beyond the older proposal; creates only the official tenant without publishing marketplace versions."},
     {"name":"requests::oauth::find_or_create_refuses_a_new_tenant_past_the_cap","source":"tests/requests/oauth.rs","editions":["ee"],"role":"common","jobs":["common-sqlite"],"reason":"SQLite executes explicit-cap and implicit hard-cap subcases; PG skips the None parameter. Do not claim PG parity without splitting, and no signed boot licence is needed for this direct model call."},
     {"name":"db::advisory_lock_tests::sqlite_named_locks_are_noops","source":"tests/db.rs","editions":["ce","ee"],"role":"common","jobs":["common-sqlite"],"reason":"SQLite named-lock no-op, separate from exclusion."},
