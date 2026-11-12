@@ -428,17 +428,6 @@ pub(crate) async fn detail_for_actor(
     })
 }
 
-pub(crate) async fn models_for_tenant(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-) -> Result<Vec<Model>, YorishiroError> {
-    Entity::find()
-        .filter(crate::models::_entities::workspace_workspaces::Column::TenantId.eq(tenant_id))
-        .all(conn)
-        .await
-        .internal()
-}
-
 pub(crate) async fn stamp_embedding_if_missing(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

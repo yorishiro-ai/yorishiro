@@ -84,13 +84,6 @@ async fn operator_user_deletion_requires_confirmation_and_no_memberships() {
                 .is_some()
         );
         assert!(delete(&ctx, user.id, user.id).await.is_err());
-        loco_rs::boot::run_task::<App>(
-            &ctx,
-            Some(&"list_users".to_owned()),
-            &Vars::from_cli_args(vec![]),
-        )
-        .await
-        .unwrap();
     })
     .await;
 }

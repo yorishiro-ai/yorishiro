@@ -9,3 +9,5 @@ pub mod disable_tenant;
 
 pub mod delete_tenant;
 mod users;
+
+mod root_password;

@@ -3,9 +3,7 @@
 //! This worker re-embeds all entities in a workspace with the current provider model,
 //! then restamps the workspace's `embedding_model`/`embedding_dimensions`.
 //!
-//! The REST endpoint (`POST /api/migration-jobs/reindex`) enqueues this worker,
-//! which runs under the same advisory lock as the `reindex_embeddings` task,
-//! so both entry points are serialized per workspace.
+//! The REST endpoint (`POST /api/migration-jobs/reindex`) enqueues this worker, which runs under the workspace advisory lock to serialize reindex operations per workspace.
 //!
 //! **Routing**: like `embedding_sync`, a reindex job carries one `worker-target:<name>` tag chosen when it is enqueued,
 //! so `--worker=worker-target:tenant:<id>` picks up only that tenant's reindex jobs.

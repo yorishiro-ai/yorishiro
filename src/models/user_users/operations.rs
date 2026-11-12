@@ -4,24 +4,87 @@ use loco_rs::hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
 };
-use sea_orm::{Condition, QueryOrder, QuerySelect};
+use sea_orm::{Condition, QuerySelect};
 
 use super::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::user_users::Column;
 
-pub(crate) async fn list_by_operator(
-    conn: &impl ConnectionTrait,
-    limit: u64,
-    offset: u64,
-) -> Result<Vec<Model>, YorishiroError> {
-    Entity::find()
-        .order_by_asc(Column::Id)
-        .limit(limit.clamp(1, 100))
-        .offset(offset)
-        .all(conn)
+/// Resets an existing root password with a trusted operator identity and revokes all attributed keys.
+/// Does not convert passwordless accounts or change membership, roles or account identity.
+///
+/// # Errors
+/// Rejects mismatched confirmation, weak passwords, non-root or passwordless accounts and missing, ambiguous or disabled tenant memberships.
+/// Password and key changes roll back together if persistence fails.
+pub async fn reset_root_password_by_operator(
+    db: &sea_orm::DatabaseConnection,
+    user_id: uuid::Uuid,
+    confirmed_user_id: uuid::Uuid,
+    password: &str,
+) -> Result<(), YorishiroError> {
+    if user_id != confirmed_user_id {
+        return Err(YorishiroError::Conflict {
+            message: "confirmed_user_id must match user_id".into(),
+        });
+    }
+    if password.chars().count() < MIN_TENANT_PASSWORD_CHARS {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "password must contain at least {MIN_TENANT_PASSWORD_CHARS} characters"
+            ),
+        });
+    }
+    use crate::models::_entities::tenant_memberships as memberships;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let current = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user_id))
+        .all(&txn)
         .await
-        .internal()
+        .internal()?;
+    let [membership] = current.as_slice() else {
+        return Err(YorishiroError::Conflict {
+            message: "the account must belong to exactly one tenant".into(),
+        });
+    };
+    let tenant_id = membership.tenant_id;
+    // Match login key issuance and membership mutation lock ordering, then recheck discovery.
+    crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    crate::db::lock_for_update(&txn, &format!("user-membership:{user_id}"))
+        .await
+        .internal()?;
+    let current = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user_id))
+        .all(&txn)
+        .await
+        .internal()?;
+    if current.len() != 1 || current[0].tenant_id != tenant_id {
+        return Err(YorishiroError::Conflict {
+            message: "account membership changed; retry the reset".into(),
+        });
+    }
+    crate::models::tenant_tenants::Model::require_active(&txn, tenant_id).await?;
+    let user = Entity::find_by_id(user_id)
+        .one(&txn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("user not found"))?;
+    if user.tenant_id.is_some() || user.password_hash.is_none() {
+        return Err(YorishiroError::Conflict {
+            message: "password recovery requires an existing password-bearing root account".into(),
+        });
+    }
+    let mut active: ActiveModel = user.into();
+    active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
+    active.update(&txn).await.internal()?;
+    crate::models::api_keys::Entity::revoke_matching(
+        &txn,
+        Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok(())
 }
 
 /// Deletes an account with a trusted operator identity.

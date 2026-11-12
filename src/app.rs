@@ -351,22 +351,10 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::inspect_tenant_retirement::InspectTenantRetirement);
     tasks.register(tasks::disable_tenant::DisableTenant);
     tasks.register(tasks::delete_tenant::DeleteTenant);
+    tasks.register(tasks::reset_root_password::ResetRootPassword);
     // tasks-inject
-    tasks.register(tasks::create_tenant::CreateTenant);
-    tasks.register(tasks::create_workspace::CreateWorkspace);
-    tasks.register(tasks::create_api_key::CreateApiKey);
-    tasks.register(tasks::create_invite::CreateInvite);
-    tasks.register(tasks::list_tenants::ListTenants);
-    tasks.register(tasks::list_workspaces::ListWorkspaces);
-    tasks.register(tasks::create_user::CreateUser);
-    tasks.register(tasks::list_users::ListUsers);
     tasks.register(tasks::delete_user::DeleteUser);
-    tasks.register(tasks::add_member::AddMember);
-    tasks.register(tasks::list_members::ListMembers);
-    tasks.register(tasks::list_api_keys::ListApiKeys);
-    tasks.register(tasks::revoke_api_key::RevokeApiKey);
     tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
-    tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
     tasks.register(tasks::embedding_index_maintenance::EmbeddingIndexMaintenance);
     tasks.register(tasks::maintenance::Maintenance);
     tasks.register(tasks::maintenance_status::MaintenanceStatus);

@@ -56,7 +56,7 @@ async fn setup(
         body.display_name.as_deref(),
     )
     .await?;
-    // Operator bootstrap, not user self-service: this is the one path besides the `create_api_key` CLI task that may create an audit-reading key.
+    // Operator bootstrap issues the first audit-reading key; later grants require an authorized issuer.
     let created = IdentityApiKeys::create_tenant_api_key(
         &ctx.db,
         account.tenant_id,

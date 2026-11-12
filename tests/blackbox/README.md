@@ -33,7 +33,10 @@ Its deterministic vectors test transport and worker integration, not semantic mo
 The EE composition scenario adopts a library template, changes its upstream definition, previews and applies a merge, and checks immutable schema history.
 It then creates a second-workspace fork, checks scoped visibility and stale-head rejection, updates and deletes the fork without changing source history.
 
-Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
+Each SQLite invocation runs public `db migrate`, starts the server, and calls REST `/setup` against separate owned file-backed SQLite application and queue databases.
+The bootstrap key is a tenant-scoped Owner credential with the existing audit grant; ordinary scenarios use explicitly delegated, workspace-bound keys without audit.
+The owned config sets a one-tenant cap so setup remains available.
+The licensed PostgreSQL suite instead uses REST signup and root login because its unlimited tenant cap disables setup.
 The CLI suite proves migration and normal tasks succeed.
 It starts one server and reuses it for the whole suite.
 Loco 1.2.0 defaults `start --no-banner` to server-only mode.
@@ -41,7 +44,7 @@ REST and MCP additionally start a separate `--environment test_sqlite start --wo
 The worker uses the server's exact environment, application database and separate queue database.
 Children receive an allowlisted environment, an owned home directory, and embedding provider `none`.
 The owned config disables auto-migration after explicit migration, and the auth rate limit is raised for these isolated checks.
-The server has a 45-second authenticated readiness deadline, individual commands have a 30-second deadline, HTTP operations have timeouts and body limits, and the suite has a 240-second budget checked between operations.
+The server has a 45-second unauthenticated `/setup/status` readiness deadline, individual commands have a 30-second deadline, HTTP operations have timeouts and body limits, and the suite has a 240-second budget checked between operations.
 JSON and SSE bodies are read in bounded available-byte chunks with a decreasing socket timeout, so trickled partial lines cannot extend the response deadline.
 Import completion has a strict 60-second budget within the suite deadline, checks server/worker liveness, and rejects unsuccessful job states.
 Worker cleanup runs on success, timeout and failure, with suite teardown as a fallback.
@@ -59,17 +62,23 @@ Its required GHA job owns a non-superuser PostgreSQL service and its own databas
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.
 Scenario counts alone are not a public-tool completeness guarantee.
 
-Every suite checks CLI key issuance, REST and MCP acceptance, CLI revocation, and immediate rejection by both surfaces using the existing server and MCP session.
+Every CE suite checks authenticated REST key issuance and revocation, REST and MCP acceptance, and immediate rejection by both surfaces using the existing server and MCP session.
 
 | Suite | Additional checks |
 | --- | --- |
 | `rest` | Schema create/read/archive/delete and entity create/list/read/update/delete through REST, cross-checked through MCP; unauthenticated/invalid credentials, insufficient scope, malformed entity input |
 | `mcp` | Same CRUD through MCP, cross-checked through REST; initialize/session header/initialized notification, tool discovery, authentication protocol errors, scope tool errors, invalid UUID argument-deserialization tool error, missing schema arguments |
-| `cli` | Registered bootstrap/key tasks, unknown flag/task, missing/invalid/malformed arguments, success/failure exits and diagnostics, UUID and one-time credential stdout, key listing without plaintext, revoked ID retained in listing and REST rejection |
+| `cli` | Retained operational task registration and removed task absence, unknown flag/task, missing/invalid/malformed arguments, success/failure exits and diagnostics, maintenance state persistence and read-only HTTP enforcement, then restoration |
 
-`cli.human-key-management` creates an Owner invite through the CLI, accepts it through public signup and issues a user-attributed Schema key through the CLI.
+`management.human-key-management` delegates a workspace-bound Schema key to the setup Owner through authenticated REST.
+Additional workspaces are created through authenticated REST/MCP using a tenant-scoped credential and selected explicitly when issuing bound keys.
+The membership scenario accepts an invitation through REST signup, logs in as that member through REST, and delegates that member's own keys rather than issuing keys for an arbitrary user.
+All password-bearing setup, signup and login operations remain REST-only.
 REST and MCP identity readback must name that human.
-An expiring delegated Read key cannot raise scope, add audit, omit its expiry ceiling or extend it through either transport; an unattributed service key cannot delegate management credentials.
+An expiring delegated Read key cannot raise scope, add audit, omit its expiry ceiling or extend it through either transport.
+Audit-history checks delegate an explicitly audit-bearing Read key from the setup credential and revoke it through authenticated REST.
+Service-key issuance has no public equivalent after CLI reduction.
+Service-identity rejection and rotation fixtures remain internal in `tests/requests/mcp.rs` and `tests/requests/api_keys.rs`; the external runner does not relabel human keys as service keys or add a privileged issuance API.
 MCP rotation must preserve grant metadata, invalidate the predecessor through both transports and retain its successor link in secret-free REST/MCP history.
 REST revocation invalidates the successor through both transports and retains terminal history; a second rotation of the predecessor returns HTTP 409.
 These sequential contracts supplement, not replace, the internal issuance/revocation race and deterministic expiry tests.
@@ -80,10 +89,10 @@ Both reject stale entity updates through REST and MCP and verify unchanged data.
 The human management scenario also creates, renames, caps, grants/revokes membership and deletes a workspace, checking list/get visibility and preservation of the other workspace's credential.
 The shared fixture is an inline schema with one required string field.
 The additional `rest.relation-export-import-worker` and `mcp.relation-export-import-worker` scenarios share one implementation with thin transport adapters.
-Each creates a dedicated source workspace through the public CLI, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through its selected surface.
+Each creates a dedicated source workspace through authenticated REST, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through its selected surface.
 Relation create/read/list/delete and active/deprecated/archived status changes are read back through both surfaces, including omitted properties defaulting to `{}`, read-scope rejection, missing authentication, invalid status and missing endpoints.
 Export while deprecated must return exactly one schema, two entities and one relation in kind order, preserving IDs/data/properties/status, with identical raw REST NDJSON and MCP text.
-A new CLI-created destination workspace and schema service key submit the raw document through the selected surface before the real worker starts.
+A new REST-created destination workspace and delegated Schema key submit the raw document through the selected surface before the real worker starts.
 Both surfaces must report queued with an empty destination, then completed with job name `import` and counts 1/2/1.
 Restored records must have new IDs, remapped schema/endpoints, destination ownership and matching data/properties, while the source export stays unchanged.
 Imported relations are active even when exported as deprecated; this is not lossless history restoration.

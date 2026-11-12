@@ -1,6 +1,6 @@
-//! The two operational embedding tasks queue worker jobs and hold no provider.
+//! The operational resync task and authenticated reindex endpoint queue worker jobs without a provider.
 //!
-//! A task runs in a CLI process, and only a worker process loads an embedding model, so the tasks hand the work to the queue.
+//! A task runs in a CLI process, and only a worker process loads an embedding model, so the task hands the work to the queue.
 
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use std::sync::Arc;
@@ -136,11 +136,21 @@ async fn resync_queues_a_job_for_each_entity_without_an_embedding() {
 #[tokio::test]
 async fn reindex_queues_one_job_for_the_workspace() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let (workspace, _) = workspace_with_notes(&request, &ctx, 1).await;
-
-        run(&ctx, "reindex_embeddings", workspace)
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let workspace = tenant.workspace_id;
+        let key = crate::requests::fixtures::issue_api_key(
+            &ctx,
+            workspace,
+            tenant.owner_id,
+            yorishiro::models::api_keys::ApiKeyScope::Migration,
+            false,
+        )
+        .await;
+        request
+            .post("/api/migration-jobs/reindex")
+            .add_header("Authorization", format!("Bearer {key}"))
             .await
-            .expect("the task only queues");
+            .assert_status_ok();
 
         let reindexes = deliveries(&ctx, workspace).await;
         assert_eq!(reindexes.len(), 1);
@@ -160,12 +170,11 @@ async fn reindex_queues_one_job_for_the_workspace() {
 async fn the_tasks_reject_a_workspace_id_that_is_not_a_uuid() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (workspace, _) = workspace_with_notes(&request, &ctx, 0).await;
-        for task in ["resync_embeddings", "reindex_embeddings"] {
-            let vars =
-                Vars::from_cli_args(vec![("workspace_id".to_owned(), "not-a-uuid".to_owned())]);
-            let result = loco_rs::boot::run_task::<App>(&ctx, Some(&task.to_owned()), &vars).await;
-            assert!(result.is_err(), "{task} must reject it");
-        }
+        let vars = Vars::from_cli_args(vec![("workspace_id".to_owned(), "not-a-uuid".to_owned())]);
+        let result =
+            loco_rs::boot::run_task::<App>(&ctx, Some(&"resync_embeddings".to_owned()), &vars)
+                .await;
+        assert!(result.is_err(), "resync_embeddings must reject it");
         assert!(deliveries(&ctx, workspace).await.is_empty());
     })
     .await;
