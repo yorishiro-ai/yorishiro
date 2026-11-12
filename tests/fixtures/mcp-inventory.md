@@ -128,7 +128,7 @@ Input schema:
     },
     "tenant_scoped": {
       "default": false,
-      "description": "Issue a tenant-scoped key (no workspace binding, per-request `X-Workspace-Id`) instead of a workspace-bound one.\nRequires tenant Admin or Owner and a tenant-scoped issuing credential.",
+      "description": "Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.\nRequires tenant Admin or Owner and a tenant-scoped issuing credential.",
       "type": "boolean"
     }
   },

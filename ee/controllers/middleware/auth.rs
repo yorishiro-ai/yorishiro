@@ -20,7 +20,7 @@ fn bearer_token(headers: &HeaderMap) -> Result<&str, YorishiroError> {
         .ok_or(YorishiroError::Unauthenticated)
 }
 
-async fn authenticate(
+pub(crate) async fn authenticate(
     ctx: &AppContext,
     headers: &HeaderMap,
 ) -> Result<AuthContext, YorishiroError> {

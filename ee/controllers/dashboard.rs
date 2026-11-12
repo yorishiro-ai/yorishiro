@@ -17,8 +17,7 @@ async fn tenant_overview(
     headers: HeaderMap,
 ) -> Result<Json<TenantOverview>, ApiError> {
     let auth =
-        crate::edition::ee::controllers::middleware::auth::authenticate_workspace(&ctx, &headers)
-            .await?;
+        crate::edition::ee::controllers::middleware::auth::authenticate(&ctx, &headers).await?;
 
     Ok(Json(tenant_tenants::overview_as(&ctx, &auth).await?))
 }

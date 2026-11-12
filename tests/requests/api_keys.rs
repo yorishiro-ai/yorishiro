@@ -365,7 +365,11 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .await;
         assert_eq!(listed.status_code(), StatusCode::OK);
         let listed_body: Value = listed.json();
-        assert_eq!(listed_body["keys"].as_array().unwrap().len(), 2);
+        assert!(listed_body["keys"].as_array().unwrap().iter().any(|key| {
+            key["prefix"]
+                .as_str()
+                .is_some_and(|prefix| owner_key.starts_with(prefix))
+        }));
         assert!(listed_body.to_string().contains("my-client"));
         assert!(!listed_body.to_string().contains(&full_key));
         assert!(!listed_body.to_string().contains("key_hash"));

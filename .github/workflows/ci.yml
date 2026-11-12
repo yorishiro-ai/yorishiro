@@ -272,7 +272,8 @@ jobs:
       - name: Run migrations with the inventory binary
         run: ./target/debug/yorishiro db migrate
 
-      - name: Verify _entities/ matches a fresh regen
+      - name: Regenerate entities
+        id: regenerate-entities
         run: |
           # Diagnose: confirm the migration-created tables actually exist.
           # This is the branching point if db entities ever produces 0 files again.
@@ -288,7 +289,18 @@ jobs:
             exit 1
           fi
           echo "Generated $count entity files (had $count_before before)"
+
+      - name: Verify _entities/ matches a fresh regen
+        run: |
           git diff --exit-code -- src/models/_entities
+
+      - name: Upload generated entities on mismatch
+        if: ${{ failure() && steps.regenerate-entities.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-entities
+          path: src/models/_entities/
+          if-no-files-found: error
 
   public-contract:
     name: Public contracts (SQLite, ${{ matrix.edition }}, ${{ matrix.suite }})

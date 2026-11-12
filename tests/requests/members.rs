@@ -605,7 +605,9 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
                 .unwrap()
                 .contains(&serde_json::json!(tenant.workspace_id))
         );
-        assert_eq!(preview["revoked_api_key_ids"].as_array().unwrap().len(), 2);
+        let revoked_ids = preview["revoked_api_key_ids"].as_array().unwrap();
+        assert_eq!(revoked_ids.len(), 3);
+        assert!(revoked_ids.contains(&serde_json::json!(tenant_key.id)));
         let still_valid = request
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {broad}"))
@@ -635,7 +637,7 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(missing.status_code(), StatusCode::NO_CONTENT);
-        for key in [&broad, &narrow] {
+        for key in [&broad, &narrow, &tenant_key.plaintext] {
             let response = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {key}"))
