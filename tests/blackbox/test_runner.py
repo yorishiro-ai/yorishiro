@@ -76,6 +76,18 @@ class ToolInventoryTests(unittest.TestCase):
             self.assertEqual(sorted(names), reviewed[edition])
             self.assertEqual(len(names), len(set(names)))
 
+    def test_scenarios_do_not_invoke_removed_tasks(self):
+        import ast
+
+        removed = {"create_tenant", "create_user", "add_member", "create_invite", "list_members",
+                   "list_tenants", "list_users", "create_workspace", "list_workspaces", "create_api_key",
+                   "list_api_keys", "revoke_api_key", "create_tenant_api_key", "reindex_embeddings"}
+        tree = ast.parse(Path(run.__file__).read_text())
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "task" and node.args and isinstance(node.args[0], ast.Constant)):
+                self.assertNotIn(node.args[0].value, removed)
+
 
 class ProtocolTests(unittest.TestCase):
     def test_json_result_and_error(self):
@@ -197,14 +209,6 @@ class ArgumentTests(unittest.TestCase):
                     run.parse_args(arguments)
                 self.assertEqual(caught.exception.code, 2)
 
-    def test_stdout_fields_are_unique_and_uuids_validated(self):
-        value = "00000000-0000-0000-0000-000000000001"
-        self.assertEqual(run.output_field(f"noise\nworkspace id: {value}\n", "workspace id", True),
-                         value)
-        for text in ("", "workspace id: invalid", f"workspace id: {value}\nworkspace id: {value}"):
-            with self.subTest(text=text), self.assertRaises((AssertionError, ValueError)):
-                run.output_field(text, "workspace id", True)
-
     def test_child_environment_excludes_ambient_credentials_and_databases(self):
         args = run.parse_args(self.arguments())
         with tempfile.TemporaryDirectory() as directory:
@@ -256,8 +260,8 @@ class ArgumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             app = run.App(args, directory)
             with patch.object(app, "cli", return_value=("created", "")) as cli:
-                self.assertEqual(app.task("create_tenant", name="blackbox"), "created")
-                cli.assert_called_once_with("task", "create_tenant", "name:blackbox")
+                self.assertEqual(app.task("maintenance", name="blackbox"), "created")
+                cli.assert_called_once_with("task", "maintenance", "name:blackbox")
             app.close()
 
     def test_server_exit_fails_before_readiness_request(self):
@@ -266,14 +270,58 @@ class ArgumentTests(unittest.TestCase):
             app = run.App(args, directory)
             process = Mock()
             process.poll.return_value = 1
-            value = "00000000-0000-0000-0000-000000000001"
-            with patch.object(app, "cli"), patch.object(app, "task", side_effect=[f"tenant id: {value}", f"workspace id: {value}"]), \
-                    patch.object(app, "issue", return_value=(value, "ysr_test")), \
+            with patch.object(app, "cli"), \
                     patch("run.subprocess.Popen", return_value=process), patch.object(app, "http") as http:
                 with self.assertRaisesRegex(AssertionError, "exited before readiness"):
                     app.boot()
                 http.assert_not_called()
             app.close()
+
+    def test_issue_selects_workspace_and_preserves_explicit_issuer_and_audit(self):
+        args = run.parse_args(self.arguments())
+        with tempfile.TemporaryDirectory() as directory:
+            app = run.App(args, directory)
+            app.tenant_key = "ysr_bootstrap"
+            value = "00000000-0000-0000-0000-000000000001"
+            with patch.object(app, "rest", return_value={"id": value, "full_key": "ysr_delegated"}) as rest:
+                self.assertEqual(app.issue(value, "read", issuer="ysr_member", audit=True),
+                                 (value, "ysr_delegated"))
+                rest.assert_called_once_with("POST", "/api/api-keys", {
+                    "name": "blackbox-delegated", "scope": "read", "audit": True,
+                }, status=201, key="ysr_member", headers={"X-Workspace-Id": value})
+            self.assertIn("ysr_delegated", app.secrets)
+            app.close()
+
+    def test_bootstrap_uses_setup_or_signup_without_removed_tasks(self):
+        value = "00000000-0000-0000-0000-000000000001"
+        account = {"user_id": value, "tenant_id": value, "workspace_id": value,
+                   "api_key": "ysr_bootstrap"}
+        for suite, edition in (("cli", "ce"), ("tenant-postgres", "ee")):
+            args = run.parse_args(self.arguments())
+            args.suite, args.edition = suite, edition
+            with self.subTest(suite=suite), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict("os.environ", {"YORISHIRO_PUBLIC_POSTGRES_URL": "postgres://owned/test",
+                                               "YORISHIRO_LICENSE_KEY": "test-licence"}):
+                app = run.App(args, directory)
+                process = Mock()
+                process.poll.return_value = None
+                with patch.object(app, "cli") as cli, patch.object(app, "task") as task, \
+                        patch("run.subprocess.Popen", return_value=process), \
+                        patch.object(app, "http", return_value=(200, {}, "{}")), \
+                        patch.object(app, "rest", return_value=account) as rest, \
+                        patch.object(app, "login", return_value="ysr_login"), \
+                        patch.object(app, "create_workspace", return_value=value), \
+                        patch.object(app, "issue", return_value=(value, "ysr_selected")):
+                    app.boot()
+                    cli.assert_called_once_with("db", "migrate")
+                    task.assert_not_called()
+                    self.assertEqual(rest.call_args.args[1],
+                                     "/auth/signup" if suite == "tenant-postgres" else "/setup")
+                    self.assertEqual(app.key, "ysr_selected")
+                    self.assertEqual(app.tenant_key,
+                                     "ysr_login" if suite == "tenant-postgres" else "ysr_bootstrap")
+                app.server = None
+                app.close()
 
     def test_cleanup_escalates_and_reaps_timed_out_process(self):
         process = Mock(pid=123)

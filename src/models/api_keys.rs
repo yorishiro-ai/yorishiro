@@ -547,7 +547,7 @@ impl Entity {
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
-    /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or any other flow provisioning a key for an ordinary user.
+    /// An audit-reading key is an explicit grant, not a side effect of provisioning a key for an ordinary user.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.

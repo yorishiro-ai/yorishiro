@@ -181,7 +181,6 @@ pub(crate) fn mcp_tools(tools: McpToolSet) -> McpToolSet {
 /// Registers enterprise tasks after the base tasks, preserving task-list order.
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(crate::edition::ee::tasks::seed_official_templates::SeedOfficialTemplates);
-    tasks.register(crate::edition::ee::tasks::create_tenant_api_key::CreateTenantApiKey);
     tasks.register(crate::edition::ee::tasks::tenant_reindex_schedule::TenantReindexSchedule);
     tasks.register(crate::edition::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark);
     // tasks-inject (do not remove)

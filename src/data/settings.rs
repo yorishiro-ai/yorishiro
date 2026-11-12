@@ -68,7 +68,7 @@ impl Default for Dispatch {
 #[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Limits {
-    /// Lifetime of an invite minted by the `create_invite` task when `ttl_hours` is omitted.
+    /// Configured invitation lifetime in hours.
     pub(crate) invite_ttl_hours: i64,
     /// `Retry-After` advertised while maintenance is on, when the caller does not name one.
     pub(crate) maintenance_retry_after_seconds: u32,

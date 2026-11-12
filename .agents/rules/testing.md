@@ -82,7 +82,7 @@ The integration tests are one binary rooted at `tests/mod.rs`:
 - `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle
 - `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
 - `tests/services/` — embedding, rate limiting
-- `tests/tasks/` — task commands (reindex_embeddings)
+- `tests/tasks/` — task commands (`resync_embeddings`, `tenant_reindex_scheduler`)
 - `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle
 - `tests/ee/` — mirrors `ee/`; compiled only with the `enterprise` feature
 

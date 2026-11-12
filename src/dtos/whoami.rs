@@ -8,7 +8,7 @@ pub(crate) struct WhoAmIResponse {
     pub(crate) workspace_id: Option<Uuid>,
     pub(crate) tenant_id: Uuid,
     pub(crate) scope: ApiKeyScope,
-    /// The user this key was issued for, if it was created with `admin create-api-key --user`.
+    /// The user this key was issued for, if it is attributed to a user.
     pub(crate) user_id: Option<Uuid>,
     /// Independent of `scope`: whether this key additionally holds the audit grant, checked separately by `GET /api/audit-log`.
     pub(crate) audit: bool,

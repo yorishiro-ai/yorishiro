@@ -10,9 +10,9 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "557ff92b1d91483a3562dcf5bd777ae943473e600ecc90567df27ae20de184d4",
-    "src": "dc2db4fada8148176dff3b12aa55348527f6e120d7f1810a12ac31a862859a5c",
-    "ee": "b596920aa620e46aa256fd5b45dce24a6da473b0fe2f0105ee3957796256b44b",
+    "tests": "67f3525def3af86d074437c65e85ece83a9548a80c5cd086b81f8150a8df0ee1",
+    "src": "4c6421d70e20f0870616d0f64ecda76ea4cbd38f7b1ca005d845337267b41f2e",
+    "ee": "cc84e8126706d27982e04bc78e4a27968b657c3535656bed1590d65b4f700e83",
     "migration": "ad54b4dc417cca46b82f31ab09fce5079fdc4ba3569a44b89025c20751d79e5a",
     "Cargo.toml": "a56f8355d278953bd819be2557e74ac247e7da5e656e93c0127e360d292918f6",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
@@ -168,6 +168,7 @@
     {"module":"tasks::scheduler_config","source":"tests/tasks/scheduler_config.rs"},
     {"module":"tasks::tenant_reindex_scheduler","source":"tests/tasks/tenant_reindex_scheduler.rs"},
     {"module":"tasks::users","source":"tests/tasks/users.rs"},
+    {"module":"tasks::root_password","source":"tests/tasks/root_password.rs"},
     {"module":"time","source":"tests/time.rs"},
     {"module":"timezone_state","source":"tests/timezone_state.rs"},
     {"module":"workers::embedding_sync","source":"tests/workers/embedding_sync.rs"},

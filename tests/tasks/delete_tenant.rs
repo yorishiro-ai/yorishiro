@@ -1,5 +1,5 @@
 use loco_rs::task::Vars;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use yorishiro::App;
 use yorishiro::models::{tenant_retirement_events, tenant_tenants, user_users};
 
@@ -19,27 +19,29 @@ async fn assert_disabled_creation_rejected(ctx: &loco_rs::app::AppContext, tenan
     let before = tenant_tenants::retirement::inventory(&ctx.db, tenant_id)
         .await
         .unwrap();
-    for (task, extra) in [
-        (
-            "create_workspace",
-            vec![("name".into(), "must-not-exist".into())],
-        ),
-        (
-            "create_invite",
-            vec![
-                ("email".into(), "blocked@example.com".into()),
-                ("role".into(), "member".into()),
-            ],
-        ),
-    ] {
-        let mut args = vec![("tenant_id".into(), tenant_id.to_string())];
-        args.extend(extra);
-        assert!(
-            loco_rs::boot::run_task::<App>(ctx, Some(&task.to_owned()), &Vars::from_cli_args(args))
-                .await
-                .is_err()
-        );
-    }
+    let txn = ctx.db.begin().await.unwrap();
+    let workspace_error =
+        yorishiro::models::tenancy::create_workspace(&txn, tenant_id, "must-not-exist", None, None)
+            .await
+            .unwrap_err();
+    txn.rollback().await.unwrap();
+    assert!(matches!(
+        workspace_error,
+        yorishiro::YorishiroError::Unauthenticated
+    ));
+    let invite_error = yorishiro::models::workspace_invites::create_invite(
+        &ctx.db,
+        tenant_id,
+        "blocked@example.com",
+        yorishiro::models::tenant_memberships::MembershipRole::Member,
+        chrono::Duration::hours(1),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        invite_error,
+        yorishiro::YorishiroError::Unauthenticated
+    ));
     use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
     use yorishiro::models::workspace_invites;
     assert_eq!(
@@ -150,7 +152,6 @@ async fn sqlite_retirement_retains_quota_until_deletion_and_preserves_identities
     if !crate::require_sqlite_backend() {
         return;
     }
-    use sea_orm::TransactionTrait;
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let args = vec![
