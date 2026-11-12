@@ -5,20 +5,20 @@ use uuid::Uuid;
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct WhoAmIResponse {
-    pub(crate) workspace_id: Uuid,
+    pub(crate) workspace_id: Option<Uuid>,
     pub(crate) tenant_id: Uuid,
     pub(crate) scope: ApiKeyScope,
     /// The user this key was issued for, if it was created with `admin create-api-key --user`.
     pub(crate) user_id: Option<Uuid>,
     /// Independent of `scope`: whether this key additionally holds the audit grant, checked separately by `GET /api/audit-log`.
     pub(crate) audit: bool,
-    pub(crate) workspace_name: String,
+    pub(crate) workspace_name: Option<String>,
     pub(crate) tenant_name: String,
     pub(crate) stored_scope: ApiKeyScope,
     /// None for a tenant-bound credential that selects a workspace per request.
     pub(crate) bound_workspace_id: Option<Uuid>,
     pub(crate) identity_kind: &'static str,
-    pub(crate) workspace_access: crate::models::access::WorkspaceAccess,
+    pub(crate) workspace_access: Option<crate::models::access::WorkspaceAccess>,
 }
 
 impl From<crate::models::access::AccessIdentity> for WhoAmIResponse {

@@ -50,12 +50,14 @@ pub struct MembershipRecord {
     pub role: MembershipRole,
 }
 
-/// Key access observed while updating a membership, excluding secret material.
+/// Key access under the requested membership role, excluding secret material.
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MembershipKeyAccess {
     pub api_key_id: Uuid,
     pub stored_scope: ApiKeyScope,
+    /// Tenant-level ceiling for tenant-scoped keys, or workspace ceiling for workspace-bound keys.
+    /// A workspace-bound key has no effective scope when the user lacks access to its workspace.
     pub effective_scope: Option<ApiKeyScope>,
     /// Explicit operator grant, independent of the membership's ordered scope cap.
     pub audit: bool,

@@ -58,7 +58,10 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        let workspace_id = auth_ctx.workspace_id;
+        let workspace_id = match auth_ctx.require_workspace() {
+            Ok(id) => id,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
         if let Err(err) = search::ensure_available(&self.app_context().db, workspace_id).await {
             return Ok(err_to_tool_result(err));
         }

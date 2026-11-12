@@ -82,7 +82,7 @@ impl YorishiroMcpServer {
         };
         match crate::models::queue_job_lifecycles::bulk_job_status(
             authorized.txn(),
-            authorized.auth_context().workspace_id,
+            authorized.workspace_id(),
             args.job_id,
             &["import"],
         )

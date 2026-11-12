@@ -73,7 +73,7 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        let headers = auth::header_pairs(parts);
+        let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
         let ctx = auth::RequestAuth::new(&app_ctx)
             .authenticate(presented_key, &headers)
             .await
@@ -150,7 +150,7 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        let headers = auth::header_pairs(parts);
+        let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
         let (ctx, txn) = auth::RequestAuth::new(&app_ctx)
             .authorize(presented_key, R::SCOPE, &headers)
             .await
@@ -201,7 +201,7 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        let headers = auth::header_pairs(parts);
+        let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
         let (ctx, txn) = auth::RequestAuth::new(&app_ctx)
             .authorize_audit(presented_key, &headers)
             .await
@@ -232,7 +232,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let headers = auth::header_pairs(parts);
+        let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
 
         let app_ctx = AppContext::from_ref(state);
 

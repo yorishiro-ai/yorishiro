@@ -76,7 +76,7 @@ pub(crate) async fn list(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
 ) -> Result<Json<ListApiKeysResponse>, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&ctx, &auth).await?;
     let keys = IdentityApiKeys::list_for_tenant(&ctx.db, auth.tenant_id).await?;
     let mut records = Vec::with_capacity(keys.len());
     for key in keys {
@@ -99,7 +99,7 @@ pub(crate) async fn revoke(
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&ctx, &auth).await?;
     IdentityApiKeys::revoke_for_tenant(&ctx.db, &auth, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

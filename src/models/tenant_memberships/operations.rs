@@ -160,6 +160,21 @@ pub(crate) async fn add_member_in_transaction(
     use sea_orm::sea_query::OnConflict;
 
     protect_owner(conn, tenant_id, user_id, Some(role)).await?;
+    crate::db::lock_for_update(conn, &format!("user-membership:{user_id}"))
+        .await
+        .internal()?;
+    if Entity::find()
+        .filter(Column::UserId.eq(user_id))
+        .filter(Column::TenantId.ne(tenant_id))
+        .one(conn)
+        .await
+        .internal()?
+        .is_some()
+    {
+        return Err(YorishiroError::Conflict {
+            message: "an account cannot belong to more than one tenant".into(),
+        });
+    }
     guard_tenant_bound_user(conn, tenant_id, user_id, role).await?;
 
     // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
@@ -171,15 +186,21 @@ pub(crate) async fn add_member_in_transaction(
         ..Default::default()
     };
 
-    Entity::insert(active)
+    let affected = Entity::insert(active)
         .on_conflict(
-            OnConflict::columns([Column::TenantId, Column::UserId])
+            OnConflict::column(Column::UserId)
                 .update_column(Column::Role)
+                .action_and_where(Column::TenantId.eq(tenant_id))
                 .to_owned(),
         )
-        .exec(conn)
+        .exec_without_returning(conn)
         .await
         .internal()?;
+    if affected == 0 {
+        return Err(YorishiroError::Conflict {
+            message: "an account cannot belong to more than one tenant".into(),
+        });
+    }
 
     Ok(())
 }
@@ -369,7 +390,7 @@ async fn key_access(
                 .await?
                 .map(|access| stored_scope.min(access.max_scope))
         } else {
-            None
+            Some(crate::models::access::effective_scope(stored_scope, role))
         };
         access.push(super::MembershipKeyAccess {
             api_key_id: key.id,

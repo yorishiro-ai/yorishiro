@@ -73,7 +73,7 @@ Input schema:
 
 ### `create_api_key`
 
-Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (per-request X-Workspace-Id) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
+Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
 
 Input schema:
 
@@ -495,7 +495,7 @@ Input schema:
 
 ### `discover_workspaces`
 
-Discover workspace candidates within the current credential's tenant; service credentials list only the selected workspace, and discovery does not grant access (requires read scope)
+Discover workspace candidates within the current credential's tenant; workspace-bound credentials list only their bound workspace, and discovery does not grant access (requires read scope)
 
 Input schema:
 

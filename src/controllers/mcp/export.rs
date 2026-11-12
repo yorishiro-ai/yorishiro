@@ -30,13 +30,10 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let lines =
-            match export::export_jsonl(authorized.txn(), authorized.auth_context().workspace_id)
-                .await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let lines = match export::export_jsonl(authorized.txn(), authorized.workspace_id()).await {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         Ok(CallToolResult::success(vec![ContentBlock::text(lines)]))
     }
 }

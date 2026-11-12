@@ -118,13 +118,14 @@ pub(crate) async fn enqueue(
     auth: &AuthContext,
     jsonl: String,
 ) -> Result<Uuid, YorishiroError> {
-    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, auth.workspace_id)
-        .await
-        .map_err(|error| error.0)?;
+    let worker_class =
+        crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
+            .await
+            .map_err(|error| error.0)?;
     let args = ImportArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
-        workspace_id: auth.workspace_id,
+        workspace_id: auth.require_workspace()?,
         api_key_id: auth.api_key_id,
         user_id: auth.user_id,
         jsonl,
@@ -134,7 +135,7 @@ pub(crate) async fn enqueue(
         ctx,
         JobSpec {
             job_name: "import",
-            workspace_id: auth.workspace_id,
+            workspace_id: auth.require_workspace()?,
             class: worker_class,
             worker_name: ImportWorker::class_name(),
             dispatch_payload: serde_json::to_value(args).internal()?,

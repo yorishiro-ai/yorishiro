@@ -53,7 +53,7 @@ impl YorishiroMcpServer {
         };
         match entity_column_preferences::list(
             authorized.txn(),
-            authorized.auth_context().workspace_id,
+            authorized.workspace_id(),
             crate::models::pagination::ListParams::new(args.limit, args.offset),
         )
         .await
@@ -81,7 +81,7 @@ impl YorishiroMcpServer {
         };
         let record = match entity_column_preferences::set(
             authorized.txn(),
-            authorized.auth_context().workspace_id,
+            authorized.workspace_id(),
             &args.entity_type,
             &args.columns,
         )
@@ -112,7 +112,7 @@ impl YorishiroMcpServer {
         };
         if let Err(error) = entity_column_preferences::clear(
             authorized.txn(),
-            authorized.auth_context().workspace_id,
+            authorized.workspace_id(),
             &args.entity_type,
         )
         .await

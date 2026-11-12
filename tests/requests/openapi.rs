@@ -12,10 +12,10 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
 
         let document: Value = response.json();
         assert_eq!(document["openapi"], "3.1.0");
-        let login_422 = &document["paths"]["/auth/login"]["post"]["responses"]["422"]["content"];
-        assert_eq!(login_422["application/json"]["schema"]["$ref"], "#/components/schemas/LoginRecoveryResponse");
-        assert_eq!(login_422["text/plain"]["schema"]["type"], "string");
-        let invalid = request.post("/auth/login").json(&serde_json::json!({"email":12,"password":"invalid"})).await;
+        assert!(document["paths"]["/auth/login"].is_null());
+        assert!(document["paths"]["/auth/root/login"]["post"].is_object());
+        assert!(document["paths"]["/auth/tenant/login"]["post"].is_object());
+        let invalid = request.post("/auth/root/login").json(&serde_json::json!({"email":12,"password":"invalid"})).await;
         invalid.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
         assert!(invalid.headers()["content-type"].to_str().unwrap().starts_with("text/plain"));
         assert!(document["paths"]["/api/entities"].is_object());

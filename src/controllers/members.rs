@@ -119,10 +119,9 @@ async fn list_invites(
 /// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope.
 pub(crate) async fn require_tenant_admin(
     ctx: &AppContext,
-    tenant_id: uuid::Uuid,
-    user_id: Option<uuid::Uuid>,
+    actor: &crate::models::api_keys::AuthContext,
 ) -> Result<(), YorishiroError> {
-    crate::models::access::require_tenant_admin(&ctx.db, tenant_id, user_id).await
+    crate::models::access::require_tenant_admin_as(&ctx.db, actor).await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::tenant_memberships::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
@@ -134,7 +133,7 @@ async fn list_members(
     AuthContext(auth): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MembershipRecord>>, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&ctx, &auth).await?;
     let members =
         tenant_memberships::list_members(&ctx.db, auth.tenant_id, page.try_into()?).await?;
     Ok(Json(members))
@@ -149,7 +148,7 @@ async fn add_member(
     AuthContext(auth): AuthContext,
     Json(body): Json<AddMemberRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&ctx, &auth).await?;
 
     let user = user_users::get_user_by_email(&ctx.db, &body.email)
         .await?
@@ -187,7 +186,7 @@ async fn create_tenant_user(
     AuthContext(auth): AuthContext,
     Json(body): Json<crate::dtos::members::CreateTenantUserRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&ctx, &auth).await?;
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
     crate::models::access::require_current_tenant_admin(&txn, &auth).await?;
     let user = tenant_memberships::create_tenant_user_member(
@@ -223,7 +222,7 @@ async fn reset_tenant_user_password(
     Path(user_id): Path<uuid::Uuid>,
     Json(body): Json<crate::dtos::members::ResetTenantUserPasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&ctx, &auth).await?;
     tenant_memberships::reset_tenant_user_password(&ctx.db, &auth, user_id, &body.password).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -234,7 +233,7 @@ async fn remove_member(
     AuthContext(auth): AuthContext,
     Path(user_id): Path<uuid::Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&ctx, &auth).await?;
     tenant_memberships::remove_member_as(&ctx.db, &auth, user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

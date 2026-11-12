@@ -249,7 +249,8 @@ impl ServerHandler for YorishiroMcpServer {
             "Yorishiro is a multi-tenant knowledge store with user-defined schemas. \
              Every tool call requires authentication via an `Authorization: Bearer <api-key>` \
              header, and the tools available depend on the API key's scope \
-             (read/write/schema, where higher scopes include the permissions of lower ones).",
+             (read/write/schema, where higher scopes include the permissions of lower ones). \
+             Tenant-scoped keys require `X-Workspace-Id` for workspace operations; tenant operations do not select a workspace.",
         )
     }
 }
@@ -258,6 +259,7 @@ impl ServerHandler for YorishiroMcpServer {
 pub(crate) struct Authorized {
     ctx: AuthContext,
     txn: DatabaseTransaction,
+    workspace_id: uuid::Uuid,
 }
 
 impl Authorized {
@@ -273,6 +275,10 @@ impl Authorized {
 
     pub(crate) fn auth_context(&self) -> &AuthContext {
         &self.ctx
+    }
+
+    pub(crate) fn workspace_id(&self) -> uuid::Uuid {
+        self.workspace_id
     }
 }
 
@@ -300,6 +306,15 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     })
 }
 
+fn header_error(error: YorishiroError) -> ErrorData {
+    match error {
+        YorishiroError::ValidationFailed { message, .. } => {
+            ErrorData::invalid_params(message, None)
+        }
+        error => crate::error::mcp_internal(error),
+    }
+}
+
 /// The sole entry point for every tool handler.
 /// Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
 ///
@@ -310,7 +325,7 @@ pub(crate) async fn authorize(
     required: ApiKeyScope,
 ) -> Result<AuthzOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
-    let headers = auth::header_pairs(parts);
+    let headers = auth::header_pairs(&parts.headers).map_err(header_error)?;
 
     let request_auth = auth::RequestAuth::new(ctx);
     let current = match request_auth.resolve(presented_key, &headers).await {
@@ -334,11 +349,19 @@ pub(crate) async fn authorize(
             current.scope,
         )));
     }
+    let workspace_id = match current.require_workspace() {
+        Ok(workspace_id) => workspace_id,
+        Err(error) => return Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(error))),
+    };
     match request_auth
         .begin(current, required >= ApiKeyScope::Write)
         .await
     {
-        Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
+        Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized {
+            ctx,
+            txn,
+            workspace_id,
+        })),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
         }
@@ -360,7 +383,7 @@ pub(crate) async fn verify(
     required: ApiKeyScope,
 ) -> Result<VerifyOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
-    let headers = auth::header_pairs(parts);
+    let headers = auth::header_pairs(&parts.headers).map_err(header_error)?;
 
     match auth::RequestAuth::new(ctx)
         .resolve(presented_key, &headers)

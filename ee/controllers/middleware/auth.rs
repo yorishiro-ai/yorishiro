@@ -25,15 +25,7 @@ async fn authenticate(
     headers: &HeaderMap,
 ) -> Result<AuthContext, YorishiroError> {
     let token = bearer_token(headers)?;
-    let forwarded = headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_owned(), value.to_owned()))
-        })
-        .collect::<Vec<_>>();
+    let forwarded = base_auth::header_pairs(headers)?;
     base_auth::RequestAuth::new(ctx)
         .resolve(token, &forwarded)
         .await
@@ -50,7 +42,9 @@ pub(crate) async fn authenticate_workspace(
     ctx: &AppContext,
     headers: &HeaderMap,
 ) -> Result<AuthContext, YorishiroError> {
-    authenticate(ctx, headers).await
+    let auth = authenticate(ctx, headers).await?;
+    auth.require_workspace()?;
+    Ok(auth)
 }
 
 /// Authenticates the bearer API key and returns the tenant it belongs to, with **no role requirement**.

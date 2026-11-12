@@ -16,7 +16,7 @@ async fn list(authorized: Authorized<ReadScope>) -> Result<Json<Vec<model::ForkR
         model::list(
             authorized.txn(),
             authorized.ctx.tenant_id,
-            authorized.ctx.workspace_id,
+            authorized.ctx.require_workspace()?,
         )
         .await?,
     ))
@@ -31,7 +31,7 @@ async fn get(
         model::get(
             authorized.txn(),
             authorized.ctx.tenant_id,
-            authorized.ctx.workspace_id,
+            authorized.ctx.require_workspace()?,
             fork_id,
         )
         .await?,
@@ -46,7 +46,7 @@ async fn create(
     let fork = model::create(
         authorized.txn(),
         authorized.ctx.tenant_id,
-        authorized.ctx.workspace_id,
+        authorized.ctx.require_workspace()?,
         input,
     )
     .await?;
@@ -63,7 +63,7 @@ async fn update(
     let fork = model::update(
         authorized.txn(),
         authorized.ctx.tenant_id,
-        authorized.ctx.workspace_id,
+        authorized.ctx.require_workspace()?,
         fork_id,
         input,
     )
@@ -80,7 +80,7 @@ async fn delete(
     model::delete(
         authorized.txn(),
         authorized.ctx.tenant_id,
-        authorized.ctx.workspace_id,
+        authorized.ctx.require_workspace()?,
         fork_id,
     )
     .await?;

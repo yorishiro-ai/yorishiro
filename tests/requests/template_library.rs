@@ -21,15 +21,16 @@ async fn template_update_revalidates_a_previously_authenticated_administrator() 
     use yorishiro::models::{api_keys, tenant_memberships, user_users};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let created = request.post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_key))
             .json(&serde_json::json!({"name":format!("fenced-{}",uuid::Uuid::new_v4()),"definition":note_definition()})).await;
         created.assert_status(StatusCode::CREATED);
         let id = created.json::<serde_json::Value>()["id"].as_str().unwrap().parse().unwrap();
         let user = user_users::create_user(&ctx.db, &fixtures::unique_email("template-admin"), "test-password", None).await.unwrap();
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Admin).await.unwrap();
-        let key = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, Some(user.id), false).await.unwrap();
-        let actor = api_keys::AuthContext { api_key_id:key.id, workspace_id:tenant.workspace_id,
+        let key = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, ApiKeyScope::Read, Some(user.id), false, "template-admin").await.unwrap();
+        let actor = api_keys::AuthContext { api_key_id:key.id, workspace_id:None,
             tenant_id:tenant.tenant_id, user_id:Some(user.id), scope:ApiKeyScope::Read, audit:false };
         let input = || UpdateTemplateInput { name:None,description:Some("must-not-save".into()),definition:None,tags:None,locale:None };
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, MembershipRole::Member).await.unwrap();
@@ -48,9 +49,8 @@ async fn template_update_revalidates_a_previously_authenticated_administrator() 
 async fn owner_can_create_update_and_delete_a_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());
-        let TestTenant {
-            api_key: owner_key, ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let owner_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         let response = request
             .post("/api/template-library")

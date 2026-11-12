@@ -47,7 +47,7 @@ async fn import_job_status(
     Ok(Json(
         crate::models::queue_job_lifecycles::bulk_job_status(
             authorized.txn(),
-            authorized.ctx.workspace_id,
+            authorized.ctx.require_workspace()?,
             id,
             &["import"],
         )

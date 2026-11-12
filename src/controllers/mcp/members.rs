@@ -126,9 +126,7 @@ impl YorishiroMcpServer {
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let db = &self.app_context().db;
-        if let Err(error) =
-            crate::models::access::require_tenant_admin(db, auth.tenant_id, auth.user_id).await
-        {
+        if let Err(error) = crate::models::access::require_tenant_admin_as(db, &auth).await {
             return Ok(err_to_tool_result(error));
         }
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);

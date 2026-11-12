@@ -7,8 +7,8 @@ use yorishiro::models::tenant_memberships::MembershipRole;
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
-async fn attributed_key_can_accept_invite_for_passwordless_account() {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+async fn attributed_key_cannot_accept_cross_tenant_invite() {
+    use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, TransactionTrait};
     use yorishiro::models::{
         api_keys, tenant_memberships, tenant_tenants, user_users, workspace_invites,
     };
@@ -19,24 +19,15 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let email = super::fixtures::unique_email("passwordless-invite");
-        let txn = ctx.db.begin().await.unwrap();
-        yorishiro::edition::ee::models::user_users::find_or_create(
-            &txn,
-            "invite-test-provider",
-            &uuid::Uuid::new_v4().to_string(),
-            Some(&email),
-            None,
-            None,
-        )
+        let user = user_users::ActiveModel {
+            email: ActiveValue::Set(Some(email)),
+            oauth_provider: ActiveValue::Set(Some("invite-test-provider".into())),
+            oauth_subject_id: ActiveValue::Set(Some(uuid::Uuid::new_v4().to_string())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
         .await
-        .expect("provision a valid OAuth identity");
-        txn.commit().await.unwrap();
-        let user = user_users::Entity::find()
-            .filter(yorishiro::models::_entities::user_users::Column::Email.eq(&email))
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
+        .unwrap();
         assert!(user.password_hash.is_none());
         assert!(user.oauth_provider.is_some());
         assert!(user.oauth_subject_id.is_some());
@@ -92,7 +83,7 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
             .await;
         assert_eq!(
             accepted.status_code(),
-            StatusCode::OK,
+            StatusCode::CONFLICT,
             "{}",
             accepted.text()
         );
@@ -101,7 +92,7 @@ async fn attributed_key_can_accept_invite_for_passwordless_account() {
             .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .json(&body)
             .await;
-        assert_eq!(replay.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(replay.status_code(), StatusCode::CONFLICT);
         assert!(
             user_users::Entity::find_by_id(user.id)
                 .one(&ctx.db)
@@ -221,7 +212,7 @@ async fn failed_invited_registration_does_not_consume_the_invite() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        user_users::create_user(&ctx.db, exists_email.as_str(), "password", None)
+        user_users::create_user(&ctx.db, exists_email.as_str(), "long-password", None)
             .await
             .expect("existing user");
         let (_, token) = workspace_invites::create_invite(
@@ -237,7 +228,7 @@ async fn failed_invited_registration_does_not_consume_the_invite() {
         let response = request
             .post("/auth/signup")
             .json(&serde_json::json!({
-                "invite_token": token, "password": "password"
+                "invite_token": token, "password": "long-password"
             }))
             .await;
         assert_eq!(response.status_code(), StatusCode::CONFLICT);
@@ -283,7 +274,7 @@ async fn signup_then_login_round_trip() {
         assert_eq!(signup_body["role"], "owner");
 
         let login_response = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&serde_json::json!({
                 "email": round_trip_email.as_str(),
                 "password": "correct-horse-battery-staple",
@@ -311,7 +302,7 @@ async fn signup_then_login_round_trip() {
         // A wrong password on an otherwise-valid account must not leak whether
         // the account exists differently than a truly unknown email would.
         let bad_password_response = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&serde_json::json!({
                 "email": round_trip_email.as_str(),
                 "password": "not-the-password",
@@ -352,6 +343,11 @@ async fn invited_member_signup_does_not_discover_ungranted_workspaces() {
 #[tokio::test]
 async fn signup_without_invite_creates_its_own_tenant() {
     boot_request_isolated::<App, _, _>(|request, _ctx| async move {
+        request
+            .post("/auth/signup")
+            .json(&serde_json::json!({"email":"weak@example.com", "password":"short"}))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
         let signup_response = request
             .post("/auth/signup")
             .json(&serde_json::json!({
@@ -372,37 +368,19 @@ async fn signup_without_invite_creates_its_own_tenant() {
         assert_eq!(signup_body["workspaces"].as_array().unwrap().len(), 0);
 
         let login_response = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&serde_json::json!({
                 "email": "no-invite@example.com",
                 "password": "correct-horse-battery-staple",
             }))
             .await;
-        assert_eq!(
-            login_response.status_code(),
-            403,
-            "response: {:?}",
-            login_response.text()
-        );
-        let recovery = login_response.json::<serde_json::Value>();
-        assert_eq!(recovery["error"]["code"], "workspace_provisioning_required");
-        assert_eq!(recovery["error"]["memberships"][0]["role"], "owner");
-        assert_eq!(
-            recovery["error"]["memberships"][0]["tenant_id"],
-            signup_body["tenant_id"]
-        );
-        assert!(
-            recovery["error"]["workspaces"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            recovery["error"]["hint"]
-                .as_str()
-                .unwrap()
-                .contains("create_workspace")
-        );
+        assert_eq!(login_response.status_code(), StatusCode::OK);
+        let login = login_response.json::<serde_json::Value>();
+        assert_eq!(login["tenant_id"], signup_body["tenant_id"]);
+        assert!(login.get("workspace_id").is_none());
+        request.post("/auth/login")
+            .json(&serde_json::json!({"email":"no-invite@example.com", "password":"correct-horse-battery-staple"}))
+            .await.assert_status(StatusCode::NOT_FOUND);
     })
     .await;
 }
@@ -580,7 +558,7 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
     .await;
 }
 #[tokio::test]
-async fn login_selection_has_typed_candidates_only_after_credentials_are_verified() {
+async fn login_issues_tenant_key_after_credentials_are_verified() {
     use sea_orm::TransactionTrait;
     super::boot_request::<App, _, _>(|request, ctx| async move {
         let args = super::fixtures::TenantArgs::default();
@@ -599,7 +577,7 @@ async fn login_selection_has_typed_candidates_only_after_credentials_are_verifie
         .unwrap();
         transaction.commit().await.unwrap();
         let response = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&serde_json::json!({"email":email,"password":"wrong-password"}))
             .await;
         assert_eq!(response.status_code(), 401);
@@ -607,36 +585,20 @@ async fn login_selection_has_typed_candidates_only_after_credentials_are_verifie
         assert!(denied["error"]["workspaces"].is_null());
         assert!(denied["error"]["memberships"].is_null());
         let response = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&serde_json::json!({"email":email,"password":password}))
             .await;
-        assert_eq!(response.status_code(), 422, "{}", response.text());
+        assert_eq!(response.status_code(), 200, "{}", response.text());
         let body = response.json::<serde_json::Value>();
-        assert_eq!(body["error"]["code"], "workspace_selection_required");
-        assert!(body["error"]["details"].is_null());
-        let candidates = body["error"]["workspaces"].as_array().unwrap();
-        assert!(candidates.len() >= 2);
-        assert!(
-            candidates
-                .iter()
-                .any(|candidate| candidate["workspace_id"] == tenant.workspace_id.to_string())
-        );
-        assert!(
-            candidates
-                .iter()
-                .any(|candidate| candidate["workspace_id"] == other.id.to_string())
-        );
-        for candidate in candidates {
-            assert_eq!(candidate["tenant_id"], tenant.tenant_id.to_string());
-            assert!(!candidate["tenant_name"].as_str().unwrap().is_empty());
-            assert!(!candidate["workspace_name"].as_str().unwrap().is_empty());
-        }
+        assert_eq!(body["tenant_id"], tenant.tenant_id.to_string());
+        assert!(body.get("workspace_id").is_none());
+        assert_ne!(other.id, tenant.workspace_id);
     })
     .await;
 }
 
 #[tokio::test]
-async fn login_without_membership_is_distinct_from_workspace_provisioning() {
+async fn login_without_membership_is_rejected() {
     super::boot_request::<App, _, _>(|request, ctx| async move {
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
@@ -647,14 +609,10 @@ async fn login_without_membership_is_distinct_from_workspace_provisioning() {
         .await
         .unwrap();
         let response = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&serde_json::json!({"email":user.email,"password":"hunter2-hunter2"}))
             .await;
         assert_eq!(response.status_code(), 403);
-        let body = response.json::<serde_json::Value>();
-        assert_eq!(body["error"]["code"], "tenant_membership_required");
-        assert!(body["error"]["memberships"].as_array().unwrap().is_empty());
-        assert!(body["error"]["workspaces"].as_array().unwrap().is_empty());
     })
     .await;
 }

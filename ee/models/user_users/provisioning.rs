@@ -8,18 +8,11 @@ use crate::models::_entities::workspace_workspaces as workspace_workspaces_entit
 use crate::models::schema_schemas;
 use crate::models::tenant_memberships::{self, MembershipRole};
 use crate::models::workspace_workspaces::WorkspaceStatus;
-use crate::models::{tenancy, tenant_tenants, workspace_workspaces};
-use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction};
+use crate::models::{tenancy, tenant_tenants};
+use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseTransaction};
 use uuid::Uuid;
 
-use super::{CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_identity};
-
-/// The workspace an OAuth login should issue its API key for, alongside the tenant/membership role that key's scope is derived from: everything the callback controller needs to call `IdentityApiKeys::create_api_key` exactly the way `POST /auth/login` does.
-pub struct ProvisionedLogin {
-    pub(crate) user_id: Uuid,
-    pub workspace_id: Uuid,
-    pub(crate) scope: crate::models::api_keys::ApiKeyScope,
-}
+use super::{CreateOauthUserError, create_oauth_user, find_by_oauth_identity};
 
 /// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
 /// `email` is required (the design's whole point is looking users up by the ID token's `email` claim); a provider that omits it fails with `ValidationFailed` rather than silently provisioning an unusable account.
@@ -43,13 +36,13 @@ pub async fn find_or_create(
     email: Option<&str>,
     display_name: Option<&str>,
     max_tenants: Option<i32>,
-) -> Result<ProvisionedLogin, YorishiroError> {
+) -> Result<Uuid, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
         .await
         .internal()?;
 
     if let Some(existing) = find_by_oauth_identity(conn, provider, subject_id).await? {
-        return resolve_existing_login(conn, existing).await;
+        return Ok(existing.id);
     }
 
     let email = email.ok_or_else(|| YorishiroError::ValidationFailed {
@@ -90,62 +83,17 @@ pub async fn find_or_create(
         status: ActiveValue::Set(WorkspaceStatus::Active.as_db_str().to_string()),
         ..Default::default()
     };
-    let workspace = workspace_active.update(conn).await.internal()?;
+    workspace_active.update(conn).await.internal()?;
 
     tenant_memberships::add_member_in_transaction(conn, tenant.id, user.id, MembershipRole::Owner)
         .await?;
 
-    Ok(ProvisionedLogin {
-        user_id: user.id,
-        workspace_id: workspace.id,
-        scope: MembershipRole::Owner.max_scope(),
-    })
+    Ok(user.id)
 }
 
 /// A deterministic key for `lock_for_update`, one per `(provider, subject_id)` pair.
 fn identity_lock_key(provider: &str, subject_id: &str) -> String {
     format!("oauth:{provider}:{subject_id}")
-}
-
-/// Resolves a previously-provisioned OAuth identity to the workspace/role its login should use.
-/// Always called under the identity's advisory lock, so a row found here is guaranteed to have finished provisioning its tenant, workspace and membership.
-///
-/// An account reaching more than one workspace is refused rather than silently resolved to an arbitrary one, which could hand a login to the wrong tenant's workspace.
-async fn resolve_existing_login(
-    conn: &impl ConnectionTrait,
-    user: OAuthUser,
-) -> Result<ProvisionedLogin, YorishiroError> {
-    let mut workspaces = tenancy::list_workspaces_for_user(conn, user.id).await?;
-    let workspace = match workspaces.len() {
-        1 => workspaces.pop().expect("len() == 1 checked above"),
-        0 => {
-            return Err(YorishiroError::ScopeInsufficient {
-                message: "this account is not a member of any tenant".into(),
-                hint: "ask a tenant admin to add you as a member first".into(),
-            });
-        }
-        _ => {
-            return Err(YorishiroError::ValidationFailed {
-                message: "this account has access to more than one workspace".into(),
-                details: vec![],
-                hint: "sign in with password and specify workspace_id explicitly".into(),
-            });
-        }
-    };
-
-    let tenant_id = workspace_workspaces::get_workspace_tenant(conn, workspace.id).await?;
-    let access = crate::models::access::workspace_access(conn, tenant_id, workspace.id, user.id)
-        .await?
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this account has no access to its workspace".into(),
-            hint: "ask a tenant admin for a workspace grant".into(),
-        })?;
-
-    Ok(ProvisionedLogin {
-        user_id: user.id,
-        workspace_id: workspace.id,
-        scope: access.max_scope,
-    })
 }
 
 fn tenant_name_from_email(email: &str) -> String {

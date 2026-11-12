@@ -13,6 +13,7 @@ async fn invite_cancellation_and_acceptance_have_one_committed_outcome() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let user = user_users::create_user(
             &ctx.db, &super::fixtures::unique_email("cancel-accept-race"), "test-password", None,
         ).await.unwrap();
@@ -23,7 +24,7 @@ async fn invite_cancellation_and_acceptance_have_one_committed_outcome() {
         let cancel = async {
             barrier.wait().await;
             request.delete(&format!("/api/members/invites/{}", invite.id))
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await
+                .add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await
         };
         let accept = async {
             barrier.wait().await;
@@ -134,6 +135,8 @@ async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
     use yorishiro::models::{tenant_memberships, user_users};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let successor = user_users::create_user(
             &ctx.db,
             &super::fixtures::unique_email("successor"),
@@ -153,13 +156,13 @@ async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
         let path = "/api/members/transfer-ownership";
         let missing = request
             .post(path)
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(&serde_json::json!({"successor_user_id":uuid::Uuid::new_v4()}))
             .await;
         assert_eq!(missing.status_code(), StatusCode::NOT_FOUND);
         let response = request
             .post(path)
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(&serde_json::json!({"successor_user_id":successor.id}))
             .await;
         assert_eq!(
@@ -180,7 +183,7 @@ async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
         }
         let forbidden = request
             .post(path)
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(&serde_json::json!({"successor_user_id":successor.id}))
             .await;
         assert_eq!(forbidden.status_code(), StatusCode::FORBIDDEN);
@@ -192,6 +195,8 @@ async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
 async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let email = super::fixtures::unique_email("rotated-invite");
         let (invite, old_token) = yorishiro::models::workspace_invites::create_invite(
             &ctx.db,
@@ -206,7 +211,7 @@ async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
         for _ in 0..2 {
             let cancelled = request
                 .delete(&path)
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
                 .await;
             assert_eq!(cancelled.status_code(), StatusCode::NO_CONTENT);
         }
@@ -217,7 +222,7 @@ async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
         assert_eq!(rejected.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
         let rotated = request
             .post(&format!("{path}/reissue"))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(
                 &serde_json::json!({"expires_at":chrono::Utc::now() + chrono::Duration::hours(1)}),
             )
@@ -243,7 +248,7 @@ async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
         );
         let used = request
             .post(&format!("{path}/reissue"))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(
                 &serde_json::json!({"expires_at":chrono::Utc::now() + chrono::Duration::hours(1)}),
             )
@@ -257,19 +262,20 @@ async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
 async fn administrator_can_issue_and_list_secret_free_invites() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let email = super::fixtures::unique_email("managed-invite");
         let body = serde_json::json!({"email":email,"role":"member","expires_at":chrono::Utc::now() + chrono::Duration::hours(1)});
         let anonymous = request.post("/api/members/invites").json(&body).await;
         assert_eq!(anonymous.status_code(), StatusCode::UNAUTHORIZED);
         let created = request.post("/api/members/invites")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&body).await;
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key)).json(&body).await;
         assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
         let created = created.json::<serde_json::Value>();
         let token = created["token"].as_str().unwrap();
         assert!(!token.is_empty());
         assert!(created.get("token_hash").is_none());
         let listed = request.get("/api/members/invites")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await;
         assert_eq!(listed.status_code(), StatusCode::OK);
         let records = listed.json::<serde_json::Value>();
         let record = records.as_array().unwrap().iter().find(|record| record["id"] == created["id"]).unwrap();
@@ -301,18 +307,19 @@ async fn membership_mutations_reject_stale_admin_contexts() {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
             .await
             .unwrap();
-        let key = api_keys::Entity::create_api_key(
+        let key = api_keys::Entity::create_tenant_api_key(
             &ctx.db,
-            tenant.workspace_id,
+            tenant.tenant_id,
             ApiKeyScope::Read,
             Some(admin.id),
             false,
+            "stale-admin",
         )
         .await
         .unwrap();
         let actor = api_keys::AuthContext {
             api_key_id: key.id,
-            workspace_id: tenant.workspace_id,
+            workspace_id: None,
             tenant_id: tenant.tenant_id,
             user_id: Some(admin.id),
             scope: ApiKeyScope::Read,
@@ -405,6 +412,8 @@ async fn membership_mutations_reject_stale_admin_contexts() {
 async fn role_preview_reports_lost_workspaces_without_keys() {
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
             &super::fixtures::unique_email("preview-no-keys"),
@@ -424,7 +433,7 @@ async fn role_preview_reports_lost_workspaces_without_keys() {
         for role in ["member", "viewer"] {
             let response = request
                 .post(&format!("/api/members/{}/role-preview", user.id))
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
                 .json(&serde_json::json!({"role": role}))
                 .await;
             assert_eq!(response.status_code(), StatusCode::OK);
@@ -444,7 +453,7 @@ async fn role_preview_reports_lost_workspaces_without_keys() {
         .await;
         let response = request
             .post(&format!("/api/members/{}/role-preview", user.id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(&serde_json::json!({"role": "viewer"}))
             .await;
         assert_eq!(response.status_code(), StatusCode::OK);
@@ -460,6 +469,8 @@ async fn role_preview_reports_lost_workspaces_without_keys() {
 async fn existing_keys_follow_current_role_without_widening_their_grant() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
             &super::fixtures::unique_email("role-change"),
@@ -486,6 +497,16 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         .await;
         let narrow =
             issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
+        let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
+            &ctx.db,
+            tenant.tenant_id,
+            ApiKeyScope::Migration,
+            Some(user.id),
+            false,
+            "role-preview",
+        )
+        .await
+        .unwrap();
         for (role, expected) in [
             (MembershipRole::Admin, "migration"),
             (MembershipRole::Viewer, "read"),
@@ -501,7 +522,7 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
             .await;
             let preview = request
                 .post(&format!("/api/members/{}/role-preview", user.id))
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
                 .json(&serde_json::json!({"role":role}))
                 .await;
             assert_eq!(preview.status_code(), StatusCode::OK);
@@ -509,14 +530,19 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
             assert_eq!(preview["blocked_by_last_owner"], false);
             let response = request
                 .post("/api/members")
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
                 .json(&serde_json::json!({"email":user.email,"role":role}))
                 .await;
             assert_eq!(response.status_code(), StatusCode::CREATED);
             let access = response.json::<serde_json::Value>();
             assert_eq!(preview["keys"], access["keys"]);
             let keys = access["keys"].as_array().unwrap();
-            assert_eq!(keys.len(), 2);
+            assert_eq!(keys.len(), 3);
+            assert!(
+                keys.iter()
+                    .any(|key| key["api_key_id"] == tenant_key.id.to_string()
+                        && key["effective_scope"] == expected)
+            );
             assert!(keys.iter().any(
                 |key| key["stored_scope"] == "migration" && key["effective_scope"] == expected
             ));
@@ -530,11 +556,10 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
                 assert!(key.get("plaintext").is_none());
             }
             let login = request
-                .post("/auth/login")
+                .post("/auth/root/login")
                 .json(&serde_json::json!({
                     "email": user.email,
                     "password": "hunter2-hunter2",
-                    "workspace_id": tenant.workspace_id,
                 }))
                 .await;
             assert_eq!(login.status_code(), StatusCode::OK);
@@ -569,7 +594,7 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         }
         let preview = request
             .get(&format!("/api/members/{}/removal-preview", user.id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(preview.status_code(), StatusCode::OK);
         let preview = preview.json::<serde_json::Value>();
@@ -588,12 +613,12 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         assert_eq!(still_valid.status_code(), StatusCode::OK);
         let removed = request
             .delete(&format!("/api/members/{}", user.id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(removed.status_code(), StatusCode::NO_CONTENT);
         let preview = request
             .get(&format!("/api/members/{}/removal-preview", user.id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(preview.status_code(), StatusCode::OK);
         let preview = preview.json::<serde_json::Value>();
@@ -602,12 +627,12 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         assert_eq!(preview["lost_workspace_ids"], serde_json::json!([]));
         let repeated = request
             .delete(&format!("/api/members/{}", user.id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(repeated.status_code(), StatusCode::NO_CONTENT);
         let missing = request
             .delete(&format!("/api/members/{}", uuid::Uuid::new_v4()))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(missing.status_code(), StatusCode::NO_CONTENT);
         for key in [&broad, &narrow] {
@@ -641,9 +666,9 @@ async fn owner_can_list_and_add_members() {
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let args = TenantArgs::default();
         let owner_email = args.owner_email.clone();
-        let TestTenant {
-            api_key: owner_key, ..
-        } = TestTenant::create(&request, &ctx, args).await;
+        let tenant = TestTenant::create(&request, &ctx, args).await;
+        let owner_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         // The invitee must already have an account before they can be added by email.
         let invitee = yorishiro::models::user_users::create_user(
@@ -689,9 +714,9 @@ async fn owner_can_list_and_add_members() {
 #[tokio::test]
 async fn add_member_rejects_an_email_with_no_account() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant {
-            api_key: owner_key, ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let owner_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         let response = request
             .post("/api/members")
@@ -774,9 +799,11 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
         let args = TenantArgs::default();
         let email = args.owner_email.clone();
         let tenant = TestTenant::create(&request, &ctx, args).await;
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let preview = request
             .get(&format!("/api/members/{}/removal-preview", tenant.owner_id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(preview.status_code(), StatusCode::OK);
         assert_eq!(
@@ -785,7 +812,7 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
         );
         let role_preview = request
             .post(&format!("/api/members/{}/role-preview", tenant.owner_id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(&serde_json::json!({"role":"admin"}))
             .await;
         assert_eq!(role_preview.status_code(), StatusCode::OK);
@@ -795,13 +822,13 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
         );
         let demoted = request
             .post("/api/members")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(&serde_json::json!({"email":email,"role":"admin"}))
             .await;
         assert_eq!(demoted.status_code(), StatusCode::CONFLICT);
         let removed = request
             .delete(&format!("/api/members/{}", tenant.owner_id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(removed.status_code(), StatusCode::CONFLICT);
         let demoted = yorishiro::models::tenant_memberships::add_member(
@@ -817,9 +844,87 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
         ));
         let identity = request
             .get("/api/whoami")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(identity.status_code(), StatusCode::OK);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[cfg(feature = "enterprise")]
+async fn competing_tenant_memberships_allow_only_one() {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use yorishiro::models::_entities::tenant_memberships::Column;
+    use yorishiro::models::tenant_memberships;
+
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("competing-tenants"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        let barrier = tokio::sync::Barrier::new(2);
+        let a = async {
+            barrier.wait().await;
+            tenant_memberships::add_member(
+                &ctx.db,
+                first.tenant_id,
+                user.id,
+                MembershipRole::Member,
+            )
+            .await
+        };
+        let b = async {
+            barrier.wait().await;
+            tenant_memberships::add_member(
+                &ctx.db,
+                second.tenant_id,
+                user.id,
+                MembershipRole::Member,
+            )
+            .await
+        };
+        let (a, b) = tokio::join!(a, b);
+        assert_ne!(a.is_ok(), b.is_ok(), "{a:?}, {b:?}");
+        let other_tenant = if a.is_ok() {
+            second.tenant_id
+        } else {
+            first.tenant_id
+        };
+        assert!(matches!(
+            if a.is_err() { a } else { b },
+            Err(yorishiro::YorishiroError::Conflict { .. })
+        ));
+        assert_eq!(
+            tenant_memberships::Entity::find()
+                .filter(Column::UserId.eq(user.id))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            1
+        );
+        let duplicate = tenant_memberships::Entity::insert(tenant_memberships::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(other_tenant),
+            user_id: sea_orm::ActiveValue::Set(user.id),
+            role: sea_orm::ActiveValue::Set("member".into()),
+            ..Default::default()
+        })
+        .exec(&ctx.db)
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            duplicate.sql_err(),
+            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+        ));
     })
     .await;
 }
@@ -1026,44 +1131,100 @@ async fn tenant_key_issuance_cannot_survive_concurrent_membership_removal() {
 async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let auth = format!("Bearer {}", tenant.api_key);
+        let tenant_admin_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let auth = format!("Bearer {}", tenant_admin_key);
         let create = |body: serde_json::Value| {
             request
                 .post("/api/members/users")
                 .add_header("Authorization", &auth)
                 .json(&body)
         };
+        let user_name = format!("alice-{}", uuid::Uuid::new_v4());
         let password = "tenant-user-password";
-        let created = create(serde_json::json!({"user_name":"alice","password":password,"role":"admin"})).await;
+        let created =
+            create(serde_json::json!({"user_name":user_name,"password":password,"role":"admin"}))
+                .await;
         created.assert_status(StatusCode::CREATED);
         let body: serde_json::Value = created.json();
         assert!(body["email"].is_null());
-        assert_eq!(body["user_name"], "alice");
+        assert_eq!(body["user_name"], user_name);
         let user_id = body["user_id"].as_str().unwrap().to_owned();
 
         // Ownership, duplicates and weak passwords are refused.
-        create(serde_json::json!({"user_name":"bob","password":password,"role":"owner"})).await.assert_status(StatusCode::CONFLICT);
-        create(serde_json::json!({"user_name":"alice","password":password,"role":"member"})).await.assert_status(StatusCode::CONFLICT);
-        create(serde_json::json!({"user_name":"carol","password":"short","role":"member"})).await.assert_status(StatusCode::CONFLICT);
+        create(serde_json::json!({"user_name":"bob","password":password,"role":"owner"}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+        create(serde_json::json!({"user_name":user_name,"password":password,"role":"member"}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+        create(serde_json::json!({"user_name":"carol","password":"short","role":"member"}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
 
-        let login = |body: serde_json::Value| request.post("/auth/login").json(&body);
-        let signed_in = login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":password,"workspace_id":tenant.workspace_id})).await;
+        let login = |body: serde_json::Value| {
+            request
+                .post("/auth/tenant/login")
+                .add_header("x-tenant-id", tenant.tenant_id.to_string())
+                .json(&body)
+        };
+        request
+            .post("/auth/tenant/login")
+            .json(&serde_json::json!({"user_name":user_name,"password":password}))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        request
+            .post("/auth/tenant/login")
+            .add_header("x-tenant-id", uuid::Uuid::new_v4().to_string())
+            .json(&serde_json::json!({"user_name":user_name,"password":password}))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let signed_in = login(serde_json::json!({"user_name":user_name,"password":password})).await;
         signed_in.assert_status(StatusCode::OK);
-        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":"wrong-password-here"})).await.assert_status(StatusCode::UNAUTHORIZED);
-        // The two sign-in forms cannot be mixed.
-        login(serde_json::json!({"email":"a@example.com","tenant_id":tenant.tenant_id,"user_name":"alice","password":password})).await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            signed_in.json::<serde_json::Value>()["tenant_id"],
+            tenant.tenant_id.to_string()
+        );
+        login(serde_json::json!({"user_name":user_name,"password":"wrong-password-here"}))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        login(
+            serde_json::json!({"email":"a@example.com","user_name":user_name,"password":password}),
+        )
+        .await
+        .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 
-        // A password reset replaces the credential and revokes keys issued earlier.
-        let old_key = signed_in.json::<serde_json::Value>()["api_key"].as_str().unwrap().to_owned();
-        request.put(&format!("/api/members/users/{user_id}/password")).add_header("Authorization", &auth)
-            .json(&serde_json::json!({"password":"replacement-password"})).await.assert_status(StatusCode::NO_CONTENT);
-        request.get("/api/members").add_header("Authorization", &format!("Bearer {old_key}")).await.assert_status(StatusCode::UNAUTHORIZED);
-        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":password})).await.assert_status(StatusCode::UNAUTHORIZED);
-        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":"replacement-password","workspace_id":tenant.workspace_id})).await.assert_status(StatusCode::OK);
+        let old_key = signed_in.json::<serde_json::Value>()["api_key"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        request
+            .put(&format!("/api/members/users/{user_id}/password"))
+            .add_header("Authorization", &auth)
+            .json(&serde_json::json!({"password":"replacement-password"}))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        request
+            .get("/api/members")
+            .add_header("Authorization", &format!("Bearer {old_key}"))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        login(serde_json::json!({"user_name":user_name,"password":password}))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        login(serde_json::json!({"user_name":user_name,"password":"replacement-password"}))
+            .await
+            .assert_status(StatusCode::OK);
 
         // Removing the membership removes the account.
-        request.delete(&format!("/api/members/{user_id}")).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
-        login(serde_json::json!({"tenant_id":tenant.tenant_id,"user_name":"alice","password":"replacement-password"})).await.assert_status(StatusCode::UNAUTHORIZED);
+        request
+            .delete(&format!("/api/members/{user_id}"))
+            .add_header("Authorization", &auth)
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        login(serde_json::json!({"user_name":user_name,"password":"replacement-password"}))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
     })
     .await;
 }

@@ -28,7 +28,7 @@ async fn set_worker_class(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_worker_classes::set(&ctx, auth_ctx.workspace_id, body.worker_class).await?;
+    workspace_worker_classes::set(&ctx, auth_ctx.require_workspace()?, body.worker_class).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -40,7 +40,7 @@ async fn get_worker_class(
 ) -> Result<Json<WorkerClassAssignment>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = workspace_worker_classes::describe(&ctx.db, auth_ctx.workspace_id)
+    let described = workspace_worker_classes::describe(&ctx.db, auth_ctx.require_workspace()?)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found("no worker class assignment configured for this workspace")
@@ -56,7 +56,7 @@ async fn delete_worker_class(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_worker_classes::clear(&ctx.db, auth_ctx.workspace_id).await?;
+    workspace_worker_classes::clear(&ctx.db, auth_ctx.require_workspace()?).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

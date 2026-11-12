@@ -25,7 +25,7 @@ pub(crate) struct ApiKeyArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (per-request X-Workspace-Id) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)"
+        description = "Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)"
     )]
     pub(crate) async fn create_api_key(
         &self,
@@ -96,8 +96,7 @@ impl YorishiroMcpServer {
         };
         let ctx = self.app_context();
         let result = async {
-            crate::models::access::require_tenant_admin(&ctx.db, auth.tenant_id, auth.user_id)
-                .await?;
+            crate::models::access::require_tenant_admin_as(&ctx.db, &auth).await?;
             let mut records = Vec::new();
             for key in IdentityApiKeys::list_for_tenant(&ctx.db, auth.tenant_id).await? {
                 let grant = key.grant_metadata(&ctx.db).await?;

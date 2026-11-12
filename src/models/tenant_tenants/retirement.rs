@@ -278,33 +278,6 @@ async fn delete_disabled_in(
     Ok(())
 }
 
-/// Deletes a tenant the caller has just found disabled and solely owned, inside the caller's transaction.
-///
-/// # Errors
-/// Rejects tenants that are not disabled and propagates deletion failures.
-pub(crate) async fn delete_owned_by_user(
-    txn: &sea_orm::DatabaseTransaction,
-    tenant_id: Uuid,
-) -> Result<(), YorishiroError> {
-    crate::db::lock_for_update(txn, "create_tenant")
-        .await
-        .internal()?;
-    crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
-        .await
-        .internal()?;
-    let disabled = super::Entity::find_by_id(tenant_id)
-        .one(txn)
-        .await
-        .internal()?
-        .is_some_and(|tenant| tenant.disabled_at.is_some());
-    if !disabled {
-        return Err(YorishiroError::Conflict {
-            message: format!("disable tenant {tenant_id} before deleting its owner"),
-        });
-    }
-    delete_disabled_in(txn, tenant_id).await
-}
-
 /// Cancels retained background work for an already-disabled tenant.
 /// The caller must commit this transaction together with disablement and credential revocation.
 ///

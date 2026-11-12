@@ -27,10 +27,13 @@ async fn list_columns(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
     let schema_txn =
-        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
-    let stored =
-        entity_column_preferences::list(&schema_txn, auth_ctx.workspace_id, page.try_into()?)
-            .await?;
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?).await?;
+    let stored = entity_column_preferences::list(
+        &schema_txn,
+        auth_ctx.require_workspace()?,
+        page.try_into()?,
+    )
+    .await?;
     Ok(Json(stored))
 }
 
@@ -45,10 +48,10 @@ async fn set_columns(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Write)?;
     let schema_txn =
-        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?).await?;
     let stored = entity_column_preferences::set(
         &schema_txn,
-        auth_ctx.workspace_id,
+        auth_ctx.require_workspace()?,
         &entity_type,
         &body.columns,
     )
@@ -67,8 +70,9 @@ async fn reset_columns(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Write)?;
     let schema_txn =
-        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
-    entity_column_preferences::clear(&schema_txn, auth_ctx.workspace_id, &entity_type).await?;
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?).await?;
+    entity_column_preferences::clear(&schema_txn, auth_ctx.require_workspace()?, &entity_type)
+        .await?;
     schema_txn.commit().await.internal()?;
     Ok(StatusCode::NO_CONTENT)
 }

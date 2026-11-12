@@ -23,8 +23,8 @@ pub(crate) struct SetupResponse {
     pub(crate) email: String,
     pub(crate) tenant_id: Uuid,
     /// The default workspace created for the tenant.
-    /// The returned key is not bound to it: it is tenant-scoped and names its workspace per request.
+    /// The returned key is not bound to it: it is tenant-scoped and requires a workspace ID in x-workspace-id for workspace operations.
     pub(crate) workspace_id: Uuid,
-    /// A freshly issued tenant-scoped admin key, scoped to the new owner account: shown only here, same as `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
+    /// A freshly issued tenant-scoped admin key, scoped to the new owner account: shown only here, same as `/auth/root/login`'s, so the setup screen can log straight into the dashboard afterward.
     pub(crate) api_key: String,
 }

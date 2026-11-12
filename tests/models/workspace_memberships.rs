@@ -263,14 +263,10 @@ async fn workspace_access_requires_a_grant_and_caps_both_roles() {
         .await
         .expect("restore tenant membership only");
         let login = request
-            .post("/auth/login")
+            .post("/auth/root/login")
             .json(&serde_json::json!({"email":member.email,"password":"hunter2-hunter2"}))
             .await;
-        assert_eq!(login.status_code(), 403);
-        assert_eq!(
-            login.json::<serde_json::Value>()["error"]["code"],
-            "workspace_access_required"
-        );
+        assert_eq!(login.status_code(), 200);
         assert!(
             tenancy::list_workspaces_for_user(&ctx.db, member.id)
                 .await

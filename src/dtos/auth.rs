@@ -47,26 +47,24 @@ pub struct SignupResponse {
     pub email: String,
     pub tenant_id: Uuid,
     pub role: MembershipRole,
-    /// The workspaces the new member can now log into.
-    /// The client picks one and passes its id to `/auth/login`.
+    /// Workspaces currently accessible to the new member.
     pub(crate) workspaces: Vec<WorkspaceSummary>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct LoginRequest {
-    /// Root user sign-in: the account's email.
-    /// Send either `email`, or `tenant_id` together with `user_name`.
-    pub email: Option<String>,
-    /// Tenant user sign-in: the tenant the user belongs to.
-    pub tenant_id: Option<Uuid>,
-    /// Tenant user sign-in: the user's name within that tenant.
-    pub user_name: Option<String>,
+pub struct RootLoginRequest {
+    pub email: String,
     pub password: String,
-    /// Which of the account's workspaces to issue an API key for.
-    /// Omit this when the account can only reach one workspace; it resolves automatically.
-    /// An account reaching more than one receives `workspace_selection_required` (422) with typed candidates.
-    pub workspace_id: Option<Uuid>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TenantLoginRequest {
+    pub user_name: String,
+    pub password: String,
 }
 
 #[derive(Serialize)]
@@ -76,59 +74,7 @@ pub struct LoginResponse {
     /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
     pub api_key: String,
     pub api_key_id: Uuid,
-    pub workspace_id: Uuid,
+    pub tenant_id: Uuid,
     pub scope: ApiKeyScope,
     pub user_id: Uuid,
-}
-
-pub use crate::models::tenancy::LoginRecoveryReason as LoginRecoveryCode;
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct LoginRecoveryResponse {
-    pub error: LoginRecovery,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct LoginRecovery {
-    pub code: LoginRecoveryCode,
-    pub message: String,
-    pub hint: String,
-    pub memberships: Vec<crate::models::tenancy::LoginMembership>,
-    pub workspaces: Vec<crate::models::tenancy::LoginWorkspace>,
-}
-
-impl LoginRecovery {
-    pub(crate) fn new(
-        code: LoginRecoveryCode,
-        memberships: Vec<crate::models::tenancy::LoginMembership>,
-        workspaces: Vec<crate::models::tenancy::LoginWorkspace>,
-    ) -> Self {
-        let (message, hint) = match code {
-            LoginRecoveryCode::TenantMembershipRequired => (
-                "this account is not a member of any tenant",
-                "ask a tenant admin to add you as a member first",
-            ),
-            LoginRecoveryCode::WorkspaceProvisioningRequired => (
-                "this account has tenant membership but no accessible workspace",
-                "ask an operator to run cargo loco task create_workspace tenant_id:<tenant_id> name:<workspace_name>, then retry /auth/login; tenant capacity, licence and backend restrictions still apply",
-            ),
-            LoginRecoveryCode::WorkspaceSelectionRequired => (
-                "this account has access to more than one workspace",
-                "specify workspace_id explicitly",
-            ),
-            LoginRecoveryCode::WorkspaceAccessRequired => (
-                "this account has tenant membership but no workspace grant",
-                "ask a tenant or workspace administrator for an explicit workspace grant, then retry /auth/login",
-            ),
-        };
-        Self {
-            code,
-            message: message.into(),
-            hint: hint.into(),
-            memberships,
-            workspaces,
-        }
-    }
 }

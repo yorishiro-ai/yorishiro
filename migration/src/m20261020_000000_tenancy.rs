@@ -212,9 +212,10 @@ async fn up_tenant_memberships(manager: &SchemaManager<'_>) -> Result<(), DbErr>
     manager
         .create_index(
             sea_orm_migration::sea_query::Index::create()
-                .name("idx_tenant_memberships_user_id")
+                .name("uq_tenant_memberships_user_id")
                 .table(Alias::new("tenant_memberships"))
                 .col(Alias::new("user_id"))
+                .unique()
                 .to_owned(),
         )
         .await?;

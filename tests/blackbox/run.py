@@ -1088,6 +1088,12 @@ def workspace_key_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
     identity = client.call("whoami")
+    login = app.rest("POST", "/auth/root/login", {
+        "email": "owner@example.invalid", "password": "blackbox-owned-password",
+    })
+    tenant_key = login["api_key"]
+    app.secrets.append(tenant_key)
+    tenant_client = MCP(app, tenant_key)
     capabilities = client.call("capabilities")
     require(capabilities["tenant_admin"] and not capabilities["constraints"]["discovery_authorizes_requests"],
             "capabilities confused discovery with authorization")
@@ -1098,12 +1104,12 @@ def workspace_key_lifecycle(app):
     client.call("revoke_api_key", {"key_id": created["id"]})
     delegated.call("whoami", error=True)
     app.rest("GET", "/api/whoami", key=created["full_key"], status=401)
-    workspace = client.call("create_workspace", {"name": "mcp-managed"})
+    workspace = tenant_client.call("create_workspace", {"name": "mcp-managed"})
     workspace_id = workspace["id"]
     require(any(row["id"] == workspace_id for row in client.call("list_workspaces")),
             "MCP-created workspace not listed")
     require(any(row["workspace_id"] == workspace_id and row["tenant_id"] == app.tenant
-                for row in client.call("discover_workspaces")),
+                for row in tenant_client.call("discover_workspaces")),
             "human discovery omitted tenant workspace")
     issued = app.task("create_api_key", workspace_id=workspace_id, scope="schema", user_id=identity["user_id"])
     selected_key = output_field(issued, "api key (shown once)")
@@ -1117,15 +1123,15 @@ def workspace_key_lifecycle(app):
     require(app.rest("GET", f"/api/workspaces/{workspace_id}", key=selected_key) == detail,
             "workspace detail differs across transports")
     args = {"workspace_id": workspace_id, "user_id": identity["user_id"]}
-    client.call("grant_workspace_member", {**args, "role": "viewer"})
-    require(any(row["user_id"] == identity["user_id"] for row in client.call("list_workspace_members", {
+    tenant_client.call("grant_workspace_member", {**args, "role": "viewer"})
+    require(any(row["user_id"] == identity["user_id"] for row in tenant_client.call("list_workspace_members", {
         "workspace_id": workspace_id,
     })), "MCP workspace grant missing")
-    client.call("revoke_workspace_member", args)
-    require(not any(row["user_id"] == identity["user_id"] for row in client.call("list_workspace_members", {
+    tenant_client.call("revoke_workspace_member", args)
+    require(not any(row["user_id"] == identity["user_id"] for row in tenant_client.call("list_workspace_members", {
         "workspace_id": workspace_id,
     })), "MCP workspace grant survived revocation")
-    client.call("delete_workspace", {"workspace_id": workspace_id})
+    tenant_client.call("delete_workspace", {"workspace_id": workspace_id})
     app.rest("GET", f"/api/workspaces/{workspace_id}", key=owner, status=404)
     selected.call("whoami", error=True)
     require(client.call("whoami")["user_id"] == identity["user_id"], "workspace deletion invalidated unrelated key")

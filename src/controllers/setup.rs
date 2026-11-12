@@ -1,4 +1,4 @@
-//! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
+//! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/root/login`.
 //!
 //! Creates the deployment's first tenant, workspace and owner account, then issues a tenant-scoped admin key for that owner.
 //! The key is not bound to the default workspace: it can act on every workspace of the tenant and names the target per request.

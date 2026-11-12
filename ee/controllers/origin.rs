@@ -34,9 +34,12 @@ async fn list_upstream_changes(
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
 
     // ctx.db: this joins template_templates, which the request role cannot read.
-    let changes =
-        origin_model::list_with_upstream_changes(&ctx.db, auth_ctx.workspace_id, page.try_into()?)
-            .await?;
+    let changes = origin_model::list_with_upstream_changes(
+        &ctx.db,
+        auth_ctx.require_workspace()?,
+        page.try_into()?,
+    )
+    .await?;
     Ok(Json(changes))
 }
 
@@ -52,12 +55,12 @@ async fn merge_preview(
 
     // The schema is workspace content and comes off the RLS-scoped connection; the template is control-plane data the request role holds no grant on, hence both `schema_txn` and `ctx`.
     let schema_txn =
-        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
+        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?).await?;
     let plan = origin::merge_preview(
         &schema_txn,
         &ctx,
         auth_ctx.tenant_id,
-        auth_ctx.workspace_id,
+        auth_ctx.require_workspace()?,
         schema_id,
     )
     .await?;
@@ -76,12 +79,13 @@ async fn merge_apply(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
     let schema_txn =
-        crate::db::begin_workspace_write(&ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?;
+        crate::db::begin_workspace_write(&ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?)
+            .await?;
     let (schema, diff, summary) = origin::merge_apply(
         &schema_txn,
         &ctx,
         auth_ctx.tenant_id,
-        auth_ctx.workspace_id,
+        auth_ctx.require_workspace()?,
         schema_id,
     )
     .await?;

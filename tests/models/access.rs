@@ -25,7 +25,7 @@ fn effective_scope_never_exceeds_either_grant() {
 fn audit_and_content_scope_are_independent() {
     let mut context = AuthContext {
         api_key_id: uuid::Uuid::nil(),
-        workspace_id: uuid::Uuid::nil(),
+        workspace_id: Some(uuid::Uuid::nil()),
         tenant_id: uuid::Uuid::nil(),
         scope: ApiKeyScope::Read,
         user_id: None,

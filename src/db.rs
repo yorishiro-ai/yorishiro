@@ -386,6 +386,21 @@ impl TenantDb {
             .await?;
         Ok(conn)
     }
+
+    pub(crate) async fn acquire_for_tenant(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<sea_orm::sqlx::pool::PoolConnection<sea_orm::sqlx::Postgres>, sea_orm::sqlx::Error>
+    {
+        let mut conn = self.pool.acquire().await?;
+        sea_orm::sqlx::query(
+            "SELECT set_config('app.current_tenant', $1, false), set_config('app.current_workspace', '', false)",
+        )
+        .bind(tenant_id.to_string())
+        .execute(conn.as_mut())
+        .await?;
+        Ok(conn)
+    }
 }
 
 /// Begins the transaction one workspace's request work runs in.

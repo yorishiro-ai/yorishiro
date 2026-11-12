@@ -198,6 +198,20 @@ pub async fn issue_api_key(
         .plaintext
 }
 
+pub async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id: Uuid) -> String {
+    api_keys::Entity::create_tenant_api_key(
+        &ctx.db,
+        tenant_id,
+        ApiKeyScope::Migration,
+        Some(user_id),
+        false,
+        "test-tenant-admin",
+    )
+    .await
+    .expect("issue tenant key")
+    .plaintext
+}
+
 /// An email address no other test in the shared database uses.
 pub fn unique_email(prefix: &str) -> String {
     format!("{prefix}-{}@example.com", Uuid::new_v4().simple())

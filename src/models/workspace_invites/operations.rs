@@ -123,7 +123,7 @@ pub(crate) async fn list_invites(
     actor: &crate::models::api_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<Model>, YorishiroError> {
-    crate::models::access::require_tenant_admin(conn, actor.tenant_id, actor.user_id).await?;
+    crate::models::access::require_tenant_admin_as(conn, actor).await?;
     Entity::find()
         .filter(Column::TenantId.eq(actor.tenant_id))
         .order_by_desc(Column::CreatedAt)

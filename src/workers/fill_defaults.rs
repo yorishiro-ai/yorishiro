@@ -111,14 +111,16 @@ pub(crate) async fn enqueue(
     schema_name: String,
 ) -> Result<Uuid, crate::YorishiroError> {
     // Validate against the caller's scoped transaction before accepting a durable request.
-    crate::models::schema_schemas::get_active_schema(txn, auth.workspace_id, &schema_name).await?;
-    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, auth.workspace_id)
-        .await
-        .map_err(|error| error.0)?;
+    crate::models::schema_schemas::get_active_schema(txn, auth.require_workspace()?, &schema_name)
+        .await?;
+    let worker_class =
+        crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
+            .await
+            .map_err(|error| error.0)?;
     let args = FillDefaultsArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
-        workspace_id: auth.workspace_id,
+        workspace_id: auth.require_workspace()?,
         api_key_id: auth.api_key_id,
         user_id: auth.user_id,
         schema_name,
@@ -128,7 +130,7 @@ pub(crate) async fn enqueue(
         ctx,
         JobSpec {
             job_name: "fill_defaults",
-            workspace_id: auth.workspace_id,
+            workspace_id: auth.require_workspace()?,
             class: worker_class,
             worker_name: FillDefaultsWorker::class_name(),
             dispatch_payload: serde_json::to_value(args)

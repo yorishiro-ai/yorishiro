@@ -39,7 +39,7 @@ async fn infer_fill(
     // that the endpoint exists and is merely locked.
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    let workspace_id = auth_ctx.workspace_id;
+    let workspace_id = auth_ctx.require_workspace()?;
 
     // Refuse before doing any work: a caller with no key gets one clear error rather than a scan that reports zero applied and reads as "nothing to infer".
     if workspace_llm_keys::get(&ctx.db, workspace_id)
@@ -79,7 +79,7 @@ async fn infer_job_status(
 ) -> Result<Json<InferJobStatusResponse>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let caller_workspace_id = auth_ctx.workspace_id;
+    let caller_workspace_id = auth_ctx.require_workspace()?;
     let parsed_job_id = uuid::Uuid::parse_str(&job_id)
         .map_err(|_| YorishiroError::not_found("infer-fill job not found"))?;
     let result = inference_jobs::get(&ctx.db, parsed_job_id)
@@ -165,7 +165,7 @@ async fn confirmation_status(
     Ok(Json(
         crate::models::queue_job_lifecycles::bulk_job_status(
             &txn,
-            auth.workspace_id,
+            auth.require_workspace()?,
             job_id,
             &["confirm_proposals"],
         )
@@ -186,7 +186,7 @@ async fn authorized_job(
     let job = inference_jobs::get(&ctx.db, parsed)
         .await?
         .ok_or_else(|| YorishiroError::not_found("infer-fill job not found"))?;
-    if job.workspace_id != auth_ctx.workspace_id {
+    if job.workspace_id != auth_ctx.require_workspace()? {
         return Err(YorishiroError::ScopeInsufficient {
             message: "cannot access infer-fill jobs for another workspace".into(),
             hint: "verify the job belongs to your workspace".into(),
@@ -205,7 +205,8 @@ async fn list_proposals(
 ) -> Result<Json<Vec<inference_proposals::ProposalRecord>>, ApiError> {
     let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Read).await?;
     let txn = proposal_transaction(&ctx, &auth_ctx).await?;
-    let proposals = inference_proposals::for_job(&txn, auth_ctx.workspace_id, job_id).await?;
+    let proposals =
+        inference_proposals::for_job(&txn, auth_ctx.require_workspace()?, job_id).await?;
     drop(txn);
     Ok(Json(proposals))
 }
@@ -218,7 +219,7 @@ async fn reject_proposals(
 ) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
     let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Schema).await?;
     let txn = proposal_transaction(&ctx, &auth_ctx).await?;
-    let report = inference_proposals::reject(&txn, auth_ctx.workspace_id, job_id).await?;
+    let report = inference_proposals::reject(&txn, auth_ctx.require_workspace()?, job_id).await?;
     txn.commit().await.internal()?;
     Ok(Json(report))
 }
@@ -231,7 +232,7 @@ async fn discard_proposals(
 ) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
     let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Schema).await?;
     let txn = proposal_transaction(&ctx, &auth_ctx).await?;
-    let report = inference_proposals::discard(&txn, auth_ctx.workspace_id, job_id).await?;
+    let report = inference_proposals::discard(&txn, auth_ctx.require_workspace()?, job_id).await?;
     txn.commit().await.internal()?;
     Ok(Json(report))
 }
@@ -240,7 +241,7 @@ async fn proposal_transaction(
     ctx: &AppContext,
     auth_ctx: &AuthContext,
 ) -> Result<sea_orm::DatabaseTransaction, ApiError> {
-    Ok(crate::db::begin_workspace(ctx, auth_ctx.tenant_id, auth_ctx.workspace_id).await?)
+    Ok(crate::db::begin_workspace(ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?).await?)
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 202, body = crate::dtos::jobs::QueuedJobResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
@@ -272,7 +273,7 @@ async fn set_llm_key(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     workspace_llm_keys::set(
         &ctx.db,
-        auth_ctx.workspace_id,
+        auth_ctx.require_workspace()?,
         &body.base_url,
         &body.model,
         &body.api_key,
@@ -289,7 +290,7 @@ async fn get_llm_key(
 ) -> Result<Json<workspace_llm_keys::LlmKeyDescription>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = workspace_llm_keys::describe(&ctx.db, auth_ctx.workspace_id)
+    let described = workspace_llm_keys::describe(&ctx.db, auth_ctx.require_workspace()?)
         .await?
         .ok_or_else(|| YorishiroError::not_found("no LLM credentials configured"))?;
     Ok(Json(described))
@@ -303,7 +304,7 @@ async fn delete_llm_key(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_llm_keys::clear(&ctx.db, auth_ctx.workspace_id).await?;
+    workspace_llm_keys::clear(&ctx.db, auth_ctx.require_workspace()?).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

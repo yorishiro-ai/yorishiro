@@ -13,7 +13,7 @@ pub(crate) struct CreateApiKeyRequest {
     pub(crate) expires_at: Option<DateTime<chrono::FixedOffset>>,
     #[serde(default)]
     pub(crate) audit: bool,
-    /// Issue a tenant-scoped key (no workspace binding, per-request `X-Workspace-Id`) instead of a workspace-bound one.
+    /// Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.
     /// Requires tenant Admin or Owner and a tenant-scoped issuing credential.
     #[serde(default)]
     pub(crate) tenant_scoped: bool,

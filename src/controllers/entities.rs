@@ -23,7 +23,7 @@ pub(crate) async fn create_entity(
     authorized: Authorized<WriteScope>,
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let input = body.into();
     let created_by = authorized.ctx.user_id;
     let quotas = crate::quotas(&ctx, authorized.ctx.tenant_id).await?;
@@ -48,7 +48,7 @@ async fn get_entity(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<EntityRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let record = entity_entities::get(authorized.txn(), workspace_id, id).await?;
     Ok(Json(record))
 }
@@ -60,7 +60,7 @@ pub(crate) async fn update_entity(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateEntityRequest>,
 ) -> Result<Json<EntityRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let updated_by = authorized.ctx.user_id;
     let record = entity_entities::update(
         authorized.txn(),
@@ -83,7 +83,7 @@ pub(crate) async fn delete_entity(
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     entity_entities::delete(authorized.txn(), workspace_id, id).await?;
     authorized.commit().await?;
     Ok(StatusCode::NO_CONTENT)
@@ -99,7 +99,7 @@ async fn list_entities(
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {
     let query = params.try_into()?;
 
-    let workspace_id = authorized.ctx.workspace_id;
+    let workspace_id = authorized.ctx.require_workspace()?;
     let records = entity_entities::list(authorized.txn(), workspace_id, query).await?;
     Ok(Json(records))
 }
@@ -133,7 +133,7 @@ pub(crate) async fn migration_job_status(
     Ok(Json(
         crate::models::queue_job_lifecycles::migration_job_status(
             authorized.txn(),
-            authorized.ctx.workspace_id,
+            authorized.ctx.require_workspace()?,
             job_id,
         )
         .await?,

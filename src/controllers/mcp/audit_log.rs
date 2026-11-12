@@ -31,7 +31,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let key = super::extract_bearer_key(&parts)?;
-        let headers = auth::header_pairs(&parts);
+        let headers = auth::header_pairs(&parts.headers).map_err(super::header_error)?;
         let (actor, txn) = match auth::RequestAuth::new(self.app_context())
             .authorize_audit(key, &headers)
             .await
@@ -49,9 +49,11 @@ impl YorishiroMcpServer {
             Ok(page) => page,
             Err(error) => return Ok(err_to_tool_result(error)),
         };
-        match crate::models::api_key_audit_log::list_for_workspace(&txn, actor.workspace_id, page)
-            .await
-        {
+        let workspace_id = match actor.require_workspace() {
+            Ok(id) => id,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
+        match crate::models::api_key_audit_log::list_for_workspace(&txn, workspace_id, page).await {
             Ok(records) => ok_json(crate::controllers::audit_log::render_records(
                 records,
                 crate::time::configured(self.app_context()),

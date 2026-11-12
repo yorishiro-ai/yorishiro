@@ -108,25 +108,26 @@ async fn workspace_bound_issuer_cannot_rotate_another_workspaces_key() {
 async fn delegated_expiry_cannot_outlive_the_issuing_key() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let owner = format!("Bearer {}",tenant.api_key);
+        let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let owner = format!("Bearer {}",tenant_key);
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
-        let issued = request.post("/api/api-keys").add_header("Authorization",&owner)
-            .json(&serde_json::json!({"name":"short-admin","expires_at":expiry})).await;
+        let issued = request.post("/api/api-keys").add_header("Authorization",&owner).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+            .json(&serde_json::json!({"name":"short-admin","tenant_scoped":true,"expires_at":expiry})).await;
         issued.assert_status(StatusCode::CREATED);
         let issued = issued.json::<Value>();
         let auth = format!("Bearer {}",issued["full_key"].as_str().unwrap());
         for body in [serde_json::json!({"name":"unlimited"}),
             serde_json::json!({"name":"longer","expires_at":expiry+chrono::Duration::seconds(1)})] {
-            request.post("/api/api-keys").add_header("Authorization",&auth).json(&body)
+            request.post("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).json(&body)
                 .await.assert_status(StatusCode::FORBIDDEN);
         }
-        request.post("/api/api-keys").add_header("Authorization",&auth)
+        request.post("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"bounded","expires_at":expiry-chrono::Duration::seconds(1)}))
             .await.assert_status(StatusCode::CREATED);
-        let key = request.post("/api/api-keys").add_header("Authorization",&owner)
+        let key = request.post("/api/api-keys").add_header("Authorization",&owner).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"unlimited-target"})).await.json::<Value>();
         request.post(&format!("/api/api-keys/{}/rotate",key["id"].as_str().unwrap()))
-            .add_header("Authorization",&auth).await.assert_status(StatusCode::FORBIDDEN);
+            .add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await.assert_status(StatusCode::FORBIDDEN);
     }).await;
 }
 
@@ -135,14 +136,21 @@ async fn rotation_preserves_service_identity_and_serializes_with_revocation() {
     use yorishiro::models::api_keys::{ApiKeyScope, Entity};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let service =
             Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false)
                 .await
                 .unwrap();
-        let auth = format!("Bearer {}", tenant.api_key);
+        let auth = format!("Bearer {}", tenant_key);
         let path = format!("/api/api-keys/{}/rotate", service.id);
         let (rotated, revoked) = tokio::join!(
-            async { request.post(&path).add_header("Authorization", &auth).await },
+            async {
+                request
+                    .post(&path)
+                    .add_header("Authorization", &auth)
+                    .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+                    .await
+            },
             Entity::revoke(&ctx.db, service.id)
         );
         if rotated.status_code() == StatusCode::CREATED {
@@ -168,19 +176,33 @@ async fn rotation_preserves_service_identity_and_serializes_with_revocation() {
 async fn concurrent_rotation_issues_only_one_replacement() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let auth = format!("Bearer {}", tenant.api_key);
+        let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let auth = format!("Bearer {}", tenant_key);
         let name = format!("rotation-race-{}", Uuid::new_v4());
         let created = request
             .post("/api/api-keys")
             .add_header("Authorization", &auth)
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":name}))
             .await;
         created.assert_status(StatusCode::CREATED);
         let id = created.json::<Value>()["id"].as_str().unwrap().to_owned();
         let path = format!("/api/api-keys/{id}/rotate");
         let (a, b) = tokio::join!(
-            async { request.post(&path).add_header("Authorization", &auth).await },
-            async { request.post(&path).add_header("Authorization", &auth).await }
+            async {
+                request
+                    .post(&path)
+                    .add_header("Authorization", &auth)
+                    .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+                    .await
+            },
+            async {
+                request
+                    .post(&path)
+                    .add_header("Authorization", &auth)
+                    .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+                    .await
+            }
         );
         let mut statuses = [a.status_code().as_u16(), b.status_code().as_u16()];
         statuses.sort();
@@ -188,6 +210,7 @@ async fn concurrent_rotation_issues_only_one_replacement() {
         let listed = request
             .get("/api/api-keys")
             .add_header("Authorization", &auth)
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await
             .json::<Value>();
         assert_eq!(
@@ -207,15 +230,16 @@ async fn concurrent_rotation_issues_only_one_replacement() {
 async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let auth = format!("Bearer {}",tenant.api_key);
+        let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let auth = format!("Bearer {}",tenant_key);
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
-        let created = request.post("/api/api-keys").add_header("Authorization",&auth)
+        let created = request.post("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"rotate-me","scope":"read","expires_at":expiry})).await;
         created.assert_status(StatusCode::CREATED);
         let original: Value = created.json();
         let id = original["id"].as_str().unwrap();
         let rotated = request.post(&format!("/api/api-keys/{id}/rotate"))
-            .add_header("Authorization",&auth).await;
+            .add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await;
         rotated.assert_status(StatusCode::CREATED);
         let replacement: Value = rotated.json();
         for field in ["scope","audit","workspace_id","tenant_id","user_id","expires_at"] {
@@ -225,9 +249,9 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
             .await.assert_status(StatusCode::UNAUTHORIZED);
         request.get("/api/whoami").add_header("Authorization",format!("Bearer {}",replacement["full_key"].as_str().unwrap()))
             .await.assert_status(StatusCode::OK);
-        request.post(&format!("/api/api-keys/{id}/rotate")).add_header("Authorization",&auth)
+        request.post(&format!("/api/api-keys/{id}/rotate")).add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await.assert_status(StatusCode::CONFLICT);
-        let listed = request.get("/api/api-keys").add_header("Authorization",&auth).await.json::<Value>();
+        let listed = request.get("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await.json::<Value>();
         let old = listed["keys"].as_array().unwrap().iter().find(|key|key["id"]==original["id"]).unwrap();
         assert_eq!(old["state"],"revoked");
         assert_eq!(old["replaced_by_id"],replacement["id"]);
@@ -242,11 +266,11 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
         }.update(&ctx.db).await.unwrap();
         request.get("/api/whoami").add_header("Authorization",format!("Bearer {}",replacement["full_key"].as_str().unwrap()))
             .await.assert_status(StatusCode::UNAUTHORIZED);
-        let expired = request.get("/api/api-keys").add_header("Authorization",&auth).await.json::<Value>();
+        let expired = request.get("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await.json::<Value>();
         let expired = expired["keys"].as_array().unwrap().iter().find(|key|key["id"]==replacement["id"]).unwrap();
         assert_eq!(expired["state"],"expired");
         assert!(expired["effective_scope"].is_null());
-        request.post("/api/api-keys").add_header("Authorization",&auth)
+        request.post("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"past","expires_at":chrono::Utc::now()-chrono::Duration::seconds(1)}))
             .await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
     }).await;
@@ -262,9 +286,8 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .timezone;
         assert_ne!(timezone, "UTC", "test must boot with a non-default zone");
         let timezone = timezone.parse::<chrono_tz::Tz>().unwrap();
-        let TestTenant {
-            api_key: owner_key, ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let owner_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         assert_eq!(
             request.get("/api/api-keys").await.status_code(),
@@ -274,6 +297,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let created = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {owner_key}"))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({ "name": "  my-client  " }))
             .await;
         assert_eq!(created.status_code(), StatusCode::CREATED);
@@ -320,6 +344,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let unsupported = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {owner_key}"))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"unsupported", "binding":"tenant"}))
             .await;
         assert_eq!(unsupported.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -336,6 +361,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let listed = request
             .get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {owner_key}"))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await;
         assert_eq!(listed.status_code(), StatusCode::OK);
         let listed_body: Value = listed.json();
@@ -398,6 +424,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             request
                 .delete(&format!("/api/api-keys/{key_id}"))
                 .add_header("Authorization", format!("Bearer {owner_key}"))
+                .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
                 .await
                 .status_code(),
             StatusCode::NOT_FOUND
@@ -406,6 +433,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let invalid = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {owner_key}"))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({ "name": "   " }))
             .await;
         assert_eq!(invalid.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -413,6 +441,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let missing = request
             .delete("/api/api-keys/not-a-uuid")
             .add_header("Authorization", format!("Bearer {owner_key}"))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await;
         assert_eq!(missing.status_code(), StatusCode::BAD_REQUEST);
     })
@@ -609,7 +638,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .assert_status(StatusCode::FORBIDDEN);
 
         let member_tenant_key = api_keys::Entity::create_tenant_api_key(
-            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Read,
+            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Write,
             Some(member.id), false, "member-tenant-issuer",
         ).await.unwrap();
         request.post("/api/api-keys")
@@ -617,6 +646,21 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"denied-member", "tenant_scoped":true}))
             .await.assert_status(StatusCode::FORBIDDEN);
+
+        let txn = ctx.db.begin().await.unwrap();
+        let inaccessible = tenancy::create_workspace(&txn, tenant.tenant_id, "no-member-grant", None, None).await.unwrap();
+        txn.commit().await.unwrap();
+        request.get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, inaccessible.id.to_string())
+            .await.assert_status(StatusCode::FORBIDDEN);
+        let listed = request.get("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+            .await.json::<Value>();
+        let member_record = listed["keys"].as_array().unwrap().iter()
+            .find(|key| key["id"] == member_tenant_key.id.to_string()).unwrap();
+        assert_eq!(member_record["effective_scope"], "write");
 
         let read_issuer = api_keys::Entity::create_tenant_api_key(
             &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Read,

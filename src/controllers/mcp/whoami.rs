@@ -52,7 +52,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Discover workspace candidates within the current credential's tenant; service credentials list only the selected workspace, and discovery does not grant access (requires read scope)"
+        description = "Discover workspace candidates within the current credential's tenant; workspace-bound credentials list only their bound workspace, and discovery does not grant access (requires read scope)"
     )]
     pub async fn discover_workspaces(
         &self,
