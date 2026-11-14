@@ -66,16 +66,10 @@ pub async fn preview_removal(
     )
     .await?;
     let role = get_membership_role(&txn, actor.tenant_id, user_id).await?;
-    let blocked_by_last_owner = if role == Some(MembershipRole::Owner) {
-        Entity::find()
-            .filter(Column::TenantId.eq(actor.tenant_id))
-            .filter(Column::Role.eq(MembershipRole::Owner.as_db_str()))
-            .count(&txn)
-            .await
-            .internal()?
-            <= 1
-    } else {
-        false
+    let blocked_by_last_owner = match protect_owner(&txn, actor.tenant_id, user_id, None).await {
+        Ok(()) => false,
+        Err(YorishiroError::Conflict { .. }) => true,
+        Err(error) => return Err(error),
     };
     let revoked_api_key_ids = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
