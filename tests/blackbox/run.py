@@ -1053,6 +1053,7 @@ def iam_lifecycle(app):
             "delegated retirement inventory differs across transports")
     tenant_client.call("transfer_ownership", {"successor_user_id": user_id}, error=True)
     tenant_client.call("set_member_role", {"user_id": user_id, "role": "owner"}, error=True)
+    tenant_client.call("preview_member_role_change", {"user_id": user_id, "role": "owner"}, error=True)
     tenant_client.call("remove_member", {"user_id": app.account["user_id"]}, error=True)
     admin_document["statements"].append({"effect": "allow", "actions": ["workspace_get", "workspace_update"],
         "resources": [{"type": "workspace", "tenant_id": app.tenant, "workspace_id": app.workspace}]})

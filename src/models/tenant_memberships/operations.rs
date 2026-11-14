@@ -401,6 +401,13 @@ pub async fn preview_role_change(
     let current_role = get_membership_role(&txn, actor.tenant_id, user_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("tenant membership not found"))?;
+    if role == MembershipRole::Owner
+        && !crate::models::iam_tenant_roots::Model::contains(&txn, actor.tenant_id, user_id).await?
+    {
+        return Err(YorishiroError::Conflict {
+            message: "tenant root cannot be assigned through membership changes".into(),
+        });
+    }
     let blocked_by_last_owner = if role != MembershipRole::Owner {
         match protect_owner(&txn, actor.tenant_id, user_id, Some(role)).await {
             Ok(()) => false,
