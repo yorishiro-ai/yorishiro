@@ -141,6 +141,9 @@ async fn perform_infer_fill(
             continue;
         }
 
+        check_actor(ctx, args)
+            .await
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
         let answers = client
             .propose_fields(&row.data, &missing)
             .await
@@ -156,11 +159,12 @@ async fn perform_infer_fill(
 
     if !batches.is_empty() {
         let proposal_txn = open_workspace_write_scope(ctx, args.workspace_id).await?;
-        crate::models::access::require_job_actor(
+        let authorization = crate::ee::models::access::authorize_job_actor(
             &proposal_txn,
             &ctx.db,
             &args.actor,
             crate::models::api_keys::ApiKeyScope::Schema,
+            crate::models::iam_policy::Action::InferenceCreate,
         )
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
@@ -197,6 +201,9 @@ async fn perform_infer_fill(
             }
         }
         proposal_txn.commit().await.internal()?;
+        if let Some(authorization) = authorization {
+            authorization.commit().await.internal()?;
+        }
     }
 
     Ok((proposed, skipped))
@@ -461,17 +468,18 @@ async fn defer_and_enqueue(
 /// Returns the job ID that the caller can use to poll status.
 ///
 /// # Errors
-/// Returns `loco_rs::Error` when the queue is configured but the enqueue fails.
+/// Rejects unavailable queues, insufficient IAM permission or failed job registration.
 pub async fn enqueue_infer_fill(
     ctx: &AppContext,
     auth: &crate::models::api_keys::AuthContext,
     schema_name: String,
-) -> loco_rs::Result<String> {
+) -> Result<String, crate::YorishiroError> {
     let workspace_id = auth.require_workspace()?;
     if ctx.queue_provider.is_none() {
-        return Err(loco_rs::Error::Message(
-            "infer-fill requires a queue provider (configure queue: in the server config)".into(),
-        ));
+        return Err(crate::YorishiroError::BackendUnavailable {
+            message: "infer-fill requires a queue provider (configure queue: in the server config)"
+                .into(),
+        });
     }
 
     let job_id = Uuid::new_v4();
@@ -479,9 +487,22 @@ pub async fn enqueue_infer_fill(
         crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
             .await
             .internal()?;
-    let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id)
+    let txn = crate::db::begin_workspace_write(ctx, tenant_id, workspace_id)
         .await
         .internal()?;
+    let authorization = crate::ee::models::access::authorize_job_actor(
+        &txn,
+        &ctx.db,
+        &crate::models::api_key_audit_log::AuditActor {
+            tenant_id: auth.tenant_id,
+            workspace_id,
+            api_key_id: auth.api_key_id,
+            user_id: auth.user_id,
+        },
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam_policy::Action::InferenceCreate,
+    )
+    .await?;
     inference_jobs::create(&txn, job_id, workspace_id, &schema_name)
         .await
         .internal()?;
@@ -501,8 +522,12 @@ pub async fn enqueue_infer_fill(
         },
         Some(&txn),
     )
-    .await?;
+    .await
+    .internal()?;
     txn.commit().await.internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
 
     Ok(job_id.to_string())
 }
@@ -513,12 +538,17 @@ async fn check_actor(ctx: &AppContext, args: &InferFillArgs) -> Result<(), crate
     }
     let txn =
         crate::db::begin_workspace_write(ctx, args.actor.tenant_id, args.workspace_id).await?;
-    crate::models::access::require_job_actor(
+    let authorization = crate::ee::models::access::authorize_job_actor(
         &txn,
         &ctx.db,
         &args.actor,
         crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam_policy::Action::InferenceCreate,
     )
     .await?;
-    txn.commit().await.internal()
+    txn.commit().await.internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
+    Ok(())
 }

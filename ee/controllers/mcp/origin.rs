@@ -43,17 +43,14 @@ pub(crate) struct MergeApplyArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List schemas in this workspace whose origin template has changed since \
-                       the schema was last copied (requires read scope). Use this to discover \
-                       which schemas have pending upstream updates that have not yet been \
-                       merged."
+        description = "List schemas in this workspace whose origin template has changed since the schema was last copied (requires read scope and schema_upstream_list IAM permission). Use this to discover which schemas have pending upstream updates that have not yet been merged."
     )]
     pub(crate) async fn list_upstream_changes(
         &self,
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("list_upstream_changes")?,
@@ -63,6 +60,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaUpstreamList)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
@@ -81,16 +84,14 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Preview what merging the origin template would do to a schema (requires \
-                       read scope). Returns a list of fields that would be added, updated, \
-                       kept, or conflicted. Does not write anything."
+        description = "Preview what merging the origin template would do to a schema (requires read scope and schema_merge_preview IAM permission). Returns a list of fields that would be added, updated, kept, or conflicted. Does not write anything."
     )]
     pub(crate) async fn merge_preview(
         &self,
         Parameters(args): Parameters<MergePreviewArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("merge_preview")?,
@@ -100,6 +101,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaMergePreview)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let auth_ctx = authorized.auth_context();
         let plan = match crate::edition::ee::models::schema_schemas::merge_preview(
@@ -123,17 +130,14 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
-        description = "Merge the origin template into a schema, writing the merged definition \
-                       as the schema's next version (requires schema scope). Returns the new \
-                       schema version and a diff describing whether the merge was breaking. \
-                       Fails if there are merge conflicts."
+        description = "Merge the origin template into a schema, writing the merged definition as the schema's next version (requires schema scope and schema_merge_apply IAM permission). Returns the new schema version and a diff describing whether the merge was breaking. Fails if there are merge conflicts."
     )]
     pub(crate) async fn merge_apply(
         &self,
         Parameters(args): Parameters<MergeApplyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("merge_apply")?,
@@ -143,6 +147,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaMergeApply)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let auth_ctx = authorized.auth_context();
         let (schema, diff, summary) = match crate::edition::ee::models::schema_schemas::merge_apply(

@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_invites::Column;
-use crate::models::api_keys::hash_key;
+use crate::models::api_keys::{ApiKeyScope, hash_key};
+use crate::models::iam_policy::{Action, Resource};
 use crate::models::tenant_memberships::MembershipRole;
 
 use super::{ActiveModel, Entity, Model, RedeemedInvite};
@@ -22,7 +23,16 @@ pub(crate) async fn revoke_invite_as(
     invite_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserDelete,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let invite = managed_invite(&txn, actor.tenant_id, invite_id).await?;
     if invite.used_at.is_some() {
         return Err(YorishiroError::Conflict {
@@ -46,10 +56,21 @@ pub(crate) async fn reissue_invite_as(
     expires_at: DateTime<Utc>,
 ) -> Result<(Model, String), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserUpdate,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let invite = managed_invite(&txn, actor.tenant_id, invite_id).await?;
     if invite.role == MembershipRole::Owner.as_db_str() {
-        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+        return Err(YorishiroError::Conflict {
+            message: "tenant root cannot be assigned through an invitation".into(),
+        });
     }
     if invite.used_at.is_some() {
         return Err(YorishiroError::Conflict {
@@ -93,9 +114,20 @@ pub(crate) async fn create_invite_as(
     expires_at: DateTime<Utc>,
 ) -> Result<(Model, String), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserCreate,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     if role == MembershipRole::Owner {
-        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+        return Err(YorishiroError::Conflict {
+            message: "tenant root cannot be assigned through an invitation".into(),
+        });
     }
     let now = crate::time::now();
     if expires_at <= now || email.trim().is_empty() || !email.contains('@') {
@@ -119,18 +151,28 @@ pub(crate) async fn create_invite_as(
 }
 
 pub(crate) async fn list_invites(
-    conn: &impl ConnectionTrait,
+    db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<Model>, YorishiroError> {
-    crate::models::access::require_tenant_admin_as(conn, actor).await?;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserList,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     Entity::find()
         .filter(Column::TenantId.eq(actor.tenant_id))
         .order_by_desc(Column::CreatedAt)
         .order_by_desc(Column::Id)
         .limit(page.limit() as u64)
         .offset(page.offset() as u64)
-        .all(conn)
+        .all(&txn)
         .await
         .internal()
 }

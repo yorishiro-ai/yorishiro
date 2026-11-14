@@ -6,7 +6,7 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop]
+    branches: [develop, refactor/cli-reduction]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

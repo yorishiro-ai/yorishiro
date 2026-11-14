@@ -10,6 +10,7 @@ mod api_keys;
 mod compute_credit_ledger;
 mod content_entities_sqlite;
 mod entities;
+mod iam_policy;
 #[cfg(feature = "enterprise")]
 mod inference_jobs;
 #[cfg(feature = "enterprise")]

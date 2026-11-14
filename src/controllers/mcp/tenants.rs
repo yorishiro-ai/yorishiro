@@ -23,7 +23,7 @@ pub(crate) struct DisableTenantArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Read the current tenant's basic metadata and stored manual workspace cap (requires read scope and tenant Admin or Owner)"
+        description = "Read the current tenant's basic metadata and stored manual workspace cap (requires read scope and IAM permission)"
     )]
     pub(crate) async fn get_tenant(
         &self,
@@ -50,7 +50,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Update current tenant name or explicitly replace/clear its manual workspace cap without altering plan quotas (requires read scope and tenant Admin or Owner)"
+        description = "Update current tenant name or explicitly replace/clear its manual workspace cap without altering plan quotas (requires read scope and IAM permission)"
     )]
     pub(crate) async fn update_tenant(
         &self,
@@ -78,7 +78,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Inspect current-tenant retirement inventory and retention consequences without changing data (requires read scope and tenant Owner)"
+        description = "Inspect current-tenant retirement inventory and retention consequences without changing data (requires read scope and tenant_get IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn tenant_retirement_inventory(
         &self,
@@ -102,7 +102,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Disable the current tenant after confirming its UUID, revoking all its credentials and cancelling work; data and identities remain and quota stays occupied (requires read scope and tenant Owner; physical deletion is operator-only)"
+        description = "Disable the current tenant after confirming its UUID, revoking all its credentials and cancelling work; data and identities remain and quota stays occupied (requires read scope and tenant_update IAM permission with a tenant-scoped credential; physical deletion is operator-only)"
     )]
     pub(crate) async fn disable_tenant(
         &self,

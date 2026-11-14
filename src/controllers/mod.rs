@@ -5,6 +5,7 @@ pub mod entities;
 pub mod error;
 pub mod export;
 pub mod extractors;
+pub(crate) mod iam;
 pub mod import;
 pub mod mcp;
 pub mod members;

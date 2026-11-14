@@ -87,6 +87,7 @@ pub async fn find_or_create(
 
     tenant_memberships::add_member_in_transaction(conn, tenant.id, user.id, MembershipRole::Owner)
         .await?;
+    tenancy::assign_initial_root(conn, tenant.id, user.id).await?;
 
     Ok(user.id)
 }

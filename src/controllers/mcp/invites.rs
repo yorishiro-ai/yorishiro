@@ -77,7 +77,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant Admin or Owner; inviting an Owner requires Owner)"
+        description = "Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant_user_create IAM permission; Owner invitations are rejected)"
     )]
     pub(crate) async fn create_invite(
         &self,
@@ -113,7 +113,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List current-tenant invitations without exposing their tokens (requires read scope and tenant Admin or Owner)"
+        description = "List current-tenant invitations without exposing their tokens (requires read scope and tenant_user_list IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn list_invites(
         &self,
@@ -144,7 +144,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Cancel an unused current-tenant invitation; repeated cancellation is safe (requires read scope and tenant Admin or Owner)"
+        description = "Cancel an unused current-tenant invitation; repeated cancellation is safe (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn revoke_invite(
         &self,
@@ -171,7 +171,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Replace an unused current-tenant invitation token and expiry, invalidating the old token, for caller delivery (requires read scope and tenant Admin or Owner)"
+        description = "Replace an unused current-tenant invitation token and expiry, invalidating the old token, for caller delivery (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn reissue_invite(
         &self,

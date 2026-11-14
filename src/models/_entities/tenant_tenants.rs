@@ -21,6 +21,10 @@ pub enum Relation {
     ApiKeyAuditLog,
     #[sea_orm(has_many = "super::api_keys::Entity")]
     ApiKeys,
+    #[sea_orm(has_many = "super::iam_groups::Entity")]
+    IamGroups,
+    #[sea_orm(has_many = "super::iam_policies::Entity")]
+    IamPolicies,
     #[sea_orm(has_many = "super::schema_schemas::Entity")]
     SchemaSchemas,
     #[sea_orm(has_many = "super::template_reviews::Entity")]
@@ -52,6 +56,18 @@ impl Related<super::api_key_audit_log::Entity> for Entity {
 impl Related<super::api_keys::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ApiKeys.def()
+    }
+}
+
+impl Related<super::iam_groups::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamGroups.def()
+    }
+}
+
+impl Related<super::iam_policies::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamPolicies.def()
     }
 }
 

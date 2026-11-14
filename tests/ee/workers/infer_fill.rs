@@ -18,10 +18,10 @@ async fn rejects_a_missing_queue_before_creating_a_job() {
             .await
             .expect_err("missing queue must fail");
 
-        assert_eq!(
-            error.to_string(),
-            "infer-fill requires a queue provider (configure queue: in the server config)"
-        );
+        assert!(matches!(
+            error,
+            yorishiro::YorishiroError::BackendUnavailable { .. }
+        ));
     })
     .await;
 }
@@ -653,15 +653,26 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, fixture.tenant_id, fixture.owner_id).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(&txn, fixture.tenant_id,
+            &crate::requests::fixtures::unique_email("infer-iam"), "hunter2-hunter2", None,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+        txn.commit().await.unwrap();
+        for mode in ["revoke", "detach", "deny"] {
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_create"],
+            "resources":[{"type":"workspace","tenant_id":fixture.tenant_id,"workspace_id":fixture.workspace_id}]}]});
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
+            .json(&serde_json::json!({"name":mode,"document":document})).await;
+        policy.assert_status(axum::http::StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
+            .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         let key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db,
-            fixture.workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Schema,
-            None,
-            false,
-        )
-        .await
-        .unwrap();
+            &ctx.db, fixture.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema,
+            Some(member.id), false).await.unwrap();
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
             .await
             .unwrap()
@@ -675,9 +686,18 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
             .find(|row| row.payload["job_id"] == job_id.to_string())
             .unwrap()
             .id;
-        yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id)
-            .await
-            .unwrap();
+        match mode {
+            "revoke" => yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap(),
+            "detach" => { request.delete(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
+                .await.assert_status(axum::http::StatusCode::NO_CONTENT); },
+            _ => {
+                let mut deny = document;
+                deny["statements"][0]["effect"] = serde_json::json!("deny");
+                request.put(&format!("/api/iam/policies/{policy_id}"))
+                    .add_header("Authorization", format!("Bearer {tenant_key}"))
+                    .json(&serde_json::json!({"name":mode,"document":deny})).await.assert_status_ok();
+            }
+        }
         crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed").await;
         let job = yorishiro::edition::ee::models::inference_jobs::get(&ctx.db, job_id)
             .await
@@ -694,7 +714,18 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
         )
         .await
         .unwrap();
-        assert!(proposals.is_empty());
+         assert!(proposals.is_empty());
+         if mode != "revoke" {
+             let error = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
+                 .await.expect_err("denied IAM permission must reject enqueue");
+             assert!(matches!(error, yorishiro::YorishiroError::ScopeInsufficient { .. }));
+         }
+         if mode != "detach" {
+            request.delete(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
+                .await.assert_status(axum::http::StatusCode::NO_CONTENT);
+        }
+        }
+
     })
     .await;
 }
@@ -705,20 +736,20 @@ async fn revocation_during_llm_call_rejects_the_late_proposal() {
 }
 
 #[tokio::test]
-async fn downgrade_during_llm_call_rejects_the_late_proposal() {
-    permission_change_during_llm_call(PermissionChange::Downgrade).await;
+async fn policy_detachment_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(PermissionChange::DetachPolicy).await;
 }
 
 #[tokio::test]
-async fn workspace_revocation_during_llm_call_rejects_the_late_proposal() {
-    permission_change_during_llm_call(PermissionChange::RevokeWorkspace).await;
+async fn explicit_deny_during_llm_call_rejects_the_late_proposal() {
+    permission_change_during_llm_call(PermissionChange::DenyPolicy).await;
 }
 
 #[derive(Clone, Copy)]
 enum PermissionChange {
     RevokeKey,
-    Downgrade,
-    RevokeWorkspace,
+    DetachPolicy,
+    DenyPolicy,
 }
 
 async fn permission_change_during_llm_call(change: PermissionChange) {
@@ -738,21 +769,25 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({"base_url":llm.url,"model":"test-model","api_key":"sk-test"})).await;
         assert_eq!(response.status_code(), 204, "{}", response.text());
-        let user_id = if !matches!(change, PermissionChange::RevokeKey) {
-            let txn = ctx.db.begin().await.unwrap();
-            let user = yorishiro::models::tenancy::register_member(
-                &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
-                "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Admin,
-            ).await.unwrap();
-            yorishiro::models::workspace_memberships::Model::grant(&txn, setup.workspace_id, user.id,
-                yorishiro::models::workspace_memberships::WorkspaceRole::Admin).await.unwrap();
-            txn.commit().await.unwrap();
-            Some(user.id)
-        } else {
-            None
-        };
+        let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let user = yorishiro::models::tenancy::register_member(
+            &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
+            "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Admin,
+        ).await.unwrap();
+        txn.commit().await.unwrap();
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_create"],
+            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
+            .json(&serde_json::json!({"name":"inflight-inference","document":document})).await;
+        policy.assert_status(axum::http::StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", user.id);
+        request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
+            .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         let key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema, user_id, false,
+            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema, Some(user.id), false,
         ).await.unwrap();
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
             .await.unwrap().parse::<Uuid>().unwrap();
@@ -763,25 +798,25 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             tokio::time::timeout(Duration::from_secs(5), entered.notified())
                 .await.expect("worker reached the LLM");
             let changed = tokio::time::timeout(Duration::from_secs(5), async {
-                if matches!(change, PermissionChange::RevokeWorkspace) {
-                    let user_id = user_id.unwrap();
-                    yorishiro::models::tenant_memberships::add_member(
-                        &ctx.db, setup.tenant_id, user_id,
-                        yorishiro::models::tenant_memberships::MembershipRole::Member,
-                    ).await.unwrap();
-                    let response = request.delete(&format!("/api/workspaces/{}/members/{user_id}", setup.workspace_id))
-                        .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
-                    assert_eq!(response.status_code(), 204, "{}", response.text());
-                    Ok(())
-                } else if let Some(user_id) = user_id {
-                    yorishiro::models::tenant_memberships::add_member(&ctx.db, setup.tenant_id, user_id,
-                        yorishiro::models::tenant_memberships::MembershipRole::Viewer).await
-                } else {
-                    yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id).await
+                match change {
+                    PermissionChange::RevokeKey => {
+                        yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+                    }
+                    PermissionChange::DetachPolicy => {
+                        request.delete(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
+                            .await.assert_status(axum::http::StatusCode::NO_CONTENT);
+                    }
+                    PermissionChange::DenyPolicy => {
+                        let mut deny = document;
+                        deny["statements"][0]["effect"] = serde_json::json!("deny");
+                        request.put(&format!("/api/iam/policies/{policy_id}"))
+                            .add_header("Authorization", format!("Bearer {tenant_key}"))
+                            .json(&serde_json::json!({"name":"inflight-inference","document":deny})).await.assert_status_ok();
+                    }
                 }
             }).await;
             release.add_permits(1);
-            changed.expect("permission changes must not wait for the LLM reply").unwrap();
+            changed.expect("permission changes must not wait for the LLM reply");
         };
         tokio::join!(
             crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed"),
@@ -792,16 +827,6 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
         assert!(inference_proposals::for_job(&ctx.db, setup.workspace_id, job_id).await.unwrap().is_empty());
         let entity = yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity_id).await.unwrap();
         assert_eq!(entity.data, serde_json::json!({"title":"original"}));
-        if matches!(change, PermissionChange::Downgrade) {
-            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
-            assert_eq!(actor(&ctx, &key.plaintext).await.scope, yorishiro::models::api_keys::ApiKeyScope::Read);
-        }
-        if matches!(change, PermissionChange::RevokeWorkspace) {
-            assert!(yorishiro::models::api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
-            assert!(yorishiro::models::workspace_memberships::Model::role(
-                &ctx.db, setup.workspace_id, user_id.unwrap(),
-            ).await.unwrap().is_none());
-        }
     }).await;
 }
 

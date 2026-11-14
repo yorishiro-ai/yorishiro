@@ -133,7 +133,8 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert_eq!(missing_target.status_code(), 200);
         let tenant_identity = missing_target.json::<serde_json::Value>();
         assert!(tenant_identity["workspace_id"].is_null());
-        assert!(tenant_identity["workspace_access"].is_null());
+        assert!(tenant_identity.get("workspace_access").is_none());
+        assert_eq!(tenant_identity["tenant_root"], true);
         request
             .get("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))

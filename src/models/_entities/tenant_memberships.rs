@@ -19,6 +19,12 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::iam_group_memberships::Entity")]
+    IamGroupMemberships,
+    #[sea_orm(has_many = "super::iam_tenant_roots::Entity")]
+    IamTenantRoots,
+    #[sea_orm(has_many = "super::iam_user_policy_attachments::Entity")]
+    IamUserPolicyAttachments,
     #[sea_orm(
         belongs_to = "super::tenant_tenants::Entity",
         from = "Column::TenantId",
@@ -35,6 +41,24 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     UserUsers,
+}
+
+impl Related<super::iam_group_memberships::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamGroupMemberships.def()
+    }
+}
+
+impl Related<super::iam_tenant_roots::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamTenantRoots.def()
+    }
+}
+
+impl Related<super::iam_user_policy_attachments::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamUserPolicyAttachments.def()
+    }
 }
 
 impl Related<super::tenant_tenants::Entity> for Entity {

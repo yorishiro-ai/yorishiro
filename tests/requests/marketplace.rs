@@ -117,7 +117,9 @@ async fn the_marketplace_answers_501_on_sqlite() {
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
-        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        owner.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
 
         let listing = request
             .get("/api/marketplace")
@@ -139,7 +141,9 @@ async fn publish_list_fork_and_review_round_trip() {
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
-        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        owner.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
 
         // Publishing a version of a template that doesn't exist must 404.
         let draft = request
@@ -174,6 +178,65 @@ async fn publish_list_fork_and_review_round_trip() {
             .unwrap()
             .parse()
             .unwrap();
+
+        let member = request.post("/api/members/users")
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
+            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password","role":"admin"}))
+            .await;
+        member.assert_status(StatusCode::CREATED);
+        let member_id = member.json::<serde_json::Value>()["user_id"].clone();
+        let login = request.post("/auth/tenant/login")
+            .add_header("X-Tenant-Id", owner.tenant_id.to_string())
+            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password"})).await;
+        login.assert_status_ok();
+        let delegated_key = login.json::<serde_json::Value>()["api_key"].as_str().unwrap().to_owned();
+        let actions = ["marketplace_list", "marketplace_version_list", "marketplace_review_list",
+            "marketplace_publish", "marketplace_review_submit", "marketplace_fork", "marketplace_visibility_update"];
+        let document = json!({"statements":[{"effect":"allow","actions":actions,
+            "resources":[{"type":"tenant","tenant_id":owner.tenant_id}]}]});
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
+            .json(&json!({"name":"marketplace-delegate","document":document})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member_id.as_str().unwrap());
+        for effect in ["implicit", "deny"] {
+            if effect == "deny" {
+                let mut denied = document.clone();
+                denied["statements"][0]["effect"] = json!("deny");
+                request.put(&format!("/api/iam/policies/{policy_id}"))
+                    .add_header("Authorization", format!("Bearer {}", owner.api_key))
+                    .json(&json!({"name":"marketplace-delegate","document":denied})).await.assert_status_ok();
+                request.put(&attachment).add_header("Authorization", format!("Bearer {}", owner.api_key))
+                    .await.assert_status(StatusCode::NO_CONTENT);
+            }
+            for path in ["/api/marketplace".to_owned(), format!("/api/marketplace/{template_id}/versions"),
+                format!("/api/marketplace/{template_id}/reviews")] {
+                request.get(&path).add_header("Authorization", format!("Bearer {delegated_key}"))
+                    .await.assert_status(StatusCode::FORBIDDEN);
+            }
+            request.post(&format!("/api/marketplace/{template_id}/versions"))
+                .add_header("Authorization", format!("Bearer {delegated_key}"))
+                .json(&json!({"definition":note_definition()})).await.assert_status(StatusCode::FORBIDDEN);
+            request.post(&format!("/api/marketplace/{template_id}/reviews"))
+                .add_header("Authorization", format!("Bearer {delegated_key}"))
+                .json(&json!({"rating":5})).await.assert_status(StatusCode::FORBIDDEN);
+            request.post(&format!("/api/marketplace/{template_id}/fork"))
+                .add_header("Authorization", format!("Bearer {delegated_key}"))
+                .await.assert_status(StatusCode::FORBIDDEN);
+            request.put(&format!("/api/marketplace/{template_id}/visibility"))
+                .add_header("Authorization", format!("Bearer {delegated_key}"))
+                .json(&json!({"visibility":"community"})).await.assert_status(StatusCode::FORBIDDEN);
+        }
+        request.put(&format!("/api/iam/policies/{policy_id}"))
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
+            .json(&json!({"name":"marketplace-delegate","document":document})).await.assert_status_ok();
+        request.get("/api/marketplace").add_header("Authorization", format!("Bearer {delegated_key}"))
+            .await.assert_status_ok();
+        request.delete(&attachment).add_header("Authorization", format!("Bearer {}", owner.api_key))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        request.get("/api/marketplace").add_header("Authorization", format!("Bearer {delegated_key}"))
+            .await.assert_status(StatusCode::FORBIDDEN);
 
         let invalid_visibility = request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
@@ -306,7 +369,9 @@ async fn publish_list_fork_and_review_round_trip() {
         );
 
         // A second tenant forks it.
-        let forker = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut forker = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        forker.api_key =
+            super::fixtures::issue_tenant_key(&ctx, forker.tenant_id, forker.owner_id).await;
         assert_ne!(forker.tenant_id, owner.tenant_id);
 
         let fork = request
@@ -391,8 +456,12 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
-        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        owner.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
+        let mut other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        other.api_key =
+            super::fixtures::issue_tenant_key(&ctx, other.tenant_id, other.owner_id).await;
 
         let create_template = request
             .post("/api/template-library")
@@ -440,8 +509,12 @@ async fn a_rating_outside_the_range_is_rejected() {
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
-        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let reviewer = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        owner.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
+        let mut reviewer = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        reviewer.api_key =
+            super::fixtures::issue_tenant_key(&ctx, reviewer.tenant_id, reviewer.owner_id).await;
 
         let create_template = request
             .post("/api/template-library")

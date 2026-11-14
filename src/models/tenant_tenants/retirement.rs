@@ -39,26 +39,35 @@ pub struct RetirementInventory {
     pub identity_policy: &'static str,
 }
 
-/// Returns a retirement snapshot for the current tenant owner without changing tenant data.
+/// Returns an IAM-authorized retirement snapshot without changing tenant data.
 ///
 /// # Errors
-/// Rejects stale or non-owner credentials and propagates inventory failures.
+/// Rejects unauthorized credentials and propagates inventory failures.
 pub async fn inventory_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<RetirementInventory, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TenantGet,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let snapshot = inventory(&txn, actor.tenant_id).await?;
     txn.rollback().await.internal()?;
     Ok(snapshot)
 }
 
-/// Disables the owner's tenant without deleting retained data or user identities.
+/// Disables the authorized tenant without deleting retained data or user identities.
 /// Confirmation names the tenant UUID, not a workspace or a mutable display name.
 ///
 /// # Errors
-/// Rejects stale or non-owner credentials, mismatched confirmation and infrastructure tenants.
+/// Rejects unauthorized credentials, mismatched confirmation and infrastructure tenants.
 /// Database failures roll back disablement, key revocation, work cancellation and audit together.
 pub async fn disable_as(
     db: &sea_orm::DatabaseConnection,
@@ -75,8 +84,17 @@ pub async fn disable_as(
         });
     }
     let txn = crate::db::begin_write(db).await.internal()?;
-    let user_id = crate::models::access::require_current_tenant_owner(&txn, actor).await?;
-    disable_in_transaction(&txn, actor.tenant_id, Some(user_id)).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TenantUpdate,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    disable_in_transaction(&txn, actor.tenant_id, actor.user_id).await?;
     txn.commit().await.internal()
 }
 
@@ -259,6 +277,10 @@ async fn delete_disabled_in(
         .internal()?;
     workspace_workspaces::Entity::delete_many()
         .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
+        .exec(txn)
+        .await
+        .internal()?;
+    crate::models::iam_tenant_roots::Entity::delete_by_id(tenant_id)
         .exec(txn)
         .await
         .internal()?;

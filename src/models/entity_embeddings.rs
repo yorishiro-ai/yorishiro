@@ -46,3 +46,5 @@ pub(super) fn validate_vector(
     }
     Ok(())
 }
+
+pub(crate) use reindex::reindex_workspace_as;

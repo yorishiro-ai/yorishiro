@@ -39,7 +39,17 @@ impl Model {
     ) -> Result<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>, YorishiroError> {
         use sea_orm::QueryOrder;
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::WorkspaceGet,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id,
+            },
+        )
+        .await?;
         let records = Entity::find()
             .filter(Column::WorkspaceId.eq(workspace_id))
             .order_by_asc(Column::UserId)
@@ -73,7 +83,17 @@ impl Model {
         role: WorkspaceRole,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::WorkspaceUpdate,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id,
+            },
+        )
+        .await?;
         Self::grant(&txn, workspace_id, user_id, role).await?;
         txn.commit().await.internal()
     }
@@ -89,7 +109,17 @@ impl Model {
         user_id: Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::WorkspaceUpdate,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id,
+            },
+        )
+        .await?;
         Self::revoke(&txn, workspace_id, user_id).await?;
         txn.commit().await.internal()
     }

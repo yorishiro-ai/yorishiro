@@ -18,7 +18,7 @@ use crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest;
 use crate::edition::ee::models::workspace_embedding_keys::{self, EmbeddingKeyDescription};
 
 /// `PUT /api/workspace/embedding-key`
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/embedding-key", request_body = crate::edition::ee::controllers::openapi::EmbeddingKeyRequest, responses((status = 204, description = "Embedding provider saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/embedding-key", request_body = crate::edition::ee::controllers::openapi::EmbeddingKeyRequest, responses((status = 204, description = "Embedding provider saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["embedding_provider_update"]))), tag = "enterprise"))]
 async fn set_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -27,19 +27,19 @@ async fn set_embedding_key(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
-    workspace_embedding_keys::configure(&ctx, auth_ctx.require_workspace()?, body).await?;
+    workspace_embedding_keys::configure(&ctx, &auth_ctx, body).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /api/workspace/embedding-key`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/embedding-key", responses((status = 200, body = crate::edition::ee::controllers::openapi::EmbeddingKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/embedding-key", responses((status = 200, body = crate::edition::ee::controllers::openapi::EmbeddingKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["embedding_provider_get"]))), tag = "enterprise"))]
 async fn get_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
 ) -> Result<Json<EmbeddingKeyDescription>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = workspace_embedding_keys::describe(&ctx.db, auth_ctx.require_workspace()?)
+    let described = workspace_embedding_keys::describe_as(&ctx.db, &auth_ctx)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found("no embedding provider configured for this workspace")
@@ -48,14 +48,14 @@ async fn get_embedding_key(
 }
 
 /// `DELETE /api/workspace/embedding-key`
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspace/embedding-key", responses((status = 204, description = "Embedding provider removed"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspace/embedding-key", responses((status = 204, description = "Embedding provider removed"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["embedding_provider_delete"]))), tag = "enterprise"))]
 async fn delete_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_embedding_keys::remove(&ctx, auth_ctx.require_workspace()?).await?;
+    workspace_embedding_keys::remove(&ctx, &auth_ctx).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

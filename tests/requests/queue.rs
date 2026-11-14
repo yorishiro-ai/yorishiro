@@ -306,6 +306,7 @@ async fn each_reindex_worker_class_is_sent_to_its_own_target() {
                     workspace_id,
                     worker_class: class,
                     startup: false,
+                    actor: None,
                 },
             )
             .await

@@ -15,7 +15,7 @@ use crate::models::api_keys::ApiKeyScope;
 
 #[tool_router(vis = "pub(crate)", router = tool_router_llm)]
 impl YorishiroMcpServer {
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Read the selected workspace's inference LLM endpoint and model without its API key (requires read scope); returns not found when unconfigured")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Read the selected workspace's inference LLM endpoint and model without its API key (requires read scope and llm_provider_get IAM permission); returns not found when unconfigured")]
     pub(crate) async fn get_llm_provider(
         &self,
         Extension(parts): Extension<Parts>,
@@ -30,15 +30,7 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(actor) => actor,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match workspace_llm_keys::describe(
-            &self.app_context().db,
-            match actor.require_workspace() {
-                Ok(workspace_id) => workspace_id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
-        )
-        .await
-        {
+        match workspace_llm_keys::describe_as(&self.app_context().db, &actor).await {
             Ok(Some(record)) => ok_json(record),
             Ok(None) => Ok(err_to_tool_result(YorishiroError::not_found(
                 "no LLM credentials configured",
@@ -47,7 +39,7 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Configure the selected workspace's inference LLM endpoint, model and API key (requires schema scope); stores the secret without returning it or invoking inference")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Configure the selected workspace's inference LLM endpoint, model and API key (requires schema scope and llm_provider_update IAM permission); stores the secret without returning it or invoking inference")]
     pub(crate) async fn set_llm_provider(
         &self,
         Parameters(input): Parameters<SetLlmKeyRequest>,
@@ -63,12 +55,9 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(actor) => actor,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match workspace_llm_keys::set(
+        match workspace_llm_keys::set_as(
             &self.app_context().db,
-            match actor.require_workspace() {
-                Ok(workspace_id) => workspace_id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
+            &actor,
             &input.base_url,
             &input.model,
             &input.api_key,
@@ -80,7 +69,7 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Remove the selected workspace's inference LLM credentials (requires schema scope); future inference requires configuration again, and already-started external calls are not cancelled")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Remove the selected workspace's inference LLM credentials (requires schema scope and llm_provider_delete IAM permission); future inference requires configuration again, and already-started external calls are not cancelled")]
     pub(crate) async fn reset_llm_provider(
         &self,
         Extension(parts): Extension<Parts>,
@@ -95,15 +84,7 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(actor) => actor,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match workspace_llm_keys::clear(
-            &self.app_context().db,
-            match actor.require_workspace() {
-                Ok(workspace_id) => workspace_id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
-        )
-        .await
-        {
+        match workspace_llm_keys::clear_as(&self.app_context().db, &actor).await {
             Ok(()) => ok_json(serde_json::json!({"reset":true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }

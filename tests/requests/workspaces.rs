@@ -392,12 +392,12 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             .await;
         assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
 
-        // A Member-role key can still list/view workspaces, just not create/delete them.
+        // A bound credential cannot enumerate tenant resources.
         let response = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
-        assert_eq!(response.status_code(), StatusCode::OK);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
     })
     .await;
 }
@@ -579,7 +579,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             .delete(&format!("/api/workspaces/{sibling_id}"))
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await
-            .assert_status(StatusCode::NOT_FOUND);
+            .assert_status(StatusCode::FORBIDDEN);
         let txn = ctx.db.begin().await.unwrap();
         yorishiro::models::workspace_memberships::Model::grant(
             &txn,
@@ -626,67 +626,6 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
 }
 
 #[tokio::test]
-async fn workspace_inventory_respects_direct_grants_and_service_binding() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let tenant_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let response = request
-            .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {tenant_key}"))
-            .json(&serde_json::json!({"name":format!("private-sibling-{}", Uuid::new_v4())}))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::CREATED);
-        let sibling = response.json::<serde_json::Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        request
-            .get(&format!("/api/workspaces/{sibling}"))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .await
-            .assert_status(StatusCode::NOT_FOUND);
-        let member = member_key(
-            &ctx,
-            tenant.tenant_id,
-            tenant.workspace_id,
-            MembershipRole::Member,
-        )
-        .await;
-        let service = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db,
-            tenant.workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Read,
-            None,
-            false,
-        )
-        .await
-        .unwrap();
-        for key in [&member, &service.plaintext] {
-            let response = request
-                .get("/api/workspaces")
-                .add_header("Authorization", format!("Bearer {key}"))
-                .await;
-            assert_eq!(response.status_code(), StatusCode::OK);
-            let workspaces = response.json::<serde_json::Value>();
-            assert_eq!(workspaces.as_array().unwrap().len(), 1);
-            assert_eq!(workspaces[0]["id"], tenant.workspace_id.to_string());
-            let response = request
-                .get(&format!("/api/workspaces/{sibling}"))
-                .add_header("Authorization", format!("Bearer {key}"))
-                .await;
-            assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
-            let response = request
-                .get(&format!("/api/workspaces/{}", tenant.workspace_id))
-                .add_header("Authorization", format!("Bearer {key}"))
-                .await;
-            assert_eq!(response.status_code(), StatusCode::OK);
-        }
-    })
-    .await;
-}
-
-#[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn workspace_endpoints_enforce_tenant_isolation() {
     if !crate::require_postgres_backend() {
@@ -727,10 +666,12 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         let listed = request
             .get("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .await;
         listed.assert_status(StatusCode::OK);
         let row = listed
@@ -760,7 +701,7 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
 
         let listed = request
             .get("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .await;
         listed.assert_status(StatusCode::OK);
         let row = listed

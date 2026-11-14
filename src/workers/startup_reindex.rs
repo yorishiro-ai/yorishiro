@@ -174,6 +174,7 @@ async fn enqueue_metadata_reindex(
         workspace_id,
         worker_class,
         startup: true,
+        actor: None,
     };
     // A concurrent scan can win the unique admission after this precheck; the next tick observes it.
     crate::workers::reindex::enqueue_for_class(ctx, args)
