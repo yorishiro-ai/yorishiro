@@ -1,8 +1,8 @@
 //! Tenant membership and role operations.
 
 use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect,
+    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect,
 };
 use uuid::Uuid;
 
@@ -150,22 +150,6 @@ async fn protect_owner(
     {
         return Err(YorishiroError::Conflict {
             message: "cannot remove or demote the tenant root".into(),
-        });
-    }
-    if next_role == Some(MembershipRole::Owner)
-        || get_membership_role(txn, tenant_id, user_id).await? != Some(MembershipRole::Owner)
-    {
-        return Ok(());
-    }
-    let owners = Entity::find()
-        .filter(Column::TenantId.eq(tenant_id))
-        .filter(Column::Role.eq(MembershipRole::Owner.as_db_str()))
-        .count(txn)
-        .await
-        .internal()?;
-    if owners <= 1 {
-        return Err(YorishiroError::Conflict {
-            message: "cannot remove or demote the tenant's last owner".into(),
         });
     }
     Ok(())
