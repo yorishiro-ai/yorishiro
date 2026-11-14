@@ -57,12 +57,13 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             serde_json::json!(["audit"])
         );
         assert_eq!(
-            document["paths"]["/api/members"]["get"]["x-yorishiro-required-roles"],
-            serde_json::json!(["tenant_admin"])
+            document["paths"]["/api/members"]["get"]["x-yorishiro-required-actions"],
+            serde_json::json!(["tenant_user_list"])
         );
         for method in ["put", "delete"] {
             let operation = &document["paths"]["/api/workspaces/{id}/members/{user_id}"][method];
-            assert_eq!(operation["x-yorishiro-required-roles"], serde_json::json!(["workspace_admin"]));
+            assert_eq!(operation["x-yorishiro-required-actions"], serde_json::json!(["workspace_update"]));
+            assert!(operation.get("x-yorishiro-required-roles").is_none());
             for status in ["204", "401", "403", "404"] {
                 assert!(operation["responses"][status].is_object());
             }
