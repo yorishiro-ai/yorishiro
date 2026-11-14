@@ -16,8 +16,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// Persistence is internal until authorization and audit are wired.
-#[allow(dead_code)]
 impl Model {
     pub(crate) async fn list_as(
         db: &DatabaseConnection,
@@ -164,19 +162,6 @@ impl Model {
                 YorishiroError::Internal(error.into())
             }
         })
-    }
-
-    pub(crate) async fn list(
-        txn: &sea_orm::DatabaseTransaction,
-        tenant_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<Vec<Self>, YorishiroError> {
-        Entity::find()
-            .filter(Column::TenantId.eq(tenant_id))
-            .filter(Column::UserId.eq(user_id))
-            .all(txn)
-            .await
-            .internal()
     }
 
     pub(crate) async fn remove(

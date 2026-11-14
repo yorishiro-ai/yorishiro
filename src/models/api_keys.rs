@@ -22,8 +22,8 @@ pub struct KeyGrant {
     pub revoked_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub replaced_by_id: Option<Uuid>,
     pub scope: ApiKeyScope,
-    /// For tenant-scoped keys, the tenant-level ceiling, not authority in any selected workspace.
-    /// For workspace-bound keys, the ceiling in that workspace; inactive keys or users without access have no effective scope.
+    /// The currently authenticated scope ceiling, not permission to execute an IAM action.
+    /// Inactive or unauthenticatable credentials have no effective scope.
     pub effective_scope: Option<ApiKeyScope>,
     pub audit: bool,
     pub workspace_id: Option<Uuid>,
@@ -85,26 +85,20 @@ impl Model {
         let effective_scope = if !self.is_active() {
             None
         } else {
-            match self.user_id {
-                None => Some(scope),
-                Some(user_id) => match self.workspace_id {
-                    Some(workspace_id) => crate::models::access::workspace_access(
-                        conn,
-                        self.tenant_id,
-                        workspace_id,
-                        user_id,
-                    )
-                    .await?
-                    .map(|access| scope.min(access.max_scope)),
-                    // A tenant-scoped key acts as the attributed user, so its ceiling is the tenant role, not a workspace grant.
-                    None => crate::models::tenant_memberships::get_membership_role(
-                        conn,
-                        self.tenant_id,
-                        user_id,
-                    )
-                    .await?
-                    .map(|role| crate::models::access::effective_scope(scope, role)),
-                },
+            let presented = AuthContext {
+                api_key_id: self.id,
+                workspace_id: self.workspace_id,
+                tenant_id: self.tenant_id,
+                user_id: self.user_id,
+                scope,
+                audit: self.audit,
+            };
+            match Self::current_context(conn, &presented).await {
+                Ok(current) => Some(current.scope),
+                Err(YorishiroError::Unauthenticated | YorishiroError::ScopeInsufficient { .. }) => {
+                    None
+                }
+                Err(error) => return Err(error),
             }
         };
         Ok(KeyGrant {

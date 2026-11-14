@@ -49,7 +49,7 @@ def main() -> int:
     assert "POSTGRES_CONTAINER: ${{ job.services.db.id }}" in assigned_workflow
     triggers = workflow.split("\non:\n", 1)[1].split("\nconcurrency:\n", 1)[0]
     assert "  pull_request:" in triggers
-    assert "    branches: [develop]" in triggers
+    assert "    branches: [develop, refactor/cli-reduction]" in triggers
     assert not any(
         line.strip().split(":", 1)[0] in {"push", "workflow_dispatch", "schedule"}
         for line in triggers.splitlines()

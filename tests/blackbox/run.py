@@ -1128,6 +1128,9 @@ def human_key_management(app):
     app.secrets.append(original["full_key"])
     reader = MCP(app, original["full_key"])
     require(reader.call("whoami")["user_id"] == account["user_id"], "delegated key lost attribution")
+    listed = next(row for row in client.call("list_api_keys")["keys"] if row["id"] == original["id"])
+    require(listed["effective_scope"] == reader.call("whoami")["scope"],
+            "credential history disagrees with authenticated scope")
     for body in ({"name": "scope-escalation", "scope": "write", "expires_at": expiry},
                  {"name": "audit-escalation", "audit": True, "expires_at": expiry},
                  {"name": "unlimited"},
