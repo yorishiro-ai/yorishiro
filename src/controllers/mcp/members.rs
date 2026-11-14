@@ -42,7 +42,7 @@ pub(crate) struct SetMemberRoleArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant Admin or Owner; Owner changes require Owner)"
+        description = "Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential; Owner changes require Owner)"
     )]
     pub(crate) async fn set_member_role(
         &self,
@@ -76,7 +76,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant Admin or Owner)"
+        description = "Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn preview_member_role_change(
         &self,
@@ -108,7 +108,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List members of the current tenant (requires read scope and tenant Admin or Owner; service credentials are rejected)"
+        description = "List members of the current tenant (requires read scope and tenant_user_list IAM permission with a tenant-scoped credential; service credentials are rejected)"
     )]
     pub(crate) async fn list_members(
         &self,
@@ -126,11 +126,8 @@ impl YorishiroMcpServer {
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let db = &self.app_context().db;
-        if let Err(error) = crate::models::access::require_tenant_admin_as(db, &auth).await {
-            return Ok(err_to_tool_result(error));
-        }
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        match tenant_memberships::list_members(db, auth.tenant_id, page).await {
+        match tenant_memberships::list_members_as(db, &auth, page).await {
             Ok(members) => ok_json(members),
             Err(error) => Ok(err_to_tool_result(error)),
         }
@@ -138,7 +135,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant Admin or Owner)"
+        description = "Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn preview_member_removal(
         &self,
@@ -164,7 +161,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant Admin or Owner; last Owner is protected)"
+        description = "Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential; last Owner is protected)"
     )]
     pub(crate) async fn remove_member(
         &self,
@@ -191,7 +188,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Atomically transfer tenant ownership to an existing member and demote the caller to Admin (requires read scope and tenant Owner)"
+        description = "Reject tenant ownership transfer because root identity is immutable (requires read scope and tenant_user_update IAM permission)"
     )]
     pub(crate) async fn transfer_ownership(
         &self,

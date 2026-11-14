@@ -1,7 +1,7 @@
 use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
 use uuid::Uuid;
 use yorishiro::App;
@@ -293,15 +293,55 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             "the proposal must not be written before confirmation: {fetched:?}"
         );
 
+        let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(&txn, setup.tenant_id,
+            &super::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+        txn.commit().await.unwrap();
+        let key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, setup.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Schema, Some(member.id), false).await.unwrap();
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_confirm"],
+            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        for deny in [false, true] {
+            let policy = request.post("/api/iam/policies")
+                .add_header("Authorization", format!("Bearer {iam_key}"))
+                .json(&serde_json::json!({"name":format!("confirm-{deny}"),"document":document})).await;
+            policy.assert_status(StatusCode::CREATED);
+            let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+            let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+            request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                .await.assert_status(StatusCode::NO_CONTENT);
+            let queued = request.post(&format!("/api/inference-jobs/{job_id}/confirm"))
+                .add_header("Authorization", format!("Bearer {}", key.plaintext)).await;
+            queued.assert_status(StatusCode::ACCEPTED);
+            let id = queued.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+            if deny {
+                let mut denied = document.clone();
+                denied["statements"][0]["effect"] = serde_json::json!("deny");
+                request.put(&format!("/api/iam/policies/{policy_id}"))
+                    .add_header("Authorization", format!("Bearer {iam_key}"))
+                    .json(&serde_json::json!({"name":format!("confirm-{deny}"),"document":denied})).await.assert_status_ok();
+            } else {
+                request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
+            }
+            super::fill_defaults::fail_via_api(&request, &ctx, id, &setup.api_key,
+                &format!("/api/inference-jobs/confirmations/{id}")).await;
+            let unchanged = request.get(&format!("/api/entities/{entity}"))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
+            unchanged.assert_status_ok();
+            assert_eq!(unchanged.json::<serde_json::Value>()["data"], fetched["data"]);
+        }
         let revoked = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             setup.workspace_id,
             yorishiro::models::api_keys::ApiKeyScope::Schema,
-            None,
+            Some(setup.owner_id),
             false,
         )
         .await
-        .expect("issue confirmation service key");
+        .expect("issue confirmation automation key");
         let denied = request
             .post(&format!("/api/inference-jobs/{job_id}/confirm"))
             .add_header("Authorization", format!("Bearer {}", revoked.plaintext))
@@ -520,9 +560,64 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         )
         .await;
 
+        let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, setup.tenant_id, &super::fixtures::unique_email("proposal-reviewer"),
+            "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Admin,
+        ).await.unwrap();
+        txn.commit().await.unwrap();
+        let key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema,
+            Some(member.id), false,
+        ).await.unwrap();
+        let document = serde_json::json!({"statements":[{"effect":"allow",
+            "actions":["inference_job_get","inference_proposal_list","inference_reject","inference_discard","inference_confirmation_get"],
+            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        let policy = request.post("/api/iam/policies").add_header("Authorization", format!("Bearer {iam_key}"))
+            .json(&serde_json::json!({"name":"proposal-reviewer","document":document})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        for mode in ["implicit", "deny", "detached"] {
+            if mode == "deny" {
+                request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
+                let mut denied = document.clone();
+                denied["statements"][0]["effect"] = serde_json::json!("deny");
+                request.put(&format!("/api/iam/policies/{policy_id}"))
+                    .add_header("Authorization", format!("Bearer {iam_key}"))
+                    .json(&serde_json::json!({"name":"proposal-reviewer","document":denied})).await.assert_status_ok();
+            } else if mode == "detached" {
+                request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
+            }
+            for path in [format!("/api/inference-jobs/{rejected_job}"),
+                format!("/api/inference-jobs/{rejected_job}/proposals"),
+                format!("/api/inference-jobs/confirmations/{}", Uuid::new_v4())] {
+                request.get(&path).add_header("Authorization", format!("Bearer {}", key.plaintext))
+                    .await.assert_status(StatusCode::FORBIDDEN);
+            }
+            for action in ["reject", "discard"] {
+                request.post(&format!("/api/inference-jobs/{rejected_job}/{action}"))
+                    .add_header("Authorization", format!("Bearer {}", key.plaintext))
+                    .await.assert_status(StatusCode::FORBIDDEN);
+            }
+        }
+        request.put(&format!("/api/iam/policies/{policy_id}"))
+            .add_header("Authorization", format!("Bearer {iam_key}"))
+            .json(&serde_json::json!({"name":"proposal-reviewer","document":document})).await.assert_status_ok();
+        request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        request.get(&format!("/api/inference-jobs/{rejected_job}"))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext)).await.assert_status_ok();
+        request.get(&format!("/api/inference-jobs/confirmations/{}", Uuid::new_v4()))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .await.assert_status(StatusCode::NOT_FOUND);
+
         let listed = request
             .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
             listed.status_code(),
@@ -534,10 +629,14 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         assert_eq!(proposals.as_array().unwrap().len(), 1);
         assert_eq!(proposals[0]["status"], "pending");
         assert_eq!(proposals[0]["proposed"], "reject me");
+        let unchanged = request.get(&format!("/api/inference-jobs/{discarded_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext)).await;
+        unchanged.assert_status_ok();
+        assert_eq!(unchanged.json::<serde_json::Value>()[0]["status"], "pending");
 
         let rejected = request
             .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
             rejected.status_code(),
@@ -549,7 +648,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
 
         let discarded = request
             .post(&format!("/api/inference-jobs/{discarded_job}/discard"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
             discarded.status_code(),

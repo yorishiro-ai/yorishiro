@@ -64,6 +64,11 @@ pub async fn reset_root_password_by_operator(
             message: "account membership changed; retry the reset".into(),
         });
     }
+    if !crate::models::iam_tenant_roots::Model::contains(&txn, tenant_id, user_id).await? {
+        return Err(YorishiroError::Conflict {
+            message: "password recovery requires the tenant root account".into(),
+        });
+    }
     crate::models::tenant_tenants::Model::require_active(&txn, tenant_id).await?;
     let user = Entity::find_by_id(user_id)
         .one(&txn)

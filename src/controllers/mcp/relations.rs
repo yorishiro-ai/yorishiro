@@ -90,7 +90,7 @@ impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),
-        description = "Create a relation between two entities (requires write scope). \
+        description = "Create a relation between two entities (requires write scope and relation_create IAM permission). \
                            Properties cannot be edited in place; to change them, delete the \
                            relation and recreate it. To retire a relation without losing the \
                            record that it existed, use set_relation_status instead of deleting."
@@ -100,7 +100,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("create_relation")?,
@@ -110,6 +110,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::RelationCreate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let input = args.into();
 
@@ -123,13 +129,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "Get a single relation by ID (requires read scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "Get a single relation by ID (requires read scope and relation_get IAM permission)")]
     pub async fn get_relation(
         &self,
         Parameters(args): Parameters<GetRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("get_relation")?,
@@ -139,6 +145,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::RelationGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let record = match entity_relations::get(authorized.txn(), workspace_id, args.id).await {
@@ -149,13 +161,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Delete a relation (requires write scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Delete a relation (requires write scope and relation_delete IAM permission)")]
     pub(crate) async fn delete_relation(
         &self,
         Parameters(args): Parameters<DeleteRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("delete_relation")?,
@@ -165,6 +177,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::RelationDelete)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         match entity_relations::delete(authorized.txn(), workspace_id, args.id).await {
@@ -176,13 +194,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "List relations (requires read scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "List relations (requires read scope and relation_list IAM permission)")]
     pub async fn list_relations(
         &self,
         Parameters(args): Parameters<ListRelationsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("list_relations")?,
@@ -192,6 +210,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::RelationList)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let query = match args.try_into() {
             Ok(query) => query,
@@ -209,7 +233,7 @@ impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),
         description = "Set a relation's status to active, deprecated or archived \
-                           (requires write scope). Retiring a relation this way keeps the record \
+                           (requires write scope and relation_update IAM permission). Retiring a relation this way keeps the record \
                            that it existed, which delete_relation does not; graph traversal \
                            follows active relations only."
     )]
@@ -218,7 +242,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SetRelationStatusArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("set_relation_status")?,
@@ -228,6 +252,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::RelationUpdate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let status = match entity_relations::parse_relation_status(&args.status) {

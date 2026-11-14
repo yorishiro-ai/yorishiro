@@ -20,7 +20,7 @@ use crate::edition::ee::models::workspace_worker_classes::{self, WorkerClassAssi
 /// `PUT /api/workspace/worker-class`
 /// Requires the destination tag in `settings.worker_targets` and a separately running worker serving that tag.
 /// The deployment declaration does not guarantee that the worker is currently online.
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/worker-class", request_body = crate::edition::ee::controllers::openapi::WorkerClassRequest, responses((status = 204, description = "Worker class saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/worker-class", request_body = crate::edition::ee::controllers::openapi::WorkerClassRequest, responses((status = 204, description = "Worker class saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["worker_class_update"]))), tag = "enterprise"))]
 async fn set_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -28,19 +28,19 @@ async fn set_worker_class(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_worker_classes::set(&ctx, auth_ctx.require_workspace()?, body.worker_class).await?;
+    workspace_worker_classes::set_as(&ctx, &auth_ctx, body.worker_class).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /api/workspace/worker-class`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/worker-class", responses((status = 200, body = crate::edition::ee::controllers::openapi::WorkerClassResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/worker-class", responses((status = 200, body = crate::edition::ee::controllers::openapi::WorkerClassResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["worker_class_get"]))), tag = "enterprise"))]
 async fn get_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
 ) -> Result<Json<WorkerClassAssignment>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = workspace_worker_classes::describe(&ctx.db, auth_ctx.require_workspace()?)
+    let described = workspace_worker_classes::describe_as(&ctx.db, &auth_ctx)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found("no worker class assignment configured for this workspace")
@@ -49,14 +49,14 @@ async fn get_worker_class(
 }
 
 /// `DELETE /api/workspace/worker-class`
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspace/worker-class", responses((status = 204, description = "Worker class reset"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspace/worker-class", responses((status = 204, description = "Worker class reset"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["worker_class_delete"]))), tag = "enterprise"))]
 async fn delete_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    workspace_worker_classes::clear(&ctx.db, auth_ctx.require_workspace()?).await?;
+    workspace_worker_classes::clear_as(&ctx.db, &auth_ctx).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

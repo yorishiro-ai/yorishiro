@@ -7,23 +7,35 @@ pub mod retirement;
 pub(crate) use operations::count_tenants;
 pub use operations::create_tenant;
 
-/// Reads the authenticated tenant's administrator-visible metadata.
+/// Reads the authenticated tenant's metadata under the membership fence.
 ///
 /// # Errors
-/// Rejects stale credentials and non-administrators or propagates database errors.
+/// Rejects unauthorized credentials or propagates database errors.
 pub(crate) async fn detail_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Model, crate::error::YorishiroError> {
-    let current = crate::models::api_keys::Model::current_context(db, actor).await?;
-    crate::models::access::require_tenant_admin_as(db, &current).await?;
-    Model::find_by_id(db, current.tenant_id).await
+    use crate::error::ResultExt;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TenantGet,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    let tenant = Model::find_by_id(&txn, actor.tenant_id).await?;
+    txn.commit().await.internal()?;
+    Ok(tenant)
 }
 
 /// Updates current-tenant metadata under the membership fence without changing plan quotas.
 ///
 /// # Errors
-/// Rejects non-administrators, invalid names or caps and propagates persistence errors.
+/// Rejects unauthorized credentials, invalid names or caps and propagates persistence errors.
 pub(crate) async fn update_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -31,7 +43,16 @@ pub(crate) async fn update_as(
 ) -> Result<Model, crate::error::YorishiroError> {
     use crate::error::{ResultExt, YorishiroError};
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TenantUpdate,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     if input.max_workspaces.is_some() && !input.replace_max_workspaces {
         return Err(YorishiroError::Conflict {
             message: "max_workspaces requires replace_max_workspaces=true".into(),

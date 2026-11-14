@@ -10,7 +10,7 @@ use crate::controllers::extractors::AuthContext;
 use crate::dtos::tenants::DisableTenantRequest;
 use crate::models::tenant_tenants::retirement;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenants/current", responses((status = 200, body = crate::dtos::tenants::TenantRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenants/current", responses((status = 200, body = crate::dtos::tenants::TenantRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-iam-action" = json!("tenant_get"))), tag = "community"))]
 async fn detail(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -21,7 +21,7 @@ async fn detail(
     )))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/tenants/current", request_body = crate::dtos::tenants::UpdateTenantRequest, responses((status = 200, body = crate::dtos::tenants::TenantRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/tenants/current", request_body = crate::dtos::tenants::UpdateTenantRequest, responses((status = 200, body = crate::dtos::tenants::TenantRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-iam-action" = json!("tenant_update"))), tag = "community"))]
 async fn update(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -33,7 +33,7 @@ async fn update(
     )))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenants/current/retirement", responses((status = 200, body = retirement::RetirementInventory), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_owner"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenants/current/retirement", responses((status = 200, body = retirement::RetirementInventory), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_get"]))), tag = "community"))]
 async fn inventory(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -41,7 +41,7 @@ async fn inventory(
     Ok(Json(retirement::inventory_as(&ctx.db, &actor).await?))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/tenants/current/disable", request_body = DisableTenantRequest, responses((status = 204, description = "Tenant disabled, credentials revoked and work cancelled; data and identities retained, quota still occupied"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_owner"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/tenants/current/disable", request_body = DisableTenantRequest, responses((status = 204, description = "Tenant disabled, credentials revoked and work cancelled; data and identities retained, quota still occupied"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_update"]))), tag = "community"))]
 async fn disable(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,

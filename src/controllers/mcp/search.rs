@@ -33,7 +33,7 @@ pub(crate) struct SearchEntitiesArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope)"
+        description = "Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope and search IAM permission)"
     )]
     pub(crate) async fn search_entities(
         &self,
@@ -62,6 +62,9 @@ impl YorishiroMcpServer {
             Ok(id) => id,
             Err(error) => return Ok(err_to_tool_result(error)),
         };
+        if let Err(err) = search::authorize_search(self.app_context(), &auth_ctx).await {
+            return Ok(err_to_tool_result(err));
+        }
         if let Err(err) = search::ensure_available(&self.app_context().db, workspace_id).await {
             return Ok(err_to_tool_result(err));
         }
@@ -74,14 +77,8 @@ impl YorishiroMcpServer {
             return Ok(err_to_tool_result(err));
         }
 
-        let hits = match search::search_text(
-            self.app_context(),
-            auth_ctx.tenant_id,
-            workspace_id,
-            &args.query_text,
-            query,
-        )
-        .await
+        let hits = match search::search_text(self.app_context(), &auth_ctx, &args.query_text, query)
+            .await
         {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),

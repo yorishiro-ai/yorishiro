@@ -29,6 +29,16 @@ pub struct ReindexArgs {
     pub worker_class: WorkerClass,
     #[serde(default)]
     pub startup: bool,
+    #[serde(default)]
+    pub actor: Option<ReindexActor>,
+}
+
+/// Credential identity retained for user-requested reindex authorization.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ReindexActor {
+    pub tenant_id: Uuid,
+    pub api_key_id: Uuid,
+    pub user_id: Option<Uuid>,
 }
 
 impl ReindexArgs {
@@ -50,6 +60,33 @@ impl ReindexArgs {
 ///
 /// Called by [`ReindexWorker`] once the job has been admitted.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
+    let actor = args
+        .actor
+        .as_ref()
+        .map(|actor| crate::models::api_keys::AuthContext {
+            tenant_id: actor.tenant_id,
+            api_key_id: actor.api_key_id,
+            user_id: actor.user_id,
+            workspace_id: Some(args.workspace_id),
+            scope: crate::models::api_keys::ApiKeyScope::Migration,
+            audit: false,
+        });
+    if let Some(actor) = &actor {
+        let txn = crate::db::begin_write(&ctx.db).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            crate::models::api_keys::ApiKeyScope::Migration,
+            crate::models::iam_policy::Action::WorkspaceReindex,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id: args.workspace_id,
+            },
+        )
+        .await
+        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        txn.commit().await?;
+    }
     // Resolve in the worker so workspace-specific overrides are honored without putting
     // credentials in the queue payload.
     let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
@@ -69,9 +106,14 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .acquire_owned()
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    let outcome = crate::db::reindex_workspace_with_lock(ctx, args.workspace_id, provider.as_ref())
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+    let outcome = crate::db::reindex_workspace_with_actor(
+        ctx,
+        args.workspace_id,
+        provider.as_ref(),
+        actor.as_ref(),
+    )
+    .await
+    .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
     if !outcome.failures.is_empty() {
         return Err(loco_rs::Error::Message(format!(
@@ -146,6 +188,7 @@ pub async fn enqueue_reindex(
             workspace_id,
             worker_class,
             startup: false,
+            actor: None,
         },
         txn,
     )
@@ -165,6 +208,22 @@ pub(crate) async fn enqueue_requested(
                 .into(),
         });
     }
+    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        Some(crate::db::begin_write(&ctx.db).await.internal()?)
+    } else {
+        None
+    };
+    crate::models::access::require_iam_action(
+        authorization.as_ref().unwrap_or(txn),
+        actor,
+        crate::models::api_keys::ApiKeyScope::Migration,
+        crate::models::iam_policy::Action::WorkspaceReindex,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: actor.require_workspace()?,
+        },
+    )
+    .await?;
     api_key_audit_log::record(
         txn,
         AuditActor {
@@ -177,7 +236,29 @@ pub(crate) async fn enqueue_requested(
         serde_json::json!({"workspace_id":actor.require_workspace()?}),
     )
     .await?;
-    enqueue_reindex(ctx, actor.require_workspace()?, Some(txn))
-        .await
-        .internal()
+    let worker_class =
+        crate::controllers::extractors::resolve_worker_class(ctx, actor.require_workspace()?)
+            .await
+            .map_err(|error| error.0)?;
+    let id = crate::workers::dispatch::dispatch_reindex(
+        ctx,
+        ReindexArgs {
+            lifecycle_id: None,
+            workspace_id: actor.require_workspace()?,
+            worker_class,
+            startup: false,
+            actor: Some(ReindexActor {
+                tenant_id: actor.tenant_id,
+                api_key_id: actor.api_key_id,
+                user_id: actor.user_id,
+            }),
+        },
+        Some(txn),
+    )
+    .await
+    .internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
+    Ok(id)
 }

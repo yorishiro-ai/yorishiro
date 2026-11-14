@@ -13,6 +13,8 @@ async fn overview_distinguishes_billing_manual_and_active_limits() {
     guard.set(variable, "true");
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         yorishiro::models::tenant_tenants::ActiveModel {
             id: Set(tenant.tenant_id),
             max_workspaces: Set(Some(17)),
@@ -41,7 +43,7 @@ async fn overview_distinguishes_billing_manual_and_active_limits() {
                 })));
             let response = request
                 .get("/api/tenant/overview")
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+                .add_header("Authorization", format!("Bearer {tenant_key}"))
                 .await;
             response.assert_status(axum::http::StatusCode::OK);
             let body = response.json::<serde_json::Value>();
@@ -75,7 +77,18 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let args = TenantArgs::default();
         let email = args.owner_email.clone();
-        let TestTenant { api_key, .. } = TestTenant::create(&request, &ctx, args).await;
+        let tenant = TestTenant::create(&request, &ctx, args).await;
+        let api_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        request
+            .get("/api/tenant/overview")
+            .await
+            .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+        request
+            .get("/api/tenant/overview")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .assert_status(axum::http::StatusCode::FORBIDDEN);
 
         let response = request
             .get("/api/tenant/overview")
@@ -94,21 +107,6 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
         assert_eq!(body["members"].as_array().unwrap().len(), 1);
         assert_eq!(body["members"][0]["email"], email);
         assert_eq!(body["members"][0]["role"], "owner");
-    })
-    .await;
-}
-
-/// No `Authorization` header at all must be rejected, not treated as an anonymous tenant.
-#[tokio::test]
-async fn tenant_overview_requires_authentication() {
-    boot_request::<App, _, _>(|request, _ctx| async move {
-        let response = request.get("/api/tenant/overview").await;
-        assert_eq!(
-            response.status_code(),
-            401,
-            "response: {:?}",
-            response.text()
-        );
     })
     .await;
 }

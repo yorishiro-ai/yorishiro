@@ -29,6 +29,10 @@ Pinned E5 model and reference contracts are mandatory; the pre-existing private 
 ## Responsibility ownership
 
 Common assertions have one CE/SQLite owner when compiled in both editions.
+The IAM REST/MCP, root-immutability and administrator recovery scenarios explicitly run on both SQLite and PostgreSQL.
+Queued fill/import/undo/reindex and inference permission-revocation scenarios also retain exact backend-parity assignments because SQLite immediate transactions and PostgreSQL identity fences are different guarantees.
+Their PostgreSQL fixtures are classified as dedicated so the runner does not mistake owned database creation for shared-fixture DDL.
+Licensed confirmation remains in `licensed-sqlite`; a missing local licence is not a reason to remove that GHA assignment or bypass the production gate.
 EE-only assertions use SQLite unless PostgreSQL semantics or multi-tenant fixtures require PostgreSQL.
 An explicit `ee_delta` records the shared identities whose enterprise branches also need execution.
 Provider parity is allowed only for the exact identities marked `provider_parity`, not a whole worker or request module.

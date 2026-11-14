@@ -25,7 +25,7 @@ pub(crate) struct ApiKeyArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)"
+        description = "Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and credential_create IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn create_api_key(
         &self,
@@ -78,7 +78,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List current-tenant API key history including revoked and expired grants without secrets (requires read scope and tenant Admin or Owner)"
+        description = "List current-tenant API key history including revoked and expired grants without secrets (requires read scope and credential_list IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn list_api_keys(
         &self,
@@ -96,10 +96,8 @@ impl YorishiroMcpServer {
         };
         let ctx = self.app_context();
         let result = async {
-            crate::models::access::require_tenant_admin_as(&ctx.db, &auth).await?;
             let mut records = Vec::new();
-            for key in IdentityApiKeys::list_for_tenant(&ctx.db, auth.tenant_id).await? {
-                let grant = key.grant_metadata(&ctx.db).await?;
+            for (key, grant) in IdentityApiKeys::list_with_grants_as(&ctx.db, &auth).await? {
                 records.push(ApiKeyRecord {
                     id: key.id,
                     prefix: key.key_prefix,
@@ -120,7 +118,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Revoke a current-tenant API key while retaining secret-free history (requires read scope and tenant Admin or Owner)"
+        description = "Revoke a current-tenant API key while retaining secret-free history (requires read scope and credential_revoke IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn revoke_api_key(
         &self,
@@ -145,7 +143,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Atomically rotate a current-tenant API key, revoke its predecessor and return the successor secret once (requires read scope and tenant Admin or Owner; issuer ceilings apply)"
+        description = "Atomically rotate a current-tenant API key, revoke its predecessor and return the successor secret once (requires read scope and credential_rotate IAM permission with a tenant-scoped credential; issuer ceilings apply)"
     )]
     pub(crate) async fn rotate_api_key(
         &self,

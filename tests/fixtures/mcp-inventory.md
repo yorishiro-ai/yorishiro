@@ -36,9 +36,37 @@ Input schema:
 }
 ```
 
+### `add_group_member`
+
+Add group member in the current tenant (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "group_id",
+    "user_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `archive_schema`
 
-Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema scope)
+Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema scope and schema_archive IAM permission)
 
 Input schema:
 
@@ -58,9 +86,65 @@ Input schema:
 }
 ```
 
+### `attach_group_policy`
+
+Attach group policy in the current tenant (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "group_id",
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
+### `attach_user_policy`
+
+Attach a tenant IAM policy to a non-root tenant user (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `capabilities`
 
-Inspect current grants and visible tools' required scopes and scope satisfaction; this snapshot does not guarantee operation success or authorize later requests (requires read scope)
+Inspect credential scope, independent audit grant, tenant root identity and visible tools' scope requirements; IAM is evaluated per operation and this snapshot does not authorize requests (requires read scope)
 
 Input schema:
 
@@ -73,7 +157,7 @@ Input schema:
 
 ### `create_api_key`
 
-Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and tenant Admin or Owner)
+Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and credential_create IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -141,7 +225,7 @@ Input schema:
 
 ### `create_entity`
 
-Create a new entity (requires write scope)
+Create a new entity (requires write scope and entity_create IAM permission)
 
 Input schema:
 
@@ -170,9 +254,55 @@ Input schema:
 }
 ```
 
+### `create_iam_group`
+
+Create a tenant IAM group (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+### `create_iam_policy`
+
+Create a tenant IAM policy (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "document": true,
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "document"
+  ],
+  "type": "object"
+}
+```
+
 ### `create_invite`
 
-Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant Admin or Owner; inviting an Owner requires Owner)
+Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant_user_create IAM permission; Owner invitations are rejected)
 
 Input schema:
 
@@ -275,7 +405,7 @@ Input schema:
 
 ### `create_template_library_item`
 
-Create a tenant-shared schema template in the library, not a workspace data schema (requires read scope and tenant Admin or Owner)
+Create a tenant-shared schema template in the library, not a workspace data schema (requires read scope and template_library_create IAM permission)
 
 Input schema:
 
@@ -324,7 +454,7 @@ Input schema:
 
 ### `create_workspace`
 
-Create a workspace in the current tenant without retargeting the current credential (requires read scope and tenant Admin or Owner)
+Create a workspace in the current tenant without retargeting the current credential (requires read scope, a tenant-scoped credential and workspace_create IAM permission)
 
 Input schema:
 
@@ -360,7 +490,7 @@ Input schema:
 
 ### `delete_entity`
 
-Delete an entity (requires write scope)
+Delete an entity (requires write scope and entity_delete IAM permission)
 
 Input schema:
 
@@ -380,9 +510,55 @@ Input schema:
 }
 ```
 
+### `delete_iam_group`
+
+Delete a tenant IAM group and its memberships and policy attachments (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "group_id"
+  ],
+  "type": "object"
+}
+```
+
+### `delete_iam_policy`
+
+Delete a tenant IAM policy and its user and group attachments (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `delete_relation`
 
-Delete a relation (requires write scope)
+Delete a relation (requires write scope and relation_delete IAM permission)
 
 Input schema:
 
@@ -404,7 +580,7 @@ Input schema:
 
 ### `delete_schema`
 
-Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema scope)
+Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema scope and schema_delete IAM permission)
 
 Input schema:
 
@@ -426,7 +602,7 @@ Input schema:
 
 ### `delete_template_library_item`
 
-Delete an owned tenant template while preserving existing workspace schemas (requires read scope and tenant Admin or Owner)
+Delete an owned tenant template while preserving existing workspace schemas (requires read scope and template_library_delete IAM permission)
 
 Input schema:
 
@@ -448,7 +624,7 @@ Input schema:
 
 ### `delete_workspace`
 
-Permanently delete a current-tenant workspace and its data; the last workspace is protected (requires read scope and tenant Admin or Owner)
+Permanently delete a current-tenant workspace and its data; the last workspace is protected (requires read scope and workspace_delete IAM permission within the credential workspace binding)
 
 Input schema:
 
@@ -469,9 +645,65 @@ Input schema:
 }
 ```
 
+### `detach_group_policy`
+
+Detach group policy in the current tenant (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "group_id",
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
+### `detach_user_policy`
+
+Detach a tenant IAM policy from a tenant user (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `disable_tenant`
 
-Disable the current tenant after confirming its UUID, revoking all its credentials and cancelling work; data and identities remain and quota stays occupied (requires read scope and tenant Owner; physical deletion is operator-only)
+Disable the current tenant after confirming its UUID, revoking all its credentials and cancelling work; data and identities remain and quota stays occupied (requires read scope and tenant_update IAM permission with a tenant-scoped credential; physical deletion is operator-only)
 
 Input schema:
 
@@ -521,7 +753,7 @@ Input schema:
 
 ### `fill_defaults`
 
-Enqueue a fill-defaults job (requires migration scope). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log.
+Enqueue a fill-defaults job (requires migration scope and migration_fill_defaults IAM permission, rechecked at execution). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log.
 
 Input schema:
 
@@ -543,7 +775,7 @@ Input schema:
 
 ### `fork_template_library_item`
 
-Fork a visible schema template into the current tenant's library (requires read scope and tenant Admin or Owner)
+Fork a visible schema template into the current tenant's library (requires read scope and template_library_fork IAM permission)
 
 Input schema:
 
@@ -570,7 +802,7 @@ Input schema:
 
 ### `get_active_schema`
 
-Get the currently active schema definition by name (requires read scope)
+Get the currently active schema definition by name (requires read scope and schema_get IAM permission)
 
 Input schema:
 
@@ -604,7 +836,7 @@ Input schema:
 
 ### `get_entity`
 
-Get a single entity by ID (requires read scope)
+Get a single entity by ID (requires read scope and entity_get IAM permission)
 
 Input schema:
 
@@ -673,9 +905,55 @@ Input schema:
 }
 ```
 
+### `get_iam_group`
+
+Get a tenant IAM group (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "group_id"
+  ],
+  "type": "object"
+}
+```
+
+### `get_iam_policy`
+
+Get a tenant IAM policy (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `get_relation`
 
-Get a single relation by ID (requires read scope)
+Get a single relation by ID (requires read scope and relation_get IAM permission)
 
 Input schema:
 
@@ -697,7 +975,7 @@ Input schema:
 
 ### `get_schema_by_id`
 
-Get a specific version of a schema definition by ID (requires read scope)
+Get a specific version of a schema definition by ID (requires read scope and schema_get IAM permission)
 
 Input schema:
 
@@ -762,7 +1040,7 @@ Input schema:
 
 ### `get_tenant`
 
-Read the current tenant's basic metadata and stored manual workspace cap (requires read scope and tenant Admin or Owner)
+Read the current tenant's basic metadata and stored manual workspace cap (requires read scope and IAM permission)
 
 Input schema:
 
@@ -775,7 +1053,7 @@ Input schema:
 
 ### `get_workspace`
 
-Get selected workspace details, counts and effective entity cap; cannot retarget a workspace-bound credential (requires read scope)
+Get workspace details, counts and effective entity cap with workspace_get IAM permission; cannot retarget a selected or credential-bound workspace (requires read scope)
 
 Input schema:
 
@@ -798,7 +1076,7 @@ Input schema:
 
 ### `grant_workspace_member`
 
-Grant or change a direct workspace role for an existing tenant member; grants no tenant administration or key issuance authority (requires read scope and workspace Admin)
+Grant or change a direct workspace role for an existing tenant member; grants no tenant administration or key issuance authority (requires read scope and workspace_update IAM permission)
 
 Input schema:
 
@@ -863,7 +1141,7 @@ Input schema:
 
 ### `import_jsonl`
 
-Bulk-import schemas/entities/relations from a JSON Lines document in the export format (requires schema scope, since importing schemas is itself a schema-scope-only operation). Returns a job_id; poll import_job_status. The worker applies every record in one transaction or rolls everything back.
+Bulk-import schemas/entities/relations from a JSON Lines document in the export format (requires schema scope, since importing schemas is itself a schema-scope-only operation). Returns a job_id; poll import_job_status. Requires import_create IAM permission at enqueue and execution. The worker applies every record in one transaction or rolls everything back.
 
 Input schema:
 
@@ -885,7 +1163,7 @@ Input schema:
 
 ### `list_api_keys`
 
-List current-tenant API key history including revoked and expired grants without secrets (requires read scope and tenant Admin or Owner)
+List current-tenant API key history including revoked and expired grants without secrets (requires read scope and credential_list IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -898,7 +1176,7 @@ Input schema:
 
 ### `list_audit_log`
 
-List the selected workspace's paginated audit history (requires the independent audit grant; tenant or workspace administration does not grant audit access)
+List the selected workspace's paginated audit history (requires audit_log_list IAM permission and the independent audit grant; administration does not grant audit access)
 
 Input schema:
 
@@ -931,7 +1209,7 @@ Input schema:
 
 ### `list_entities`
 
-List entities (requires read scope)
+List entities (requires read scope and entity_list IAM permission)
 
 Input schema:
 
@@ -977,9 +1255,210 @@ Input schema:
 }
 ```
 
+### `list_iam_audit`
+
+List tenant IAM audit events (requires read scope, audit grant and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+### `list_iam_group_members`
+
+List tenant IAM group members with bounded pagination (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "group_id"
+  ],
+  "type": "object"
+}
+```
+
+### `list_iam_group_policies`
+
+List tenant IAM group policies with bounded pagination (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "group_id"
+  ],
+  "type": "object"
+}
+```
+
+### `list_iam_groups`
+
+List tenant IAM groups with bounded pagination (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+### `list_iam_policies`
+
+List tenant IAM policies with bounded pagination (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+### `list_iam_user_policies`
+
+List tenant IAM user policies with bounded pagination (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `list_invites`
 
-List current-tenant invitations without exposing their tokens (requires read scope and tenant Admin or Owner)
+List current-tenant invitations without exposing their tokens (requires read scope and tenant_user_list IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1009,7 +1488,7 @@ Input schema:
 
 ### `list_members`
 
-List members of the current tenant (requires read scope and tenant Admin or Owner; service credentials are rejected)
+List members of the current tenant (requires read scope and tenant_user_list IAM permission with a tenant-scoped credential; service credentials are rejected)
 
 Input schema:
 
@@ -1039,7 +1518,7 @@ Input schema:
 
 ### `list_relations`
 
-List relations (requires read scope)
+List relations (requires read scope and relation_list IAM permission)
 
 Input schema:
 
@@ -1172,7 +1651,7 @@ Input schema:
 
 ### `list_workspace_members`
 
-List direct workspace grants; inherited tenant administrator access is not a direct grant (requires read scope and workspace Admin)
+List direct workspace grants; inherited tenant administrator access is not a direct grant (requires read scope and workspace_get IAM permission)
 
 Input schema:
 
@@ -1195,7 +1674,7 @@ Input schema:
 
 ### `list_workspaces`
 
-List visible workspace records in the current tenant; discovery is not authority to retarget a bound credential (requires read scope)
+List current-tenant workspaces allowed by workspace_get IAM permission (requires read scope, workspace_list IAM permission and a tenant-scoped credential)
 
 Input schema:
 
@@ -1229,7 +1708,7 @@ Input schema:
 
 ### `migration_job_status`
 
-Get a migration job's status (requires migration scope)
+Get a migration job's status (requires migration scope and migration_job_get IAM permission)
 
 Input schema:
 
@@ -1251,7 +1730,7 @@ Input schema:
 
 ### `preview_member_removal`
 
-Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant Admin or Owner)
+Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1274,7 +1753,7 @@ Input schema:
 
 ### `preview_member_role_change`
 
-Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant Admin or Owner)
+Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1313,7 +1792,7 @@ Input schema:
 
 ### `recall_context`
 
-Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope)
+Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope and recall IAM permission)
 
 Input schema:
 
@@ -1358,7 +1837,7 @@ Input schema:
 
 ### `reindex_workspace`
 
-Enqueue workspace embedding reindex (requires migration scope)
+Enqueue workspace embedding reindex (requires migration scope and workspace_reindex IAM permission, rechecked before execution and publication)
 
 Input schema:
 
@@ -1371,7 +1850,7 @@ Input schema:
 
 ### `reissue_invite`
 
-Replace an unused current-tenant invitation token and expiry, invalidating the old token, for caller delivery (requires read scope and tenant Admin or Owner)
+Replace an unused current-tenant invitation token and expiry, invalidating the old token, for caller delivery (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1397,9 +1876,37 @@ Input schema:
 }
 ```
 
+### `remove_group_member`
+
+Remove group member in the current tenant (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "group_id",
+    "user_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `remove_member`
 
-Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant Admin or Owner; last Owner is protected)
+Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential; last Owner is protected)
 
 Input schema:
 
@@ -1422,7 +1929,7 @@ Input schema:
 
 ### `revoke_api_key`
 
-Revoke a current-tenant API key while retaining secret-free history (requires read scope and tenant Admin or Owner)
+Revoke a current-tenant API key while retaining secret-free history (requires read scope and credential_revoke IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1445,7 +1952,7 @@ Input schema:
 
 ### `revoke_invite`
 
-Cancel an unused current-tenant invitation; repeated cancellation is safe (requires read scope and tenant Admin or Owner)
+Cancel an unused current-tenant invitation; repeated cancellation is safe (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1468,7 +1975,7 @@ Input schema:
 
 ### `revoke_workspace_member`
 
-Revoke a direct workspace grant and affected workspace-bound credentials; inherited tenant authority remains (requires read scope and workspace Admin)
+Revoke a direct workspace grant and affected workspace-bound credentials; inherited tenant authority remains (requires read scope and workspace_update IAM permission)
 
 Input schema:
 
@@ -1496,7 +2003,7 @@ Input schema:
 
 ### `rotate_api_key`
 
-Atomically rotate a current-tenant API key, revoke its predecessor and return the successor secret once (requires read scope and tenant Admin or Owner; issuer ceilings apply)
+Atomically rotate a current-tenant API key, revoke its predecessor and return the successor secret once (requires read scope and credential_rotate IAM permission with a tenant-scoped credential; issuer ceilings apply)
 
 Input schema:
 
@@ -1519,7 +2026,7 @@ Input schema:
 
 ### `search_entities`
 
-Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope)
+Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope and search IAM permission)
 
 Input schema:
 
@@ -1558,7 +2065,7 @@ Input schema:
 
 ### `set_member_role`
 
-Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant Admin or Owner; Owner changes require Owner)
+Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential; Owner changes require Owner)
 
 Input schema:
 
@@ -1624,7 +2131,7 @@ Input schema:
 
 ### `tenant_retirement_inventory`
 
-Inspect current-tenant retirement inventory and retention consequences without changing data (requires read scope and tenant Owner)
+Inspect current-tenant retirement inventory and retention consequences without changing data (requires read scope and tenant_get IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1637,7 +2144,7 @@ Input schema:
 
 ### `transfer_ownership`
 
-Atomically transfer tenant ownership to an existing member and demote the caller to Admin (requires read scope and tenant Owner)
+Reject tenant ownership transfer because root identity is immutable (requires read scope and tenant_user_update IAM permission)
 
 Input schema:
 
@@ -1660,7 +2167,7 @@ Input schema:
 
 ### `undo_migration_job`
 
-Enqueue undo of a migration job's snapshots (requires migration scope)
+Enqueue undo of a migration job's snapshots (requires migration scope and migration_undo IAM permission, rechecked at execution)
 
 Input schema:
 
@@ -1705,7 +2212,7 @@ Input schema:
 
 ### `update_entity`
 
-Replace the data of an existing entity (requires write scope); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between
+Replace the data of an existing entity (requires write scope and entity_update IAM permission); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between
 
 Input schema:
 
@@ -1737,9 +2244,65 @@ Input schema:
 }
 ```
 
+### `update_iam_group`
+
+Rename a tenant IAM group (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "group_id",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+### `update_iam_policy`
+
+Update a tenant IAM policy and immediately re-evaluate its grants (requires read scope and IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "document": true,
+    "name": {
+      "type": "string"
+    },
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "policy_id",
+    "name",
+    "document"
+  ],
+  "type": "object"
+}
+```
+
 ### `update_template_library_item`
 
-Update an owned tenant template; existing workspace schema versions are unchanged (requires read scope and tenant Admin or Owner)
+Update an owned tenant template; existing workspace schema versions are unchanged (requires read scope and template_library_update IAM permission)
 
 Input schema:
 
@@ -1790,7 +2353,7 @@ Input schema:
 
 ### `update_tenant`
 
-Update current tenant name or explicitly replace/clear its manual workspace cap without altering plan quotas (requires read scope and tenant Admin or Owner)
+Update current tenant name or explicitly replace/clear its manual workspace cap without altering plan quotas (requires read scope and IAM permission)
 
 Input schema:
 
@@ -1824,7 +2387,7 @@ Input schema:
 
 ### `update_workspace`
 
-Update selected workspace name (workspace Admin) or replace/clear manual entity cap (tenant Admin); schema binding is immutable here (requires read scope)
+Update a workspace name with workspace_update IAM permission; replacing or clearing its manual entity cap also requires tenant_update and a tenant-scoped credential; schema binding is immutable here (requires read scope)
 
 Input schema:
 
@@ -1879,7 +2442,7 @@ Input schema:
 
 ### `create_schema_fork`
 
-Create a workspace-owned fork of a same-tenant source schema (requires schema scope); validates source identity and workspace cycles without modifying the source
+Create a workspace-owned fork of a same-tenant source schema (requires schema scope and schema_fork_create IAM permission); validates source identity and workspace cycles without modifying the source
 
 Input schema:
 
@@ -1907,7 +2470,7 @@ Input schema:
 
 ### `delete_schema_fork`
 
-Delete a selected-workspace fork association using the REST reference-preserving model (requires schema scope); does not delete the source schema
+Delete a selected-workspace fork association using the REST reference-preserving model (requires schema scope and schema_fork_delete IAM permission); does not delete the source schema
 
 Input schema:
 
@@ -1930,7 +2493,7 @@ Input schema:
 
 ### `get_embedding_provider`
 
-Read the selected workspace's embedding provider metadata without its API key (requires read scope); returns not found when the deployment default is used
+Read the selected workspace's embedding provider metadata without its API key (requires read scope and embedding_provider_get IAM permission); returns not found when the deployment default is used
 
 Input schema:
 
@@ -1943,7 +2506,7 @@ Input schema:
 
 ### `get_llm_provider`
 
-Read the selected workspace's inference LLM endpoint and model without its API key (requires read scope); returns not found when unconfigured
+Read the selected workspace's inference LLM endpoint and model without its API key (requires read scope and llm_provider_get IAM permission); returns not found when unconfigured
 
 Input schema:
 
@@ -1956,7 +2519,7 @@ Input schema:
 
 ### `get_schema_fork`
 
-Read a schema fork owned by the selected workspace, including its immutable current head (requires read scope)
+Read a schema fork owned by the selected workspace, including its immutable current head (requires read scope and schema_fork_get IAM permission)
 
 Input schema:
 
@@ -1979,7 +2542,7 @@ Input schema:
 
 ### `get_tenant_overview`
 
-Read current tenant billing plan metadata, effective workspace cap, usage and member summary (requires read scope and tenant Admin or Owner); this read never changes billing or plan policy
+Read current tenant billing plan metadata, effective workspace cap, usage and member summary (requires read scope, tenant_get and tenant_user_list IAM permissions with a tenant-scoped credential); this read never changes billing or plan policy
 
 Input schema:
 
@@ -1992,7 +2555,7 @@ Input schema:
 
 ### `get_worker_class`
 
-Read the selected workspace's explicit worker-class assignment (requires read scope); missing assignments use shared compute and return not found here
+Read the selected workspace's explicit worker-class assignment (requires read scope and worker_class_get IAM permission); missing assignments use shared compute and return not found here
 
 Input schema:
 
@@ -2005,7 +2568,7 @@ Input schema:
 
 ### `list_entity_columns`
 
-List the selected workspace's stored entity-table column preferences (requires read scope); these display preferences are shared by workspace users
+List the selected workspace's stored entity-table column preferences (requires read scope and entity_columns_get IAM permission); these display preferences are shared by workspace users
 
 Input schema:
 
@@ -2035,7 +2598,7 @@ Input schema:
 
 ### `list_schema_forks`
 
-List schema forks owned by the selected workspace (requires read scope); source visibility does not authorize changing the source workspace
+List schema forks owned by the selected workspace (requires read scope and schema_fork_list IAM permission); source visibility does not authorize changing the source workspace
 
 Input schema:
 
@@ -2048,7 +2611,7 @@ Input schema:
 
 ### `list_upstream_changes`
 
-List schemas in this workspace whose origin template has changed since the schema was last copied (requires read scope). Use this to discover which schemas have pending upstream updates that have not yet been merged.
+List schemas in this workspace whose origin template has changed since the schema was last copied (requires read scope and schema_upstream_list IAM permission). Use this to discover which schemas have pending upstream updates that have not yet been merged.
 
 Input schema:
 
@@ -2079,7 +2642,7 @@ Input schema:
 
 ### `merge_apply`
 
-Merge the origin template into a schema, writing the merged definition as the schema's next version (requires schema scope). Returns the new schema version and a diff describing whether the merge was breaking. Fails if there are merge conflicts.
+Merge the origin template into a schema, writing the merged definition as the schema's next version (requires schema scope and schema_merge_apply IAM permission). Returns the new schema version and a diff describing whether the merge was breaking. Fails if there are merge conflicts.
 
 Input schema:
 
@@ -2102,7 +2665,7 @@ Input schema:
 
 ### `merge_preview`
 
-Preview what merging the origin template would do to a schema (requires read scope). Returns a list of fields that would be added, updated, kept, or conflicted. Does not write anything.
+Preview what merging the origin template would do to a schema (requires read scope and schema_merge_preview IAM permission). Returns a list of fields that would be added, updated, kept, or conflicted. Does not write anything.
 
 Input schema:
 
@@ -2125,7 +2688,7 @@ Input schema:
 
 ### `reset_embedding_provider`
 
-Remove the selected workspace's embedding provider override and queue a full reindex atomically using the deployment default (requires schema scope)
+Remove the selected workspace's embedding provider override and queue a full reindex atomically using the deployment default (requires schema scope and embedding_provider_delete IAM permission)
 
 Input schema:
 
@@ -2138,7 +2701,7 @@ Input schema:
 
 ### `reset_entity_columns`
 
-Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires write scope); this removes only the display preference
+Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires write scope and entity_columns_delete IAM permission); this removes only the display preference
 
 Input schema:
 
@@ -2160,7 +2723,7 @@ Input schema:
 
 ### `reset_llm_provider`
 
-Remove the selected workspace's inference LLM credentials (requires schema scope); future inference requires configuration again, and already-started external calls are not cancelled
+Remove the selected workspace's inference LLM credentials (requires schema scope and llm_provider_delete IAM permission); future inference requires configuration again, and already-started external calls are not cancelled
 
 Input schema:
 
@@ -2173,7 +2736,7 @@ Input schema:
 
 ### `reset_worker_class`
 
-Remove the selected workspace's worker-class assignment and fall back to shared compute (requires schema scope); queued jobs retain their existing routing
+Remove the selected workspace's worker-class assignment and fall back to shared compute (requires schema scope and worker_class_delete IAM permission); queued jobs retain their existing routing
 
 Input schema:
 
@@ -2186,7 +2749,7 @@ Input schema:
 
 ### `set_embedding_provider`
 
-Configure the selected workspace's OpenAI-compatible embedding provider (requires schema scope); document changes queue a full reindex atomically, query-instruction-only changes do not; the supplied API key is stored and never returned
+Configure the selected workspace's OpenAI-compatible embedding provider (requires schema scope and embedding_provider_update IAM permission); document changes queue a full reindex atomically, query-instruction-only changes do not; the supplied API key is stored and never returned
 
 Input schema:
 
@@ -2234,7 +2797,7 @@ Input schema:
 
 ### `set_entity_columns`
 
-Replace the selected workspace's visible columns for one entity type (requires write scope); validates duplicate columns and the display limit without changing schema definitions
+Replace the selected workspace's visible columns for one entity type (requires write scope and entity_columns_update IAM permission); validates duplicate columns and the display limit without changing schema definitions
 
 Input schema:
 
@@ -2263,7 +2826,7 @@ Input schema:
 
 ### `set_llm_provider`
 
-Configure the selected workspace's inference LLM endpoint, model and API key (requires schema scope); stores the secret without returning it or invoking inference
+Configure the selected workspace's inference LLM endpoint, model and API key (requires schema scope and llm_provider_update IAM permission); stores the secret without returning it or invoking inference
 
 Input schema:
 
@@ -2294,7 +2857,7 @@ Input schema:
 
 ### `set_worker_class`
 
-Assign the selected workspace's worker class (requires schema scope); the deployment must declare the destination worker target, which does not guarantee a worker is online
+Assign the selected workspace's worker class (requires schema scope and worker_class_update IAM permission); the deployment must declare the destination worker target, which does not guarantee a worker is online
 
 Input schema:
 
@@ -2338,7 +2901,7 @@ Input schema:
 
 ### `update_schema_fork`
 
-Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires schema scope); force is required to discard local edits
+Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires schema scope and schema_fork_update IAM permission); force is required to discard local edits
 
 Input schema:
 

@@ -12,6 +12,7 @@ mod entity_columns;
 mod export;
 pub(crate) mod fill_defaults;
 pub(crate) mod fixtures;
+mod iam;
 mod import;
 #[cfg(feature = "enterprise")]
 pub(crate) mod inference;

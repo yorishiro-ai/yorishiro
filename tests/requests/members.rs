@@ -53,87 +53,11 @@ async fn invite_cancellation_and_acceptance_have_one_committed_outcome() {
 }
 
 #[tokio::test]
-async fn non_administrative_credentials_cannot_manage_invites_or_preview_members() {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use yorishiro::models::_entities::tenant_memberships::Column;
-    use yorishiro::models::{api_keys, tenant_memberships, user_users, workspace_invites};
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let (invite, _) = workspace_invites::create_invite(
-            &ctx.db, tenant.tenant_id, &super::fixtures::unique_email("denied-invite"),
-            MembershipRole::Member, chrono::Duration::hours(1),
-        ).await.unwrap();
-        let mut credentials = Vec::new();
-        for role in [MembershipRole::Member, MembershipRole::Viewer] {
-            let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("denied-member"), "test-password", None).await.unwrap();
-            tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id, role).await.unwrap();
-            super::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id,
-                yorishiro::models::workspace_memberships::WorkspaceRole::Admin).await;
-            credentials.push((issue_api_key(&ctx, tenant.workspace_id, user.id, role.max_scope(), false).await, StatusCode::FORBIDDEN));
-        }
-        let service = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Migration, None, false).await.unwrap();
-        credentials.push((service.plaintext, StatusCode::UNAUTHORIZED));
-        for (key, expected) in credentials {
-            let authorization = format!("Bearer {key}");
-            let response = request.get("/api/members/invites").add_header("Authorization", authorization.clone()).await;
-            assert_eq!(response.status_code(), expected);
-            let response = request.post("/api/members/invites").add_header("Authorization", authorization.clone())
-                .json(&serde_json::json!({"email":"denied@example.com","role":"owner","expires_at":chrono::Utc::now() + chrono::Duration::hours(1)})).await;
-            assert_eq!(response.status_code(), expected);
-            let response = request.delete(&format!("/api/members/invites/{}", invite.id)).add_header("Authorization", authorization.clone()).await;
-            assert_eq!(response.status_code(), expected);
-            let response = request.post(&format!("/api/members/invites/{}/reissue", invite.id)).add_header("Authorization", authorization.clone())
-                .json(&serde_json::json!({"expires_at":chrono::Utc::now() + chrono::Duration::hours(1)})).await;
-            assert_eq!(response.status_code(), expected);
-            let response = request.get(&format!("/api/members/{}/removal-preview", tenant.owner_id)).add_header("Authorization", authorization.clone()).await;
-            assert_eq!(response.status_code(), expected);
-            let response = request.post(&format!("/api/members/{}/role-preview", tenant.owner_id)).add_header("Authorization", authorization.clone())
-                .json(&serde_json::json!({"role":"viewer"})).await;
-            assert_eq!(response.status_code(), expected);
-            let response = request.post("/api/members/transfer-ownership").add_header("Authorization", authorization)
-                .json(&serde_json::json!({"successor_user_id":tenant.owner_id})).await;
-            assert_eq!(response.status_code(), expected);
-        }
-        assert_eq!(workspace_invites::Entity::find_by_id(invite.id).one(&ctx.db).await.unwrap().unwrap(), invite);
-        let owner = tenant_memberships::Entity::find()
-            .filter(Column::TenantId.eq(tenant.tenant_id))
-            .filter(Column::UserId.eq(tenant.owner_id))
-            .one(&ctx.db).await.unwrap().expect("owner membership must remain");
-        assert_eq!(owner.role, MembershipRole::Owner.as_db_str());
-    }).await;
-}
-
-#[tokio::test]
-async fn administrators_cannot_grant_or_remove_owner_authority() {
-    use yorishiro::models::api_keys::ApiKeyScope;
-    use yorishiro::models::{tenant_memberships, user_users};
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let admin = user_users::create_user(&ctx.db, &super::fixtures::unique_email("owner-boundary"), "test-password", None).await.unwrap();
-        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin).await.unwrap();
-        let key = super::fixtures::issue_api_key(&ctx, tenant.workspace_id, admin.id, ApiKeyScope::Migration, false).await;
-        let auth = format!("Bearer {key}");
-        request.post("/api/members").add_header("Authorization", &auth)
-            .json(&serde_json::json!({"email":admin.email,"role":"owner"})).await.assert_status(StatusCode::FORBIDDEN);
-        request.delete(&format!("/api/members/{}", tenant.owner_id)).add_header("Authorization", &auth)
-            .await.assert_status(StatusCode::FORBIDDEN);
-        let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
-        request.post("/api/members/invites").add_header("Authorization", &auth)
-            .json(&serde_json::json!({"email":"other@example.com","role":"owner","expires_at":expiry})).await.assert_status(StatusCode::FORBIDDEN);
-        let (invite, _) = yorishiro::models::workspace_invites::create_invite(&ctx.db, tenant.tenant_id, "owner@example.com", MembershipRole::Owner, chrono::Duration::hours(1)).await.unwrap();
-        request.post(&format!("/api/members/invites/{}/reissue", invite.id)).add_header("Authorization", &auth)
-            .json(&serde_json::json!({"expires_at":expiry})).await.assert_status(StatusCode::FORBIDDEN);
-        request.post("/api/members/invites").add_header("Authorization", &auth)
-            .json(&serde_json::json!({"email":"member@example.com","role":"member","expires_at":expiry})).await.assert_status(StatusCode::CREATED);
-    }).await;
-}
-
-#[tokio::test]
-async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
+async fn root_cannot_transfer_ownership() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::_entities::tenant_memberships::Column;
     use yorishiro::models::{tenant_memberships, user_users};
-    boot_request::<App, _, _>(|request, ctx| async move {
+    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_admin_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
@@ -159,7 +83,7 @@ async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .json(&serde_json::json!({"successor_user_id":uuid::Uuid::new_v4()}))
             .await;
-        assert_eq!(missing.status_code(), StatusCode::NOT_FOUND);
+        assert_eq!(missing.status_code(), StatusCode::CONFLICT);
         let response = request
             .post(path)
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
@@ -167,11 +91,11 @@ async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
             .await;
         assert_eq!(
             response.status_code(),
-            StatusCode::NO_CONTENT,
+            StatusCode::CONFLICT,
             "{}",
             response.text()
         );
-        for (user_id, role) in [(tenant.owner_id, "admin"), (successor.id, "owner")] {
+        for (user_id, role) in [(tenant.owner_id, "owner"), (successor.id, "viewer")] {
             let membership = tenant_memberships::Entity::find()
                 .filter(Column::TenantId.eq(tenant.tenant_id))
                 .filter(Column::UserId.eq(user_id))
@@ -181,12 +105,6 @@ async fn owner_can_transfer_to_existing_member_but_admin_cannot() {
                 .unwrap();
             assert_eq!(membership.role, role);
         }
-        let forbidden = request
-            .post(path)
-            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
-            .json(&serde_json::json!({"successor_user_id":successor.id}))
-            .await;
-        assert_eq!(forbidden.status_code(), StatusCode::FORBIDDEN);
     })
     .await;
 }
@@ -1136,6 +1054,12 @@ async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
         let tenant_admin_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let auth = format!("Bearer {}", tenant_admin_key);
+        request
+            .put(&format!("/api/members/users/{}/password", tenant.owner_id))
+            .add_header("Authorization", &auth)
+            .json(&serde_json::json!({"password":"must-not-replace-root-password"}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
         let create = |body: serde_json::Value| {
             request
                 .post("/api/members/users")

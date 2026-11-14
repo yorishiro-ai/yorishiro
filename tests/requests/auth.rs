@@ -284,6 +284,22 @@ async fn signup_then_login_round_trip() {
         let login_body: serde_json::Value = login_response.json();
         assert!(login_body["api_key"].as_str().unwrap().starts_with("ysr_"));
         assert_eq!(login_body["scope"], "migration");
+        {
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            use yorishiro::models::_entities::api_keys::Column;
+            use yorishiro::models::api_keys;
+            let key = api_keys::Entity::find()
+                .filter(
+                    Column::KeyHash.eq(api_keys::hash_key(login_body["api_key"].as_str().unwrap())),
+                )
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let remaining = key.expires_at.unwrap() - chrono::Utc::now().fixed_offset();
+            assert!(remaining > chrono::Duration::hours(11));
+            assert!(remaining <= chrono::Duration::hours(12));
+        }
 
         // The invite is single-use: redeeming the same token again must fail.
         let replay_response = request

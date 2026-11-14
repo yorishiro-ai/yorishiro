@@ -8,6 +8,179 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::tenant_memberships::{self, MembershipRole};
 
+/// Keeps the identity authorization fence alive until the workspace operation finishes.
+pub(crate) async fn authorize_workspace_action(
+    txn: &DatabaseTransaction,
+    identity: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+    scope: ApiKeyScope,
+    action: crate::models::iam_policy::Action,
+) -> Result<Option<DatabaseTransaction>, YorishiroError> {
+    let authorization = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        Some(crate::db::begin_write(identity).await.internal()?)
+    } else {
+        None
+    };
+    require_iam_action(
+        authorization.as_ref().unwrap_or(txn),
+        actor,
+        scope,
+        action,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: actor.require_workspace()?,
+        },
+    )
+    .await?;
+    Ok(authorization)
+}
+
+/// Checks a concrete IAM action while holding the tenant membership fence.
+pub(crate) async fn require_iam_action(
+    txn: &DatabaseTransaction,
+    actor: &AuthContext,
+    required: ApiKeyScope,
+    action: crate::models::iam_policy::Action,
+    target: crate::models::iam_policy::Resource,
+) -> Result<(), YorishiroError> {
+    IamEvaluation::load(txn, actor, required)
+        .await?
+        .require(action, target)
+        .await
+}
+
+/// Validated authorization state usable only while its transaction holds the membership fence.
+/// Reload after changing credentials, root, policies or attachments in that transaction.
+pub(crate) struct IamEvaluation<'a> {
+    txn: &'a DatabaseTransaction,
+    current: AuthContext,
+    bound_workspace_id: Option<Uuid>,
+    root: bool,
+    policies: Vec<crate::models::iam_policy::Policy>,
+}
+
+impl<'a> IamEvaluation<'a> {
+    pub(crate) async fn load(
+        txn: &'a DatabaseTransaction,
+        actor: &AuthContext,
+        required: ApiKeyScope,
+    ) -> Result<Self, YorishiroError> {
+        use crate::models::iam_policy::Policy;
+        use sea_orm::EntityTrait;
+        crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
+            .await
+            .internal()?;
+        let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
+        let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
+            .one(txn)
+            .await
+            .internal()?
+            .ok_or(YorishiroError::Unauthenticated)?;
+        let mut credential = current.clone();
+        credential.scope = ApiKeyScope::from_db_str(&key.scope).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!("unknown api key scope in database"))
+        })?;
+        require_scope(&credential, required)?;
+        let user_id = current.user_id.ok_or(YorishiroError::Unauthenticated)?;
+        let root =
+            crate::models::iam_tenant_roots::Model::contains(txn, current.tenant_id, user_id)
+                .await?;
+        let documents = if root {
+            Vec::new()
+        } else {
+            crate::models::iam_policies::Model::for_user(txn, current.tenant_id, user_id).await?
+        };
+        let mut policies = Vec::with_capacity(documents.len());
+        for document in documents {
+            let json = serde_json::to_string(&document.document).internal()?;
+            // Ownership is verified for the concrete target; stale unrelated selectors must not block it.
+            policies.push(Policy::parse(&json, current.tenant_id, |tenant, _| {
+                tenant == current.tenant_id
+            })?);
+        }
+        Ok(Self {
+            txn,
+            current,
+            bound_workspace_id: key.workspace_id,
+            root,
+            policies,
+        })
+    }
+
+    pub(crate) async fn require(
+        &self,
+        action: crate::models::iam_policy::Action,
+        target: crate::models::iam_policy::Resource,
+    ) -> Result<(), YorishiroError> {
+        use crate::models::iam_policy::{Policy, Resource};
+        if !action.applies_to(target) {
+            return Err(YorishiroError::Unauthenticated);
+        }
+        if let Resource::Workspace { workspace_id, .. } = target
+            && (self
+                .current
+                .workspace_id
+                .is_some_and(|id| id != workspace_id)
+                || self.bound_workspace_id.is_some_and(|id| id != workspace_id))
+        {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: "credential workspace does not match the target workspace".into(),
+                hint: "use a credential for the target workspace".into(),
+            });
+        }
+        let workspace = match target {
+            Resource::Tenant { tenant_id } if tenant_id == self.current.tenant_id => {
+                if self.bound_workspace_id.is_some() {
+                    return Err(YorishiroError::ScopeInsufficient {
+                        message: "workspace-bound credentials cannot access tenant resources"
+                            .into(),
+                        hint: "use a tenant-scoped credential".into(),
+                    });
+                }
+                None
+            }
+            Resource::Workspace {
+                tenant_id,
+                workspace_id,
+            } if tenant_id == self.current.tenant_id
+                && self
+                    .current
+                    .workspace_id
+                    .is_none_or(|id| id == workspace_id)
+                && self.bound_workspace_id.is_none_or(|id| id == workspace_id) =>
+            {
+                let owner = crate::models::workspace_workspaces::get_workspace_tenant(
+                    self.txn,
+                    workspace_id,
+                )
+                .await?;
+                if owner != tenant_id {
+                    return Err(YorishiroError::Unauthenticated);
+                }
+                Some(workspace_id)
+            }
+            _ => return Err(YorishiroError::Unauthenticated),
+        };
+        if self.root {
+            return Ok(());
+        }
+        if Policy::allows(
+            &self.policies,
+            self.current.tenant_id,
+            action,
+            target,
+            |tenant, id| tenant == self.current.tenant_id && Some(id) == workspace,
+        ) {
+            Ok(())
+        } else {
+            Err(YorishiroError::ScopeInsufficient {
+                message: "IAM policy does not permit this operation".into(),
+                hint: "request an applicable IAM policy grant".into(),
+            })
+        }
+    }
+}
+
 /// Persisted, secret-free identity and target information shared by transports.
 pub struct AccessIdentity {
     pub current: AuthContext,
@@ -15,7 +188,7 @@ pub struct AccessIdentity {
     pub tenant_name: String,
     pub stored_scope: ApiKeyScope,
     pub bound_workspace_id: Option<Uuid>,
-    pub workspace_access: Option<WorkspaceAccess>,
+    pub tenant_root: bool,
 }
 
 /// Resolves names and binding after revalidating the credential and membership.
@@ -46,30 +219,38 @@ pub async fn identity(
         .await
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
-    let grant = key.grant_metadata(conn).await?;
-    let workspace_access = current_workspace_access(conn, &current).await?;
+    let stored_scope = ApiKeyScope::from_db_str(&key.scope).ok_or_else(|| {
+        YorishiroError::Internal(anyhow::anyhow!("unknown api key scope in database"))
+    })?;
+    let tenant_root = match current.user_id {
+        Some(user_id) => {
+            crate::models::iam_tenant_roots::Model::contains(conn, current.tenant_id, user_id)
+                .await?
+        }
+        None => false,
+    };
     Ok(AccessIdentity {
         current,
         workspace_name: workspace.map(|workspace| workspace.name),
         tenant_name: tenant.name,
-        stored_scope: grant.scope,
-        bound_workspace_id: grant.workspace_id,
-        workspace_access,
+        stored_scope,
+        bound_workspace_id: key.workspace_id,
+        tenant_root,
     })
 }
 
-/// Current grant summary, not authorization for a later request or a tool-policy decision.
+/// Credential ceilings and root identity, not authorization for a later request.
 #[derive(serde::Serialize)]
 pub struct AccessCapabilities {
     pub database_backend: &'static str,
     pub row_level_security: bool,
     pub scopes: Vec<ApiKeyScope>,
     pub audit: bool,
-    pub tenant_admin: bool,
-    pub workspace_access: Option<WorkspaceAccess>,
+    pub tenant_root: bool,
+    pub credential_scope: ApiKeyScope,
 }
 
-/// Inspects current grants using the same decisions as protected operations.
+/// Inspects credential limits without inferring IAM authority from legacy roles.
 ///
 /// # Errors
 /// Rejects revoked credentials or missing membership and propagates database failures.
@@ -77,7 +258,8 @@ pub async fn capabilities(
     conn: &impl ConnectionTrait,
     actor: &AuthContext,
 ) -> Result<AccessCapabilities, YorishiroError> {
-    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    let identity = identity(conn, actor).await?;
+    let current = identity.current;
     let scopes = [
         ApiKeyScope::Read,
         ApiKeyScope::Write,
@@ -87,11 +269,6 @@ pub async fn capabilities(
     .into_iter()
     .filter(|scope| require_scope(&current, *scope).is_ok())
     .collect();
-    let tenant_admin = match require_tenant_admin_as(conn, &current).await {
-        Ok(()) => true,
-        Err(YorishiroError::Unauthenticated | YorishiroError::ScopeInsufficient { .. }) => false,
-        Err(error) => return Err(error),
-    };
     Ok(AccessCapabilities {
         database_backend: match conn.get_database_backend() {
             sea_orm::DatabaseBackend::Postgres => "postgres",
@@ -102,41 +279,9 @@ pub async fn capabilities(
         row_level_security: conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres,
         scopes,
         audit: require_audit(&current).is_ok(),
-        tenant_admin,
-        workspace_access: current_workspace_access(conn, &current).await?,
+        tenant_root: identity.tenant_root,
+        credential_scope: identity.stored_scope,
     })
-}
-
-/// Fences a queued mutation against credential revocation and membership changes.
-pub(crate) async fn require_job_actor(
-    txn: &DatabaseTransaction,
-    identity: &impl ConnectionTrait,
-    actor: &crate::models::api_key_audit_log::AuditActor,
-    required: ApiKeyScope,
-) -> Result<(), YorishiroError> {
-    crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
-        .await
-        .internal()?;
-    let tenant =
-        crate::models::workspace_workspaces::get_workspace_tenant(txn, actor.workspace_id).await?;
-    if tenant != actor.tenant_id {
-        return Err(YorishiroError::Unauthenticated);
-    }
-    let presented = AuthContext {
-        api_key_id: actor.api_key_id,
-        tenant_id: actor.tenant_id,
-        workspace_id: Some(actor.workspace_id),
-        user_id: actor.user_id,
-        scope: required,
-        audit: false,
-    };
-    // PostgreSQL membership is control-plane data; SQLite must read its own write transaction.
-    let current = if txn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        crate::models::api_keys::Model::current_context(txn, &presented).await?
-    } else {
-        crate::models::api_keys::Model::current_context(identity, &presented).await?
-    };
-    require_scope(&current, required)
 }
 
 /// A role can restrict a stored grant, never widen it.
@@ -151,26 +296,6 @@ pub struct WorkspaceAccess {
     pub max_scope: ApiKeyScope,
     pub source: &'static str,
     pub workspace_admin: bool,
-}
-
-async fn current_workspace_access(
-    conn: &impl ConnectionTrait,
-    current: &AuthContext,
-) -> Result<Option<WorkspaceAccess>, YorishiroError> {
-    let Some(workspace_id) = current.workspace_id else {
-        return Ok(None);
-    };
-    match current.user_id {
-        Some(user_id) => workspace_access(conn, current.tenant_id, workspace_id, user_id)
-            .await?
-            .map(Some)
-            .ok_or(YorishiroError::Unauthenticated),
-        None => Ok(Some(WorkspaceAccess {
-            max_scope: current.scope,
-            source: "service_key",
-            workspace_admin: false,
-        })),
-    }
 }
 
 /// Resolves inherited tenant authority or an explicit workspace grant.
@@ -222,118 +347,35 @@ pub(crate) async fn workspace_access_for_role(
     }))
 }
 
-/// Revalidates the actor after acquiring the membership mutation fence.
-pub(crate) async fn require_current_workspace_admin(
-    txn: &DatabaseTransaction,
-    actor: &AuthContext,
-    workspace_id: Uuid,
-) -> Result<(), YorishiroError> {
-    crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
-        .await
-        .internal()?;
-    let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
-    use sea_orm::EntityTrait;
-    let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
-        .one(txn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)?;
-    if key.workspace_id.is_some_and(|bound| bound != workspace_id) {
-        return Err(YorishiroError::ScopeInsufficient {
-            message: "workspace administration exceeds the credential's binding".into(),
-            hint: "use a credential that can access the target workspace".into(),
-        });
-    }
-    if let Some(user_id) = current.user_id
-        && workspace_access(txn, current.tenant_id, workspace_id, user_id)
-            .await?
-            .is_some_and(|access| access.workspace_admin)
-    {
-        return Ok(());
-    }
-    Err(YorishiroError::ScopeInsufficient {
-        message: "workspace administration required".into(),
-        hint: "request an administrator grant for this workspace".into(),
-    })
-}
-
-/// Revalidates the actor after acquiring the membership mutation fence.
-pub(crate) async fn require_current_tenant_admin(
-    txn: &DatabaseTransaction,
-    actor: &AuthContext,
-) -> Result<(), YorishiroError> {
-    crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
-        .await
-        .internal()?;
-    let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
-    require_tenant_admin_as(txn, &current).await
-}
-
-pub(crate) async fn require_tenant_admin_as(
-    conn: &impl ConnectionTrait,
-    actor: &AuthContext,
-) -> Result<(), YorishiroError> {
-    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
-    require_tenant_admin(conn, current.tenant_id, current.user_id).await
-}
-
-/// Requires current owner authority under the shared membership fence.
-pub(crate) async fn require_current_tenant_owner(
-    txn: &DatabaseTransaction,
-    actor: &AuthContext,
-) -> Result<Uuid, YorishiroError> {
-    require_current_tenant_admin(txn, actor).await?;
-    let user_id = actor.user_id.ok_or(YorishiroError::Unauthenticated)?;
-    if tenant_memberships::get_membership_role(txn, actor.tenant_id, user_id).await?
-        != Some(MembershipRole::Owner)
-    {
-        return Err(YorishiroError::ScopeInsufficient {
-            message: "this operation requires a tenant owner".into(),
-            hint: "ask a current tenant owner to perform this operation".into(),
-        });
-    }
-    Ok(user_id)
-}
-
 /// Serializes credential issuance with membership updates and checks attribution.
-pub(crate) async fn require_attributed_key_grant(
+pub(crate) async fn require_key_attribution(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Option<Uuid>,
-    scope: ApiKeyScope,
 ) -> Result<(), YorishiroError> {
     crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
         .await
         .internal()?;
     crate::models::tenant_tenants::Model::require_active(txn, tenant_id).await?;
     if let Some(user_id) = user_id {
-        let role = tenant_memberships::get_membership_role(txn, tenant_id, user_id)
+        tenant_memberships::get_membership_role(txn, tenant_id, user_id)
             .await?
             .ok_or(YorishiroError::Unauthenticated)?;
-        if effective_scope(scope, role) != scope {
-            return Err(YorishiroError::ScopeInsufficient {
-                message: format!(
-                    "this user's tenant role permits at most {:?} scope keys",
-                    role.max_scope()
-                ),
-                hint: "issue a lower-scoped key, or raise the user's tenant role".into(),
-            });
-        }
     }
     Ok(())
 }
 
-/// Delegated credentials cannot exceed either the issuer's grant or current role.
+/// Delegated credentials cannot exceed the issuer's scope or audit grant.
 ///
 /// # Errors
-/// Rejects non-administrators and grants the issuer does not hold.
+/// Rejects inactive tenants and grants the issuer does not hold.
 pub async fn require_key_grant(
     conn: &impl ConnectionTrait,
     issuer: &AuthContext,
     scope: ApiKeyScope,
     audit: bool,
 ) -> Result<(), YorishiroError> {
-    require_tenant_admin(conn, issuer.tenant_id, issuer.user_id).await?;
+    crate::models::tenant_tenants::Model::require_active(conn, issuer.tenant_id).await?;
     require_scope(issuer, scope)?;
     if audit {
         require_audit(issuer)?;

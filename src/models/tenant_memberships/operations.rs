@@ -1,15 +1,48 @@
 //! Tenant membership and role operations.
 
 use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect,
+    ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect,
 };
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{tenant_memberships::Column, user_users};
+use crate::models::api_keys::ApiKeyScope;
+use crate::models::iam_policy::{Action, Resource};
 
 use super::{ActiveModel, Entity, MembershipRecord, MembershipRole};
+
+pub(crate) async fn update_member_by_email_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    email: &str,
+    role: MembershipRole,
+) -> Result<
+    (
+        crate::models::user_users::Model,
+        Vec<super::MembershipKeyAccess>,
+    ),
+    YorishiroError,
+> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserUpdate,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    let user = crate::models::user_users::get_user_by_email(&txn, email)
+        .await?
+        .ok_or_else(|| YorishiroError::not_found("account not found"))?;
+    let keys = update_member_access_on(&txn, actor, user.id, role).await?;
+    txn.commit().await.internal()?;
+    Ok((user, keys))
+}
 
 /// Reports membership removal effects without changing membership or credentials.
 ///
@@ -22,18 +55,21 @@ pub async fn preview_removal(
 ) -> Result<super::MembershipRemovalPreview, YorishiroError> {
     use crate::models::_entities::{api_keys, workspace_workspaces};
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserDelete,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let role = get_membership_role(&txn, actor.tenant_id, user_id).await?;
-    let blocked_by_last_owner = if role == Some(MembershipRole::Owner) {
-        Entity::find()
-            .filter(Column::TenantId.eq(actor.tenant_id))
-            .filter(Column::Role.eq(MembershipRole::Owner.as_db_str()))
-            .count(&txn)
-            .await
-            .internal()?
-            <= 1
-    } else {
-        false
+    let blocked_by_last_owner = match protect_owner(&txn, actor.tenant_id, user_id, None).await {
+        Ok(()) => false,
+        Err(YorishiroError::Conflict { .. }) => true,
+        Err(error) => return Err(error),
     };
     let revoked_api_key_ids = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
@@ -74,36 +110,29 @@ pub async fn preview_removal(
     })
 }
 
-/// Transfers ownership to an existing member without leaving the tenant ownerless.
+/// Rejects ownership transfer because tenant root identity is immutable.
 ///
 /// # Errors
-/// Rejects stale credentials, non-owner actors, self-transfer and missing recipients.
+/// Rejects unauthorized credentials or returns a conflict for authorized callers.
 pub async fn transfer_ownership(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
-    successor_id: Uuid,
+    _successor_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    let user_id = actor.user_id.ok_or(YorishiroError::Unauthenticated)?;
-    if get_membership_role(&txn, actor.tenant_id, user_id).await? != Some(MembershipRole::Owner) {
-        return Err(YorishiroError::ScopeInsufficient {
-            message: "only a tenant owner can transfer ownership".into(),
-            hint: "ask a current tenant owner to perform the transfer".into(),
-        });
-    }
-    if user_id == successor_id {
-        return Err(YorishiroError::Conflict {
-            message: "ownership must be transferred to another member".into(),
-        });
-    }
-    get_membership_role(&txn, actor.tenant_id, successor_id)
-        .await?
-        .ok_or_else(|| YorishiroError::not_found("successor tenant membership not found"))?;
-    add_member_in_transaction(&txn, actor.tenant_id, successor_id, MembershipRole::Owner).await?;
-    add_member_in_transaction(&txn, actor.tenant_id, user_id, MembershipRole::Admin).await?;
-    txn.commit().await.internal()?;
-    Ok(())
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserUpdate,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    Err(YorishiroError::Conflict {
+        message: "tenant root ownership cannot be transferred".into(),
+    })
 }
 
 /// Serializes membership changes and refuses losing the last owner.
@@ -116,20 +145,11 @@ async fn protect_owner(
     crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
         .await
         .internal()?;
-    if next_role == Some(MembershipRole::Owner)
-        || get_membership_role(txn, tenant_id, user_id).await? != Some(MembershipRole::Owner)
+    if next_role != Some(MembershipRole::Owner)
+        && crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await?
     {
-        return Ok(());
-    }
-    let owners = Entity::find()
-        .filter(Column::TenantId.eq(tenant_id))
-        .filter(Column::Role.eq(MembershipRole::Owner.as_db_str()))
-        .count(txn)
-        .await
-        .internal()?;
-    if owners <= 1 {
         return Err(YorishiroError::Conflict {
-            message: "cannot remove or demote the tenant's last owner".into(),
+            message: "cannot remove or demote the tenant root".into(),
         });
     }
     Ok(())
@@ -217,7 +237,7 @@ async fn guard_tenant_bound_user(
         .await
         .internal()?
     else {
-        return Ok(());
+        return Err(YorishiroError::not_found("account not found"));
     };
     match user.tenant_id {
         Some(bound) if bound != tenant_id => Err(YorishiroError::Conflict {
@@ -270,9 +290,20 @@ pub async fn reset_tenant_user_password(
     password: &str,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    if get_membership_role(&txn, actor.tenant_id, user_id).await? == Some(MembershipRole::Admin) {
-        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserPasswordReset,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    if crate::models::iam_tenant_roots::Model::contains(&txn, actor.tenant_id, user_id).await? {
+        return Err(YorishiroError::Conflict {
+            message: "tenant root password recovery requires the administrator CLI".into(),
+        });
     }
     crate::models::user_users::reset_tenant_password(&txn, actor.tenant_id, user_id, password)
         .await?;
@@ -291,17 +322,37 @@ pub async fn update_member_access(
     role: MembershipRole,
 ) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    let tenant_id = actor.tenant_id;
-    if role == MembershipRole::Owner
-        || get_membership_role(&txn, tenant_id, user_id).await? == Some(MembershipRole::Owner)
-    {
-        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
-    }
-    add_member_in_transaction(&txn, tenant_id, user_id, role).await?;
-    let access = key_access(&txn, tenant_id, user_id, role).await?;
+    let access = update_member_access_on(&txn, actor, user_id, role).await?;
     txn.commit().await.internal()?;
     Ok(access)
+}
+
+async fn update_member_access_on(
+    txn: &DatabaseTransaction,
+    actor: &crate::models::api_keys::AuthContext,
+    user_id: Uuid,
+    role: MembershipRole,
+) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
+    crate::models::access::require_iam_action(
+        txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserUpdate,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    let tenant_id = actor.tenant_id;
+    if role == MembershipRole::Owner
+        && !crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await?
+    {
+        return Err(YorishiroError::Conflict {
+            message: "tenant root cannot be assigned through membership changes".into(),
+        });
+    }
+    add_member_in_transaction(txn, tenant_id, user_id, role).await?;
+    key_access(txn, tenant_id, user_id, role).await
 }
 
 /// Previews a role change without updating membership or stored grants.
@@ -315,10 +366,26 @@ pub async fn preview_role_change(
     role: MembershipRole,
 ) -> Result<super::MembershipRolePreview, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserUpdate,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let current_role = get_membership_role(&txn, actor.tenant_id, user_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("tenant membership not found"))?;
+    if role == MembershipRole::Owner
+        && !crate::models::iam_tenant_roots::Model::contains(&txn, actor.tenant_id, user_id).await?
+    {
+        return Err(YorishiroError::Conflict {
+            message: "tenant root cannot be assigned through membership changes".into(),
+        });
+    }
     let blocked_by_last_owner = if role != MembershipRole::Owner {
         match protect_owner(&txn, actor.tenant_id, user_id, Some(role)).await {
             Ok(()) => false,
@@ -428,10 +495,16 @@ pub async fn remove_member_as(
     user_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    if get_membership_role(&txn, actor.tenant_id, user_id).await? == Some(MembershipRole::Owner) {
-        crate::models::access::require_current_tenant_owner(&txn, actor).await?;
-    }
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserDelete,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     remove_member_in_transaction(&txn, actor.tenant_id, user_id).await?;
     txn.commit().await.internal()?;
     Ok(())
@@ -480,6 +553,25 @@ async fn remove_member_in_transaction(
 }
 
 /// Every member of a tenant, joined against their user row.
+pub(crate) async fn list_members_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<MembershipRecord>, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserList,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    super::list_members(&txn, actor.tenant_id, page).await
+}
+
 pub(crate) async fn list_members(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

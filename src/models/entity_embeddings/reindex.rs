@@ -63,6 +63,15 @@ pub async fn reindex_workspace(
     workspace_id: Uuid,
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
+    reindex_workspace_as(conn, workspace_id, provider, None).await
+}
+
+pub(crate) async fn reindex_workspace_as(
+    conn: &DatabaseConnection,
+    workspace_id: Uuid,
+    provider: &dyn EmbeddingProvider,
+    actor: Option<&crate::models::api_keys::AuthContext>,
+) -> Result<ReindexOutcome, YorishiroError> {
     if provider.dimensions() == 0 || i32::try_from(provider.dimensions()).is_err() {
         return Err(YorishiroError::ValidationFailed {
             message: "provider dimensions must be a positive i32".into(),
@@ -76,6 +85,19 @@ pub async fn reindex_workspace(
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     let txn = crate::db::begin_write(conn).await.internal()?;
+    if let Some(actor) = actor {
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            crate::models::api_keys::ApiKeyScope::Migration,
+            crate::models::iam_policy::Action::WorkspaceReindex,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id,
+            },
+        )
+        .await?;
+    }
     let revision = workspace_workspaces::embedding_revision(&txn, workspace_id).await?;
     workspace_workspaces::fence_embedding(&txn, workspace_id, revision).await?;
     workspace_workspaces::check_embedding_assignment(&txn, workspace_id, provider).await?;
@@ -126,6 +148,19 @@ pub async fn reindex_workspace(
     if failures.is_empty() {
         // Mutation triggers take this same row lock before changing entities or provider settings.
         let txn = crate::db::begin_write(conn).await.internal()?;
+        if let Some(actor) = actor {
+            crate::models::access::require_iam_action(
+                &txn,
+                actor,
+                crate::models::api_keys::ApiKeyScope::Migration,
+                crate::models::iam_policy::Action::WorkspaceReindex,
+                crate::models::iam_policy::Resource::Workspace {
+                    tenant_id: actor.tenant_id,
+                    workspace_id,
+                },
+            )
+            .await?;
+        }
         workspace_workspaces::fence_embedding(&txn, workspace_id, revision).await?;
         if workspace_workspaces::embedding_content_revision(&txn, workspace_id).await?
             != content_revision

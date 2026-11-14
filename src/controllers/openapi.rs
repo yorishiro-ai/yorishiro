@@ -4,11 +4,8 @@
 
 use serde_json::Value;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 use crate::error::ValidationDetail;
-
-use crate::models::api_key_audit_log::AuditAction;
 
 #[derive(ToSchema)]
 pub struct ApiErrorBody {
@@ -25,21 +22,6 @@ pub struct ApiErrorDetail {
     pub hint: Option<String>,
     #[schema(nullable = true)]
     pub retry_after_seconds: Option<u32>,
-}
-
-#[derive(serde::Serialize, ToSchema)]
-pub struct AuditLogRecord {
-    pub id: Uuid,
-    pub workspace_id: Uuid,
-    pub tenant_id: Uuid,
-    #[schema(nullable = true)]
-    pub api_key_id: Option<Uuid>,
-    #[schema(nullable = true)]
-    pub user_id: Option<Uuid>,
-    pub action: AuditAction,
-    pub detail: Value,
-    #[schema(format = DateTime)]
-    pub created_at: String,
 }
 
 #[derive(ToSchema)]

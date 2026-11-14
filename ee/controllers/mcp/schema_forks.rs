@@ -34,12 +34,12 @@ pub(crate) struct UpdateForkArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_schema_forks)]
 impl YorishiroMcpServer {
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List schema forks owned by the selected workspace (requires read scope); source visibility does not authorize changing the source workspace")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List schema forks owned by the selected workspace (requires read scope and schema_fork_list IAM permission); source visibility does not authorize changing the source workspace")]
     pub(crate) async fn list_schema_forks(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("list_schema_forks")?,
@@ -49,6 +49,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaForkList)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         let actor = authorized.auth_context();
         match model::list(authorized.txn(), actor.tenant_id, authorized.workspace_id()).await {
             Ok(records) => ok_json(records),
@@ -56,13 +63,13 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Read a schema fork owned by the selected workspace, including its immutable current head (requires read scope)")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Read a schema fork owned by the selected workspace, including its immutable current head (requires read scope and schema_fork_get IAM permission)")]
     pub(crate) async fn get_schema_fork(
         &self,
         Parameters(args): Parameters<ForkIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("get_schema_fork")?,
@@ -72,6 +79,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaForkGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         let actor = authorized.auth_context();
         match model::get(
             authorized.txn(),
@@ -86,13 +100,13 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Create a workspace-owned fork of a same-tenant source schema (requires schema scope); validates source identity and workspace cycles without modifying the source")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Create a workspace-owned fork of a same-tenant source schema (requires schema scope and schema_fork_create IAM permission); validates source identity and workspace cycles without modifying the source")]
     pub(crate) async fn create_schema_fork(
         &self,
         Parameters(input): Parameters<model::CreateInput>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("create_schema_fork")?,
@@ -102,6 +116,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaForkCreate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         let actor = authorized.auth_context();
         let record = match model::create(
             authorized.txn(),
@@ -118,13 +139,13 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires schema scope); force is required to discard local edits")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires schema scope and schema_fork_update IAM permission); force is required to discard local edits")]
     pub(crate) async fn update_schema_fork(
         &self,
         Parameters(args): Parameters<UpdateForkArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("update_schema_fork")?,
@@ -134,6 +155,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaForkUpdate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         let definition = args
             .definition
             .map(serde_json::from_value)
@@ -163,13 +191,13 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Delete a selected-workspace fork association using the REST reference-preserving model (requires schema scope); does not delete the source schema")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Delete a selected-workspace fork association using the REST reference-preserving model (requires schema scope and schema_fork_delete IAM permission); does not delete the source schema")]
     pub(crate) async fn delete_schema_fork(
         &self,
         Parameters(args): Parameters<ForkIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("delete_schema_fork")?,
@@ -179,6 +207,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaForkDelete)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         let actor = authorized.auth_context();
         if let Err(error) = model::delete(
             authorized.txn(),

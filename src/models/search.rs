@@ -89,17 +89,45 @@ pub(crate) async fn ensure_available(
 
 pub(crate) async fn search_text(
     ctx: &loco_rs::app::AppContext,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
+    actor: &crate::models::api_keys::AuthContext,
     text: &str,
     query: SearchQuery,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
+    let tenant_id = actor.tenant_id;
+    let workspace_id = actor.require_workspace()?;
+    authorize_search(ctx, actor).await?;
     // Wait for the worker without holding a workspace connection.
     let vector =
         crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await?;
     check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id).await?;
+    let _authorization = super::access::authorize_workspace_action(
+        &txn,
+        &ctx.db,
+        actor,
+        super::api_keys::ApiKeyScope::Read,
+        super::iam_policy::Action::Search,
+    )
+    .await?;
     search_by_vector(&txn, workspace_id, vector, text, query).await
+}
+
+pub(crate) async fn authorize_search(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+    super::access::require_iam_action(
+        &txn,
+        actor,
+        super::api_keys::ApiKeyScope::Read,
+        super::iam_policy::Action::Search,
+        super::iam_policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: actor.require_workspace()?,
+        },
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Serialize)]

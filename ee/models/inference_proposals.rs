@@ -15,6 +15,61 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+pub(crate) async fn for_job_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    job_id: Uuid,
+) -> Result<Vec<ProposalRecord>, YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::InferenceProposalList,
+    )
+    .await?;
+    let workspace_id = actor.require_workspace()?;
+    super::inference_jobs::workspace_job(&txn, workspace_id, job_id).await?;
+    for_job(&txn, workspace_id, job_id).await
+}
+
+pub(crate) async fn reject_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    job_id: Uuid,
+) -> Result<ProposalActionReport, YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam_policy::Action::InferenceReject,
+    )
+    .await?;
+    let workspace_id = actor.require_workspace()?;
+    super::inference_jobs::workspace_job(&txn, workspace_id, job_id).await?;
+    let report = reject(&txn, workspace_id, job_id).await?;
+    txn.commit().await.internal()?;
+    Ok(report)
+}
+
+pub(crate) async fn discard_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    job_id: Uuid,
+) -> Result<ProposalActionReport, YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam_policy::Action::InferenceDiscard,
+    )
+    .await?;
+    let workspace_id = actor.require_workspace()?;
+    super::inference_jobs::workspace_job(&txn, workspace_id, job_id).await?;
+    let report = discard(&txn, workspace_id, job_id).await?;
+    txn.commit().await.internal()?;
+    Ok(report)
+}
+
 crate::db_enum::db_enum! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum ProposalStatus {

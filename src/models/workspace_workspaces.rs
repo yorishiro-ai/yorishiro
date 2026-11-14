@@ -308,55 +308,73 @@ pub(crate) async fn stamped_for_reindex(
 }
 
 pub(crate) async fn list_for_actor(
-    conn: &impl ConnectionTrait,
+    conn: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
-    let candidates = crate::models::tenancy::discover_workspaces(conn, actor).await?;
-    Entity::find()
+    use crate::models::iam_policy::{Action, Resource};
+    let txn = crate::db::begin_write(conn).await.internal()?;
+    let evaluation = crate::models::access::IamEvaluation::load(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+    )
+    .await?;
+    evaluation
+        .require(
+            Action::WorkspaceList,
+            Resource::Tenant {
+                tenant_id: actor.tenant_id,
+            },
+        )
+        .await?;
+    let candidates = Entity::find()
         .filter(
             crate::models::_entities::workspace_workspaces::Column::TenantId.eq(actor.tenant_id),
         )
-        .filter(
-            crate::models::_entities::workspace_workspaces::Column::Id.is_in(
-                candidates
-                    .into_iter()
-                    .map(|workspace| workspace.workspace_id),
-            ),
-        )
-        .all(conn)
+        .all(&txn)
         .await
-        .internal()?
-        .into_iter()
-        .map(WorkspaceRecord::try_from)
-        .collect()
+        .internal()?;
+    let mut records = Vec::new();
+    for workspace in candidates {
+        match evaluation
+            .require(
+                Action::WorkspaceGet,
+                Resource::Workspace {
+                    tenant_id: actor.tenant_id,
+                    workspace_id: workspace.id,
+                },
+            )
+            .await
+        {
+            Ok(()) => records.push(WorkspaceRecord::try_from(workspace)?),
+            Err(YorishiroError::ScopeInsufficient { .. }) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    txn.commit().await.internal()?;
+    Ok(records)
 }
 
 pub(crate) async fn get_for_actor(
-    conn: &impl ConnectionTrait,
+    conn: &sea_orm::DatabaseTransaction,
     actor: &crate::models::api_keys::AuthContext,
     workspace_id: Uuid,
 ) -> Result<Model, YorishiroError> {
-    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
     let workspace = get_workspace(conn, workspace_id).await?;
-    let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)?;
-    let allowed = if workspace.tenant_id != current.tenant_id
-        || key.workspace_id.is_some_and(|id| id != workspace_id)
-    {
-        false
-    } else if let Some(user_id) = current.user_id {
-        crate::models::access::workspace_access(conn, current.tenant_id, workspace_id, user_id)
-            .await?
-            .is_some()
-    } else {
-        true
-    };
-    if !allowed {
+    if workspace.tenant_id != actor.tenant_id {
         return Err(YorishiroError::not_found("workspace not found"));
     }
+    crate::models::access::require_iam_action(
+        conn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::WorkspaceGet,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id,
+        },
+    )
+    .await?;
     Ok(workspace)
 }
 
@@ -368,8 +386,18 @@ pub(crate) async fn update_as(
 ) -> Result<WorkspaceRecord, YorishiroError> {
     use sea_orm::ActiveValue::Set;
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_workspace_admin(&txn, actor, id).await?;
-    let workspace = get_for_actor(&txn, actor, id).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::WorkspaceUpdate,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: id,
+        },
+    )
+    .await?;
+    let workspace = get_workspace(&txn, id).await?;
     if input.max_entities.is_some() && !input.replace_max_entities {
         return Err(YorishiroError::Conflict {
             message: "max_entities requires replace_max_entities=true".into(),
@@ -392,7 +420,16 @@ pub(crate) async fn update_as(
     }
     if input.replace_max_entities {
         // Manual quota policy belongs to the tenant, not a delegated workspace administrator.
-        crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            crate::models::api_keys::ApiKeyScope::Read,
+            crate::models::iam_policy::Action::TenantUpdate,
+            crate::models::iam_policy::Resource::Tenant {
+                tenant_id: actor.tenant_id,
+            },
+        )
+        .await?;
         active.max_entities = Set(input.max_entities);
     }
     let saved = active.update(&txn).await.internal()?;
@@ -405,12 +442,15 @@ pub(crate) async fn detail_for_actor(
     actor: &crate::models::api_keys::AuthContext,
     id: Uuid,
 ) -> Result<crate::dtos::workspaces::WorkspaceDetail, YorishiroError> {
-    let workspace = get_for_actor(&ctx.db, actor, id).await?;
+    let authorization = crate::db::begin_write(&ctx.db).await.internal()?;
+    let workspace = get_for_actor(&authorization, actor, id).await?;
     let txn = crate::db::begin_workspace(ctx, workspace.tenant_id, workspace.id).await?;
     let entity_count = crate::models::entity_entities::count(&txn, id).await?;
     let relation_count = crate::models::entity_relations::count(&txn, id).await?;
     let schema_count = crate::models::schema_schemas::count_active(&txn, id).await?;
     let quotas = crate::quotas(ctx, workspace.tenant_id).await?;
+    txn.commit().await.internal()?;
+    authorization.commit().await.internal()?;
     Ok(crate::dtos::workspaces::WorkspaceDetail {
         id,
         tenant_id: workspace.tenant_id,

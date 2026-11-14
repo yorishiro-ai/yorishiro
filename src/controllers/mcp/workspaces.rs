@@ -55,7 +55,7 @@ pub(crate) struct UpdateWorkspaceArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List direct workspace grants; inherited tenant administrator access is not a direct grant (requires read scope and workspace Admin)"
+        description = "List direct workspace grants; inherited tenant administrator access is not a direct grant (requires read scope and workspace_get IAM permission)"
     )]
     pub(crate) async fn list_workspace_members(
         &self,
@@ -86,7 +86,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Grant or change a direct workspace role for an existing tenant member; grants no tenant administration or key issuance authority (requires read scope and workspace Admin)"
+        description = "Grant or change a direct workspace role for an existing tenant member; grants no tenant administration or key issuance authority (requires read scope and workspace_update IAM permission)"
     )]
     pub(crate) async fn grant_workspace_member(
         &self,
@@ -119,7 +119,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Revoke a direct workspace grant and affected workspace-bound credentials; inherited tenant authority remains (requires read scope and workspace Admin)"
+        description = "Revoke a direct workspace grant and affected workspace-bound credentials; inherited tenant authority remains (requires read scope and workspace_update IAM permission)"
     )]
     pub(crate) async fn revoke_workspace_member(
         &self,
@@ -151,7 +151,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List visible workspace records in the current tenant; discovery is not authority to retarget a bound credential (requires read scope)"
+        description = "List current-tenant workspaces allowed by workspace_get IAM permission (requires read scope, workspace_list IAM permission and a tenant-scoped credential)"
     )]
     pub(crate) async fn list_workspaces(
         &self,
@@ -184,7 +184,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Get selected workspace details, counts and effective entity cap; cannot retarget a workspace-bound credential (requires read scope)"
+        description = "Get workspace details, counts and effective entity cap with workspace_get IAM permission; cannot retarget a selected or credential-bound workspace (requires read scope)"
     )]
     pub(crate) async fn get_workspace(
         &self,
@@ -211,7 +211,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Create a workspace in the current tenant without retargeting the current credential (requires read scope and tenant Admin or Owner)"
+        description = "Create a workspace in the current tenant without retargeting the current credential (requires read scope, a tenant-scoped credential and workspace_create IAM permission)"
     )]
     pub(crate) async fn create_workspace(
         &self,
@@ -247,7 +247,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Update selected workspace name (workspace Admin) or replace/clear manual entity cap (tenant Admin); schema binding is immutable here (requires read scope)"
+        description = "Update a workspace name with workspace_update IAM permission; replacing or clearing its manual entity cap also requires tenant_update and a tenant-scoped credential; schema binding is immutable here (requires read scope)"
     )]
     pub(crate) async fn update_workspace(
         &self,
@@ -283,7 +283,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Permanently delete a current-tenant workspace and its data; the last workspace is protected (requires read scope and tenant Admin or Owner)"
+        description = "Permanently delete a current-tenant workspace and its data; the last workspace is protected (requires read scope and workspace_delete IAM permission within the credential workspace binding)"
     )]
     pub(crate) async fn delete_workspace(
         &self,

@@ -317,6 +317,7 @@ pub(crate) async fn tick(
                 workspace_id: ws.id,
                 worker_class,
                 startup: false,
+                actor: None,
             };
             dispatches.push((schedule.tenant_id, args));
         }

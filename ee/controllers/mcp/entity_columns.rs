@@ -35,13 +35,13 @@ pub(crate) struct ResetColumnsArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_entity_columns)]
 impl YorishiroMcpServer {
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List the selected workspace's stored entity-table column preferences (requires read scope); these display preferences are shared by workspace users")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List the selected workspace's stored entity-table column preferences (requires read scope and entity_columns_get IAM permission); these display preferences are shared by workspace users")]
     pub(crate) async fn list_entity_columns(
         &self,
         Parameters(args): Parameters<ListColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("list_entity_columns")?,
@@ -51,6 +51,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityColumnsGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         match entity_column_preferences::list(
             authorized.txn(),
             authorized.workspace_id(),
@@ -63,13 +70,13 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write), description = "Replace the selected workspace's visible columns for one entity type (requires write scope); validates duplicate columns and the display limit without changing schema definitions")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write), description = "Replace the selected workspace's visible columns for one entity type (requires write scope and entity_columns_update IAM permission); validates duplicate columns and the display limit without changing schema definitions")]
     pub(crate) async fn set_entity_columns(
         &self,
         Parameters(args): Parameters<SetColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("set_entity_columns")?,
@@ -79,6 +86,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityColumnsUpdate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         let record = match entity_column_preferences::set(
             authorized.txn(),
             authorized.workspace_id(),
@@ -94,13 +108,13 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write), description = "Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires write scope); this removes only the display preference")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write), description = "Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires write scope and entity_columns_delete IAM permission); this removes only the display preference")]
     pub(crate) async fn reset_entity_columns(
         &self,
         Parameters(args): Parameters<ResetColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match authorize(
+        let mut authorized = match authorize(
             self.app_context(),
             &parts,
             self.required_scope("reset_entity_columns")?,
@@ -110,6 +124,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityColumnsDelete)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         if let Err(error) = entity_column_preferences::clear(
             authorized.txn(),
             authorized.workspace_id(),

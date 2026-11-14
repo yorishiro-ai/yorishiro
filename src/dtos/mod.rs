@@ -2,6 +2,7 @@ pub mod api_keys;
 pub mod auth;
 pub mod common;
 pub mod entities;
+pub(crate) mod iam;
 pub(crate) mod jobs;
 pub mod members;
 pub mod relations;

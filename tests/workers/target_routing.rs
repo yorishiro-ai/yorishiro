@@ -32,6 +32,7 @@ async fn production_dispatch_records_each_resolved_target() {
                     workspace_id: fixture.workspace_id,
                     worker_class: class,
                     startup: false,
+                    actor: None,
                 },
             )
             .await

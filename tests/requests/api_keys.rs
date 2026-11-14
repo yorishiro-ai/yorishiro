@@ -645,6 +645,31 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Write,
             Some(member.id), false, "member-tenant-issuer",
         ).await.unwrap();
+        let _elevated = api_keys::Entity::create_tenant_api_key(
+            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Migration,
+            Some(member.id), false, "iam-not-role-ceiling",
+        ).await.unwrap();
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["credential_create"],
+            "resources":[{"type":"tenant","tenant_id":tenant.tenant_id}]}]});
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .json(&serde_json::json!({"name":"member-issuance","document":document})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        request.put(&attachment).add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        // The stored write ceiling is preserved, but the legacy member role is not an issuance gate.
+        request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
+            .json(&serde_json::json!({"name":"iam-member-write","scope":"write","tenant_scoped":true}))
+            .await.assert_status(StatusCode::CREATED);
+        request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
+            .json(&serde_json::json!({"name":"iam-member-escalation","scope":"schema","tenant_scoped":true}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+        request.delete(&attachment).add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .await.assert_status(StatusCode::NO_CONTENT);
         request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
@@ -654,6 +679,9 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let txn = ctx.db.begin().await.unwrap();
         let inaccessible = tenancy::create_workspace(&txn, tenant.tenant_id, "no-member-grant", None, None).await.unwrap();
         txn.commit().await.unwrap();
+        let _ungranted = api_keys::Entity::create_api_key(
+            &ctx.db, inaccessible.id, api_keys::ApiKeyScope::Schema, Some(member.id), false,
+        ).await.expect("issuance does not require a legacy workspace grant");
         request.get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, inaccessible.id.to_string())

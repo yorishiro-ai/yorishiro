@@ -155,6 +155,7 @@ impl RouteMounts {
             controllers::import::routes(),
             controllers::import::openapi_docs()
         );
+        mount!(controllers::iam::routes(), controllers::iam::openapi_docs());
         mount!(
             controllers::members::routes(),
             controllers::members::openapi_docs()

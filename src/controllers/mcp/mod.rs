@@ -2,6 +2,7 @@ mod api_keys;
 mod audit_log;
 pub mod entities;
 mod export;
+mod iam;
 mod import;
 mod invites;
 mod members;
@@ -174,6 +175,7 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_search(),
         YorishiroMcpServer::tool_router_template_library(),
         YorishiroMcpServer::tool_router_tenants(),
+        YorishiroMcpServer::tool_router_iam(),
         YorishiroMcpServer::tool_router_whoami(),
         YorishiroMcpServer::tool_router_workspaces(),
         YorishiroMcpServer::tool_router_api_keys(),
@@ -259,6 +261,9 @@ impl ServerHandler for YorishiroMcpServer {
 pub(crate) struct Authorized {
     ctx: AuthContext,
     txn: DatabaseTransaction,
+    identity: sea_orm::DatabaseConnection,
+    authorization: Option<DatabaseTransaction>,
+    required: ApiKeyScope,
     workspace_id: uuid::Uuid,
 }
 
@@ -270,7 +275,32 @@ impl Authorized {
     /// Commits the transaction.
     /// Every write handler must call this before returning `Ok`.
     pub(crate) async fn commit(self) -> Result<(), ErrorData> {
-        self.txn.commit().await.map_err(crate::error::mcp_internal)
+        self.txn
+            .commit()
+            .await
+            .map_err(crate::error::mcp_internal)?;
+        if let Some(authorization) = self.authorization {
+            authorization
+                .commit()
+                .await
+                .map_err(crate::error::mcp_internal)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn require_action(
+        &mut self,
+        action: crate::models::iam_policy::Action,
+    ) -> Result<(), YorishiroError> {
+        self.authorization = crate::models::access::authorize_workspace_action(
+            &self.txn,
+            &self.identity,
+            &self.ctx,
+            self.required,
+            action,
+        )
+        .await?;
+        Ok(())
     }
 
     pub(crate) fn auth_context(&self) -> &AuthContext {
@@ -353,6 +383,7 @@ pub(crate) async fn authorize(
         Ok(workspace_id) => workspace_id,
         Err(error) => return Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(error))),
     };
+    let identity = ctx.db.clone();
     match request_auth
         .begin(current, required >= ApiKeyScope::Write)
         .await
@@ -360,6 +391,9 @@ pub(crate) async fn authorize(
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized {
             ctx,
             txn,
+            identity,
+            authorization: None,
+            required,
             workspace_id,
         })),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {

@@ -18,6 +18,18 @@ pub(crate) struct SetupAccount {
     pub(crate) workspace_id: Uuid,
 }
 
+/// Records the initial root after its tenant membership has been created.
+///
+/// # Errors
+/// Returns an error if the root is not a member or a root already exists.
+pub async fn assign_initial_root(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), YorishiroError> {
+    crate::models::iam_tenant_roots::Model::create(txn, tenant_id, user_id).await
+}
+
 /// Issues a tenant-scoped login credential after rechecking the account and membership.
 ///
 /// # Errors
@@ -126,6 +138,7 @@ pub(crate) async fn signup_account(
         crate::models::tenant_memberships::MembershipRole::Owner,
     )
     .await?;
+    assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
     Ok((user, tenant.id))
 }
@@ -162,6 +175,7 @@ pub(crate) async fn setup_first_account(
         tenant_memberships::MembershipRole::Owner,
     )
     .await?;
+    assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
     Ok(SetupAccount {
         user_id: user.id,
@@ -428,7 +442,16 @@ pub(crate) async fn create_workspace_in_context(
     schema_id: Option<Uuid>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::WorkspaceCreate,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let quota = crate::quotas(ctx, actor.tenant_id).await?;
     let workspace = create_workspace_with_quota(
         &txn,
@@ -443,30 +466,32 @@ pub(crate) async fn create_workspace_in_context(
     Ok(workspace)
 }
 
-/// Deletes a workspace after revalidating tenant administration and target ownership.
+/// Deletes a workspace after revalidating IAM permission and target ownership.
 ///
 /// # Errors
-/// Rejects revoked credentials, lost administration, foreign targets or the last workspace.
+/// Rejects revoked credentials, missing permission, foreign targets or the last workspace.
 pub async fn delete_workspace_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    let key = crate::models::api_keys::Entity::find_by_id(actor.api_key_id)
-        .one(&txn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)?;
-    if key.workspace_id.is_some_and(|id| id != workspace_id) {
-        return Err(YorishiroError::not_found("workspace not found"));
-    }
     if crate::models::workspace_workspaces::get_workspace_tenant(&txn, workspace_id).await?
         != actor.tenant_id
     {
         return Err(YorishiroError::not_found("workspace not found"));
     }
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::WorkspaceDelete,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id,
+        },
+    )
+    .await?;
     crate::models::workspace_workspaces::delete_workspace(&txn, workspace_id).await?;
     txn.commit().await.internal()?;
     Ok(())

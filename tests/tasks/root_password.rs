@@ -10,7 +10,7 @@ const NEW_PASSWORD: &str = "new-root-password-123";
 
 #[tokio::test]
 async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
-    boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let before = user_users::Entity::find_by_id(tenant.owner_id)
             .one(&ctx.db)

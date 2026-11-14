@@ -3,6 +3,7 @@
 //! Base's own models are reached through `crate::models`; most modules here are the ones whose tables this crate's own migrations add.
 //! `origin` is the exception: it owns no table, and reads base's own `schema_schemas`/`template_templates` on `ctx.db`, since the endpoint it serves is enterprise regardless of which tables it happens to read.
 
+pub(crate) mod access;
 pub mod api_keys;
 pub mod compute_credit_ledger;
 pub mod entity_column_preferences;

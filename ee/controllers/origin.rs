@@ -1,42 +1,36 @@
 //! Following an origin template: `/api/schemas/upstream-changes`, `merge-preview` and `merge`.
 //! This overlays base's own `/api/schemas` namespace, since merging a schema is a schema operation from the client's side, not an administrative one like the dashboard or Stripe.
 //!
-//! Authentication goes through `authz::authenticate_workspace` rather than a base extractor, and the scope check is written out explicitly in each handler below rather than carried by the extractor's own type.
-//! It resolves through the base `DefaultAuthenticator`, so a workspace-scoped key names its own workspace and a tenant-scoped one names it with `X-Workspace-Id`.
-//! The scope check is explicit for the same reason: there is no extractor here to carry it.
-
 use crate::controllers::ApiError;
-use crate::controllers::middleware::auth::require_scope;
-use crate::error::ResultExt;
-use crate::models::api_keys::ApiKeyScope;
+use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
 use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use uuid::Uuid;
 
-use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::origin::MergeResponse;
 use crate::edition::ee::models::schema_schemas as origin_model;
 use crate::edition::ee::models::schema_schemas as origin;
 use crate::edition::ee::models::schema_schemas::MergePlan;
 
 /// `GET /api/schemas/upstream-changes`: schemas whose origin template has moved on.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/upstream-changes", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::UpstreamChange]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/upstream-changes", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::UpstreamChange]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_upstream_list"]))), tag = "enterprise"))]
 async fn list_upstream_changes(
     State(ctx): State<AppContext>,
-    headers: HeaderMap,
+    mut authorized: Authorized<ReadScope>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
-    require_scope(&auth_ctx, ApiKeyScope::Read)?;
+    authorized
+        .require_action(crate::models::iam_policy::Action::SchemaUpstreamList)
+        .await?;
 
-    // ctx.db: this joins template_templates, which the request role cannot read.
+    // Upstream joins templates through the identity pool under the retained IAM fence.
     let changes = origin_model::list_with_upstream_changes(
         &ctx.db,
-        auth_ctx.require_workspace()?,
+        authorized.ctx.require_workspace()?,
         page.try_into()?,
     )
     .await?;
@@ -44,23 +38,22 @@ async fn list_upstream_changes(
 }
 
 /// `GET /api/schemas/{schema_id}/merge-preview`: what following the template would do.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}/merge-preview", params(("schema_id" = Uuid, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::MergePlan), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}/merge-preview", params(("schema_id" = Uuid, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::MergePlan), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_merge_preview"]))), tag = "enterprise"))]
 async fn merge_preview(
     State(ctx): State<AppContext>,
-    headers: HeaderMap,
+    mut authorized: Authorized<ReadScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<MergePlan>, ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
-    require_scope(&auth_ctx, ApiKeyScope::Read)?;
+    authorized
+        .require_action(crate::models::iam_policy::Action::SchemaMergePreview)
+        .await?;
 
-    // The schema is workspace content and comes off the RLS-scoped connection; the template is control-plane data the request role holds no grant on, hence both `schema_txn` and `ctx`.
-    let schema_txn =
-        crate::db::begin_workspace(&ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?).await?;
+    // Workspace content uses the scoped transaction; templates require the identity pool.
     let plan = origin::merge_preview(
-        &schema_txn,
+        authorized.txn(),
         &ctx,
-        auth_ctx.tenant_id,
-        auth_ctx.require_workspace()?,
+        authorized.ctx.tenant_id,
+        authorized.ctx.require_workspace()?,
         schema_id,
     )
     .await?;
@@ -69,27 +62,25 @@ async fn merge_preview(
 }
 
 /// `POST /api/schemas/{schema_id}/merge`: write the merged definition as the next version.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/merge", params(("schema_id" = Uuid, Path)), responses((status = 201, body = crate::edition::ee::controllers::openapi::MergeResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/merge", params(("schema_id" = Uuid, Path)), responses((status = 201, body = crate::edition::ee::controllers::openapi::MergeResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_merge_apply"]))), tag = "enterprise"))]
 async fn merge_apply(
     State(ctx): State<AppContext>,
-    headers: HeaderMap,
+    mut authorized: Authorized<SchemaScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<MergeResponse>), ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
-    require_scope(&auth_ctx, ApiKeyScope::Schema)?;
+    authorized
+        .require_action(crate::models::iam_policy::Action::SchemaMergeApply)
+        .await?;
 
-    let schema_txn =
-        crate::db::begin_workspace_write(&ctx, auth_ctx.tenant_id, auth_ctx.require_workspace()?)
-            .await?;
     let (schema, diff, summary) = origin::merge_apply(
-        &schema_txn,
+        authorized.txn(),
         &ctx,
-        auth_ctx.tenant_id,
-        auth_ctx.require_workspace()?,
+        authorized.ctx.tenant_id,
+        authorized.ctx.require_workspace()?,
         schema_id,
     )
     .await?;
-    schema_txn.commit().await.internal()?;
+    authorized.commit().await?;
     Ok((
         StatusCode::CREATED,
         Json(MergeResponse {

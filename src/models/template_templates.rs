@@ -248,19 +248,66 @@ pub(crate) async fn create_template(
     row.try_into()
 }
 
+pub(crate) async fn list_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<TemplateRecord>, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TemplateLibraryList,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    list_templates(&txn, actor.tenant_id, page).await
+}
+
+pub(crate) async fn get_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    id: uuid::Uuid,
+) -> Result<TemplateRecord, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TemplateLibraryGet,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    get_template(&txn, actor.tenant_id, id).await
+}
+
 pub(crate) async fn create_as(
     db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
     input: CreateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TemplateLibraryCreate,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let template = create_template(&txn, actor.tenant_id, actor.user_id, input).await?;
     txn.commit().await.internal()?;
     Ok(template)
 }
 
-/// Updates a template after revalidating tenant administration under the membership fence.
+/// Updates a template after revalidating IAM permission under the membership fence.
 ///
 /// # Errors
 /// Rejects stale or unauthorized credentials and propagates validation and persistence errors.
@@ -271,7 +318,16 @@ pub async fn update_as(
     input: UpdateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TemplateLibraryUpdate,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let template = update_template(&txn, actor.tenant_id, template_id, input).await?;
     txn.commit().await.internal()?;
     Ok(template)
@@ -283,7 +339,16 @@ pub(crate) async fn delete_as(
     template_id: uuid::Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TemplateLibraryDelete,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     delete_template(&txn, actor.tenant_id, template_id).await?;
     txn.commit().await.internal()
 }
@@ -295,7 +360,16 @@ pub(crate) async fn fork_as(
     name: String,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TemplateLibraryFork,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let template = fork_template(
         &txn,
         actor.tenant_id,

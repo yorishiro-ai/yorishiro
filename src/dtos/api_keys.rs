@@ -14,7 +14,7 @@ pub(crate) struct CreateApiKeyRequest {
     #[serde(default)]
     pub(crate) audit: bool,
     /// Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.
-    /// Requires tenant Admin or Owner and a tenant-scoped issuing credential.
+    /// Requires CredentialCreate IAM permission and a tenant-scoped issuing credential.
     #[serde(default)]
     pub(crate) tenant_scoped: bool,
 }

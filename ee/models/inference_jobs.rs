@@ -19,6 +19,59 @@ crate::db_enum::db_enum! {
     }
 }
 
+pub(crate) async fn get_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    job_id: Uuid,
+) -> Result<InferenceJobRecord, YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::InferenceJobGet,
+    )
+    .await?;
+    workspace_job(&txn, actor.require_workspace()?, job_id).await
+}
+
+pub(crate) async fn workspace_job(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<InferenceJobRecord, YorishiroError> {
+    let job = get(conn, job_id)
+        .await?
+        .ok_or_else(|| YorishiroError::not_found("infer-fill job not found"))?;
+    if job.workspace_id != workspace_id {
+        return Err(YorishiroError::ScopeInsufficient {
+            message: "cannot access infer-fill jobs for another workspace".into(),
+            hint: "verify the job belongs to your workspace".into(),
+        });
+    }
+    Ok(job)
+}
+
+pub(crate) async fn confirmation_status_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    job_id: Uuid,
+) -> Result<crate::models::queue_job_lifecycles::BulkJobStatus, YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam_policy::Action::InferenceConfirmationGet,
+    )
+    .await?;
+    crate::models::queue_job_lifecycles::bulk_job_status(
+        &txn,
+        actor.require_workspace()?,
+        job_id,
+        &["confirm_proposals"],
+    )
+    .await
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InferenceJobRecord {
     pub id: Uuid,

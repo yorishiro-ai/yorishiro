@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::template_templates;
 
@@ -60,7 +60,7 @@ pub(crate) struct ForkTemplateLibraryArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Create a tenant-shared schema template in the library, not a workspace data schema (requires read scope and tenant Admin or Owner)"
+        description = "Create a tenant-shared schema template in the library, not a workspace data schema (requires read scope and template_library_create IAM permission)"
     )]
     pub(crate) async fn create_template_library_item(
         &self,
@@ -102,7 +102,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Update an owned tenant template; existing workspace schema versions are unchanged (requires read scope and tenant Admin or Owner)"
+        description = "Update an owned tenant template; existing workspace schema versions are unchanged (requires read scope and template_library_update IAM permission)"
     )]
     pub(crate) async fn update_template_library_item(
         &self,
@@ -144,7 +144,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Delete an owned tenant template while preserving existing workspace schemas (requires read scope and tenant Admin or Owner)"
+        description = "Delete an owned tenant template while preserving existing workspace schemas (requires read scope and template_library_delete IAM permission)"
     )]
     pub(crate) async fn delete_template_library_item(
         &self,
@@ -169,7 +169,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Fork a visible schema template into the current tenant's library (requires read scope and tenant Admin or Owner)"
+        description = "Fork a visible schema template into the current tenant's library (requires read scope and template_library_fork IAM permission)"
     )]
     pub(crate) async fn fork_template_library_item(
         &self,
@@ -204,25 +204,23 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let auth = match super::verify(
             self.app_context(),
             &parts,
             self.required_scope("list_template_library")?,
         )
         .await?
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let tenant_id = authorized.auth_context().tenant_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let templates =
-            match template_templates::list_templates(&self.app_context().db, tenant_id, page).await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let templates = match template_templates::list_as(&self.app_context().db, &auth, page).await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(templates)
     }
 
@@ -236,28 +234,22 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let auth = match super::verify(
             self.app_context(),
             &parts,
             self.required_scope("get_template_library_item")?,
         )
         .await?
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let tenant_id = authorized.auth_context().tenant_id;
-        let template = match template_templates::get_template(
-            &self.app_context().db,
-            tenant_id,
-            args.id,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let template =
+            match template_templates::get_as(&self.app_context().db, &auth, args.id).await {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(template)
     }
 }

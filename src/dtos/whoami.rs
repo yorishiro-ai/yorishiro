@@ -18,7 +18,8 @@ pub(crate) struct WhoAmIResponse {
     /// None for a tenant-bound credential that selects a workspace per request.
     pub(crate) bound_workspace_id: Option<Uuid>,
     pub(crate) identity_kind: &'static str,
-    pub(crate) workspace_access: Option<crate::models::access::WorkspaceAccess>,
+    /// Root identity does not bypass credential scope, binding or audit requirements.
+    pub(crate) tenant_root: bool,
 }
 
 impl From<crate::models::access::AccessIdentity> for WhoAmIResponse {
@@ -29,7 +30,7 @@ impl From<crate::models::access::AccessIdentity> for WhoAmIResponse {
             tenant_name: identity.tenant_name,
             stored_scope: identity.stored_scope,
             bound_workspace_id: identity.bound_workspace_id,
-            workspace_access: identity.workspace_access,
+            tenant_root: identity.tenant_root,
             identity_kind: if ctx.user_id.is_some() {
                 "user"
             } else {

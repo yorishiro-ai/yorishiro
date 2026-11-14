@@ -9,12 +9,11 @@ use loco_rs::controller::Routes;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::dtos::members::{AddMemberRequest, MemberAccessResponse};
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::ResultExt;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
-use crate::models::user_users;
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/{user_id}/role-preview", params(("user_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::PreviewRoleRequest, responses((status = 200, body = crate::models::tenant_memberships::MembershipRolePreview), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/{user_id}/role-preview", params(("user_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::PreviewRoleRequest, responses((status = 200, body = crate::models::tenant_memberships::MembershipRolePreview), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_update"]))), tag = "community"))]
 async fn preview_role_change(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -26,7 +25,7 @@ async fn preview_role_change(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members/{user_id}/removal-preview", params(("user_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::models::tenant_memberships::MembershipRemovalPreview), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members/{user_id}/removal-preview", params(("user_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::models::tenant_memberships::MembershipRemovalPreview), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_delete"]))), tag = "community"))]
 async fn preview_removal(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -37,7 +36,7 @@ async fn preview_removal(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/transfer-ownership", request_body = crate::dtos::members::TransferOwnershipRequest, responses((status = 204, description = "Successor promoted to owner and actor demoted to admin atomically"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_owner"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/transfer-ownership", request_body = crate::dtos::members::TransferOwnershipRequest, responses((status = 204, description = "Successor promoted to owner and actor demoted to admin atomically"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_update"]))), tag = "community"))]
 async fn transfer_ownership(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -47,7 +46,7 @@ async fn transfer_ownership(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/invites/{invite_id}", params(("invite_id" = uuid::Uuid, Path)), responses((status = 204, description = "Invite expired; repeated cancellation is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/invites/{invite_id}", params(("invite_id" = uuid::Uuid, Path)), responses((status = 204, description = "Invite expired; repeated cancellation is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_delete"]))), tag = "community"))]
 async fn revoke_invite(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -57,7 +56,7 @@ async fn revoke_invite(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/invites/{invite_id}/reissue", params(("invite_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::ReissueInviteRequest, responses((status = 200, body = crate::dtos::members::CreateInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/invites/{invite_id}/reissue", params(("invite_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::ReissueInviteRequest, responses((status = 200, body = crate::dtos::members::CreateInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_update"]))), tag = "community"))]
 async fn reissue_invite(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -77,7 +76,7 @@ async fn reissue_invite(
     }))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/invites", request_body = crate::dtos::members::CreateInviteRequest, responses((status = 201, body = crate::dtos::members::CreateInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/invites", request_body = crate::dtos::members::CreateInviteRequest, responses((status = 201, body = crate::dtos::members::CreateInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_create"]))), tag = "community"))]
 async fn create_invite(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -100,7 +99,7 @@ async fn create_invite(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members/invites", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::dtos::members::InviteRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members/invites", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::dtos::members::InviteRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_list"]))), tag = "community"))]
 async fn list_invites(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -116,15 +115,7 @@ async fn list_invites(
     ))
 }
 
-/// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope.
-pub(crate) async fn require_tenant_admin(
-    ctx: &AppContext,
-    actor: &crate::models::api_keys::AuthContext,
-) -> Result<(), YorishiroError> {
-    crate::models::access::require_tenant_admin_as(&ctx.db, actor).await
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::tenant_memberships::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::tenant_memberships::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_list"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -133,13 +124,11 @@ async fn list_members(
     AuthContext(auth): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MembershipRecord>>, ApiError> {
-    require_tenant_admin(&ctx, &auth).await?;
-    let members =
-        tenant_memberships::list_members(&ctx.db, auth.tenant_id, page.try_into()?).await?;
+    let members = tenant_memberships::list_members_as(&ctx.db, &auth, page.try_into()?).await?;
     Ok(Json(members))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::dtos::members::MemberAccessResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = crate::dtos::members::AddMemberRequest, responses((status = 201, body = crate::dtos::members::MemberAccessResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_update"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -148,18 +137,9 @@ async fn add_member(
     AuthContext(auth): AuthContext,
     Json(body): Json<AddMemberRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_tenant_admin(&ctx, &auth).await?;
-
-    let user = user_users::get_user_by_email(&ctx.db, &body.email)
-        .await?
-        .ok_or_else(|| {
-            YorishiroError::not_found(format!(
-                "no user with email '{}' has an account",
-                body.email
-            ))
-        })?;
-
-    let keys = tenant_memberships::update_member_access(&ctx.db, &auth, user.id, body.role).await?;
+    let (user, keys) =
+        tenant_memberships::update_member_by_email_as(&ctx.db, &auth, &body.email, body.role)
+            .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -176,7 +156,7 @@ async fn add_member(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/users", request_body = crate::dtos::members::CreateTenantUserRequest, responses((status = 201, body = MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/users", request_body = crate::dtos::members::CreateTenantUserRequest, responses((status = 201, body = MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_create"]))), tag = "community"))]
 /// Creates a user bound to the caller's tenant, signed in with tenant id, user name and password.
 ///
 /// # Errors
@@ -186,9 +166,17 @@ async fn create_tenant_user(
     AuthContext(auth): AuthContext,
     Json(body): Json<crate::dtos::members::CreateTenantUserRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_tenant_admin(&ctx, &auth).await?;
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, &auth).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        &auth,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::TenantUserCreate,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: auth.tenant_id,
+        },
+    )
+    .await?;
     let user = tenant_memberships::create_tenant_user_member(
         &txn,
         auth.tenant_id,
@@ -211,7 +199,7 @@ async fn create_tenant_user(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/members/users/{user_id}/password", params(("user_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::ResetTenantUserPasswordRequest, responses((status = 204, description = "Password replaced and the user's keys revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/members/users/{user_id}/password", params(("user_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::ResetTenantUserPasswordRequest, responses((status = 204, description = "Password replaced and the user's keys revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_password_reset"]))), tag = "community"))]
 /// Replaces a tenant user's password.
 ///
 /// # Errors
@@ -222,18 +210,16 @@ async fn reset_tenant_user_password(
     Path(user_id): Path<uuid::Uuid>,
     Json(body): Json<crate::dtos::members::ResetTenantUserPasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_tenant_admin(&ctx, &auth).await?;
     tenant_memberships::reset_tenant_user_password(&ctx.db, &auth, user_id, &body.password).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/{user_id}", params(("user_id" = uuid::Uuid, Path)), responses((status = 204, description = "Membership absent and attributed tenant keys revoked; a tenant user's account is deleted; repeated removal is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/members/{user_id}", params(("user_id" = uuid::Uuid, Path)), responses((status = 204, description = "Membership absent and attributed tenant keys revoked; a tenant user's account is deleted; repeated removal is safe"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_delete"]))), tag = "community"))]
 async fn remove_member(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(user_id): Path<uuid::Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_tenant_admin(&ctx, &auth).await?;
     tenant_memberships::remove_member_as(&ctx.db, &auth, user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

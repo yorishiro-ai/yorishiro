@@ -1,7 +1,7 @@
 use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
-use sea_orm::EntityTrait;
+use sea_orm::{EntityTrait, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
@@ -9,6 +9,7 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 
 struct Setup {
+    owner_id: Uuid,
     tenant_id: Uuid,
     workspace_id: Uuid,
     /// `Migration` scope, `audit: false`: what triggers the two audited operations, but must not itself be able to read them.
@@ -27,6 +28,7 @@ async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) ->
     let audit_key = issue_api_key(ctx, workspace_id, owner_id, ApiKeyScope::Read, true).await;
 
     Setup {
+        owner_id,
         tenant_id,
         workspace_id,
         migration_key,
@@ -52,6 +54,36 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
             "test must boot with a non-default zone"
         );
         let setup = setup(&request, &ctx).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, setup.tenant_id, &super::fixtures::unique_email("audit-reader"),
+            "audit-reader-password", None,
+            yorishiro::models::tenant_memberships::MembershipRole::Admin,
+        ).await.unwrap();
+        txn.commit().await.unwrap();
+        let delegated = issue_api_key(&ctx, setup.workspace_id, member.id, ApiKeyScope::Read, true).await;
+        let root_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["audit_log_list"],
+            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {root_key}"))
+            .json(&serde_json::json!({"name":"audit-reader","document":document})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status(StatusCode::FORBIDDEN);
+        request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status_ok();
+        let mut denied = document.clone();
+        denied["statements"][0]["effect"] = serde_json::json!("deny");
+        request.put(&format!("/api/iam/policies/{policy_id}"))
+            .add_header("Authorization", format!("Bearer {root_key}"))
+            .json(&serde_json::json!({"name":"audit-reader","document":denied})).await.assert_status_ok();
+        request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status(StatusCode::FORBIDDEN);
 
         let set = request
             .put("/api/system/maintenance")
