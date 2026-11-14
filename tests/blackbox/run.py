@@ -1382,6 +1382,10 @@ def membership_retirement_lifecycle(app):
     owner = app.tenant_key
     client = MCP(app, owner)
     owner_id = client.call("whoami")["user_id"]
+    missing_user = str(uuid.uuid4())
+    app.rest("POST", "/api/members", {"email": "missing@example.invalid", "role": "admin"},
+             status=404, key=owner)
+    client.call("set_member_role", {"user_id": missing_user, "role": "admin"}, error=True)
     for name, args in (("preview_member_removal", {"user_id": owner_id}),
                        ("preview_member_role_change", {"user_id": owner_id, "role": "admin"})):
         require(client.call(name, args)["blocked_by_last_owner"], "preview missed last-owner protection")

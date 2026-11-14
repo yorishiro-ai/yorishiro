@@ -253,7 +253,7 @@ async fn guard_tenant_bound_user(
         .await
         .internal()?
     else {
-        return Ok(());
+        return Err(YorishiroError::not_found("account not found"));
     };
     match user.tenant_id {
         Some(bound) if bound != tenant_id => Err(YorishiroError::Conflict {
