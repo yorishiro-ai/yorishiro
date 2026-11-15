@@ -159,6 +159,27 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             "response: {:?}",
             infer.text()
         );
+        let session = super::mcp::initialize(&request).await;
+        let mcp = super::mcp::mcp_call(
+            &request,
+            &session,
+            &setup.api_key,
+            2,
+            "tools/call",
+            serde_json::json!({"name":"infer_fill","arguments":{"schema_name":"note"}}),
+        )
+        .await;
+        assert_eq!(mcp["result"]["isError"], true);
+        assert_eq!(
+            mcp["result"]["structuredContent"],
+            infer.json::<serde_json::Value>()
+        );
+        assert!(
+            mcp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("no LLM credentials configured")
+        );
     })
     .await;
 }
@@ -378,17 +399,10 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             fetched["data"]
         );
 
-        let confirm = request
-            .post(&format!("/api/inference-jobs/{job_id}/confirm"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .await;
-        assert_eq!(
-            confirm.status_code(),
-            StatusCode::ACCEPTED,
-            "response: {:?}",
-            confirm.text()
-        );
-        let accepted: serde_json::Value = confirm.json();
+        let session = super::mcp::initialize(&request).await;
+        let confirm = super::mcp::mcp_call(&request, &session, &setup.api_key, 40, "tools/call",
+            serde_json::json!({"name":"confirm_inference_proposals","arguments":{"job_id":job_id}})).await;
+        let accepted = super::mcp::tool_result_json(&confirm);
         let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
         super::fill_defaults::finish_via_api(
             &request,
@@ -539,6 +553,7 @@ async fn create_completed_proposal(
 async fn proposals_can_be_listed_rejected_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
+        let session = super::mcp::initialize(&request).await;
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
@@ -603,6 +618,12 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
                     .add_header("Authorization", format!("Bearer {}", key.plaintext))
                     .await.assert_status(StatusCode::FORBIDDEN);
             }
+            for (index, name) in ["get_inference_job", "list_inference_proposals", "get_inference_confirmation",
+                "reject_inference_proposals", "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
+                let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, index as i64 + 10, "tools/call",
+                    serde_json::json!({"name":name,"arguments":{"job_id":rejected_job}})).await;
+                assert_eq!(mcp["result"]["structuredContent"]["error"]["code"], "scope_insufficient", "{name}: {mcp}");
+            }
         }
         request.put(&format!("/api/iam/policies/{policy_id}"))
             .add_header("Authorization", format!("Bearer {iam_key}"))
@@ -626,6 +647,9 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             listed.text()
         );
         let proposals: serde_json::Value = listed.json();
+        let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, 30, "tools/call",
+            serde_json::json!({"name":"list_inference_proposals","arguments":{"job_id":rejected_job}})).await;
+        assert_eq!(super::mcp::tool_result_json(&mcp), proposals);
         assert_eq!(proposals.as_array().unwrap().len(), 1);
         assert_eq!(proposals[0]["status"], "pending");
         assert_eq!(proposals[0]["proposed"], "reject me");

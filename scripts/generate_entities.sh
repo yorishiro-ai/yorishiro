@@ -21,7 +21,7 @@ container=$(docker run --detach \
     --publish 127.0.0.1::5432 \
     --health-cmd 'pg_isready -U yorishiro -h 127.0.0.1' \
     --health-interval 1s --health-timeout 3s --health-retries 60 \
-    pgvector/pgvector:pg18)
+    pgvector/pgvector:pg18 -c jit=off -c enable_nestloop=off)
 
 ready=false
 for ((attempt=0; attempt<90; attempt++)); do
@@ -44,6 +44,7 @@ export YORISHIRO_EMBEDDING_PROVIDER=none
 export LOCO_ENV=test_postgres
 
 ./target/debug/yorishiro db migrate
+docker exec "$container" psql -U yorishiro -d yorishiro -c ANALYZE >/dev/null
 rm -f src/models/_entities/*.rs
 ./target/debug/yorishiro db entities
 python3 scripts/harden_generated_entities.py

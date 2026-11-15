@@ -5,7 +5,7 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -41,22 +41,6 @@ async fn infer_fill(
     // that the endpoint exists and is merely locked.
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    let workspace_id = auth_ctx.require_workspace()?;
-
-    // Refuse before doing any work: a caller with no key gets one clear error rather than a scan that reports zero applied and reads as "nothing to infer".
-    if workspace_llm_keys::get(&ctx.db, workspace_id)
-        .await
-        .internal()?
-        .is_none()
-    {
-        return Err(YorishiroError::ValidationFailed {
-            message: "this workspace has no LLM credentials configured".into(),
-            details: vec![],
-            hint: "PUT /api/workspace/llm-key".to_string(),
-        }
-        .into());
-    }
-
     let job_id =
         crate::edition::ee::workers::infer_fill::enqueue_infer_fill(&ctx, &auth_ctx, name).await?;
 

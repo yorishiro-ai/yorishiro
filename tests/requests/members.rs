@@ -327,7 +327,7 @@ async fn membership_mutations_reject_stale_admin_contexts() {
 }
 
 #[tokio::test]
-async fn role_preview_reports_lost_workspaces_without_keys() {
+async fn role_preview_does_not_infer_iam_changes_from_membership_labels() {
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_admin_key =
@@ -357,10 +357,7 @@ async fn role_preview_reports_lost_workspaces_without_keys() {
             assert_eq!(response.status_code(), StatusCode::OK);
             let preview = response.json::<serde_json::Value>();
             assert_eq!(preview["keys"], serde_json::json!([]));
-            assert_eq!(
-                preview["lost_workspace_ids"],
-                serde_json::json!([tenant.workspace_id])
-            );
+            assert_eq!(preview["lost_workspace_ids"], serde_json::json!([]));
         }
         super::fixtures::grant_workspace(
             &ctx,
@@ -384,7 +381,7 @@ async fn role_preview_reports_lost_workspaces_without_keys() {
 }
 
 #[tokio::test]
-async fn existing_keys_follow_current_role_without_widening_their_grant() {
+async fn membership_labels_preserve_credential_ceilings_and_removal_revokes_keys() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_admin_key =
@@ -427,9 +424,8 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         .unwrap();
         for (role, expected) in [
             (MembershipRole::Admin, "migration"),
-            (MembershipRole::Viewer, "read"),
-            (MembershipRole::Member, "write"),
-            (MembershipRole::Owner, "migration"),
+            (MembershipRole::Viewer, "migration"),
+            (MembershipRole::Member, "migration"),
         ] {
             super::fixtures::grant_workspace(
                 &ctx,
@@ -517,12 +513,7 @@ async fn existing_keys_follow_current_role_without_widening_their_grant() {
         assert_eq!(preview.status_code(), StatusCode::OK);
         let preview = preview.json::<serde_json::Value>();
         assert_eq!(preview["blocked_by_last_owner"], false);
-        assert!(
-            preview["lost_workspace_ids"]
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!(tenant.workspace_id))
-        );
+        assert_eq!(preview["lost_workspace_ids"], serde_json::json!([]));
         let revoked_ids = preview["revoked_api_key_ids"].as_array().unwrap();
         assert_eq!(revoked_ids.len(), 3);
         assert!(revoked_ids.contains(&serde_json::json!(tenant_key.id)));
@@ -950,17 +941,16 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
             assert_eq!(stored.workspace_id, None);
             api_keys::Entity::revoke(&ctx.db, created.id).await.unwrap();
         }
-        assert!(
-            api_keys::Entity::create_api_key(
-                &ctx.db,
-                tenant.workspace_id,
-                ApiKeyScope::Write,
-                Some(user.id),
-                false
-            )
-            .await
-            .is_err()
-        );
+        let broad = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Write,
+            Some(user.id),
+            false,
+        )
+        .await
+        .unwrap();
+        api_keys::Entity::revoke(&ctx.db, broad.id).await.unwrap();
         let barrier = tokio::sync::Barrier::new(2);
         let issue = async {
             barrier.wait().await;

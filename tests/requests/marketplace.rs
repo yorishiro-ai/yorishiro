@@ -128,6 +128,24 @@ async fn the_marketplace_answers_501_on_sqlite() {
         assert_eq!(listing.status_code(), StatusCode::NOT_IMPLEMENTED);
         let body: serde_json::Value = listing.json();
         assert_eq!(body["error"]["code"], "backend_unsupported");
+        let session = super::mcp::initialize(&request).await;
+        let response = super::mcp::mcp_call(
+            &request,
+            &session,
+            &owner.api_key,
+            2,
+            "tools/call",
+            serde_json::json!({"name": "list_marketplace", "arguments": {}}),
+        )
+        .await;
+        assert_eq!(response["result"]["isError"], true);
+        assert_eq!(response["result"]["structuredContent"], body);
+        assert!(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("requires PostgreSQL")
+        );
     })
     .await;
 }
@@ -146,6 +164,7 @@ async fn publish_list_fork_and_review_round_trip() {
             super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
 
         // Publishing a version of a template that doesn't exist must 404.
+        let session = super::mcp::initialize(&request).await;
         let draft = request
             .post("/api/marketplace/00000000-0000-0000-0000-000000000000/versions")
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
@@ -227,6 +246,19 @@ async fn publish_list_fork_and_review_round_trip() {
             request.put(&format!("/api/marketplace/{template_id}/visibility"))
                 .add_header("Authorization", format!("Bearer {delegated_key}"))
                 .json(&json!({"visibility":"community"})).await.assert_status(StatusCode::FORBIDDEN);
+            for (index, (name, arguments)) in [
+                ("list_marketplace", json!({})),
+                ("list_marketplace_versions", json!({"template_id":template_id})),
+                ("list_marketplace_reviews", json!({"template_id":template_id})),
+                ("publish_marketplace_version", json!({"template_id":template_id,"definition":note_definition()})),
+                ("submit_marketplace_review", json!({"template_id":template_id,"rating":5})),
+                ("fork_marketplace_template", json!({"template_id":template_id})),
+                ("set_marketplace_visibility", json!({"template_id":template_id,"visibility":"community"})),
+            ].into_iter().enumerate() {
+                let response = super::mcp::mcp_call(&request, &session, &delegated_key, index as i64 + 10,
+                    "tools/call", json!({"name":name,"arguments":arguments})).await;
+                assert_eq!(response["result"]["structuredContent"]["error"]["code"], "scope_insufficient", "{name}: {response}");
+            }
         }
         request.put(&format!("/api/iam/policies/{policy_id}"))
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
@@ -367,6 +399,17 @@ async fn publish_list_fork_and_review_round_trip() {
                 .collect::<Vec<_>>(),
             vec![Some("stable"), Some("pre"), Some("stable"), Some("draft")]
         );
+        for (index, (name, path, arguments)) in [
+            ("list_marketplace", "/api/marketplace".to_owned(), json!({})),
+            ("list_marketplace_versions", format!("/api/marketplace/{template_id}/versions"), json!({"template_id":template_id})),
+            ("list_marketplace_reviews", format!("/api/marketplace/{template_id}/reviews"), json!({"template_id":template_id})),
+        ].into_iter().enumerate() {
+            let rest: serde_json::Value = request.get(&path)
+                .add_header("Authorization", format!("Bearer {}", owner.api_key)).await.json();
+            let mcp = super::mcp::mcp_call(&request, &session, &owner.api_key, index as i64 + 30,
+                "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(super::mcp::tool_result_json(&mcp), rest, "{name}");
+        }
 
         // A second tenant forks it.
         let mut forker = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

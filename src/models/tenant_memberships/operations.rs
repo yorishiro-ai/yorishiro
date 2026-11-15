@@ -279,10 +279,49 @@ pub async fn create_tenant_user_member(
     Ok(user)
 }
 
-/// Resets a tenant user's password as a current administrator.
+/// Creates a tenant user after checking the caller's IAM permission.
 ///
 /// # Errors
-/// Rejects stale credentials; only an owner may reset an administrator's password.
+/// Rejects unauthorized credentials, owner role, invalid credentials and duplicate names.
+pub(crate) async fn create_tenant_user_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    input: &crate::dtos::members::CreateTenantUserRequest,
+) -> Result<MembershipRecord, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        ApiKeyScope::Read,
+        Action::TenantUserCreate,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    let user = create_tenant_user_member(
+        &txn,
+        actor.tenant_id,
+        &input.user_name,
+        &input.password,
+        input.display_name.as_deref(),
+        input.role,
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok(MembershipRecord {
+        user_id: user.id,
+        email: None,
+        user_name: user.user_name,
+        display_name: user.display_name,
+        role: input.role,
+    })
+}
+
+/// Resets a tenant user's password with IAM authorization.
+///
+/// # Errors
+/// Rejects unauthorized credentials, root recovery and users outside the tenant.
 pub async fn reset_tenant_user_password(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -352,7 +391,7 @@ async fn update_member_access_on(
         });
     }
     add_member_in_transaction(txn, tenant_id, user_id, role).await?;
-    key_access(txn, tenant_id, user_id, role).await
+    key_access(txn, tenant_id, user_id).await
 }
 
 /// Previews a role change without updating membership or stored grants.
@@ -395,28 +434,9 @@ pub async fn preview_role_change(
     } else {
         false
     };
-    let keys = key_access(&txn, actor.tenant_id, user_id, role).await?;
-    let mut lost_workspace_ids = Vec::new();
-    let candidates = crate::models::tenancy::list_workspaces_for_user(&txn, user_id).await?;
-    use crate::models::_entities::workspace_workspaces;
-    let workspace_ids = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(actor.tenant_id))
-        .filter(workspace_workspaces::Column::Id.is_in(candidates.into_iter().map(|w| w.id)))
-        .select_only()
-        .column(workspace_workspaces::Column::Id)
-        .into_tuple::<Uuid>()
-        .all(&txn)
-        .await
-        .internal()?;
-    for workspace_id in workspace_ids {
-        if crate::models::access::workspace_access_for_role(&txn, workspace_id, user_id, role)
-            .await?
-            .is_none()
-        {
-            lost_workspace_ids.push(workspace_id);
-        }
-    }
-    lost_workspace_ids.sort_unstable();
+    let keys = key_access(&txn, actor.tenant_id, user_id).await?;
+    // Membership labels do not change IAM grants or credential ceilings.
+    let lost_workspace_ids = Vec::new();
     txn.rollback().await.internal()?;
     Ok(super::MembershipRolePreview {
         user_id,
@@ -432,7 +452,6 @@ async fn key_access(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
-    role: MembershipRole,
 ) -> Result<Vec<super::MembershipKeyAccess>, YorishiroError> {
     use crate::models::_entities::api_keys;
     let keys = api_keys::Entity::find()
@@ -452,13 +471,7 @@ async fn key_access(
     for key in keys {
         let stored_scope = crate::models::api_keys::ApiKeyScope::from_db_str(&key.scope)
             .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown api key scope")))?;
-        let effective_scope = if let Some(workspace_id) = key.workspace_id {
-            crate::models::access::workspace_access_for_role(txn, workspace_id, user_id, role)
-                .await?
-                .map(|access| stored_scope.min(access.max_scope))
-        } else {
-            Some(crate::models::access::effective_scope(stored_scope, role))
-        };
+        let effective_scope = Some(stored_scope);
         access.push(super::MembershipKeyAccess {
             api_key_id: key.id,
             stored_scope,

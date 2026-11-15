@@ -41,6 +41,9 @@ use crate::models::api_keys::{ApiKeyScope, AuthContext};
 
 pub trait McpToolPolicy: Send + Sync {
     fn allows(&self, ctx: &AppContext, name: &str) -> bool;
+    fn read_only(&self, name: &str) -> bool {
+        read_only_tool(name)
+    }
 }
 
 /// The policy a deployment gets when it does not choose one: every registered tool is listed and callable.
@@ -215,6 +218,14 @@ impl ServerHandler for YorishiroMcpServer {
         if !self.tool_policy.allows(&self.ctx, request.name.as_ref()) {
             return Err(ErrorData::invalid_params("tool not found", None));
         }
+        let maintenance = match crate::models::system_maintenance::get(&self.ctx.db).await {
+            Ok(state) => state,
+            Err(error) => return Ok(err_to_tool_result(error).into()),
+        };
+        if let Some(error) = maintenance.refusal(!self.tool_policy.read_only(request.name.as_ref()))
+        {
+            return Ok(err_to_tool_result(error).into());
+        }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
     }
@@ -255,6 +266,55 @@ impl ServerHandler for YorishiroMcpServer {
              Tenant-scoped keys require `X-Workspace-Id` for workspace operations; tenant operations do not select a workspace.",
         )
     }
+}
+
+// Unknown tools fail closed in read-only mode; scope alone cannot distinguish reads from IAM writes.
+pub(crate) fn read_only_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "capabilities"
+            | "whoami"
+            | "discover_workspaces"
+            | "export_jsonl"
+            | "get_active_schema"
+            | "get_current_user"
+            | "get_entity"
+            | "get_entity_drift"
+            | "get_entity_type_json_schema"
+            | "get_iam_group"
+            | "get_iam_policy"
+            | "get_relation"
+            | "get_schema_by_id"
+            | "get_template"
+            | "get_template_library_item"
+            | "get_tenant"
+            | "get_workspace"
+            | "import_job_status"
+            | "migration_job_status"
+            | "migration_dry_run"
+            | "list_api_keys"
+            | "list_audit_log"
+            | "list_entities"
+            | "list_iam_audit"
+            | "list_iam_group_members"
+            | "list_iam_group_policies"
+            | "list_iam_groups"
+            | "list_iam_policies"
+            | "list_iam_user_policies"
+            | "list_invites"
+            | "list_members"
+            | "list_relations"
+            | "list_schemas"
+            | "list_template_library"
+            | "list_templates"
+            | "list_workspace_members"
+            | "list_workspaces"
+            | "preview_member_removal"
+            | "preview_member_role_change"
+            | "recall_context"
+            | "search_entities"
+            | "tenant_retirement_inventory"
+    )
 }
 
 /// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
@@ -469,36 +529,28 @@ fn scope_denied(
 /// Converts a business-logic error into a tool call result (`is_error: true`).
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
-    let structured = match &err {
-        YorishiroError::ScopeInsufficient { message, hint } => Some(serde_json::json!({
-            "error": { "code": "scope_insufficient", "message": message, "hint": hint }
-        })),
-        _ => None,
-    };
-    let message = match err {
-        YorishiroError::Internal(err) => crate::error::report_internal(&err).to_string(),
-        YorishiroError::ValidationFailed {
-            message,
-            details,
-            hint,
-        } => {
-            let mut msg = message;
-            if !details.is_empty() {
-                let detail_lines: Vec<String> = details
-                    .iter()
-                    .map(|d| format!("{}: {}", d.field, d.problem))
-                    .collect();
-                msg = format!("{msg}\n  {}", detail_lines.join("\n  "));
+    let (_, body) = err.into_http_parts();
+    let mut message = body["error"]["message"]
+        .as_str()
+        .unwrap_or("request failed")
+        .to_owned();
+    if let Some(details) = body["error"]["details"].as_array() {
+        for detail in details {
+            if let (Some(field), Some(problem)) =
+                (detail["field"].as_str(), detail["problem"].as_str())
+            {
+                message.push_str(&format!("\n  {field}: {problem}"));
             }
-            if !hint.is_empty() {
-                msg = format!("{msg}\nhint: {hint}");
-            }
-            msg
         }
-        other => other.to_string(),
-    };
+    }
+    if let Some(hint) = body["error"]["hint"]
+        .as_str()
+        .filter(|hint| !hint.is_empty())
+    {
+        message.push_str(&format!("\nhint: {hint}"));
+    }
     let mut result = CallToolResult::error(vec![ContentBlock::text(message)]);
-    result.structured_content = structured;
+    result.structured_content = Some(body);
     result
 }
 

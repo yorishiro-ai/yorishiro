@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
-use crate::models::tenant_memberships::{self, MembershipRole};
+use crate::models::tenant_memberships;
 
 /// Keeps the identity authorization fence alive until the workspace operation finishes.
 pub(crate) async fn authorize_workspace_action(
@@ -282,11 +282,6 @@ pub async fn capabilities(
         tenant_root: identity.tenant_root,
         credential_scope: identity.stored_scope,
     })
-}
-
-/// A role can restrict a stored grant, never widen it.
-pub fn effective_scope(stored: ApiKeyScope, role: MembershipRole) -> ApiKeyScope {
-    stored.min(role.max_scope())
 }
 
 /// Workspace authority and its provenance, independently of any credential's stored scope.

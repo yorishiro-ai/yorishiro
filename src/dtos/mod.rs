@@ -9,7 +9,6 @@ pub mod relations;
 pub(crate) mod schemas;
 pub(crate) mod search;
 pub mod setup;
-pub(crate) mod system;
 pub(crate) mod template_library;
 pub(crate) mod tenants;
 pub(crate) mod users;

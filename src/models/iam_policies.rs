@@ -198,7 +198,7 @@ impl Model {
     }
 
     pub(crate) async fn for_user(
-        txn: &sea_orm::DatabaseTransaction,
+        txn: &impl ConnectionTrait,
         tenant_id: Uuid,
         user_id: Uuid,
     ) -> Result<Vec<Self>, YorishiroError> {

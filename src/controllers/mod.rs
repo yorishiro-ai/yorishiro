@@ -18,7 +18,6 @@ pub mod schemas;
 pub mod search;
 pub(crate) mod setup;
 pub mod swagger;
-pub(crate) mod system;
 pub mod template_library;
 pub(crate) mod users;
 pub(crate) mod whoami;

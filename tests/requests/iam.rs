@@ -416,6 +416,11 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 "list_workspaces", serde_json::json!({})).await;
             let mcp_inventory: serde_json::Value = serde_json::from_str(mcp_inventory["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
             assert_eq!(inventory, mcp_inventory);
+            let discovered = iam_mcp_call(&request, &session, &user_key.plaintext,
+                "discover_workspaces", serde_json::json!({})).await;
+            let discovered: serde_json::Value = serde_json::from_str(discovered["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(discovered.as_array().unwrap().len(), 1);
+            assert_eq!(discovered[0]["workspace_id"], workspace_id.to_string());
             request.get("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .await.assert_status(StatusCode::FORBIDDEN);

@@ -86,7 +86,7 @@ pub(crate) struct MemberAccessResponse {
     pub(crate) keys: Vec<crate::models::tenant_memberships::MembershipKeyAccess>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct CreateTenantUserRequest {

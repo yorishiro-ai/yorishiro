@@ -87,10 +87,10 @@ pub async fn issue_login_key(
     {
         return Err(YorishiroError::Unauthenticated);
     }
-    let role = crate::models::tenant_memberships::get_membership_role(&txn, tenant_id, user_id)
+    crate::models::tenant_memberships::get_membership_role(&txn, tenant_id, user_id)
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
-    let scope = role.max_scope();
+    let scope = crate::models::api_keys::ApiKeyScope::Migration;
     let key =
         crate::models::api_keys::Entity::create_login_key(&txn, tenant_id, user_id, scope).await?;
     txn.commit().await.internal()?;
@@ -185,7 +185,7 @@ pub(crate) async fn setup_first_account(
     })
 }
 
-/// Every workspace `user_id` can log into through inherited authority or a direct grant.
+/// Every workspace `user_id` can discover through IAM workspace-get permission.
 /// Used by sign-in to list explicit workspace choices.
 ///
 /// Deliberately unpaginated: sign-in must show every reachable workspace.
@@ -280,8 +280,7 @@ async fn login_options(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
 ) -> Result<(Vec<LoginMembership>, Vec<LoginWorkspace>), YorishiroError> {
-    use crate::models::_entities::{tenant_tenants, workspace_memberships};
-    use crate::models::tenant_memberships::MembershipRole;
+    use crate::models::_entities::tenant_tenants;
     let rows = tenant_memberships::Entity::find()
         .filter(tenant_memberships::Column::UserId.eq(user_id))
         .find_also_related(tenant_tenants::Entity)
@@ -319,26 +318,46 @@ async fn login_options(
             .iter()
             .map(|membership| (membership.tenant_id, &membership.tenant_name))
             .collect();
-        let inherited: std::collections::BTreeSet<_> = memberships
-            .iter()
-            .filter(|membership| {
-                matches!(
-                    membership.role,
-                    MembershipRole::Owner | MembershipRole::Admin
+        let mut permissions = std::collections::BTreeMap::new();
+        for membership in &memberships {
+            let root = crate::models::iam_tenant_roots::Model::contains(
+                conn,
+                membership.tenant_id,
+                user_id,
+            )
+            .await?;
+            let mut policies = Vec::new();
+            if !root {
+                for record in crate::models::iam_policies::Model::for_user(
+                    conn,
+                    membership.tenant_id,
+                    user_id,
                 )
-            })
-            .map(|membership| membership.tenant_id)
-            .collect();
-        let grants: std::collections::BTreeSet<_> = workspace_memberships::Entity::find()
-            .filter(workspace_memberships::Column::UserId.eq(user_id))
-            .all(conn)
-            .await
-            .internal()?
-            .into_iter()
-            .map(|grant| grant.workspace_id)
-            .collect();
+                .await?
+                {
+                    policies.push(crate::models::iam_policy::Policy::parse(
+                        &serde_json::to_string(&record.document).internal()?,
+                        membership.tenant_id,
+                        |tenant, _| tenant == membership.tenant_id,
+                    )?);
+                }
+            }
+            permissions.insert(membership.tenant_id, (root, policies));
+        }
         for workspace in workspaces {
-            if !inherited.contains(&workspace.tenant_id) && !grants.contains(&workspace.id) {
+            let (root, policies) = &permissions[&workspace.tenant_id];
+            if !root
+                && !crate::models::iam_policy::Policy::allows(
+                    policies,
+                    workspace.tenant_id,
+                    crate::models::iam_policy::Action::WorkspaceGet,
+                    crate::models::iam_policy::Resource::Workspace {
+                        tenant_id: workspace.tenant_id,
+                        workspace_id: workspace.id,
+                    },
+                    |tenant, id| tenant == workspace.tenant_id && id == workspace.id,
+                )
+            {
                 continue;
             }
             let tenant_name = names.get(&workspace.tenant_id).ok_or_else(|| {

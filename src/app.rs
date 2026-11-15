@@ -185,10 +185,6 @@ impl RouteMounts {
             controllers::setup::openapi_docs()
         );
         mount!(
-            controllers::system::routes(),
-            controllers::system::openapi_docs()
-        );
-        mount!(
             controllers::template_library::routes(),
             controllers::template_library::openapi_docs()
         );

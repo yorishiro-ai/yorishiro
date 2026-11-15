@@ -806,6 +806,8 @@ def mcp_suite(app):
     expected = set(reviewed["ce"])
     if app.args.edition == "ee":
         expected.update(reviewed["ee_additions"])
+        if not app.env.get("YORISHIRO_LICENSE_KEY"):
+            expected.difference_update(reviewed["licensed"])
     require(names == expected, "MCP public-tool inventory changed; review scenario ownership and gaps")
     app.discovered_tools = sorted(names)
     require({"list_schemas", "create_schema", "get_entity", "create_entity", "delete_entity"} <= names,
@@ -851,6 +853,9 @@ def cli_suite(app):
         out, err = app.cli(*arguments, ok=False)
         require(out.strip() or err.strip(), "CLI failure produced no diagnostic")
     require("mode=off" in app.task("maintenance_status"), "initial maintenance state is not off")
+    for method, body in (("GET", None), ("PUT", {"mode": "full-lock"})):
+        status, _, _ = app.http(method, "/api/system/maintenance", body, key=app.key)
+        require(status == 404, "maintenance must only be controlled through the CLI")
     app.task("maintenance", mode="read_only", retry_after=7, reason="blackbox-maintenance")
     try:
         state = app.task("maintenance_status")
@@ -858,9 +863,20 @@ def cli_suite(app):
                 and "blackbox-maintenance" in state, "maintenance task did not persist its arguments")
         app.rest("POST", "/api/entities", {}, status=423)
         app.rest("GET", "/api/schemas")
+        reader = MCP(app, app.key)
+        reader.call("list_schemas")
+        reader.call("create_schema", {"definition": SCHEMA}, error=True)
+        MCP(app, app.tenant_key).call("update_tenant", {"name": "maintenance-denied"}, error=True)
     finally:
         app.task("maintenance", mode="off")
     require("mode=off" in app.task("maintenance_status"), "maintenance task did not restore service")
+    app.task("maintenance", mode="full_lock", retry_after=7)
+    try:
+        app.rest("GET", "/api/schemas", status=503)
+        app.rest("PUT", "/api/system/maintenance", {"mode": "off"}, status=503)
+    finally:
+        app.task("maintenance", mode="off")
+    app.rest("GET", "/api/schemas")
 
 
 def root_recovery(app):
@@ -1395,9 +1411,9 @@ def membership_retirement_lifecycle(app):
             "rejected last-owner change altered membership")
     password = "blackbox-successor-password"
     app.secrets.append(password)
-    account = app.rest("POST", "/api/members/users", {
+    account = client.call("create_tenant_user", {
         "user_name": "successor", "password": password, "role": "admin",
-    }, status=201, key=owner)
+    })
     user_id = account["user_id"]
     client.call("grant_workspace_member", {
         "workspace_id": app.workspace, "user_id": user_id, "role": "viewer",
@@ -1409,6 +1425,14 @@ def membership_retirement_lifecycle(app):
     app.secrets.append(member_login)
     key = member_login
     member = MCP(app, key)
+    client.call("reset_tenant_user_password", {"user_id": user_id, "password": password})
+    app.rest("GET", "/api/whoami", key=key, status=401)
+    login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
+                     key="", headers={"X-Tenant-Id": app.tenant})
+    key = login["api_key"]
+    app.secrets.append(key)
+    member = MCP(app, key)
+    client.call("reset_tenant_user_password", {"user_id": owner_id, "password": password}, error=True)
     before = client.call("list_members")
     require(before == app.rest("GET", "/api/members", key=owner), "membership lists differ")
     preview = client.call("preview_member_role_change", {"user_id": user_id, "role": "viewer"})

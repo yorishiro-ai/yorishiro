@@ -27,6 +27,14 @@ pub(crate) struct MemberArgs {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct ResetTenantUserPasswordArgs {
+    pub user_id: Uuid,
+    /// At least 12 characters. Revokes every credential issued to the user.
+    pub password: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct TransferOwnershipArgs {
     pub successor_user_id: Uuid,
 }
@@ -41,8 +49,66 @@ pub(crate) struct SetMemberRoleArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_members)]
 impl YorishiroMcpServer {
     #[tool(
+        meta = super::scope_requirement(ApiKeyScope::Read),
+        description = "Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)"
+    )]
+    pub(crate) async fn create_tenant_user(
+        &self,
+        Parameters(input): Parameters<crate::dtos::members::CreateTenantUserRequest>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("create_tenant_user")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match tenant_memberships::create_tenant_user_as(&self.app_context().db, &auth, &input).await
+        {
+            Ok(member) => ok_json(member),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(
+        meta = super::scope_requirement(ApiKeyScope::Read),
+        description = "Reset a tenant user's password and revoke all their credentials; tenant root recovery is CLI-only (requires read scope and tenant_user_password_reset IAM permission with a tenant-scoped credential)"
+    )]
+    pub(crate) async fn reset_tenant_user_password(
+        &self,
+        Parameters(input): Parameters<ResetTenantUserPasswordArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("reset_tenant_user_password")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match tenant_memberships::reset_tenant_user_password(
+            &self.app_context().db,
+            &auth,
+            input.user_id,
+            &input.password,
+        )
+        .await
+        {
+            Ok(()) => ok_json(serde_json::json!({"reset": true})),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential; Owner changes require Owner)"
+        description = "Change an existing tenant member's legacy role, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn set_member_role(
         &self,
@@ -161,7 +227,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential; last Owner is protected)"
+        description = "Remove a current-tenant membership and revoke attributed tenant credentials; a tenant user's account is deleted with its membership, and tenant root removal is rejected (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn remove_member(
         &self,

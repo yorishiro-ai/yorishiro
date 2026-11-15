@@ -309,7 +309,7 @@ async fn list_templates_and_get_template_over_rest() {
 async fn create_schema_from_a_library_template_links_the_origin() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());
-        let TestTenant { api_key: key, .. } = TestTenant::create(
+        let tenant = TestTenant::create(
             &request,
             &ctx,
             TenantArgs {
@@ -318,10 +318,13 @@ async fn create_schema_from_a_library_template_links_the_origin() {
             },
         )
         .await;
+        let key = tenant.api_key;
+        let library_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         let response = request
             .post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("Authorization", format!("Bearer {library_key}"))
             .json(&serde_json::json!({
                 "name": name,
                 "definition": {
@@ -366,7 +369,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
 async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());
-        let TestTenant { api_key: key, .. } = TestTenant::create(
+        let tenant = TestTenant::create(
             &request,
             &ctx,
             TenantArgs {
@@ -375,10 +378,13 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
             },
         )
         .await;
+        let key = tenant.api_key;
+        let library_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         let response = request
             .post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("Authorization", format!("Bearer {library_key}"))
             .json(&serde_json::json!({
                 "name": name,
                 "definition": {

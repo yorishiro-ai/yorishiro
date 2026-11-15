@@ -106,7 +106,9 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
             },
         )
         .await;
-        let template = create_template(&request, &tenant.api_key, note_definition()).await;
+        let library_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let template = create_template(&request, &library_key, note_definition()).await;
         for _ in 0..2 {
             let txn = ctx.db.begin().await.unwrap();
             let workspace = yorishiro::models::tenancy::create_workspace(
@@ -172,7 +174,8 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             key_scope: ApiKeyScope::Schema,
             ..Default::default()
         }).await;
-        let template = create_template(&request, &setup.api_key, note_definition()).await;
+        let library_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let template = create_template(&request, &library_key, note_definition()).await;
 
         let create = request
             .post("/api/schemas")
@@ -233,7 +236,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
         for _ in 0..2 {
             request
                 .put(&format!("/api/template-library/{template}"))
-                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .add_header("Authorization", format!("Bearer {library_key}"))
                 .json(&json!({ "definition": updated_definition }))
                 .await
                 .assert_status(StatusCode::OK);
@@ -362,7 +365,8 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             },
         )
         .await;
-        let template = create_template(&request, &setup.api_key, note_definition()).await;
+        let library_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let template = create_template(&request, &library_key, note_definition()).await;
         let create = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -377,7 +381,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
 
         request
             .put(&format!("/api/template-library/{template}"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {library_key}"))
             .json(&json!({ "definition": {
                 "name": "library-note",
                 "entity_types": { "note": { "fields": {
@@ -425,7 +429,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         let publish_after_merge_waits = async {
         wait_for_lock(format!("{}:library-note", setup.workspace_id)).await;
         let update_request = request.clone();
-        let update_key = setup.api_key.clone();
+        let update_key = library_key.clone();
         let update = async move {
             update_request.put(&format!("/api/template-library/{template}"))
                 .add_header("Authorization", format!("Bearer {update_key}"))
@@ -481,7 +485,9 @@ async fn merging_a_conflicting_field_is_refused() {
                 "note": { "fields": { "priority": { "type": "string" } } }
             }
         });
-        let template = create_template(&request, &setup.api_key, base_def.clone()).await;
+        let library_key =
+            super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let template = create_template(&request, &library_key, base_def.clone()).await;
 
         let create = request
             .post("/api/schemas")
@@ -507,7 +513,7 @@ async fn merging_a_conflicting_field_is_refused() {
 
         request
             .put(&format!("/api/template-library/{template}"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {library_key}"))
             .json(&json!({ "definition": {
                         "name": "library-note",
                         "entity_types": {

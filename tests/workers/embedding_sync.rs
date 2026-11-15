@@ -45,7 +45,7 @@ mod conflict {
     use futures::FutureExt;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker};
-    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
     use tokio::sync::{Notify, Semaphore};
     use uuid::Uuid;
     use yorishiro::App;
@@ -1529,6 +1529,9 @@ mod conflict {
             )
             .await
             .expect("add update owner");
+            let txn = ctx.db.begin().await.unwrap();
+            crate::requests::fixtures::grant_iam_administrator(&txn, tenant_id, owner.id).await;
+            txn.commit().await.unwrap();
             let write_key = api_keys::Entity::create_api_key(
                 &ctx.db,
                 workspace_id,

@@ -9,7 +9,6 @@ use loco_rs::controller::Routes;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::dtos::members::{AddMemberRequest, MemberAccessResponse};
-use crate::error::ResultExt;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
 
@@ -166,37 +165,8 @@ async fn create_tenant_user(
     AuthContext(auth): AuthContext,
     Json(body): Json<crate::dtos::members::CreateTenantUserRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    crate::models::access::require_iam_action(
-        &txn,
-        &auth,
-        crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TenantUserCreate,
-        crate::models::iam_policy::Resource::Tenant {
-            tenant_id: auth.tenant_id,
-        },
-    )
-    .await?;
-    let user = tenant_memberships::create_tenant_user_member(
-        &txn,
-        auth.tenant_id,
-        &body.user_name,
-        &body.password,
-        body.display_name.as_deref(),
-        body.role,
-    )
-    .await?;
-    txn.commit().await.internal()?;
-    Ok((
-        StatusCode::CREATED,
-        Json(MembershipRecord {
-            user_id: user.id,
-            email: None,
-            user_name: user.user_name,
-            display_name: user.display_name,
-            role: body.role,
-        }),
-    ))
+    let member = tenant_memberships::create_tenant_user_as(&ctx.db, &auth, &body).await?;
+    Ok((StatusCode::CREATED, Json(member)))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/members/users/{user_id}/password", params(("user_id" = uuid::Uuid, Path)), request_body = crate::dtos::members::ResetTenantUserPasswordRequest, responses((status = 204, description = "Password replaced and the user's keys revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_password_reset"]))), tag = "community"))]

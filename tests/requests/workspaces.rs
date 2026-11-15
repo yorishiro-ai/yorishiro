@@ -412,11 +412,12 @@ async fn workspaces_endpoints_require_authentication() {
 }
 
 #[tokio::test]
-async fn workspace_administrators_manage_only_their_direct_grants() {
+async fn workspace_grant_management_requires_iam_and_respects_credential_binding() {
     use sea_orm::TransactionTrait;
     use yorishiro::models::workspace_memberships::WorkspaceRole;
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let administrator_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let local = user_users::create_user(
             &ctx.db,
             &format!("local-{}@example.com", uuid::Uuid::new_v4()),
@@ -461,6 +462,21 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             false,
         )
         .await;
+        request.put(&local_path)
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"role":"admin"}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {administrator_key}"))
+            .json(&serde_json::json!({"name":"workspace-grant-manager", "document":{"statements":[{
+                "effect":"allow", "actions":["workspace_get", "workspace_update"],
+                "resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]
+            }]}})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        request.put(&format!("/api/iam/users/{}/policies/{policy_id}", local.id))
+            .add_header("Authorization", format!("Bearer {administrator_key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
         let path = format!(
             "/api/workspaces/{}/members/{}",
             tenant.workspace_id, target.id
@@ -509,7 +525,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             .add_header("Authorization", format!("Bearer {}", service.plaintext))
             .json(&serde_json::json!({"role":"admin"}))
             .await
-            .assert_status(StatusCode::FORBIDDEN);
+            .assert_status(StatusCode::UNAUTHORIZED);
         request
             .delete(&format!(
                 "/api/workspaces/{}/members/{}",
@@ -620,7 +636,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({"role":"admin"}))
             .await
-            .assert_status(StatusCode::FORBIDDEN);
+            .assert_status(StatusCode::NO_CONTENT);
     })
     .await;
 }

@@ -174,36 +174,17 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    /// Applies current membership without widening the key's stored grant.
+    /// Requires current membership without changing the credential's stored ceiling.
     /// Requests already authenticated may finish; later authentications read the committed membership.
     pub(crate) async fn with_current_membership(
-        mut self,
+        self,
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
         crate::models::tenant_tenants::Model::require_active(conn, self.tenant_id).await?;
         if let Some(user_id) = self.user_id {
-            let role = crate::models::tenant_memberships::get_membership_role(
-                conn,
-                self.tenant_id,
-                user_id,
-            )
-            .await?
-            .ok_or(YorishiroError::Unauthenticated)?;
-            self.scope = crate::models::access::effective_scope(self.scope, role);
-            if let Some(workspace_id) = self.workspace_id {
-                let access = crate::models::access::workspace_access(
-                    conn,
-                    self.tenant_id,
-                    workspace_id,
-                    user_id,
-                )
+            crate::models::tenant_memberships::get_membership_role(conn, self.tenant_id, user_id)
                 .await?
-                .ok_or_else(|| YorishiroError::ScopeInsufficient {
-                    message: "this account has no access to the selected workspace".into(),
-                    hint: "ask a tenant administrator for a workspace grant".into(),
-                })?;
-                self.scope = self.scope.min(access.max_scope);
-            }
+                .ok_or(YorishiroError::Unauthenticated)?;
         }
         Ok(self)
     }

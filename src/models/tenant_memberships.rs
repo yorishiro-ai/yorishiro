@@ -7,6 +7,7 @@ use crate::models::api_keys::ApiKeyScope;
 
 mod operations;
 
+pub(crate) use operations::create_tenant_user_as;
 pub use operations::preview_removal;
 pub use operations::preview_role_change;
 pub use operations::transfer_ownership;

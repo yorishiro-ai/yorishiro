@@ -158,6 +158,31 @@ async fn gated_routes_are_served_with_a_licence() {
 async fn missing_licence_state_closes_the_gate_again() {
     boot_request::<App, _, _>(|request, ctx| async move {
         require_licence(&ctx);
+        let session = super::mcp::initialize(&request).await;
+        let listed = super::mcp::mcp_call(
+            &request,
+            &session,
+            "",
+            1,
+            "tools/list",
+            serde_json::json!({}),
+        )
+        .await;
+        let licensed_tools: Vec<_> =
+            serde_json::from_str::<serde_json::Value>(include_str!("../blackbox/tools.json"))
+                .unwrap()["licensed"]
+                .as_array()
+                .unwrap()
+                .clone();
+        for name in &licensed_tools {
+            assert!(
+                listed["result"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == *name)
+            );
+        }
         let licensed = request.get(GATED[0]).await.status_code();
         // 401 here rather than 200: the request carries no API key, and the point is only that the
         // *licence* is not what rejects it. Asserting the exact code rather than `!= 404` matters:
@@ -179,6 +204,37 @@ async fn missing_licence_state_closes_the_gate_again() {
             unavailable, 404,
             "missing licence state must close the gate without a restart; got {unavailable}"
         );
+        let listed = super::mcp::mcp_call(
+            &request,
+            &session,
+            "",
+            2,
+            "tools/list",
+            serde_json::json!({}),
+        )
+        .await;
+        for (index, name) in licensed_tools.iter().enumerate() {
+            assert!(
+                !listed["result"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == *name)
+            );
+            let rejected = super::mcp::mcp_call(
+                &request,
+                &session,
+                "",
+                index as i64 + 3,
+                "tools/call",
+                serde_json::json!({"name":name,"arguments":{}}),
+            )
+            .await;
+            assert!(
+                rejected.get("error").is_some(),
+                "hidden tool must not dispatch: {name}"
+            );
+        }
     })
     .await;
 }

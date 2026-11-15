@@ -7,6 +7,7 @@ import re
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -288,7 +289,10 @@ class ArgumentTests(unittest.TestCase):
                                  (value, "ysr_delegated"))
                 rest.assert_called_once_with("POST", "/api/api-keys", {
                     "name": "blackbox-delegated", "scope": "read", "audit": True,
+                    "expires_at": rest.call_args.args[2]["expires_at"],
                 }, status=201, key="ysr_member", headers={"X-Workspace-Id": value})
+                self.assertGreater(datetime.fromisoformat(rest.call_args.args[2]["expires_at"]),
+                                   datetime.now(UTC))
             self.assertIn("ysr_delegated", app.secrets)
             app.close()
 

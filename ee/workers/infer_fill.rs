@@ -503,6 +503,17 @@ pub async fn enqueue_infer_fill(
         crate::models::iam_policy::Action::InferenceCreate,
     )
     .await?;
+    if workspace_llm_keys::get(&txn, workspace_id)
+        .await
+        .internal()?
+        .is_none()
+    {
+        return Err(crate::YorishiroError::ValidationFailed {
+            message: "this workspace has no LLM credentials configured".into(),
+            details: vec![],
+            hint: "configure the workspace LLM provider before requesting inference".into(),
+        });
+    }
     inference_jobs::create(&txn, job_id, workspace_id, &schema_name)
         .await
         .internal()?;

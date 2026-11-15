@@ -212,7 +212,7 @@ Input schema:
     },
     "tenant_scoped": {
       "default": false,
-      "description": "Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.\nRequires tenant Admin or Owner and a tenant-scoped issuing credential.",
+      "description": "Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.\nRequires CredentialCreate IAM permission and a tenant-scoped issuing credential.",
       "type": "boolean"
     }
   },
@@ -345,7 +345,7 @@ Input schema:
 
 ### `create_relation`
 
-Create a relation between two entities (requires write scope). Properties cannot be edited in place; to change them, delete the relation and recreate it. To retire a relation without losing the record that it existed, use set_relation_status instead of deleting.
+Create a relation between two entities (requires write scope and relation_create IAM permission). Properties cannot be edited in place; to change them, delete the relation and recreate it. To retire a relation without losing the record that it existed, use set_relation_status instead of deleting.
 
 Input schema:
 
@@ -380,7 +380,7 @@ Input schema:
 
 ### `create_schema`
 
-Register a new schema, or add a new version to an existing schema (requires schema scope)
+Register a new schema, or add a new version to an existing schema (requires schema scope and schema_create IAM permission)
 
 Input schema:
 
@@ -447,6 +447,57 @@ Input schema:
   "required": [
     "name",
     "definition"
+  ],
+  "type": "object"
+}
+```
+
+### `create_tenant_user`
+
+Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "MembershipRole": {
+      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "enum": [
+        "owner",
+        "admin",
+        "member",
+        "viewer"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "display_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "password": {
+      "description": "At least 12 characters.",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/MembershipRole",
+      "description": "Admin, member or viewer; a tenant user cannot own the tenant."
+    },
+    "user_name": {
+      "description": "Unique within the tenant: 1 to 64 letters, digits, `.`, `_` or `-`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_name",
+    "password",
+    "role"
   ],
   "type": "object"
 }
@@ -740,7 +791,7 @@ Input schema:
 
 ### `export_jsonl`
 
-Export schemas, entities, and relations in the selected workspace as newline-delimited JSON (requires read scope); one {"kind":"schema"|"entity"|"relation","record":{...}} object per line, the same format import_jsonl reads back. Limited to 8 MiB and 10,000 records; larger workspaces must use paginated list APIs.
+Export schemas, entities, and relations in the selected workspace as newline-delimited JSON (requires read scope and export IAM permission); one {"kind":"schema"|"entity"|"relation","record":{...}} object per line, the same format import_jsonl reads back. Limited to 8 MiB and 10,000 records; larger workspaces must use paginated list APIs.
 
 Input schema:
 
@@ -858,7 +909,7 @@ Input schema:
 
 ### `get_entity_drift`
 
-Report how an entity stands against the active version of its schema (requires read scope). Entities are migrated lazily, so one written against an older version can still contain newer fields. Reports active fields absent from stored data, including nested fields in existing objects. Present nulls and type errors are not missing-value diagnostics.
+Report how an entity stands against the active version of its schema (requires read scope and entity_drift_get IAM permission). Entities are migrated lazily, so one written against an older version can still contain newer fields. Reports active fields absent from stored data, including nested fields in existing objects. Present nulls and type errors are not missing-value diagnostics.
 
 Input schema:
 
@@ -880,7 +931,7 @@ Input schema:
 
 ### `get_entity_type_json_schema`
 
-Get a specific entity_type within the active schema as a JSON Schema (requires read scope). Use this to let an agent learn field types, required fields, enums, etc. ahead of time.
+Get a specific entity_type within the active schema as a JSON Schema (requires read scope and schema_get IAM permission). Use this to let an agent learn field types, required fields, enums, etc. ahead of time.
 
 Input schema:
 
@@ -1576,7 +1627,7 @@ Input schema:
 
 ### `list_schemas`
 
-List summaries of all schemas registered for the workspace (all versions, including archived). Use this to discover what schemas exist (requires read scope)
+List summaries of all schemas registered for the workspace (all versions, including archived). Use this to discover what schemas exist (requires read scope and schema_list IAM permission)
 
 Input schema:
 
@@ -1687,7 +1738,7 @@ Input schema:
 
 ### `migration_dry_run`
 
-Count what migrating a schema's entities to its active version would face, without doing it (requires read scope). Reports how many are current, how many are behind without missing required fields, and how many lack a field the active version requires: the last being the work a migration would have to fill in. Inspects stored data, not only schema definitions; this is not full active-schema validation.
+Count what migrating a schema's entities to its active version would face, without doing it (requires read scope and migration_dry_run IAM permission). Reports how many are current, how many are behind without missing required fields, and how many lack a field the active version requires: the last being the work a migration would have to fill in. Inspects stored data, not only schema definitions; this is not full active-schema validation.
 
 Input schema:
 
@@ -1906,7 +1957,7 @@ Input schema:
 
 ### `remove_member`
 
-Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential; last Owner is protected)
+Remove a current-tenant membership and revoke attributed tenant credentials; a tenant user's account is deleted with its membership, and tenant root removal is rejected (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -1922,6 +1973,34 @@ Input schema:
   },
   "required": [
     "user_id"
+  ],
+  "type": "object"
+}
+```
+
+### `reset_tenant_user_password`
+
+Reset a tenant user's password and revoke all their credentials; tenant root recovery is CLI-only (requires read scope and tenant_user_password_reset IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "password": {
+      "description": "At least 12 characters. Revokes every credential issued to the user.",
+      "type": "string"
+    },
+    "user_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "password"
   ],
   "type": "object"
 }
@@ -2065,7 +2144,7 @@ Input schema:
 
 ### `set_member_role`
 
-Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential; Owner changes require Owner)
+Change an existing tenant member's legacy role, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -2104,7 +2183,7 @@ Input schema:
 
 ### `set_relation_status`
 
-Set a relation's status to active, deprecated or archived (requires write scope). Retiring a relation this way keeps the record that it existed, which delete_relation does not; graph traversal follows active relations only.
+Set a relation's status to active, deprecated or archived (requires write scope and relation_update IAM permission). Retiring a relation this way keeps the record that it existed, which delete_relation does not; graph traversal follows active relations only.
 
 Input schema:
 
@@ -2440,6 +2519,29 @@ Input schema:
 
 ## Enterprise-only tools
 
+### `confirm_inference_proposals`
+
+Queue application of reviewed inference proposals; poll get_inference_confirmation with the returned job_id (requires an active licence, schema scope and inference_confirm IAM permission on the selected workspace)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `create_schema_fork`
 
 Create a workspace-owned fork of a same-tenant source schema (requires schema scope and schema_fork_create IAM permission); validates source identity and workspace cycles without modifying the source
@@ -2491,6 +2593,59 @@ Input schema:
 }
 ```
 
+### `discard_inference_proposals`
+
+Discard inference proposals without applying them (requires an active licence, schema scope and inference_discard IAM permission on the selected workspace)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
+  "type": "object"
+}
+```
+
+### `fork_marketplace_template`
+
+Fork a published marketplace version into the current tenant's library (requires an active licence, read scope and marketplace_fork IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "template_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "version": {
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "template_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `get_embedding_provider`
 
 Read the selected workspace's embedding provider metadata without its API key (requires read scope and embedding_provider_get IAM permission); returns not found when the deployment default is used
@@ -2500,6 +2655,52 @@ Input schema:
 ```json
 {
   "properties": {},
+  "type": "object"
+}
+```
+
+### `get_inference_confirmation`
+
+Poll durable inference confirmation results (requires an active licence, schema scope and inference_confirmation_get IAM permission on the selected workspace)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
+  "type": "object"
+}
+```
+
+### `get_inference_job`
+
+Poll an inference job in the selected workspace (requires an active licence, read scope and inference_job_get IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
   "type": "object"
 }
 ```
@@ -2566,6 +2767,28 @@ Input schema:
 }
 ```
 
+### `infer_fill`
+
+Queue inference for missing fields in the selected workspace; poll get_inference_job, then review proposals before confirmation (requires an active licence, schema scope and inference_create IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schema_name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_name"
+  ],
+  "type": "object"
+}
+```
+
 ### `list_entity_columns`
 
 List the selected workspace's stored entity-table column preferences (requires read scope and entity_columns_get IAM permission); these display preferences are shared by workspace users
@@ -2592,6 +2815,133 @@ Input schema:
       ]
     }
   },
+  "type": "object"
+}
+```
+
+### `list_inference_proposals`
+
+Review proposed inference values without applying them (requires an active licence, read scope and inference_proposal_list IAM permission on the selected workspace)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
+  "type": "object"
+}
+```
+
+### `list_marketplace`
+
+List community-visible marketplace templates (requires an active licence, PostgreSQL, read scope and marketplace_list IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+### `list_marketplace_reviews`
+
+List a marketplace template's reviews (requires an active licence, PostgreSQL, read scope and marketplace_review_list IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "template_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "template_id"
+  ],
+  "type": "object"
+}
+```
+
+### `list_marketplace_versions`
+
+List published template versions and the current tenant's own drafts (requires an active licence, PostgreSQL, read scope and marketplace_version_list IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "template_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "template_id"
+  ],
   "type": "object"
 }
 ```
@@ -2681,6 +3031,67 @@ Input schema:
   },
   "required": [
     "schema_id"
+  ],
+  "type": "object"
+}
+```
+
+### `publish_marketplace_version`
+
+Publish a version of a current-tenant template (requires an active licence, read scope and marketplace_publish IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "changelog": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "definition": true,
+    "status": {
+      "description": "One of draft, pre or stable. Defaults to draft.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "template_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "template_id",
+    "definition"
+  ],
+  "type": "object"
+}
+```
+
+### `reject_inference_proposals`
+
+Reject pending inference proposals (requires an active licence, schema scope and inference_reject IAM permission on the selected workspace)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
   ],
   "type": "object"
 }
@@ -2855,6 +3266,33 @@ Input schema:
 }
 ```
 
+### `set_marketplace_visibility`
+
+Change a current-tenant template's marketplace visibility (requires an active licence, read scope and marketplace_visibility_update IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "template_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "template_id",
+    "visibility"
+  ],
+  "type": "object"
+}
+```
+
 ### `set_worker_class`
 
 Assign the selected workspace's worker class (requires schema scope and worker_class_update IAM permission); the deployment must declare the destination worker target, which does not guarantee a worker is online
@@ -2894,6 +3332,42 @@ Input schema:
   },
   "required": [
     "worker_class"
+  ],
+  "type": "object"
+}
+```
+
+### `submit_marketplace_review`
+
+Create or replace the current tenant's template review (requires an active licence, read scope and marketplace_review_submit IAM permission with a tenant-scoped credential)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "comment": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rating": {
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "template_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "template_id",
+    "rating"
   ],
   "type": "object"
 }

@@ -46,7 +46,7 @@ async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
                 .is_none()
         );
         let read = request
-            .get("/api/workspaces")
+            .get(&format!("/api/workspaces/{workspace_id}"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
         assert_eq!(read.status_code(), StatusCode::OK);
@@ -411,7 +411,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let key_id: Uuid = created_body["id"].as_str().unwrap().parse().unwrap();
         let revoked = request
             .delete(&format!("/api/api-keys/{key_id}"))
-            .add_header("Authorization", format!("Bearer {full_key}"))
+            .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(revoked.status_code(), StatusCode::NO_CONTENT);
 
@@ -685,6 +685,9 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         request.get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, inaccessible.id.to_string())
+            .await.assert_status(StatusCode::OK);
+        request.get(&format!("/api/workspaces/{}", inaccessible.id))
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .await.assert_status(StatusCode::FORBIDDEN);
         let listed = request.get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
