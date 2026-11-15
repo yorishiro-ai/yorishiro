@@ -346,9 +346,14 @@ async fn invitation_callback_verifies_id_token_and_rejects_cookie_tampering() {
         )
         .await
         .unwrap();
+        let tenant_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+        super::fixtures::grant_iam_administrator(&txn, tenant.tenant_id, user.id).await;
+        txn.commit().await.unwrap();
         request
             .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":"oauth-selection-sibling"}))
             .await
             .assert_status(StatusCode::CREATED);

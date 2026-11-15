@@ -155,8 +155,12 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        owner_a.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner_a.tenant_id, owner_a.owner_id).await;
+        owner_b.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner_b.tenant_id, owner_b.owner_id).await;
 
         let response = request
             .post("/api/template-library")
@@ -221,8 +225,12 @@ async fn fork_copies_a_community_template_into_the_forking_tenants_own_library()
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        owner_a.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner_a.tenant_id, owner_a.owner_id).await;
+        owner_b.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner_b.tenant_id, owner_b.owner_id).await;
 
         let response = request
             .post("/api/template-library")

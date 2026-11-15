@@ -91,14 +91,14 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
         use crate::requests::fixtures::{TenantArgs, TestTenant};
         use yorishiro::models::pagination::ListParams;
 
-        let TestTenant {
-            tenant_id: tenant_a,
-            api_key: key_a,
-            ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let key_b = TestTenant::create(&request, &ctx, TenantArgs::default())
-            .await
-            .api_key;
+        let owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_a = owner_a.tenant_id;
+        let key_a =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant_a, owner_a.owner_id).await;
+        let key_b =
+            crate::requests::fixtures::issue_tenant_key(&ctx, owner_b.tenant_id, owner_b.owner_id)
+                .await;
         let mut ids = Vec::new();
         for (key, name) in [
             (&key_a, "a-private"),

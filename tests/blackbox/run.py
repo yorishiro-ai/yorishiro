@@ -201,7 +201,7 @@ class App:
         return self.cli("task", task_name, *(f"{key}:{value}" for key, value in params.items()))[0]
 
     def issue(self, workspace, scope, *, issuer=None, audit=False, expires_at=None):
-        if issuer is not None and expires_at is None:
+        if expires_at is None:
             from datetime import UTC, datetime, timedelta
             expires_at = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
         body = {"name": "blackbox-delegated", "scope": scope, "audit": audit}

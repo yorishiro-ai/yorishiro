@@ -503,7 +503,7 @@ pub async fn enqueue_infer_fill(
         crate::models::iam_policy::Action::InferenceCreate,
     )
     .await?;
-    if workspace_llm_keys::get(&txn, workspace_id)
+    if workspace_llm_keys::get(authorization.as_ref().unwrap_or(&txn), workspace_id)
         .await
         .internal()?
         .is_none()

@@ -104,7 +104,7 @@ async fn confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence(
             &ctx.db,
             target.tenant_id,
             second_owner.id,
-            MembershipRole::Owner,
+            MembershipRole::Admin,
         )
         .await
         .unwrap();
@@ -144,16 +144,23 @@ async fn confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence(
                 .await
                 .is_err()
         );
-        tenant_memberships::add_member(
+        let member_key = api_keys::Entity::create_tenant_api_key(
             &ctx.db,
             target.tenant_id,
-            target.owner_id,
-            MembershipRole::Admin,
+            api_keys::ApiKeyScope::Read,
+            Some(second_owner.id),
+            false,
+            "retirement-admin",
         )
         .await
         .unwrap();
+        let member_actor = api_keys::AuthContext {
+            api_key_id: member_key.id,
+            user_id: Some(second_owner.id),
+            ..actor.clone()
+        };
         assert!(matches!(
-            retirement::disable_as(&ctx.db, &actor, target.tenant_id).await,
+            retirement::disable_as(&ctx.db, &member_actor, target.tenant_id).await,
             Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
         ));
         assert!(
@@ -171,14 +178,6 @@ async fn confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence(
                 .unwrap(),
             0
         );
-        tenant_memberships::add_member(
-            &ctx.db,
-            target.tenant_id,
-            target.owner_id,
-            MembershipRole::Owner,
-        )
-        .await
-        .unwrap();
         retirement::disable_as(&ctx.db, &actor, target.tenant_id)
             .await
             .unwrap();

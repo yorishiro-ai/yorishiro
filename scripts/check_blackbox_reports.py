@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SUITES = ("rest", "mcp", "cli")
 EE_OWNED_COMMON_TOOLS = {"accept_invite", "search_entities"}
-REJECTION_ONLY_TOOLS = {"accept_invite"}
+REJECTION_ONLY_TOOLS = {"accept_invite", "transfer_ownership"}
 
 
 def require_owned_successes(reviewed: dict, edition: str, calls: list[dict]) -> set[str]:

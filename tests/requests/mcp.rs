@@ -1036,14 +1036,17 @@ async fn api_key_tools_reject_cross_tenant_revocation() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
-        let read_key = issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            tenant.owner_id,
+        let read_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
+            &ctx.db,
+            tenant.tenant_id,
             ApiKeyScope::Read,
+            Some(tenant.owner_id),
             false,
+            "managed-test",
         )
-        .await;
+        .await
+        .unwrap()
+        .plaintext;
         let created = mcp_call(
             &request,
             &session,
@@ -1076,10 +1079,12 @@ async fn api_key_tools_reject_cross_tenant_revocation() {
         assert_eq!(tool_result_json(&revoked)["revoked"], true);
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(tenant.tenant_id, other.tenant_id);
+        let other_key =
+            super::fixtures::issue_tenant_key(&ctx, other.tenant_id, other.owner_id).await;
         let foreign = mcp_call(
             &request,
             &session,
-            &other.api_key,
+            &other_key,
             5,
             "tools/call",
             json!({"name":"revoke_api_key","arguments":{"key_id":created["id"]}}),
@@ -2129,6 +2134,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             "licensed MCP merge tests require a valid YORISHIRO_LICENSE_KEY at boot"
         );
         let TestTenant {
+            tenant_id,
             workspace_id,
             owner_id,
             api_key: schema_key,
@@ -2144,6 +2150,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
         .await;
         let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
 
+        let library_key = super::fixtures::issue_tenant_key(&ctx, tenant_id, owner_id).await;
         let original = json!({
             "name": "library-note",
             "entity_types": {
@@ -2152,7 +2159,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
         });
         let template = request
             .post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {schema_key}"))
+            .add_header("Authorization", format!("Bearer {library_key}"))
             .json(&json!({ "name": "library-note", "definition": original }))
             .await;
         assert_eq!(
@@ -2195,7 +2202,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
         });
         let update = request
             .put(&format!("/api/template-library/{template_id}"))
-            .add_header("Authorization", format!("Bearer {schema_key}"))
+            .add_header("Authorization", format!("Bearer {library_key}"))
             .json(&json!({ "definition": updated }))
             .await;
         assert_eq!(update.status_code(), StatusCode::OK, "{}", update.text());
@@ -3151,7 +3158,9 @@ async fn mcp_tenant_users_cannot_join_another_tenant() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user_name = format!("stay-home-{}", uuid::Uuid::new_v4());
-        let auth = format!("Bearer {}", tenant.api_key);
+        let tenant_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let auth = format!("Bearer {tenant_key}");
         let session = initialize(&request).await;
         // A tenant user belongs to its own tenant only.
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -3165,10 +3174,12 @@ async fn mcp_tenant_users_cannot_join_another_tenant() {
             .as_str()
             .unwrap()
             .to_owned();
+        let other_key =
+            super::fixtures::issue_tenant_key(&ctx, other.tenant_id, other.owner_id).await;
         let joined = mcp_call(
             &request,
             &session,
-            &other.api_key,
+            &other_key,
             7,
             "tools/call",
             json!({"name":"set_member_role","arguments":{"user_id":home_user,"role":"member"}}),

@@ -19,6 +19,7 @@ from check_blackbox_reports import (
 
 class ReportGateTests(unittest.TestCase):
     def test_owned_outcome_gate_partitions_all_tools_and_rejects_missing_outcomes(self):
+        self.assertEqual(REJECTION_ONLY_TOOLS, {"accept_invite", "transfer_ownership"})
         reviewed = json.loads((Path(__file__).resolve().parents[1] / "blackbox/tools.json").read_text())
         owners = []
         for edition in ("ce", "ee"):

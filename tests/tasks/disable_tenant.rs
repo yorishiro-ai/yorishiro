@@ -27,8 +27,9 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
+        let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
         let created = request.post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&json!({"name":"retirement-notes", "definition":yorishiro::data::templates::get_template("general-notes").unwrap()})).await;
         assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
         let template_id: uuid::Uuid = created.json::<Value>()["id"].as_str().unwrap().parse().unwrap();
@@ -41,7 +42,7 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
             schemas.push(created.json::<Value>()["schema"]["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap());
         }
         let workspace = request.post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&json!({"name":format!("retirement-fork-{}", uuid::Uuid::new_v4())})).await;
         assert_eq!(workspace.status_code(), StatusCode::CREATED);
         let workspace_id = workspace.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
@@ -317,8 +318,9 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
             },
         )
         .await;
+        let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
         let created = request.post("/api/members/users")
-            .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password","role":"member"})).await;
         created.assert_status(axum::http::StatusCode::CREATED);
         let tenant_user_id: uuid::Uuid = created.json::<serde_json::Value>()["user_id"].as_str().unwrap().parse().unwrap();

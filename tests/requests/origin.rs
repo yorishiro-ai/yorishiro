@@ -444,7 +444,8 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
                 .await
         };
         let release = async {
-            wait_for_lock(format!("template-origin:{template}")).await;
+            // IAM serializes same-tenant publication before it reaches the origin lock.
+            wait_for_lock(format!("tenant-membership:{}", setup.tenant_id)).await;
             blocker.rollback().await.expect("release schema lock");
         };
         let (published, ()) = tokio::join!(update, release);

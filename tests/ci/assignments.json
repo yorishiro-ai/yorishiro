@@ -10,9 +10,9 @@
     "postgres_dedicated lists exact dedicated PostgreSQL fixture identities; all other PostgreSQL assignments are reviewed shared fixtures frozen by source_guard and observed for database DDL across the whole grouped process."
   ],
   "source_guard": {
-    "tests": "078141369f29a872a5c83b3a40da3b6d3a3ef7cafb5743e62d1a052e7d41b6ae",
+    "tests": "7f999898d8a4426638958643fa4644b1321f54bef4446277ff10a70438ccdf8f",
     "src": "3c81999b01f8f449a4e1d8a18db96ba936a2e992fc685e86313cfe1a12ffd0fd",
-    "ee": "b1a6142133b08c1903432d728b9fa1b65a6a617366a3c3d9b0deb2a4df07a1ff",
+    "ee": "587a17d1071f5adf20ebb44d34889e4728d209c20f6bf738cf9d0fffb2986074",
     "migration": "3f3c9de4439af71bd6d09122496bc531b9d89ebd90f8c775fe19560a993eb918",
     "Cargo.toml": "a56f8355d278953bd819be2557e74ac247e7da5e656e93c0127e360d292918f6",
     "migration/Cargo.toml": "9dcff4e8fc3c87442f98b16fa4658084fb2f6bdc8198dba54f92567c8e481ab8",
@@ -230,7 +230,7 @@
     {"source":"tests/requests/audit_log.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Independent tenant fixtures and audit isolation.","names":["requests::audit_log::an_audit_key_cannot_read_another_tenants_audit_log"]},
     {"source":"tests/requests/workspaces.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Two tenant fixtures and endpoint isolation.","names":["requests::workspaces::workspace_endpoints_enforce_tenant_isolation"]},
     {"source":"tests/requests/template_library.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Cross-tenant publication, mutation denial and fork ownership.","names":["requests::template_library::another_tenant_cannot_update_or_delete_a_community_template","requests::template_library::fork_copies_a_community_template_into_the_forking_tenants_own_library"]},
-    {"source":"tests/requests/tenant_auth.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Identity pool routing and grant revocation; shared EE fixtures create independent tenants and require licensed multi-tenancy.","names":["requests::tenant_auth::a_workspace_scoped_key_still_works_on_a_base_route","requests::tenant_auth::a_tenant_scoped_key_resolves_the_workspace_named_by_the_header","requests::tenant_auth::tenant_key_rechecks_direct_workspace_grants_after_revocation"]},
+    {"source":"tests/requests/tenant_auth.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Identity pool routing and IAM policy detachment; shared EE fixtures create independent tenants and require licensed multi-tenancy.","names":["requests::tenant_auth::a_workspace_scoped_key_still_works_on_a_base_route","requests::tenant_auth::a_tenant_scoped_key_resolves_the_workspace_named_by_the_header","requests::tenant_auth::tenant_key_rechecks_iam_policy_after_detachment"]},
     {"source":"tests/requests/tenant_auth.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Foreign tenant workspace retarget denial with two tenant fixtures.","names":["requests::tenant_auth::a_tenant_scoped_key_cannot_retarget_another_tenants_workspace"]},
     {"source":"tests/requests/schema_forks.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Cross-tenant RLS and schema-fork integrity fixtures.","names":["requests::schema_forks::schema_fork_http_routes_use_rls_for_cross_tenant_isolation","requests::schema_forks::schema_fork_rls_and_integrity_reject_cross_tenant_rows"]},
     {"source":"tests/requests/schema_forks.rs","editions":["ee"],"role":"postgres","jobs":["postgres-licensed"],"reason":"Graph and schema-version locks; shared EE fixtures create independent tenants and require licensed multi-tenancy.","names":["requests::schema_forks::concurrent_opposite_forks_allow_one_edge_and_reject_the_other","requests::schema_forks::fork_creation_shares_the_schema_version_lock"]},

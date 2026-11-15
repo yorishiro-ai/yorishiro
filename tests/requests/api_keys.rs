@@ -509,11 +509,11 @@ async fn api_key_lifecycle_rejects_cross_tenant_ids() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let TestTenant {
             tenant_id: other_tenant,
             workspace_id: other_workspace,
-            api_key: other_key,
+            owner_id: other_owner,
             ..
         } = TestTenant::create(
             &request,
@@ -527,6 +527,9 @@ async fn api_key_lifecycle_rejects_cross_tenant_ids() {
         )
         .await;
         assert_ne!(owner.tenant_id, other_tenant);
+        owner.api_key =
+            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
+        let other_key = super::fixtures::issue_tenant_key(&ctx, other_tenant, other_owner).await;
 
         let other_created = request
             .post("/api/api-keys")

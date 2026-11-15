@@ -44,6 +44,10 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        request.put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", fixture.api_key))
+            .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
+            .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
         let mut ctx = ctx;
@@ -137,6 +141,10 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
         };
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        request.put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", fixture.api_key))
+            .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
+            .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         use sea_orm::sqlx::{Connection, sqlite::SqliteConnection};
         let mut blocker = SqliteConnection::connect(&config.uri).await.unwrap();
         sea_orm::sqlx::query("BEGIN IMMEDIATE")
@@ -653,6 +661,10 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
     crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        request.put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", fixture.api_key))
+            .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
+            .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, fixture.tenant_id, fixture.owner_id).await;
         let txn = ctx.db.begin().await.unwrap();
         let member = yorishiro::models::tenancy::register_member(&txn, fixture.tenant_id,
