@@ -1965,11 +1965,93 @@ def cross_tenant_rejection(app):
             and token not in json.dumps(history), "rejected invitation was consumed or disclosed")
 
 
+def licensed_marketplace(app):
+    publisher = MCP(app, app.tenant_key)
+    template = publisher.call("create_template_library_item", {
+        "name": "licensed-marketplace-note", "definition": SCHEMA,
+    })
+    template_id = template["id"]
+    path = f"/api/marketplace/{template_id}"
+    require(publisher.call("set_marketplace_visibility", {
+        "template_id": template_id, "visibility": "community",
+    }) == {"updated": True}, "marketplace visibility was not updated")
+    require(app.rest("GET", f"/api/template-library/{template_id}", key=app.tenant_key)["visibility"] == "community",
+            "marketplace visibility was not persisted")
+    version = publisher.call("publish_marketplace_version", {
+        "template_id": template_id, "definition": SCHEMA, "status": "stable", "changelog": "owned fixture",
+    })
+    versions = publisher.call("list_marketplace_versions", {"template_id": template_id})
+    require(versions == app.rest("GET", path + "/versions", key=app.tenant_key)
+            and version in versions, "published marketplace version differs across transports")
+    listings = publisher.call("list_marketplace")
+    require(listings == app.rest("GET", "/api/marketplace", key=app.tenant_key)
+            and any(row["template_id"] == template_id for row in listings), "published template is not listed")
+    password = "blackbox-marketplace-password"
+    app.secrets.append(password)
+    app.rest("POST", "/auth/signup", {"email": "marketplace-reader@example.invalid", "password": password},
+             status=201, key="")
+    key = app.login("marketplace-reader@example.invalid", password)
+    reader = MCP(app, key)
+    review = reader.call("submit_marketplace_review", {"template_id": template_id, "rating": 5, "comment": "owned review"})
+    reviews = reader.call("list_marketplace_reviews", {"template_id": template_id})
+    require(reviews == app.rest("GET", path + "/reviews", key=key) and review in reviews,
+            "marketplace review differs across transports")
+    fork = reader.call("fork_marketplace_template", {"template_id": template_id, "version": version["version"]})
+    copied = app.rest("GET", f"/api/template-library/{fork['template_id']}", key=key)
+    require(copied["fork_of"] == template_id and copied["definition"] == version["definition"],
+            "marketplace fork did not retain its published definition")
+    MCP(app, app.key).call("list_marketplace", error=True)
+    app.rest("GET", "/api/marketplace", status=403, key=app.key)
+
+
+def licensed_inference(app):
+    client = MCP(app, app.key)
+    definition = json.loads(json.dumps(SCHEMA))
+    definition["name"] = "licensed-inference-note"
+    client.call("create_schema", {"definition": definition})
+    # An empty workspace schema exercises queue/review transitions without an external LLM call.
+    app.secrets.append("owned-llm-secret")
+    client.call("set_llm_provider", {"base_url": "http://127.0.0.1:1", "model": "owned-empty-schema", "api_key": "owned-llm-secret"})
+
+    def completed(tool, job_id, path, worker):
+        while True:
+            app.remaining()
+            require(worker.poll() is None and app.server.poll() is None, "inference process exited")
+            record = client.call(tool, {"job_id": job_id})
+            require(record["status"] in ("queued", "running", "completed"), f"inference job failed: {record}")
+            if record["status"] == "completed":
+                require(record == app.rest("GET", path, key=app.key), "inference status differs across transports")
+                return record
+            time.sleep(min(0.1, app.remaining()))
+
+    with app.job_worker() as worker:
+        job = client.call("infer_fill", {"schema_name": definition["name"]})
+        job_id = job["job_id"]
+        path = f"/api/inference-jobs/{job_id}"
+        result = completed("get_inference_job", job_id, path, worker)
+        require(result["proposed"] == 0, "empty schema unexpectedly proposed values")
+        proposals = client.call("list_inference_proposals", {"job_id": job_id})
+        require(proposals == app.rest("GET", path + "/proposals", key=app.key) == [],
+                "empty inference proposals differ across transports")
+        confirmation = client.call("confirm_inference_proposals", {"job_id": job_id})
+        confirmed = completed("get_inference_confirmation", confirmation["job_id"],
+                              f"/api/inference-jobs/confirmations/{confirmation['job_id']}", worker)
+        require(confirmed["result"]["confirmed"] == 0, "empty confirmation changed entities")
+        for tool, suffix in (("reject_inference_proposals", "reject"), ("discard_inference_proposals", "discard")):
+            report = client.call(tool, {"job_id": job_id})
+            require(report == app.rest("POST", path + "/" + suffix, key=app.key),
+                    "empty proposal action differs across transports")
+    client.call("reset_llm_provider")
+
+
 def scenarios(suite, edition="ce"):
     if edition == "ee":
         if suite == "tenant-postgres":
             return [("server.bootstrap", lambda app: app.boot()),
-                    ("ee.authenticated-cross-tenant-rejection", cross_tenant_rejection)]
+                    ("ee.licensed-discovery-auth-scope-input", mcp_suite),
+                    ("ee.authenticated-cross-tenant-rejection", cross_tenant_rejection),
+                    ("ee.licensed-marketplace-lifecycle", licensed_marketplace),
+                    ("ee.licensed-inference-lifecycle", licensed_inference)]
         require(suite == "mcp", "EE owns only its dedicated MCP delta suite")
         return [("server.bootstrap", lambda app: app.boot()),
                 ("ee.discovery-auth-scope-input", mcp_suite),

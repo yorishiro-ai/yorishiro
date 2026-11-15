@@ -25,7 +25,8 @@ python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro-ee --suite mc
 Common contracts run on CE/SQLite; enterprise-only composition and behavior belong in explicit EE checks, not a duplicate common matrix.
 The edition argument labels evidence; it does not infer or verify the binary's compile-time features.
 The EE MCP delta suite checks edition discovery and entity-column and worker-class setting, scope denial, nonmutation and reset through both transports, without replaying CE business scenarios.
-Both editions run with the enterprise licence explicitly unset; licensed capabilities need separate ownership.
+Both SQLite editions run with the enterprise licence explicitly unset.
+The licensed PostgreSQL suite requires full discovery and owns successful marketplace and inference calls, while the unlicensed SQLite suite requires licensed tools to remain hidden.
 The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or under-scoped writes.
 It uses reserved invalid provider URLs without starting workers, so it proves configuration and enqueue admission, not external inference or reindex completion.
 The separate EE search scenario owns a loopback OpenAI-compatible HTTP stub and a real embedding worker, waits for reindex completion, and checks REST/MCP query results and cross-workspace isolation.
@@ -56,7 +57,10 @@ These scenarios cover selected workflows, not the entire advertised MCP surface.
 Successful tool calls are not exhaustive behavioral coverage; cross-tenant acceptance and remaining fault and concurrency cases retain explicit owners outside these SQLite scenarios.
 The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL URL and signed licence, and checks that authenticated cross-tenant invite acceptance is rejected without consuming the token, adding a membership or changing the original credential selection.
 The required census assigns CE tools to CE suites except `search_entities` and `accept_invite`, which belong to the owned provider and licensed PostgreSQL EE suites.
-EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite`, which requires a rejected call because a valid attributed credential already requires tenant membership.
+EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite` and `transfer_ownership`, which require rejected calls because accounts cannot join another tenant and tenant root ownership is immutable.
+The licensed marketplace scenario publishes a template version, forks it into another tenant and records a review, comparing persisted REST reads with MCP results.
+The licensed inference scenario queues an empty-schema job, polls completion, lists proposals, queues and polls confirmation, and checks reject/discard response parity.
+It proves durable admission and review transitions, not nonempty LLM proposals; provider and late-revocation tests retain their assigned owners.
 This partitions all registered tools without replaying the full CE suite under EE, and does not claim exhaustive behavior coverage.
 Its required GHA job owns a non-superuser PostgreSQL service and its own database; ordinary SQLite suites never inherit that database or licence.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.

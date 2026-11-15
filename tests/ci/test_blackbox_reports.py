@@ -13,11 +13,29 @@ from check_blackbox_reports import (
     SUITES,
     load_reports,
     require_owned_successes,
+    validate_discovery,
     validate_reports,
 )
 
 
 class ReportGateTests(unittest.TestCase):
+    def test_discovery_requires_unlicensed_and_licensed_inventories(self):
+        reviewed = {"ce": ["common"], "ee_additions": ["extra", "paid"], "licensed": ["paid"]}
+        reports = [{"suite": "mcp", "discovered_tools": ["common", "extra"]},
+                   {"suite": "tenant-postgres", "discovered_tools": ["common", "extra", "paid"]}]
+        validate_discovery(reviewed, "ee", reports)
+        validate_discovery(reviewed, "ce", [{"suite": "mcp", "discovered_tools": ["common"]}])
+        for index in range(2):
+            for names in (["common", "extra"], ["common", "extra", "paid"], ["common", "extra", "extra"]):
+                if names == reports[index]["discovered_tools"]:
+                    continue
+                invalid = copy.deepcopy(reports)
+                invalid[index]["discovered_tools"] = names
+                with self.subTest(index=index, names=names), self.assertRaises(ValueError):
+                    validate_discovery(reviewed, "ee", invalid)
+        with self.assertRaises(ValueError):
+            validate_discovery(reviewed, "ee", reports[:1])
+
     def test_owned_outcome_gate_partitions_all_tools_and_rejects_missing_outcomes(self):
         self.assertEqual(REJECTION_ONLY_TOOLS, {"accept_invite", "transfer_ownership"})
         reviewed = json.loads((Path(__file__).resolve().parents[1] / "blackbox/tools.json").read_text())

@@ -35,6 +35,11 @@ class ToolInventoryTests(unittest.TestCase):
         self.assertEqual(ids, ["server.bootstrap", "ee.discovery-auth-scope-input",
                                "ee.column-worker-settings-lifecycle", "ee.provider-settings-lifecycle",
                                "ee.schema-fork-upstream-merge", "ee.search-reindex-worker"])
+        self.assertEqual([name for name, _ in run.scenarios("tenant-postgres", "ee")], [
+            "server.bootstrap", "ee.licensed-discovery-auth-scope-input",
+            "ee.authenticated-cross-tenant-rejection", "ee.licensed-marketplace-lifecycle",
+            "ee.licensed-inference-lifecycle",
+        ])
         with self.assertRaises(AssertionError):
             run.scenarios("rest", "ee")
 

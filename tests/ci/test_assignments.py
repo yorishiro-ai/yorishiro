@@ -307,7 +307,7 @@ class SharedTenantFixtureTests(unittest.TestCase):
             "models::query_embedding_requests::a_disabled_tenant_cannot_publish_a_query_embedding",
             "requests::tenant_auth::a_workspace_scoped_key_still_works_on_a_base_route",
             "requests::tenant_auth::a_tenant_scoped_key_resolves_the_workspace_named_by_the_header",
-            "requests::tenant_auth::tenant_key_rechecks_direct_workspace_grants_after_revocation",
+            "requests::tenant_auth::tenant_key_rechecks_iam_policy_after_detachment",
             "requests::schema_forks::concurrent_opposite_forks_allow_one_edge_and_reject_the_other",
             "requests::schema_forks::fork_creation_shares_the_schema_version_lock",
             "requests::origin::publication_waits_for_merge_revision_lock_and_remains_pending",
