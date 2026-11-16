@@ -59,8 +59,8 @@ The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL 
 The required census assigns CE tools to CE suites except `search_entities` and `accept_invite`, which belong to the owned provider and licensed PostgreSQL EE suites.
 EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite` and `transfer_ownership`, which require rejected calls because accounts cannot join another tenant and tenant root ownership is immutable.
 The licensed marketplace scenario publishes a template version, forks it into another tenant and records a review, comparing persisted REST reads with MCP results.
-The licensed inference scenario queues an empty-schema job, polls completion, lists proposals, queues and polls confirmation, and checks reject/discard response parity.
-It proves durable admission and review transitions, not nonempty LLM proposals; provider and late-revocation tests retain their assigned owners.
+The licensed inference scenario uses an owned chat-completions endpoint to produce a real proposal, checks that it does not change the entity before confirmation, then confirms it and reads the persisted value through REST.
+It also checks proposal listing and reject/discard response parity; provider failures and late-revocation tests retain their assigned owners.
 This partitions all registered tools without replaying the full CE suite under EE, and does not claim exhaustive behavior coverage.
 Its required GHA job owns a non-superuser PostgreSQL service and its own database; ordinary SQLite suites never inherit that database or licence.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.

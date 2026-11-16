@@ -1405,6 +1405,8 @@ def membership_retirement_lifecycle(app):
     client = MCP(app, owner)
     owner_id = client.call("whoami")["user_id"]
     missing_user = str(uuid.uuid4())
+    app.rest("GET", "/api/members", status=401, key="")
+    app.rest("DELETE", f"/api/members/{missing_user}", status=401, key="")
     app.rest("POST", "/api/members", {"email": "missing@example.invalid", "role": "admin"},
              status=404, key=owner)
     client.call("set_member_role", {"user_id": missing_user, "role": "admin"}, error=True)
@@ -1431,6 +1433,11 @@ def membership_retirement_lifecycle(app):
     app.secrets.append(member_login)
     key = member_login
     member = MCP(app, key)
+    for path in ("/api/members", "/api/api-keys"):
+        app.rest("GET", path, status=403, key=key)
+    app.rest("DELETE", f"/api/members/{owner_id}", status=403, key=key)
+    member.call("list_members", error=True)
+    member.call("list_api_keys", error=True)
     client.call("reset_tenant_user_password", {"user_id": user_id, "password": password})
     app.rest("GET", "/api/whoami", key=key, status=401)
     login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
@@ -1863,6 +1870,39 @@ def enterprise_schema_composition(app):
 
 
 @contextlib.contextmanager
+def inference_endpoint():
+    requests = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            document = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if (self.path != "/chat/completions" or document.get("model") != "blackbox-inference"
+                    or self.headers.get("Authorization") != "Bearer owned-llm-secret"):
+                self.send_error(400)
+                return
+            requests.append(document)
+            body = json.dumps({"choices": [{"message": {"content": '{"summary":"owned proposal"}'}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}", requests
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            require(not thread.is_alive(), "inference endpoint did not stop")
+
+
+@contextlib.contextmanager
 def embedding_endpoint():
     requests = []
 
@@ -2022,6 +2062,17 @@ def licensed_marketplace(app):
     source = publisher.call("get_template_library_item", {"id": template_id})
     require(copied["fork_of"] == template_id and copied["definition"] == source["definition"],
             "marketplace fork did not retain its published definition")
+    for method, body in (("PUT", {"description": "foreign update"}), ("DELETE", None)):
+        app.rest(method, f"/api/template-library/{template_id}", body, status=404, key=key)
+    for tool, arguments in (("update_template_library_item", {"id": template_id, "description": "foreign update"}),
+                            ("delete_template_library_item", {"id": template_id})):
+        reader.call(tool, arguments, error=True)
+    require(publisher.call("get_template_library_item", {"id": template_id}) == source,
+            "foreign template mutation changed the source")
+    library_copy = reader.call("fork_template_library_item", {"id": template_id, "name": "private-library-copy"})
+    require(library_copy["tenant_id"] == copied["tenant_id"] and library_copy["visibility"] == "tenant"
+            and library_copy["fork_of"] == template_id, "library fork did not become a private tenant copy")
+    reader.call("update_template_library_item", {"id": library_copy["id"], "description": "owned copy"})
     MCP(app, app.key).call("list_marketplace", error=True)
     app.rest("GET", "/api/marketplace", status=403, key=app.key)
 
@@ -2030,10 +2081,11 @@ def licensed_inference(app):
     client = MCP(app, app.key)
     definition = json.loads(json.dumps(SCHEMA))
     definition["name"] = "licensed-inference-note"
+    definition["entity_types"]["note"]["fields"]["summary"] = {"type": "string"}
     client.call("create_schema", {"definition": definition})
-    # An empty workspace schema exercises queue/review transitions without an external LLM call.
+    entity = client.call("create_entity", {"schema_name": definition["name"], "entity_type": "note",
+                                            "data": {"title": "owned inference document"}})
     app.secrets.append("owned-llm-secret")
-    client.call("set_llm_provider", {"base_url": "http://127.0.0.1:1", "model": "owned-empty-schema", "api_key": "owned-llm-secret"})
 
     def completed(tool, job_id, path, worker):
         while True:
@@ -2046,23 +2098,29 @@ def licensed_inference(app):
                 return record
             time.sleep(min(0.1, app.remaining()))
 
-    with app.job_worker() as worker:
+    with inference_endpoint() as (url, requests), app.job_worker() as worker:
+        client.call("set_llm_provider", {"base_url": url, "model": "blackbox-inference", "api_key": "owned-llm-secret"})
         job = client.call("infer_fill", {"schema_name": definition["name"]})
         job_id = job["job_id"]
         path = f"/api/inference-jobs/{job_id}"
         result = completed("get_inference_job", job_id, path, worker)
-        require(result["proposed"] == 0, "empty schema unexpectedly proposed values")
+        require(result["proposed"] == 1 and len(requests) == 1, "inference did not produce the owned proposal")
         proposals = client.call("list_inference_proposals", {"job_id": job_id})
-        require(proposals == app.rest("GET", path + "/proposals", key=app.key) == [],
-                "empty inference proposals differ across transports")
+        require(proposals == app.rest("GET", path + "/proposals", key=app.key)
+                and len(proposals) == 1 and proposals[0]["proposed"] == "owned proposal",
+                "inference proposals differ across transports")
+        require("summary" not in client.call("get_entity", {"id": entity["id"]})["data"],
+                "inference wrote an unconfirmed proposal")
         confirmation = client.call("confirm_inference_proposals", {"job_id": job_id})
         confirmed = completed("get_inference_confirmation", confirmation["job_id"],
                               f"/api/inference-jobs/confirmations/{confirmation['job_id']}", worker)
-        require(confirmed["result"]["confirmed"] == 0, "empty confirmation changed entities")
+        require(confirmed["result"]["confirmed"] == 1, "confirmation did not apply the proposal")
+        require(app.rest("GET", f"/api/entities/{entity['id']}")["data"]["summary"] == "owned proposal",
+                "confirmed proposal is not persisted")
         for tool, suffix in (("reject_inference_proposals", "reject"), ("discard_inference_proposals", "discard")):
             report = client.call(tool, {"job_id": job_id})
             require(report == app.rest("POST", path + "/" + suffix, key=app.key),
-                    "empty proposal action differs across transports")
+                    "proposal action differs across transports")
     client.call("reset_llm_provider")
 
 

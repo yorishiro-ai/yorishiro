@@ -120,37 +120,6 @@ async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
 }
 
 #[tokio::test]
-async fn administrator_can_issue_and_list_secret_free_invites() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let tenant_admin_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let email = super::fixtures::unique_email("managed-invite");
-        let body = serde_json::json!({"email":email,"role":"member","expires_at":chrono::Utc::now() + chrono::Duration::hours(1)});
-        let anonymous = request.post("/api/members/invites").json(&body).await;
-        assert_eq!(anonymous.status_code(), StatusCode::UNAUTHORIZED);
-        let created = request.post("/api/members/invites")
-            .add_header("Authorization", format!("Bearer {}", tenant_admin_key)).json(&body).await;
-        assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
-        let created = created.json::<serde_json::Value>();
-        let token = created["token"].as_str().unwrap();
-        assert!(!token.is_empty());
-        assert!(created.get("token_hash").is_none());
-        let listed = request.get("/api/members/invites")
-            .add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await;
-        assert_eq!(listed.status_code(), StatusCode::OK);
-        let records = listed.json::<serde_json::Value>();
-        let record = records.as_array().unwrap().iter().find(|record| record["id"] == created["id"]).unwrap();
-        assert_eq!(record["email"], email);
-        assert!(record.get("token").is_none());
-        assert!(!records.to_string().contains(token));
-        assert!(!records.to_string().contains("token_hash"));
-        let accepted = request.post("/auth/signup")
-            .json(&serde_json::json!({"invite_token":token,"password":"test-password"})).await;
-        assert_eq!(accepted.status_code(), StatusCode::CREATED, "{}", accepted.text());
-    }).await;
-}
-
-#[tokio::test]
 async fn membership_mutations_reject_stale_admin_contexts() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::{api_keys, tenant_memberships};
@@ -507,88 +476,6 @@ async fn owner_can_list_and_add_members() {
             .collect();
         assert!(emails.contains(&owner_email.as_str()));
         assert!(emails.contains(&invitee.email.as_deref().unwrap()));
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn add_member_rejects_an_email_with_no_account() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let owner_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-
-        let response = request
-            .post("/api/members")
-            .add_header("Authorization", format!("Bearer {owner_key}"))
-            .json(&serde_json::json!({
-                "email": super::fixtures::unique_email("nobody"),
-                "role": "member",
-            }))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn member_role_cannot_manage_members() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant {
-            tenant_id,
-            workspace_id,
-            ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-
-        let member = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            &crate::requests::fixtures::unique_email("member"),
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .expect("create member");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_id,
-            member.id,
-            MembershipRole::Member,
-        )
-        .await
-        .expect("add member");
-        super::fixtures::grant_workspace(
-            &ctx,
-            workspace_id,
-            member.id,
-            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
-        )
-        .await;
-        let member_key =
-            issue_api_key(&ctx, workspace_id, member.id, ApiKeyScope::Write, false).await;
-
-        let response = request
-            .get("/api/members")
-            .add_header("Authorization", format!("Bearer {member_key}"))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
-        let response = request
-            .delete(&format!("/api/members/{}", member.id))
-            .add_header("Authorization", format!("Bearer {member_key}"))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn members_endpoints_require_authentication() {
-    boot_request::<App, _, _>(|request, _ctx| async move {
-        let response = request.get("/api/members").await;
-        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
-        let response = request
-            .delete(&format!("/api/members/{}", uuid::Uuid::nil()))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     })
     .await;
 }

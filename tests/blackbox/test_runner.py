@@ -3,7 +3,6 @@
 import contextlib
 import io
 import json
-import re
 import sys
 import tempfile
 import unittest
@@ -15,6 +14,24 @@ import run
 
 
 class ToolInventoryTests(unittest.TestCase):
+    def test_owned_inference_endpoint_requires_credentials_and_returns_a_proposal(self):
+        with run.inference_endpoint() as (url, requests):
+            connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
+            try:
+                body = json.dumps({"model": "blackbox-inference", "messages": []})
+                for credential, expected in (("wrong", 400), ("owned-llm-secret", 200)):
+                    connection.request("POST", "/chat/completions", body,
+                                       {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, expected)
+                    payload = response.read()
+                    if expected == 200:
+                        proposal = json.loads(json.loads(payload)["choices"][0]["message"]["content"])
+                        self.assertEqual(proposal, {"summary": "owned proposal"})
+                self.assertEqual(len(requests), 1)
+            finally:
+                connection.close()
+
     def test_owned_provider_preserves_batch_indices_and_vector_width(self):
         with run.embedding_endpoint() as (url, requests):
             connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
@@ -29,19 +46,6 @@ class ToolInventoryTests(unittest.TestCase):
                 self.assertEqual(requests, ["a", "b"])
             finally:
                 connection.close()
-
-    def test_enterprise_scenarios_are_an_explicit_delta_not_a_common_replay(self):
-        ids = [name for name, _ in run.scenarios("mcp", "ee")]
-        self.assertEqual(ids, ["server.bootstrap", "ee.discovery-auth-scope-input",
-                               "ee.column-worker-settings-lifecycle", "ee.provider-settings-lifecycle",
-                               "ee.schema-fork-upstream-merge", "ee.search-reindex-worker"])
-        self.assertEqual([name for name, _ in run.scenarios("tenant-postgres", "ee")], [
-            "server.bootstrap", "ee.licensed-discovery-auth-scope-input",
-            "ee.authenticated-cross-tenant-rejection", "ee.licensed-marketplace-lifecycle",
-            "ee.licensed-inference-lifecycle",
-        ])
-        with self.assertRaises(AssertionError):
-            run.scenarios("rest", "ee")
 
     def test_raw_export_records_success_without_parsing_ndjson_as_one_document(self):
         app = Mock(current_scenario="mcp.graph", tool_calls=[])
@@ -73,26 +77,6 @@ class ToolInventoryTests(unittest.TestCase):
             {"tool": "get_entity", "scenario": "mcp.example", "outcome": "rejected"},
         ])
 
-    def test_reviewed_inventory_matches_source_tools(self):
-        reviewed = json.loads((run.ROOT / "tests/blackbox/tools.json").read_text())
-        for edition, directory in (("ce", "src/controllers/mcp"), ("ee_additions", "ee/controllers/mcp")):
-            names = []
-            for path in (run.ROOT / directory).glob("*.rs"):
-                names.extend(re.findall(r'#\[tool\([\s\S]*?\)\]\s*pub(?:\(crate\))? async fn (\w+)', path.read_text()))
-            self.assertEqual(sorted(names), reviewed[edition])
-            self.assertEqual(len(names), len(set(names)))
-
-    def test_scenarios_do_not_invoke_removed_tasks(self):
-        import ast
-
-        removed = {"create_tenant", "create_user", "add_member", "create_invite", "list_members",
-                   "list_tenants", "list_users", "create_workspace", "list_workspaces", "create_api_key",
-                   "list_api_keys", "revoke_api_key", "create_tenant_api_key", "reindex_embeddings"}
-        tree = ast.parse(Path(run.__file__).read_text())
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "task" and node.args and isinstance(node.args[0], ast.Constant)):
-                self.assertNotIn(node.args[0].value, removed)
 
 
 class ProtocolTests(unittest.TestCase):

@@ -453,56 +453,6 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
 }
 
 #[tokio::test]
-async fn api_key_lifecycle_rejects_non_admin() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant {
-            tenant_id,
-            workspace_id,
-            ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let member = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            &crate::requests::fixtures::unique_email("member"),
-            "member-password",
-            None,
-        )
-        .await
-        .expect("create member");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_id,
-            member.id,
-            yorishiro::models::tenant_memberships::MembershipRole::Member,
-        )
-        .await
-        .expect("add member");
-        super::fixtures::grant_workspace(
-            &ctx,
-            workspace_id,
-            member.id,
-            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
-        )
-        .await;
-        let member_key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db,
-            workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Read,
-            Some(member.id),
-            false,
-        )
-        .await
-        .expect("issue member key")
-        .plaintext;
-        let forbidden = request
-            .get("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {member_key}"))
-            .await;
-        assert_eq!(forbidden.status_code(), StatusCode::FORBIDDEN);
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
     use sea_orm::TransactionTrait;
     use yorishiro::models::{api_keys, tenancy};
