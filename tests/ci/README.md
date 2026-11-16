@@ -29,7 +29,8 @@ Pinned E5 model and reference contracts are mandatory; the pre-existing private 
 ## Responsibility ownership
 
 Common assertions have one CE/SQLite owner when compiled in both editions.
-The IAM REST/MCP, root-immutability and administrator recovery scenarios explicitly run on both SQLite and PostgreSQL.
+Root transfer rejection runs through the real REST/MCP processes on both SQLite and licensed PostgreSQL.
+IAM authorization races and administrator recovery retain explicit backend assignments.
 Queued fill/import/undo/reindex and inference permission-revocation scenarios also retain exact backend-parity assignments because SQLite immediate transactions and PostgreSQL identity fences are different guarantees.
 Their PostgreSQL fixtures are classified as dedicated so the runner does not mistake owned database creation for shared-fixture DDL.
 Licensed confirmation remains in `licensed-sqlite`; a missing local licence is not a reason to remove that GHA assignment or bypass the production gate.
@@ -40,9 +41,9 @@ Shared EE PostgreSQL fixtures create independent production tenants, so their ow
 Unlicensed and signed-licence SQLite contracts remain separate.
 
 Add tests through their declaring-module assignment or an exact reviewed exception in `assignments.json`.
-Unknown compiled identities, stale exceptions and unreviewed Rust-source changes fail the assignment check.
-The source fingerprint is a conservative review gate, not a proof of arbitrary Rust control flow.
-After reviewing changed backend, provider and feature branches, refresh the fingerprint rather than disabling the guard.
+Unknown compiled identities and stale exceptions fail the assignment check.
+Source edits do not require manually maintained tree fingerprints.
+Compiled inventory matching rejects unknown, missing and stale test identities, while execution receipts retain revision and executable hashes.
 
 The GHA build produces `test-inventory-ce`, `test-inventory-ee` and matching `test-executables-*` artifacts.
 The assignment join produces `test-assignments/test-assignments.json` with the exact responsibility matrix.

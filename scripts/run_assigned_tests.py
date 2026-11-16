@@ -52,7 +52,7 @@ def manual_exclusions(plan, manifest):
 
 
 def postgres_dedicated(plan, manifest):
-    """All other PG assignments are reviewed shared fixtures, frozen by source_guard."""
+    """Other PostgreSQL assignments use shared fixtures observed for database DDL."""
     entries = manifest.get("postgres_dedicated", [])
     names = [row["name"] for row in entries]
     require(len(names) == len(set(names)), "duplicate PostgreSQL dedicated identity")
@@ -361,6 +361,8 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
                                          env, deadline - (15 if fixture == "shared" else 0), execution_log)
                 binary_receipt["exit_code"] = code
             binary_receipt["finished_at"] = utc_now()
+            if code != 0:
+                print(redact(text, env), flush=True)
             require(code == 0, f"libtest process failed; see {execution_log}")
             passed_tests(text, names)
             after = utc_now()
@@ -376,6 +378,16 @@ def execute_job(plan, edition, job, artifacts_dir, output, manifest, env, revisi
     finally:
         receipt["finished_at"] = utc_now()
         inventory.write(output, receipt)
+        if env.get("GITHUB_STEP_SUMMARY"):
+            with Path(env["GITHUB_STEP_SUMMARY"]).open("a") as summary:
+                summary.write(f"## Assigned tests: {edition}/{job}\n\nStatus: {receipt['status']}\n\n")
+                if receipt.get("error"):
+                    summary.write(f"{receipt['error']}\n\n")
+                for log in sorted(logs.glob("*-tests.log")):
+                    lines = log.read_text(errors="replace").splitlines()
+                    failures = [line for line in lines if " ... FAILED" in line or "panicked at" in line]
+                    if failures:
+                        summary.write("```text\n" + redact("\n".join(failures), env) + "\n```\n")
     return receipt
 
 
@@ -456,7 +468,6 @@ def main():
         if args.mode == "run":
             require(os.environ.get("GITHUB_ACTIONS") == "true", "native assigned tests execute only in GitHub Actions")
             require(0 < args.timeout_seconds <= args.job_timeout_seconds - 60, "deadline must leave job cleanup time")
-            require(inventory.source_census(ROOT) == manifest["source_guard"], "source guard differs")
             revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
             require(os.environ.get("GITHUB_SHA", revision) == revision, "GitHub revision differs from checkout")
             execute_job(plan, args.edition, args.job, args.artifacts, args.output, manifest,

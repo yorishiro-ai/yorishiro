@@ -53,63 +53,6 @@ async fn invite_cancellation_and_acceptance_have_one_committed_outcome() {
 }
 
 #[tokio::test]
-async fn root_cannot_transfer_ownership() {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use yorishiro::models::_entities::tenant_memberships::Column;
-    use yorishiro::models::{tenant_memberships, user_users};
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let tenant_admin_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let successor = user_users::create_user(
-            &ctx.db,
-            &super::fixtures::unique_email("successor"),
-            "test-password",
-            None,
-        )
-        .await
-        .unwrap();
-        tenant_memberships::add_member(
-            &ctx.db,
-            tenant.tenant_id,
-            successor.id,
-            MembershipRole::Viewer,
-        )
-        .await
-        .unwrap();
-        let path = "/api/members/transfer-ownership";
-        let missing = request
-            .post(path)
-            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
-            .json(&serde_json::json!({"successor_user_id":uuid::Uuid::new_v4()}))
-            .await;
-        assert_eq!(missing.status_code(), StatusCode::CONFLICT);
-        let response = request
-            .post(path)
-            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
-            .json(&serde_json::json!({"successor_user_id":successor.id}))
-            .await;
-        assert_eq!(
-            response.status_code(),
-            StatusCode::CONFLICT,
-            "{}",
-            response.text()
-        );
-        for (user_id, role) in [(tenant.owner_id, "owner"), (successor.id, "viewer")] {
-            let membership = tenant_memberships::Entity::find()
-                .filter(Column::TenantId.eq(tenant.tenant_id))
-                .filter(Column::UserId.eq(user_id))
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(membership.role, role);
-        }
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn invite_cancellation_and_reissue_invalidate_old_tokens() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -321,60 +264,6 @@ async fn membership_mutations_reject_stale_admin_contexts() {
                 .await
                 .unwrap()
                 .is_some()
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn role_preview_does_not_infer_iam_changes_from_membership_labels() {
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let tenant_admin_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let user = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            &super::fixtures::unique_email("preview-no-keys"),
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .unwrap();
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant.tenant_id,
-            user.id,
-            MembershipRole::Admin,
-        )
-        .await
-        .unwrap();
-        for role in ["member", "viewer"] {
-            let response = request
-                .post(&format!("/api/members/{}/role-preview", user.id))
-                .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
-                .json(&serde_json::json!({"role": role}))
-                .await;
-            assert_eq!(response.status_code(), StatusCode::OK);
-            let preview = response.json::<serde_json::Value>();
-            assert_eq!(preview["keys"], serde_json::json!([]));
-            assert_eq!(preview["lost_workspace_ids"], serde_json::json!([]));
-        }
-        super::fixtures::grant_workspace(
-            &ctx,
-            tenant.workspace_id,
-            user.id,
-            yorishiro::models::workspace_memberships::WorkspaceRole::Viewer,
-        )
-        .await;
-        let response = request
-            .post(&format!("/api/members/{}/role-preview", user.id))
-            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
-            .json(&serde_json::json!({"role": "viewer"}))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::OK);
-        assert_eq!(
-            response.json::<serde_json::Value>()["lost_workspace_ids"],
-            serde_json::json!([])
         );
     })
     .await;

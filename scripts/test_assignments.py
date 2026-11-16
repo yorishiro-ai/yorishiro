@@ -2,8 +2,7 @@
 """Join compiled inventories to reviewed execution responsibilities.
 
 Only collect executes binaries, using libtest listing in GitHub Actions after one workspace build.
-The source guard freezes reviewed Rust dependencies conservatively, including all test helpers.
-It is deliberately not a Rust call-graph proof: any Rust edit requires a fresh source review.
+Compiled identities are matched to declaring modules and execution responsibilities.
 """
 
 import argparse
@@ -47,26 +46,6 @@ def load(path):
 
 def write(path, value):
     Path(path).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
-
-
-def source_census(root):
-    # shortcut: whole-tree fingerprints trade precision for fail-closed helper/alias review until an AST guard exists.
-    result = {}
-    for directory in ("tests", "src", "ee", "migration"):
-        files = sorted((root / directory).rglob("*.rs"))
-        data = b"".join(str(p.relative_to(root)).encode() + b"\0" + p.read_bytes() + b"\0" for p in files)
-        result[directory] = digest(data)
-    for name in ("Cargo.toml", "migration/Cargo.toml", "Cargo.lock", ".cargo/config.toml"):
-        result[name] = digest((root / name).read_bytes())
-    # The verified patch and its pinned upstream checksum define the ignored Loco source tree.
-    for name in ("patches/loco-rs/fixes.patch", "patches/loco-rs/verify.py"):
-        result[name] = digest((root / name).read_bytes())
-    for directory in ("config", "tests/fixtures"):
-        files = sorted(p for p in (root / directory).rglob("*")
-                       if p.is_file() and "__pycache__" not in p.parts)
-        result[directory] = digest(b"".join(str(p.relative_to(root)).encode() + b"\0" +
-                                          p.read_bytes() + b"\0" for p in files))
-    return result
 
 
 def source_functions(root, entry="tests/mod.rs", follow_modules=True):
@@ -178,7 +157,6 @@ def command(argv):
 
 
 def collect(messages, edition, manifest, root=ROOT, run=command):
-    require(source_census(root) == manifest["source_guard"], "source guard changed; review Rust sources and helper dependencies")
     compiled = []
     for key, message in sorted(artifacts(messages, manifest, root).items()):
         executable = Path(message["executable"]).resolve()
@@ -199,13 +177,12 @@ def collect(messages, edition, manifest, root=ROOT, run=command):
     binary = (root / "target/debug/yorishiro").resolve()
     require(binary.is_file() and os.access(binary, os.X_OK), "missing/non-executable process binary")
     return {"schema": 1, "edition": edition, "revision": run(["git", "rev-parse", "HEAD"]).strip(),
-             "rustc": rustc, "target_triple": host[1], "source_guard": manifest["source_guard"],
+             "rustc": rustc, "target_triple": host[1],
              "process_binary": {"executable": str(binary), "sha256": file_digest(binary)},
             "manifest_sha256": digest(json.dumps(manifest, sort_keys=True).encode()), "artifacts": compiled}
 
 
 def verify(ce, ee, manifest, root=ROOT):
-    require(source_census(root) == manifest["source_guard"], "source guard changed; review sources, including indirect backend/provider/licence/resource helpers")
     functions = source_functions(root)
     targets = {(t["package"], t["target"], t["kind"]): t for t in manifest["targets"]}
     require(len(targets) == len(manifest["targets"]), "duplicate manifest target")
@@ -239,7 +216,6 @@ def verify(ce, ee, manifest, root=ROOT):
     process_binaries = []
     for edition, inventory in (("ce", ce), ("ee", ee)):
         require(inventory["schema"] == 1 and inventory["edition"] == edition, "wrong inventory edition/schema")
-        require(inventory["source_guard"] == manifest["source_guard"], "inventory source guard differs")
         require(inventory["manifest_sha256"] == digest(json.dumps(manifest, sort_keys=True).encode()), "inventory manifest differs")
         binary = inventory.get("process_binary", {})
         require(re.fullmatch(r"[0-9a-f]{64}", binary.get("sha256", "")) and

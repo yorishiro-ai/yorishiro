@@ -502,66 +502,6 @@ async fn api_key_lifecycle_rejects_non_admin() {
     .await;
 }
 
-#[cfg(feature = "enterprise")]
-#[tokio::test]
-async fn api_key_lifecycle_rejects_cross_tenant_ids() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let TestTenant {
-            tenant_id: other_tenant,
-            workspace_id: other_workspace,
-            owner_id: other_owner,
-            ..
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                tenant_name: "other".into(),
-                workspace_name: "other".into(),
-                owner_email: super::fixtures::unique_email("other"),
-                ..TenantArgs::default()
-            },
-        )
-        .await;
-        assert_ne!(owner.tenant_id, other_tenant);
-        owner.api_key =
-            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
-        let other_key = super::fixtures::issue_tenant_key(&ctx, other_tenant, other_owner).await;
-
-        let other_created = request
-            .post("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {other_key}"))
-            .json(&serde_json::json!({ "name": "other-client" }))
-            .await;
-        assert_eq!(other_created.status_code(), StatusCode::CREATED);
-        let other_id = other_created.json::<Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-
-        let cross_tenant = request
-            .delete(&format!("/api/api-keys/{other_id}"))
-            .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .await;
-        assert_eq!(cross_tenant.status_code(), StatusCode::NOT_FOUND);
-        request
-            .post(&format!("/api/api-keys/{other_id}/rotate"))
-            .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .await
-            .assert_status(StatusCode::NOT_FOUND);
-
-        let malformed_workspace = request
-            .delete(&format!("/api/api-keys/{other_workspace}"))
-            .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .await;
-        assert_eq!(malformed_workspace.status_code(), StatusCode::NOT_FOUND);
-    })
-    .await;
-}
-
 #[tokio::test]
 async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
     use sea_orm::TransactionTrait;

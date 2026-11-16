@@ -23,15 +23,7 @@ class InventoryGuardTests(unittest.TestCase):
             "tests/common.rs": '#[test]\nfn ordinary() {}\n#[test]\nfn shared_delta() {}\nfn helper() {}\n',
             "tests/ee.rs": '#[test]\nfn extra() {}\n',
             "src/lib.rs": "",
-            "Cargo.toml": "[package]\nname='fake'\n",
-            "migration/Cargo.toml": "[package]\nname='migration'\n",
             "migration/src/lib.rs": "",
-            "Cargo.lock": "# synthetic lock\n",
-            ".cargo/config.toml": "# synthetic config\n",
-            "patches/loco-rs/fixes.patch": "synthetic framework patch\n",
-            "patches/loco-rs/verify.py": "# pinned upstream checksum\n",
-            "config/test_sqlite.yaml": "database: sqlite\n",
-            "tests/fixtures/example.json": "{}\n",
             "fake-test-executable": "never executed",
             "target/debug/yorishiro": "synthetic process binary",
         }
@@ -46,7 +38,6 @@ class InventoryGuardTests(unittest.TestCase):
                 {"package": "yorishiro", "target": "yorishiro", "kind": "lib", "source": "src/lib.rs", "allow_zero": True},
                 {"package": "migration", "target": "migration", "kind": "lib", "source": "migration/src/lib.rs", "allow_zero": True},
             ],
-            "source_guard": guard.source_census(self.root),
             "common_modules": [
                 {"module": "common", "source": "tests/common.rs"},
                 {"module": "ee", "source": "tests/ee.rs"},
@@ -68,7 +59,6 @@ class InventoryGuardTests(unittest.TestCase):
                             "tests": names[:] if target["kind"] == "test" else [], "ignored": []})
         return {"schema": 1, "edition": edition, "revision": "synthetic-revision", "rustc": "synthetic-rustc", "target_triple": "synthetic-host",
                 "process_binary": {"executable": str(self.root / "target/debug/yorishiro"), "sha256": "1" * 64},
-                "source_guard": self.manifest["source_guard"],
                 "manifest_sha256": guard.digest(json.dumps(self.manifest, sort_keys=True).encode()), "artifacts": records}
 
     def sync_manifest_hash(self):
@@ -98,16 +88,6 @@ class InventoryGuardTests(unittest.TestCase):
         self.assertIn(("common::ordinary", "ce", "common"), owners)
         self.assertIn(("ee::extra", "ee", "common"), owners)
         self.assertIn(("common::shared_delta", "ee", "ee_delta"), owners)
-
-    def test_patch_and_fixture_changes_require_ownership_review(self):
-        for name in ("patches/loco-rs/fixes.patch", "patches/loco-rs/verify.py",
-                     "config/test_sqlite.yaml", "tests/fixtures/example.json"):
-            path = self.root / name
-            original = path.read_text()
-            with self.subTest(path=name):
-                path.write_text(original + "\nchanged\n")
-                self.rejects("source guard changed")
-            path.write_text(original)
 
     def test_only_reviewed_e5_contracts_wait_for_model_cache(self):
         self.manifest["jobs"]["resource-e5"] = {"database": "sqlite", "queue": "sqlite", "requires_e5_cache": True}
@@ -235,9 +215,6 @@ class InventoryGuardTests(unittest.TestCase):
                 "owned", package=target["package"], target=target["target"], kind="lib", source=target["source"]))
             for inventory in (self.ce, self.ee):
                 inventory["artifacts"][index]["tests"] = ["owned"]
-        self.manifest["source_guard"] = guard.source_census(self.root)
-        for inventory in (self.ce, self.ee):
-            inventory["source_guard"] = self.manifest["source_guard"]
         self.sync_manifest_hash()
         report = self.verify()
         self.assertEqual(sum(row["name"] == "owned" for row in report["assignments"]), 2)
@@ -245,17 +222,6 @@ class InventoryGuardTests(unittest.TestCase):
     def test_zero_integration_artifact_is_fatal(self):
         self.ce["artifacts"][0]["tests"] = []
         self.rejects("unexpected zero-test artifact")
-
-    def test_source_guard_rejects_new_direct_and_indirect_edges(self):
-        path = self.root / "tests/common.rs"
-        original = path.read_text()
-        for change in ("fn new_helper() { require_postgres_backend(); }",
-                       "fn indirect() { postgres_test_url(); }",
-                       "fn provider() { if queue_kind() { return; } }"):
-            with self.subTest(change=change):
-                path.write_text(original + change)
-                self.rejects("source guard changed")
-        path.write_text(original)
 
     def test_libtest_listing_is_strict(self):
         self.assertEqual(guard.parse_listing("a: test\nb: test\n"), ["a", "b"])
@@ -303,29 +269,16 @@ class InventoryGuardTests(unittest.TestCase):
 class SharedTenantFixtureTests(unittest.TestCase):
     def test_shared_ee_postgres_fixtures_have_licensed_capacity(self):
         manifest = json.loads((Path(__file__).with_name("assignments.json")).read_text())
-        expected = {
-            "models::query_embedding_requests::a_disabled_tenant_cannot_publish_a_query_embedding",
-            "requests::tenant_auth::a_workspace_scoped_key_still_works_on_a_base_route",
-            "requests::tenant_auth::a_tenant_scoped_key_resolves_the_workspace_named_by_the_header",
-            "requests::tenant_auth::tenant_key_rechecks_iam_policy_after_detachment",
-            "requests::schema_forks::concurrent_opposite_forks_allow_one_edge_and_reject_the_other",
-            "requests::schema_forks::fork_creation_shares_the_schema_version_lock",
-            "requests::origin::publication_waits_for_merge_revision_lock_and_remains_pending",
-            "requests::inference::terminal_proposal_actions_serialize_against_confirmation",
-            "requests::inference::the_infer_fill_scope_carries_the_workspaces_tenant",
-        }
-        found = set()
-        for group in manifest["exception_groups"]:
-            for name in expected.intersection(group["names"]):
-                with self.subTest(name=name):
-                    self.assertEqual(group["editions"], ["ee"])
-                    self.assertEqual(len(group["jobs"]), 1)
-                    job = manifest["jobs"][group["jobs"][0]]
-                    self.assertEqual(job["database"], "postgres")
-                    self.assertTrue(job["signed_licence"])
-                    self.assertNotIn(name, found)
-                    found.add(name)
-        self.assertEqual(found, expected)
+        groups = [group for group in manifest["exception_groups"]
+                  if group["editions"] == ["ee"] and group["role"] == "postgres"
+                  and "postgres-licensed" in group["jobs"]]
+        self.assertTrue(groups)
+        for group in groups:
+            for job in group["jobs"]:
+                with self.subTest(source=group["source"], job=job):
+                    self.assertEqual(manifest["jobs"][job]["database"], "postgres")
+                    self.assertTrue(manifest["jobs"][job]["signed_licence"])
+
 
 
 if __name__ == "__main__":

@@ -380,6 +380,12 @@ class App:
         report_path = self.args.artifacts / "results.json"
         require(not report_path.is_symlink(), "report symlink refused")
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as summary:
+                summary.write(f"## Public contracts: {self.args.edition}/{self.args.suite}\n\n")
+                summary.writelines(f"- {result['status']}: `{result['id']}`\n" for result in self.results)
+                if failure:
+                    summary.write("\n```text\n" + redact(failure, self.secrets) + "\n```\n")
 
     @contextlib.contextmanager
     def job_worker(self, target="job-target:shared"):
@@ -1437,7 +1443,10 @@ def membership_retirement_lifecycle(app):
     require(before == app.rest("GET", "/api/members", key=owner), "membership lists differ")
     preview = client.call("preview_member_role_change", {"user_id": user_id, "role": "viewer"})
     require(preview["current_role"] == "admin" and preview["requested_role"] == "viewer"
-            and not preview["blocked_by_last_owner"], "wrong member role preview")
+            and not preview["blocked_by_last_owner"] and preview["lost_workspace_ids"] == [],
+            "role labels must not claim IAM workspace loss")
+    require(preview == app.rest("POST", f"/api/members/{user_id}/role-preview", {"role": "viewer"}, key=owner),
+            "role preview differs across transports")
     stored_scope = member.call("whoami")["stored_scope"]
     require(client.call("list_members") == before,
             "role preview mutated membership or grants")
@@ -1467,6 +1476,7 @@ def membership_retirement_lifecycle(app):
     app.secrets.append(successor_key)
     successor = MCP(app, successor_key)
     client.call("transfer_ownership", {"successor_user_id": user_id}, error=True)
+    app.rest("POST", "/api/members/transfer-ownership", {"successor_user_id": user_id}, status=409, key=owner)
     roles = {row["user_id"]: row["role"] for row in client.call("list_members")}
     require(roles[user_id] == "admin" and roles[owner_id] == "owner", "root transfer changed membership")
     successor.call("tenant_retirement_inventory", error=True)
@@ -1960,9 +1970,20 @@ def cross_tenant_rejection(app):
     require(members == app.rest("GET", "/api/members", key=target_login)
             and not any(row["user_id"] == account["user_id"] for row in members),
             "rejected membership exists or differs across transports")
+    administrator.call("transfer_ownership", {"successor_user_id": account["user_id"]}, error=True)
+    app.rest("POST", "/api/members/transfer-ownership", {"successor_user_id": account["user_id"]},
+             status=409, key=target_login)
+    require(administrator.call("list_members") == members, "root transfer rejection changed tenant members")
     history = administrator.call("list_invites")
     require(any(row["email"] == "owner@example.invalid" and row["used_at"] is None for row in history)
             and token not in json.dumps(history), "rejected invitation was consumed or disclosed")
+    for endpoint in (f"/api/api-keys/{app.key_id}", f"/api/api-keys/{app.key_id}/rotate"):
+        app.rest("POST" if endpoint.endswith("/rotate") else "DELETE", endpoint, status=404, key=target_login)
+    for tool in ("revoke_api_key", "rotate_api_key"):
+        rejected = administrator.call(tool, {"key_id": app.key_id}, error=True)
+        require(rejected["result"]["structuredContent"]["error"]["code"] == "not_found",
+                "foreign credential mutation must not reveal its existence")
+    require(client.call("whoami") == before, "foreign credential mutation changed the original identity")
 
 
 def licensed_marketplace(app):
@@ -1998,7 +2019,8 @@ def licensed_marketplace(app):
             "marketplace review differs across transports")
     fork = reader.call("fork_marketplace_template", {"template_id": template_id, "version": version["version"]})
     copied = app.rest("GET", f"/api/template-library/{fork['template_id']}", key=key)
-    require(copied["fork_of"] == template_id and copied["definition"] == version["definition"],
+    source = publisher.call("get_template_library_item", {"id": template_id})
+    require(copied["fork_of"] == template_id and copied["definition"] == source["definition"],
             "marketplace fork did not retain its published definition")
     MCP(app, app.key).call("list_marketplace", error=True)
     app.rest("GET", "/api/marketplace", status=403, key=app.key)

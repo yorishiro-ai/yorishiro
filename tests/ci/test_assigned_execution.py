@@ -282,6 +282,25 @@ class AssignedExecutionTests(unittest.TestCase):
         receipt = runner.inventory.load(self.root / "ce-common-sqlite.json")
         self.assertEqual(receipt["status"], "failed")
 
+    def test_failed_execution_writes_redacted_job_summary(self):
+        summary = self.root / "summary.md"
+        self.env["GITHUB_STEP_SUMMARY"] = str(summary)
+        self.env["YORISHIRO_EMBEDDING_API_KEY"] = "private-provider-key"
+
+        def failed(argv, env, deadline, log):
+            if "--list" in argv:
+                return self.fake_process(argv, env, deadline, log)
+            text = "test a ... FAILED\nthread 'a' panicked at private-provider-key\n"
+            Path(log).write_text(text)
+            return 1, text
+
+        with self.assertRaisesRegex(ValueError, "libtest process failed"):
+            self.execute(run=failed)
+        text = summary.read_text()
+        self.assertIn("test a ... FAILED", text)
+        self.assertIn("panicked at", text)
+        self.assertNotIn("private-provider-key", text)
+
     def test_missing_duplicate_failed_ignored_and_zero_results_rejected(self):
         for text in ("", "test a ... ok\ntest a ... ok\n", "test a ... FAILED\ntest b ... ok\n",
                      "test a ... ignored\ntest b ... ok\n", "test a ... ok\n"):
