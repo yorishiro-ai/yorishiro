@@ -15,6 +15,7 @@ pub mod entity_relations;
 pub mod entity_snapshots;
 pub mod export;
 pub mod iam_audit_events;
+pub mod iam_builtin;
 pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;

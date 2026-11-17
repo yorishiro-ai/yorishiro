@@ -67,11 +67,6 @@ pub(crate) async fn reissue_invite_as(
     )
     .await?;
     let invite = managed_invite(&txn, actor.tenant_id, invite_id).await?;
-    if invite.role == MembershipRole::Owner.as_db_str() {
-        return Err(YorishiroError::Conflict {
-            message: "tenant root cannot be assigned through an invitation".into(),
-        });
-    }
     if invite.used_at.is_some() {
         return Err(YorishiroError::Conflict {
             message: "a used invite cannot be reissued".into(),
@@ -124,11 +119,6 @@ pub(crate) async fn create_invite_as(
         },
     )
     .await?;
-    if role == MembershipRole::Owner {
-        return Err(YorishiroError::Conflict {
-            message: "tenant root cannot be assigned through an invitation".into(),
-        });
-    }
     let now = crate::time::now();
     if expires_at <= now || email.trim().is_empty() || !email.contains('@') {
         return Err(YorishiroError::ValidationFailed {

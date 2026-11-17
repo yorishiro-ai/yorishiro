@@ -50,7 +50,7 @@ pub(crate) struct SetMemberRoleArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = super::scope_requirement(ApiKeyScope::Read),
-        description = "Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)"
+        description = "Create a tenant user with a tenant-local user name and password; the admin role receives the built-in administrator policy, other roles start with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn create_tenant_user(
         &self,
@@ -108,7 +108,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Change an existing tenant member's legacy role, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)"
+        description = "Change an existing tenant member's role label, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn set_member_role(
         &self,

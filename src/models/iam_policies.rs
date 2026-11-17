@@ -109,6 +109,11 @@ impl Model {
         let before = Self::find(&txn, actor.tenant_id, id)
             .await?
             .ok_or_else(|| YorishiroError::not_found("IAM policy was not found"))?;
+        if crate::models::iam_builtin::is_builtin_policy_name(&before.name) {
+            return Err(YorishiroError::Conflict {
+                message: "system-managed policies cannot be updated".into(),
+            });
+        }
         let name = name.trim();
         if name.is_empty() || name.chars().count() > 100 {
             return Err(YorishiroError::ValidationFailed {
@@ -148,6 +153,11 @@ impl Model {
         let policy = Self::find(&txn, actor.tenant_id, id)
             .await?
             .ok_or_else(|| YorishiroError::not_found("IAM policy was not found"))?;
+        if crate::models::iam_builtin::is_builtin_policy_name(&policy.name) {
+            return Err(YorishiroError::Conflict {
+                message: "system-managed policies cannot be deleted".into(),
+            });
+        }
         Self::delete(&txn, actor.tenant_id, id).await?;
         crate::models::iam_audit_events::record(
             &txn,
@@ -183,6 +193,11 @@ impl Model {
                 message: "policy name must be between 1 and 100 characters".into(),
                 details: vec![],
                 hint: "provide a non-empty name of at most 100 characters".into(),
+            });
+        }
+        if crate::models::iam_builtin::is_builtin_policy_name(name) {
+            return Err(YorishiroError::Conflict {
+                message: "this policy name is reserved for a system-managed policy".into(),
             });
         }
         let policy = Self::create(&txn, actor.tenant_id, name.to_owned(), document).await?;

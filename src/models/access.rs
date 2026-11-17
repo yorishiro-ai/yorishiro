@@ -284,64 +284,6 @@ pub async fn capabilities(
     })
 }
 
-/// Workspace authority and its provenance, independently of any credential's stored scope.
-#[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct WorkspaceAccess {
-    pub max_scope: ApiKeyScope,
-    pub source: &'static str,
-    pub workspace_admin: bool,
-}
-
-/// Resolves inherited tenant authority or an explicit workspace grant.
-///
-/// # Errors
-/// Propagates workspace and membership lookup failures or rejects invalid stored roles.
-pub async fn workspace_access(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
-    user_id: Uuid,
-) -> Result<Option<WorkspaceAccess>, YorishiroError> {
-    let workspace_tenant =
-        crate::models::workspace_workspaces::get_workspace_tenant(conn, workspace_id).await?;
-    if workspace_tenant != tenant_id {
-        return Ok(None);
-    }
-    crate::models::tenant_tenants::Model::require_active(conn, tenant_id).await?;
-    let Some(tenant_role) =
-        tenant_memberships::get_membership_role(conn, tenant_id, user_id).await?
-    else {
-        return Ok(None);
-    };
-    workspace_access_for_role(conn, workspace_id, user_id, tenant_role).await
-}
-
-pub(crate) async fn workspace_access_for_role(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    user_id: Uuid,
-    tenant_role: tenant_memberships::MembershipRole,
-) -> Result<Option<WorkspaceAccess>, YorishiroError> {
-    if tenant_role.administers_tenant() {
-        return Ok(Some(WorkspaceAccess {
-            max_scope: tenant_role.max_scope(),
-            source: "tenant_role",
-            workspace_admin: true,
-        }));
-    }
-    let Some(role) =
-        crate::models::workspace_memberships::Model::role(conn, workspace_id, user_id).await?
-    else {
-        return Ok(None);
-    };
-    Ok(Some(WorkspaceAccess {
-        max_scope: tenant_role.max_scope().min(role.max_scope()),
-        source: "workspace_membership",
-        workspace_admin: role == crate::models::workspace_memberships::WorkspaceRole::Admin,
-    }))
-}
-
 /// Serializes credential issuance with membership updates and checks attribution.
 pub(crate) async fn require_key_attribution(
     txn: &DatabaseTransaction,
@@ -375,26 +317,6 @@ pub async fn require_key_grant(
     if audit {
         require_audit(issuer)?;
     }
-    Ok(())
-}
-
-/// Requires current tenant administration authority, independently of content scope.
-///
-/// # Errors
-/// Rejects service identities, missing memberships and non-administrative roles.
-pub async fn require_tenant_admin(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    user_id: Option<Uuid>,
-) -> Result<(), YorishiroError> {
-    let user_id = user_id.ok_or(YorishiroError::Unauthenticated)?;
-    tenant_memberships::get_membership_role(conn, tenant_id, user_id)
-        .await?
-        .filter(|role| role.administers_tenant())
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "this operation is restricted to tenant owners/admins".into(),
-            hint: "ask a tenant owner to grant you the admin role".into(),
-        })?;
     Ok(())
 }
 

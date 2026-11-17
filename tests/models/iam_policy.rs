@@ -279,3 +279,9 @@ fn stale_unrelated_selectors_do_not_block_grants_or_hide_denies() {
         previously_owned
     ));
 }
+
+// The built-in policy catalogue and the access probes derive from `Action::ALL`, so the list must stay in lockstep with the enum.
+#[test]
+fn action_all_matches_the_enum() {
+    assert_eq!(Action::ALL.len(), 106);
+}

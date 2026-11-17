@@ -129,13 +129,14 @@ pub(crate) async fn signup_account(
         max_tenants,
     )
     .await?;
+    crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
     let user = register_member(
         &txn,
         tenant.id,
         email,
         password,
         display_name,
-        crate::models::tenant_memberships::MembershipRole::Owner,
+        crate::models::tenant_memberships::MembershipRole::Admin,
     )
     .await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
@@ -165,6 +166,7 @@ pub(crate) async fn setup_first_account(
         });
     }
     let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
+    crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
     let workspace = create_workspace(&txn, tenant.id, "default", None, None).await?;
     let user = register_member(
         &txn,
@@ -172,7 +174,7 @@ pub(crate) async fn setup_first_account(
         email,
         password,
         display_name,
-        tenant_memberships::MembershipRole::Owner,
+        tenant_memberships::MembershipRole::Admin,
     )
     .await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;

@@ -1525,7 +1525,7 @@ mod conflict {
                 &ctx.db,
                 tenant_id,
                 owner.id,
-                MembershipRole::Owner,
+                MembershipRole::Admin,
             )
             .await
             .expect("add update owner");

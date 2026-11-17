@@ -35,7 +35,7 @@ async fn preview_removal(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/transfer-ownership", request_body = crate::dtos::members::TransferOwnershipRequest, responses((status = 204, description = "Successor promoted to owner and actor demoted to admin atomically"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_update"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members/transfer-ownership", request_body = crate::dtos::members::TransferOwnershipRequest, responses((status = 204, description = "Rejected with a conflict: tenant root ownership cannot be transferred"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_update"]))), tag = "community"))]
 async fn transfer_ownership(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,

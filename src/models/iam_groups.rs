@@ -93,6 +93,14 @@ impl Model {
                 hint: "provide a non-empty name of at most 100 characters".into(),
             });
         }
+        let current = Self::find(&txn, actor.tenant_id, id)
+            .await?
+            .ok_or_else(|| YorishiroError::not_found("IAM group was not found"))?;
+        if crate::models::iam_builtin::is_builtin_group_name(&current.name) {
+            return Err(YorishiroError::Conflict {
+                message: "the built-in admin group cannot be renamed".into(),
+            });
+        }
         if !Self::rename(&txn, actor.tenant_id, id, name.to_owned()).await? {
             return Err(YorishiroError::not_found("IAM group was not found"));
         }
@@ -127,6 +135,14 @@ impl Model {
             },
         )
         .await?;
+        let group = Self::find(&txn, actor.tenant_id, id)
+            .await?
+            .ok_or_else(|| YorishiroError::not_found("IAM group was not found"))?;
+        if crate::models::iam_builtin::is_builtin_group_name(&group.name) {
+            return Err(YorishiroError::Conflict {
+                message: "the built-in admin group cannot be deleted".into(),
+            });
+        }
         if !Self::delete(&txn, actor.tenant_id, id).await? {
             return Err(YorishiroError::not_found("IAM group was not found"));
         }
@@ -163,6 +179,11 @@ impl Model {
                 message: "group name must be between 1 and 100 characters".into(),
                 details: vec![],
                 hint: "provide a non-empty name of at most 100 characters".into(),
+            });
+        }
+        if crate::models::iam_builtin::is_builtin_group_name(name) {
+            return Err(YorishiroError::Conflict {
+                message: "this group name is reserved for the built-in admin group".into(),
             });
         }
         let group = Self::create(&txn, actor.tenant_id, name.to_owned()).await?;

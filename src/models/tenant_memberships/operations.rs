@@ -47,7 +47,7 @@ pub(crate) async fn update_member_by_email_as(
 /// Reports membership removal effects without changing membership or credentials.
 ///
 /// # Errors
-/// Rejects stale administrator credentials or persistence failures.
+/// Rejects stale administrator credentials, removing the tenant root, or persistence failures.
 pub async fn preview_removal(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -66,10 +66,11 @@ pub async fn preview_removal(
     )
     .await?;
     let role = get_membership_role(&txn, actor.tenant_id, user_id).await?;
-    let blocked_by_last_owner = match protect_owner(&txn, actor.tenant_id, user_id, None).await {
-        Ok(()) => false,
-        Err(YorishiroError::Conflict { .. }) => true,
-        Err(error) => return Err(error),
+    protect_root(&txn, actor.tenant_id, user_id, None).await?;
+    let last_admin_warning = if is_last_admin(&txn, actor.tenant_id, user_id).await? {
+        Some(LAST_ADMIN_WARNING.to_owned())
+    } else {
+        None
     };
     let revoked_api_key_ids = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
@@ -104,7 +105,7 @@ pub async fn preview_removal(
     Ok(super::MembershipRemovalPreview {
         user_id,
         role,
-        blocked_by_last_owner,
+        last_admin_warning,
         revoked_api_key_ids,
         lost_workspace_ids,
     })
@@ -135,8 +136,8 @@ pub async fn transfer_ownership(
     })
 }
 
-/// Serializes membership changes and refuses losing the last owner.
-async fn protect_owner(
+/// Serializes membership changes and refuses removing or demoting the tenant root.
+async fn protect_root(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
@@ -145,7 +146,7 @@ async fn protect_owner(
     crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
         .await
         .internal()?;
-    if next_role != Some(MembershipRole::Owner)
+    if next_role != Some(MembershipRole::Admin)
         && crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await?
     {
         return Err(YorishiroError::Conflict {
@@ -155,10 +156,44 @@ async fn protect_owner(
     Ok(())
 }
 
+/// Carried in role and removal previews when the change leaves no non-root admin behind.
+pub(crate) const LAST_ADMIN_WARNING: &str = "this leaves no non-root admin; only the tenant root retains full access and can restore administrator membership";
+
+/// True when `user_id` holds the admin role and no other non-root admin membership exists in the tenant.
+/// The tenant root keeps its admin membership no matter what happens to other members, so it cannot count as a surviving admin.
+async fn is_last_admin(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, YorishiroError> {
+    if get_membership_role(txn, tenant_id, user_id).await? != Some(MembershipRole::Admin) {
+        return Ok(false);
+    }
+    let root = crate::models::iam_tenant_roots::Entity::find_by_id(tenant_id)
+        .one(txn)
+        .await
+        .internal()?;
+    let mut query = Entity::find()
+        .filter(Column::TenantId.eq(tenant_id))
+        .filter(Column::Role.eq(MembershipRole::Admin.as_db_str()))
+        .filter(Column::UserId.ne(user_id));
+    if let Some(root) = root {
+        query = query.filter(Column::UserId.ne(root.user_id));
+    }
+    let others = query
+        .select_only()
+        .column(Column::Id)
+        .into_tuple::<Uuid>()
+        .all(txn)
+        .await
+        .internal()?;
+    Ok(others.is_empty())
+}
+
 /// Adds (or updates the role of) a user's membership in a tenant.
 ///
 /// # Errors
-/// Rejects last-owner demotion or persistence failures.
+/// Rejects removing or demoting the tenant root, or persistence failures.
 pub async fn add_member(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -179,7 +214,7 @@ pub(crate) async fn add_member_in_transaction(
 ) -> Result<(), YorishiroError> {
     use sea_orm::sea_query::OnConflict;
 
-    protect_owner(conn, tenant_id, user_id, Some(role)).await?;
+    protect_root(conn, tenant_id, user_id, Some(role)).await?;
     crate::db::lock_for_update(conn, &format!("user-membership:{user_id}"))
         .await
         .internal()?;
@@ -195,7 +230,7 @@ pub(crate) async fn add_member_in_transaction(
             message: "an account cannot belong to more than one tenant".into(),
         });
     }
-    guard_tenant_bound_user(conn, tenant_id, user_id, role).await?;
+    guard_tenant_bound_user(conn, tenant_id, user_id).await?;
 
     // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
     let active = ActiveModel {
@@ -221,16 +256,16 @@ pub(crate) async fn add_member_in_transaction(
             message: "an account cannot belong to more than one tenant".into(),
         });
     }
+    crate::models::iam_builtin::sync_admin_group(conn, tenant_id, user_id, Some(role)).await?;
 
     Ok(())
 }
 
-/// A tenant-bound user belongs to its own tenant only and can never own it.
+/// A tenant-bound user belongs to its own tenant only.
 async fn guard_tenant_bound_user(
     conn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
-    role: MembershipRole,
 ) -> Result<(), YorishiroError> {
     let Some(user) = user_users::Entity::find_by_id(user_id)
         .one(conn)
@@ -239,21 +274,20 @@ async fn guard_tenant_bound_user(
     else {
         return Err(YorishiroError::not_found("account not found"));
     };
-    match user.tenant_id {
-        Some(bound) if bound != tenant_id => Err(YorishiroError::Conflict {
+    if let Some(bound) = user.tenant_id
+        && bound != tenant_id
+    {
+        return Err(YorishiroError::Conflict {
             message: "a tenant user cannot join another tenant".into(),
-        }),
-        Some(_) if role == MembershipRole::Owner => Err(YorishiroError::Conflict {
-            message: "a tenant user cannot be an owner".into(),
-        }),
-        _ => Ok(()),
+        });
     }
+    Ok(())
 }
 
 /// Creates a tenant-bound user and its membership in the caller's transaction.
 ///
 /// # Errors
-/// Rejects owner role, invalid credentials, and duplicate names.
+/// Rejects invalid credentials, and duplicate names.
 pub async fn create_tenant_user_member(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
@@ -262,11 +296,6 @@ pub async fn create_tenant_user_member(
     display_name: Option<&str>,
     role: MembershipRole,
 ) -> Result<user_users::Model, YorishiroError> {
-    if role == MembershipRole::Owner {
-        return Err(YorishiroError::Conflict {
-            message: "a tenant user cannot be an owner".into(),
-        });
-    }
     let user = crate::models::user_users::create_tenant_user(
         txn,
         tenant_id,
@@ -282,7 +311,7 @@ pub async fn create_tenant_user_member(
 /// Creates a tenant user after checking the caller's IAM permission.
 ///
 /// # Errors
-/// Rejects unauthorized credentials, owner role, invalid credentials and duplicate names.
+/// Rejects unauthorized credentials, invalid credentials and duplicate names.
 pub(crate) async fn create_tenant_user_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -353,7 +382,7 @@ pub async fn reset_tenant_user_password(
 /// Updates membership and reports existing key grants in the same transaction.
 ///
 /// # Errors
-/// Rejects stale administrator credentials, last-owner demotion and persistence failures.
+/// Rejects stale administrator credentials, removing or demoting the tenant root, and persistence failures.
 pub async fn update_member_access(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -383,13 +412,6 @@ async fn update_member_access_on(
     )
     .await?;
     let tenant_id = actor.tenant_id;
-    if role == MembershipRole::Owner
-        && !crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await?
-    {
-        return Err(YorishiroError::Conflict {
-            message: "tenant root cannot be assigned through membership changes".into(),
-        });
-    }
     add_member_in_transaction(txn, tenant_id, user_id, role).await?;
     key_access(txn, tenant_id, user_id).await
 }
@@ -397,7 +419,7 @@ async fn update_member_access_on(
 /// Previews a role change without updating membership or stored grants.
 ///
 /// # Errors
-/// Rejects stale administrator credentials, missing membership or persistence failures.
+/// Rejects stale administrator credentials, demoting the tenant root, missing membership or persistence failures.
 pub async fn preview_role_change(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -418,22 +440,13 @@ pub async fn preview_role_change(
     let current_role = get_membership_role(&txn, actor.tenant_id, user_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("tenant membership not found"))?;
-    if role == MembershipRole::Owner
-        && !crate::models::iam_tenant_roots::Model::contains(&txn, actor.tenant_id, user_id).await?
-    {
-        return Err(YorishiroError::Conflict {
-            message: "tenant root cannot be assigned through membership changes".into(),
-        });
-    }
-    let blocked_by_last_owner = if role != MembershipRole::Owner {
-        match protect_owner(&txn, actor.tenant_id, user_id, Some(role)).await {
-            Ok(()) => false,
-            Err(YorishiroError::Conflict { .. }) => true,
-            Err(error) => return Err(error),
-        }
-    } else {
-        false
-    };
+    protect_root(&txn, actor.tenant_id, user_id, Some(role)).await?;
+    let last_admin_warning =
+        if role != MembershipRole::Admin && is_last_admin(&txn, actor.tenant_id, user_id).await? {
+            Some(LAST_ADMIN_WARNING.to_owned())
+        } else {
+            None
+        };
     let keys = key_access(&txn, actor.tenant_id, user_id).await?;
     // Membership labels do not change IAM grants or credential ceilings.
     let lost_workspace_ids = Vec::new();
@@ -442,7 +455,7 @@ pub async fn preview_role_change(
         user_id,
         current_role,
         requested_role: role,
-        blocked_by_last_owner,
+        last_admin_warning,
         lost_workspace_ids,
         keys,
     })
@@ -486,7 +499,7 @@ async fn key_access(
 /// Revokes attributed keys atomically so restoring membership cannot resurrect old credentials.
 ///
 /// # Errors
-/// Rejects last-owner removal or persistence failures.
+/// Rejects removing the tenant root or persistence failures.
 pub async fn remove_member(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -501,7 +514,7 @@ pub async fn remove_member(
 /// Removes a member only if the presented administrator is still authorized.
 ///
 /// # Errors
-/// Rejects revoked credentials, non-administrators, last-owner removal and persistence failures.
+/// Rejects revoked credentials, non-administrators, removing the tenant root and persistence failures.
 pub async fn remove_member_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -530,7 +543,7 @@ async fn remove_member_in_transaction(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::{api_keys, workspace_memberships, workspace_workspaces};
     use sea_orm::QueryTrait;
-    protect_owner(txn, tenant_id, user_id, None).await?;
+    protect_root(txn, tenant_id, user_id, None).await?;
     let workspaces = workspace_workspaces::Entity::find()
         .select_only()
         .column(workspace_workspaces::Column::Id)

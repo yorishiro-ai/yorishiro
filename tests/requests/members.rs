@@ -213,7 +213,7 @@ async fn membership_mutations_reject_stale_admin_contexts() {
             &ctx.db,
             &actor,
             admin.id,
-            MembershipRole::Owner,
+            MembershipRole::Admin,
         )
         .await;
         assert!(matches!(
@@ -260,6 +260,23 @@ async fn membership_labels_preserve_credential_ceilings_and_removal_revokes_keys
         )
         .await
         .unwrap();
+        // A second non-root admin keeps `user` from being the last one, so the role previews below stay warning-free.
+        let second_admin = yorishiro::models::user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("second-admin"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        yorishiro::models::tenant_memberships::add_member(
+            &ctx.db,
+            tenant.tenant_id,
+            second_admin.id,
+            MembershipRole::Admin,
+        )
+        .await
+        .unwrap();
         let broad = issue_api_key(
             &ctx,
             tenant.workspace_id,
@@ -299,7 +316,7 @@ async fn membership_labels_preserve_credential_ceilings_and_removal_revokes_keys
                 .await;
             assert_eq!(preview.status_code(), StatusCode::OK);
             let preview = preview.json::<serde_json::Value>();
-            assert_eq!(preview["blocked_by_last_owner"], false);
+            assert!(preview["last_admin_warning"].is_null());
             let response = request
                 .post("/api/members")
                 .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
@@ -370,7 +387,7 @@ async fn membership_labels_preserve_credential_ceilings_and_removal_revokes_keys
             .await;
         assert_eq!(preview.status_code(), StatusCode::OK);
         let preview = preview.json::<serde_json::Value>();
-        assert_eq!(preview["blocked_by_last_owner"], false);
+        assert!(preview["last_admin_warning"].is_null());
         assert_eq!(preview["lost_workspace_ids"], serde_json::json!([]));
         let revoked_ids = preview["revoked_api_key_ids"].as_array().unwrap();
         assert_eq!(revoked_ids.len(), 3);
@@ -481,36 +498,33 @@ async fn owner_can_list_and_add_members() {
 }
 
 #[tokio::test]
-async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operation() {
+async fn root_membership_changes_conflict_and_last_admin_changes_warn() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::_entities::tenant_memberships::Column;
+    use yorishiro::models::{tenant_memberships, user_users};
+
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let args = TenantArgs::default();
         let email = args.owner_email.clone();
         let tenant = TestTenant::create(&request, &ctx, args).await;
         let tenant_admin_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        // Previews of removing the tenant root or demoting it below admin conflict without changing anything.
         let preview = request
             .get(&format!("/api/members/{}/removal-preview", tenant.owner_id))
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
-        assert_eq!(preview.status_code(), StatusCode::OK);
-        assert_eq!(
-            preview.json::<serde_json::Value>()["blocked_by_last_owner"],
-            true
-        );
+        assert_eq!(preview.status_code(), StatusCode::CONFLICT);
         let role_preview = request
             .post(&format!("/api/members/{}/role-preview", tenant.owner_id))
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
-            .json(&serde_json::json!({"role":"admin"}))
+            .json(&serde_json::json!({"role":"viewer"}))
             .await;
-        assert_eq!(role_preview.status_code(), StatusCode::OK);
-        assert_eq!(
-            role_preview.json::<serde_json::Value>()["blocked_by_last_owner"],
-            true
-        );
+        assert_eq!(role_preview.status_code(), StatusCode::CONFLICT);
         let demoted = request
             .post("/api/members")
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
-            .json(&serde_json::json!({"email":email,"role":"admin"}))
+            .json(&serde_json::json!({"email":email,"role":"member"}))
             .await;
         assert_eq!(demoted.status_code(), StatusCode::CONFLICT);
         let removed = request
@@ -518,7 +532,7 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(removed.status_code(), StatusCode::CONFLICT);
-        let demoted = yorishiro::models::tenant_memberships::add_member(
+        let demoted = tenant_memberships::add_member(
             &ctx.db,
             tenant.tenant_id,
             tenant.owner_id,
@@ -529,11 +543,58 @@ async fn last_owner_cannot_be_demoted_or_removed_through_any_membership_operatio
             demoted,
             Err(yorishiro::YorishiroError::Conflict { .. })
         ));
+        // Every rejected change leaves the root membership and the login working.
+        let membership = tenant_memberships::Entity::find()
+            .filter(Column::TenantId.eq(tenant.tenant_id))
+            .filter(Column::UserId.eq(tenant.owner_id))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("root membership survives");
+        assert_eq!(membership.role, MembershipRole::Admin.as_db_str());
         let identity = request
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
             .await;
         assert_eq!(identity.status_code(), StatusCode::OK);
+        // Demoting the last non-root admin succeeds, but the previews carry the warning.
+        let admin = user_users::create_user(
+            &ctx.db,
+            &super::fixtures::unique_email("last-admin"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
+            .await
+            .unwrap();
+        let preview = request
+            .post(&format!("/api/members/{}/role-preview", admin.id))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
+            .json(&serde_json::json!({"role":"member"}))
+            .await;
+        assert_eq!(preview.status_code(), StatusCode::OK);
+        assert!(preview.json::<serde_json::Value>()["last_admin_warning"].is_string());
+        let preview = request
+            .get(&format!("/api/members/{}/removal-preview", admin.id))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
+            .await;
+        assert_eq!(preview.status_code(), StatusCode::OK);
+        assert!(preview.json::<serde_json::Value>()["last_admin_warning"].is_string());
+        let demoted = request
+            .post("/api/members")
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
+            .json(&serde_json::json!({"email":admin.email,"role":"member"}))
+            .await;
+        assert_eq!(demoted.status_code(), StatusCode::CREATED);
+        // Once demoted, the same previews no longer warn.
+        let preview = request
+            .get(&format!("/api/members/{}/removal-preview", admin.id))
+            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
+            .await;
+        assert_eq!(preview.status_code(), StatusCode::OK);
+        assert!(preview.json::<serde_json::Value>()["last_admin_warning"].is_null());
     })
     .await;
 }
@@ -617,24 +678,13 @@ async fn competing_tenant_memberships_allow_only_one() {
 }
 
 #[tokio::test]
-async fn competing_owner_demotion_and_removal_preserve_an_owner() {
-    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+async fn competing_root_demotion_and_removal_preserve_the_root() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::_entities::tenant_memberships::Column;
     use yorishiro::models::tenant_memberships;
 
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let second = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            &super::fixtures::unique_email("competing-owner"),
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .unwrap();
-        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, second.id, MembershipRole::Owner)
-            .await
-            .unwrap();
         let barrier = tokio::sync::Barrier::new(2);
         let demote = async {
             barrier.wait().await;
@@ -642,32 +692,39 @@ async fn competing_owner_demotion_and_removal_preserve_an_owner() {
                 &ctx.db,
                 tenant.tenant_id,
                 tenant.owner_id,
-                MembershipRole::Admin,
+                MembershipRole::Member,
             )
             .await
         };
         let remove = async {
             barrier.wait().await;
-            tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, second.id).await
+            tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, tenant.owner_id).await
         };
         let (demoted, removed) = tokio::join!(demote, remove);
-        assert_ne!(
-            demoted.is_ok(),
-            removed.is_ok(),
-            "exactly one owner change may commit: {demoted:?}, {removed:?}"
+        // The tenant root can neither be demoted nor removed, whichever lands first.
+        assert!(
+            matches!(demoted, Err(yorishiro::YorishiroError::Conflict { .. })),
+            "root demotion must conflict: {demoted:?}"
         );
-        let rejected = if demoted.is_err() { demoted } else { removed };
-        assert!(matches!(
-            rejected,
-            Err(yorishiro::YorishiroError::Conflict { .. })
-        ));
-        let owners = tenant_memberships::Entity::find()
+        assert!(
+            matches!(removed, Err(yorishiro::YorishiroError::Conflict { .. })),
+            "root removal must conflict: {removed:?}"
+        );
+        let membership = tenant_memberships::Entity::find()
             .filter(Column::TenantId.eq(tenant.tenant_id))
-            .filter(Column::Role.eq(MembershipRole::Owner.as_db_str()))
-            .count(&ctx.db)
+            .filter(Column::UserId.eq(tenant.owner_id))
+            .one(&ctx.db)
             .await
-            .unwrap();
-        assert_eq!(owners, 1);
+            .unwrap()
+            .expect("root membership survives");
+        assert_eq!(membership.role, MembershipRole::Admin.as_db_str());
+        let root =
+            yorishiro::models::_entities::iam_tenant_roots::Entity::find_by_id(tenant.tenant_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("root row survives");
+        assert_eq!(root.user_id, tenant.owner_id);
     })
     .await;
 }
@@ -843,10 +900,10 @@ async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
         assert_eq!(body["user_name"], user_name);
         let user_id = body["user_id"].as_str().unwrap().to_owned();
 
-        // Ownership, duplicates and weak passwords are refused.
+        // The legacy `owner` role, duplicates and weak passwords are refused.
         create(serde_json::json!({"user_name":"bob","password":password,"role":"owner"}))
             .await
-            .assert_status(StatusCode::CONFLICT);
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
         create(serde_json::json!({"user_name":user_name,"password":password,"role":"member"}))
             .await
             .assert_status(StatusCode::CONFLICT);

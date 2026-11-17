@@ -237,10 +237,11 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
 
         let txn = ctx.db.begin().await.unwrap();
+        // A policy-free member: an admin carries the built-in wildcard policy and would survive the attachment removal.
         let member = yorishiro::models::tenancy::register_member(
             &txn, tenant, &super::fixtures::unique_email("queued-member"),
             "hunter2-hunter2", None,
-            yorishiro::models::tenant_memberships::MembershipRole::Admin,
+            yorishiro::models::tenant_memberships::MembershipRole::Member,
         ).await.unwrap();
         txn.commit().await.unwrap();
         let document = json!({"statements":[{"effect":"allow","actions":["migration_fill_defaults"],
@@ -524,13 +525,14 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
         )
         .await;
         let txn = ctx.db.begin().await.unwrap();
+        // A policy-free member: an admin carries the built-in wildcard policy and would survive the attachment removal.
         let member = tenancy::register_member(
             &txn,
             tenant.tenant_id,
             &super::fixtures::unique_email("queued-workspace"),
             "hunter2-hunter2",
             None,
-            MembershipRole::Admin,
+            MembershipRole::Member,
         )
         .await
         .unwrap();

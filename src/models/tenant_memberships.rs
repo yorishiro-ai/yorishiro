@@ -19,28 +19,14 @@ pub(crate) use operations::{
 pub use operations::{create_tenant_user_member, reset_tenant_user_password};
 
 db_enum! {
-    /// Mirrors the `tenant_memberships.role` check constraint.
+    /// Display label for a tenant membership; permissions come from IAM policies, not from this value.
+    /// `from_db_str` and `FromStr` also accept the retired `"owner"` spelling, which the data migration rewrote to `"admin"`.
     #[derive(Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
     #[schemars(rename_all = "lowercase")]
     pub enum MembershipRole {
-        Owner = "owner",
-        Admin = "admin",
+        Admin = "admin" | "owner",
         Member = "member",
         Viewer = "viewer",
-    }
-}
-
-impl MembershipRole {
-    pub fn max_scope(self) -> ApiKeyScope {
-        match self {
-            Self::Owner | Self::Admin => ApiKeyScope::Migration,
-            Self::Member => ApiKeyScope::Write,
-            Self::Viewer => ApiKeyScope::Read,
-        }
-    }
-
-    pub(crate) fn administers_tenant(self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
     }
 }
 
@@ -54,16 +40,15 @@ pub struct MembershipRecord {
     pub role: MembershipRole,
 }
 
-/// Key access under the requested membership role, excluding secret material.
+/// A point-in-time snapshot of the member's live credentials, excluding secret material.
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MembershipKeyAccess {
     pub api_key_id: Uuid,
     pub stored_scope: ApiKeyScope,
-    /// Tenant-level ceiling for tenant-scoped keys, or workspace ceiling for workspace-bound keys.
-    /// A workspace-bound key has no effective scope when the user lacks access to its workspace.
+    /// The credential's own scope: membership labels no longer lower it, and IAM policies gate individual actions rather than scopes.
     pub effective_scope: Option<ApiKeyScope>,
-    /// Explicit operator grant, independent of the membership's ordered scope cap.
+    /// Explicit operator grant, independent of the credential's scope.
     pub audit: bool,
 }
 
@@ -73,7 +58,8 @@ pub struct MembershipKeyAccess {
 pub struct MembershipRemovalPreview {
     pub user_id: Uuid,
     pub role: Option<MembershipRole>,
-    pub blocked_by_last_owner: bool,
+    /// Set when this removal leaves no non-root admin; only the tenant root retains full access and can restore administrator membership.
+    pub last_admin_warning: Option<String>,
     pub revoked_api_key_ids: Vec<Uuid>,
     pub lost_workspace_ids: Vec<Uuid>,
 }
@@ -84,7 +70,8 @@ pub struct MembershipRolePreview {
     pub user_id: Uuid,
     pub current_role: MembershipRole,
     pub requested_role: MembershipRole,
-    pub blocked_by_last_owner: bool,
+    /// Set when this change leaves no non-root admin; only the tenant root retains full access and can restore administrator membership.
+    pub last_admin_warning: Option<String>,
     pub lost_workspace_ids: Vec<Uuid>,
     pub keys: Vec<MembershipKeyAccess>,
 }

@@ -11,3 +11,5 @@ path = "src/lib.rs"
 
 [dependencies]
 sea-orm-migration = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }

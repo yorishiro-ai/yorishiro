@@ -110,7 +110,7 @@ async fn signup_with_invite(
     ))
 }
 
-/// No invite: creates a brand-new tenant and joins the caller as `Owner`, but no workspace.
+/// No invite: creates a brand-new tenant and joins the caller as `Admin`, but no workspace.
 ///
 /// The new tenant can be managed using a tenant-scoped login key.
 async fn signup_without_invite(
@@ -146,7 +146,7 @@ async fn signup_without_invite(
             user_id: user.id,
             email: user.root_email(),
             tenant_id,
-            role: MembershipRole::Owner,
+            role: MembershipRole::Admin,
             workspaces: vec![],
         }),
     ))

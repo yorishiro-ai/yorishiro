@@ -302,7 +302,7 @@ Input schema:
 
 ### `create_invite`
 
-Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant_user_create IAM permission; Owner invitations are rejected)
+Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant_user_create IAM permission)
 
 Input schema:
 
@@ -310,9 +310,8 @@ Input schema:
 {
   "$defs": {
     "MembershipRole": {
-      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
       "enum": [
-        "owner",
         "admin",
         "member",
         "viewer"
@@ -454,7 +453,7 @@ Input schema:
 
 ### `create_tenant_user`
 
-Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)
+Create a tenant user with a tenant-local user name and password; the admin role receives the built-in administrator policy, other roles start with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -462,9 +461,8 @@ Input schema:
 {
   "$defs": {
     "MembershipRole": {
-      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
       "enum": [
-        "owner",
         "admin",
         "member",
         "viewer"
@@ -1812,9 +1810,8 @@ Input schema:
 {
   "$defs": {
     "MembershipRole": {
-      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
       "enum": [
-        "owner",
         "admin",
         "member",
         "viewer"
@@ -2144,7 +2141,7 @@ Input schema:
 
 ### `set_member_role`
 
-Change an existing tenant member's legacy role, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
+Change an existing tenant member's role label, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
 
 Input schema:
 
@@ -2152,9 +2149,8 @@ Input schema:
 {
   "$defs": {
     "MembershipRole": {
-      "description": "Mirrors the `tenant_memberships.role` check constraint.",
+      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
       "enum": [
-        "owner",
         "admin",
         "member",
         "viewer"

@@ -75,7 +75,7 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(membership.role, "owner");
+        assert_eq!(membership.role, "admin");
         for id in [login.id, attributed.id] {
             assert!(
                 api_keys::Entity::find_by_id(id)

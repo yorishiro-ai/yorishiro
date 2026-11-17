@@ -919,7 +919,7 @@ def iam_lifecycle(app):
     password = "blackbox-iam-member-password"
     app.secrets.append(password)
     account = app.rest("POST", "/api/members/users", {
-        "user_name": "iam-member", "password": password, "role": "admin",
+        "user_name": "iam-member", "password": password, "role": "member",
     }, status=201, key=app.tenant_key)
     user_id = account["user_id"]
     document = {"statements": [{"effect": "allow", "actions": ["workspace_get"],
@@ -954,7 +954,7 @@ def iam_lifecycle(app):
     member_capabilities = MCP(app, member_key).call("capabilities")
     require(member_identity == MCP(app, member_key).call("whoami"), "identity transport mismatch")
     require(not member_identity["tenant_root"] and not member_capabilities["tenant_root"],
-            "legacy administrator role was reported as IAM root")
+            "IAM member was reported as tenant root")
     require("workspace_access" not in member_identity and "tenant_admin" not in member_capabilities
             and "workspace_access" not in member_capabilities, "discovery retained legacy role authority")
     require(member_capabilities["credential_scope"] == member_identity["stored_scope"]
@@ -1410,13 +1410,12 @@ def membership_retirement_lifecycle(app):
     app.rest("POST", "/api/members", {"email": "missing@example.invalid", "role": "admin"},
              status=404, key=owner)
     client.call("set_member_role", {"user_id": missing_user, "role": "admin"}, error=True)
-    for name, args in (("preview_member_removal", {"user_id": owner_id}),
-                       ("preview_member_role_change", {"user_id": owner_id, "role": "admin"})):
-        require(client.call(name, args)["blocked_by_last_owner"], "preview missed last-owner protection")
+    client.call("preview_member_removal", {"user_id": owner_id}, error=True)
+    client.call("preview_member_role_change", {"user_id": owner_id, "role": "member"}, error=True)
     client.call("remove_member", {"user_id": owner_id}, error=True)
-    client.call("set_member_role", {"user_id": owner_id, "role": "admin"}, error=True)
-    require(next(row for row in client.call("list_members") if row["user_id"] == owner_id)["role"] == "owner",
-            "rejected last-owner change altered membership")
+    client.call("set_member_role", {"user_id": owner_id, "role": "member"}, error=True)
+    require(next(row for row in client.call("list_members") if row["user_id"] == owner_id)["role"] == "admin",
+            "rejected root change altered membership")
     password = "blackbox-successor-password"
     app.secrets.append(password)
     account = client.call("create_tenant_user", {
@@ -1434,10 +1433,14 @@ def membership_retirement_lifecycle(app):
     key = member_login
     member = MCP(app, key)
     for path in ("/api/members", "/api/api-keys"):
-        app.rest("GET", path, status=403, key=key)
-    app.rest("DELETE", f"/api/members/{owner_id}", status=403, key=key)
-    member.call("list_members", error=True)
-    member.call("list_api_keys", error=True)
+        app.rest("GET", path, key=key)
+    require(not app.rest("GET", "/api/whoami", key=key)["tenant_root"],
+            "admin role was reported as tenant root")
+    app.rest("DELETE", f"/api/members/{owner_id}", status=409, key=key)
+    member.call("list_members")
+    member.call("list_api_keys")
+    member.call("remove_member", {"user_id": owner_id}, error=True)
+    member.call("transfer_ownership", {"successor_user_id": user_id}, error=True)
     client.call("reset_tenant_user_password", {"user_id": user_id, "password": password})
     app.rest("GET", "/api/whoami", key=key, status=401)
     login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
@@ -1450,8 +1453,8 @@ def membership_retirement_lifecycle(app):
     require(before == app.rest("GET", "/api/members", key=owner), "membership lists differ")
     preview = client.call("preview_member_role_change", {"user_id": user_id, "role": "viewer"})
     require(preview["current_role"] == "admin" and preview["requested_role"] == "viewer"
-            and not preview["blocked_by_last_owner"] and preview["lost_workspace_ids"] == [],
-            "role labels must not claim IAM workspace loss")
+            and preview["last_admin_warning"] is not None and preview["lost_workspace_ids"] == [],
+            "role preview must warn about the last non-root admin and not claim workspace loss")
     require(preview == app.rest("POST", f"/api/members/{user_id}/role-preview", {"role": "viewer"}, key=owner),
             "role preview differs across transports")
     stored_scope = member.call("whoami")["stored_scope"]
@@ -1463,7 +1466,7 @@ def membership_retirement_lifecycle(app):
     member.call("update_tenant", {"name": "viewer-denied"}, error=True)
     removal = client.call("preview_member_removal", {"user_id": user_id})
     require(removal == app.rest("GET", f"/api/members/{user_id}/removal-preview", key=owner)
-            and not removal["blocked_by_last_owner"] and removal["revoked_api_key_ids"],
+            and not removal["last_admin_warning"] and removal["revoked_api_key_ids"],
             "removal preview lost credential impact")
     require(member.call("whoami")["user_id"] == user_id, "removal preview revoked a credential")
     client.call("remove_member", {"user_id": user_id})
@@ -1485,8 +1488,8 @@ def membership_retirement_lifecycle(app):
     client.call("transfer_ownership", {"successor_user_id": user_id}, error=True)
     app.rest("POST", "/api/members/transfer-ownership", {"successor_user_id": user_id}, status=409, key=owner)
     roles = {row["user_id"]: row["role"] for row in client.call("list_members")}
-    require(roles[user_id] == "admin" and roles[owner_id] == "owner", "root transfer changed membership")
-    successor.call("tenant_retirement_inventory", error=True)
+    require(roles[user_id] == "admin" and roles[owner_id] == "admin", "root transfer changed membership")
+    successor.call("tenant_retirement_inventory")
     root_recovery(app)
     new_key = app.login("owner@example.invalid", "blackbox-recovered-password")
     client = MCP(app, new_key)
@@ -1687,7 +1690,7 @@ def enterprise_providers(app):
     password = "blackbox-provider-admin-password"
     app.secrets.append(password)
     member = app.rest("POST", "/api/members/users", {
-        "user_name": "provider-admin", "password": password, "role": "admin",
+        "user_name": "provider-admin", "password": password, "role": "member",
     }, status=201, key=app.tenant_key)
     members = app.rest("GET", "/api/members", key=app.tenant_key)
     name = next(row["user_name"] for row in members if row["user_id"] == member["user_id"])

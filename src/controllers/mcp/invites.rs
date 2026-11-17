@@ -77,7 +77,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant_user_create IAM permission; Owner invitations are rejected)"
+        description = "Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant_user_create IAM permission)"
     )]
     pub(crate) async fn create_invite(
         &self,

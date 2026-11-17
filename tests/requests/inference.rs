@@ -316,9 +316,10 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 
         let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let txn = ctx.db.begin().await.unwrap();
+        // A policy-free member: an admin carries the built-in wildcard policy and would survive the attachment removal.
         let member = yorishiro::models::tenancy::register_member(&txn, setup.tenant_id,
             &super::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None,
-            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+            yorishiro::models::tenant_memberships::MembershipRole::Member).await.unwrap();
         txn.commit().await.unwrap();
         let key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, setup.workspace_id,
             yorishiro::models::api_keys::ApiKeyScope::Schema, Some(member.id), false).await.unwrap();
@@ -577,9 +578,10 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
 
         let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let txn = ctx.db.begin().await.unwrap();
+        // A policy-free member: an admin carries the built-in wildcard policy and would pass the implicit-deny checks.
         let member = yorishiro::models::tenancy::register_member(
             &txn, setup.tenant_id, &super::fixtures::unique_email("proposal-reviewer"),
-            "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Admin,
+            "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Member,
         ).await.unwrap();
         txn.commit().await.unwrap();
         let key = yorishiro::models::api_keys::Entity::create_api_key(

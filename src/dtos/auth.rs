@@ -32,7 +32,7 @@ pub struct AcceptInviteResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignupRequest {
     /// The plaintext token from an invitation issued through REST or MCP.
-    /// Omit it to create a fresh tenant and join it as `Owner` instead.
+    /// Omit it to create a fresh tenant and join it as `Admin` instead.
     pub invite_token: Option<String>,
     /// Required when `invite_token` is omitted, rejected when it is present.
     pub email: Option<String>,

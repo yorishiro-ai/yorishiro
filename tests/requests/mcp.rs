@@ -1050,7 +1050,7 @@ async fn tenant_invitation_tools_rotate_tokens_and_match_rest_inventory() {
         let service = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Migration, None, false).await.unwrap();
         for (id, name, arguments) in [
             (6, "list_invites", json!({})),
-            (7, "create_invite", json!({"email":email,"role":"owner","expires_at":expires_at})),
+            (7, "create_invite", json!({"email":email,"role":"admin","expires_at":expires_at})),
             (8, "reissue_invite", json!({"invite_id":created["id"],"expires_at":expires_at})),
             (9, "revoke_invite", json!({"invite_id":created["id"]})),
         ] {
@@ -1061,7 +1061,7 @@ async fn tenant_invitation_tools_rotate_tokens_and_match_rest_inventory() {
 }
 
 #[tokio::test]
-async fn tenant_membership_management_matches_rest_and_protects_owners() {
+async fn tenant_membership_management_matches_rest_and_protects_the_root() {
     use sea_orm::EntityTrait;
     use yorishiro::models::tenant_memberships::MembershipRole;
     use yorishiro::models::{tenant_memberships, user_users};
@@ -1096,14 +1096,14 @@ async fn tenant_membership_management_matches_rest_and_protects_owners() {
             (5, "list_members", json!({})),
             (6, "remove_member", json!({"user_id":tenant.owner_id})),
             (7, "transfer_ownership", json!({"successor_user_id":user.id})),
-            (8, "set_member_role", json!({"user_id":user.id,"role":"owner"})),
+            (8, "set_member_role", json!({"user_id":user.id,"role":"admin"})),
         ] {
             let denied = mcp_call(&request, &session, &viewer_key, id, "tools/call", json!({"name":name,"arguments":args})).await;
             assert_eq!(denied["result"]["isError"], true, "{denied}");
         }
         let preview = mcp_call(&request, &session, &tenant_admin_key, 9, "tools/call",
             json!({"name":"preview_member_removal","arguments":{"user_id":tenant.owner_id}})).await;
-        assert_eq!(tool_result_json(&preview)["blocked_by_last_owner"], true);
+        assert_eq!(preview["result"]["isError"], true, "{preview}");
         let protected = mcp_call(&request, &session, &tenant_admin_key, 10, "tools/call",
             json!({"name":"remove_member","arguments":{"user_id":tenant.owner_id}})).await;
         assert_eq!(protected["result"]["isError"], true);
@@ -2668,7 +2668,7 @@ async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
             .to_owned();
         let session = initialize(&request).await;
 
-        // Listing shows the name and no email; the role cannot become owner through any tool.
+        // Listing shows the name and no email; the legacy `owner` role is rejected as input and the root identity cannot be transferred.
         let listed = mcp_call(
             &request,
             &session,

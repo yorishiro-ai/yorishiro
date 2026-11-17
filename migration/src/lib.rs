@@ -18,6 +18,7 @@ mod m20261020_000012_inference;
 mod m20261020_000013_queue_jobs;
 mod m20261020_000014_entity_embeddings;
 mod m20261020_000015_iam;
+mod m20261020_000016_admin_policies;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -76,6 +77,7 @@ impl MigratorTrait for Migrations {
             Box::new(m20261020_000013_queue_jobs::Migration),
             Box::new(m20261020_000014_entity_embeddings::Migration),
             Box::new(m20261020_000015_iam::Migration),
+            Box::new(m20261020_000016_admin_policies::Migration),
             // inject-above (do not remove this comment)
         ]
     }

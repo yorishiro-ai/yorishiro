@@ -82,7 +82,7 @@ impl TestTenant {
                 &args.owner_email,
                 &args.owner_password,
                 Some(&args.tenant_name),
-                tenant_memberships::MembershipRole::Owner,
+                tenant_memberships::MembershipRole::Admin,
             )
             .await
             .expect("create CE fixture owner");

@@ -1,16 +1,17 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::YorishiroError;
 
 const MAX_STATEMENTS: usize = 64;
-const MAX_ACTIONS: usize = 32;
+pub(crate) const MAX_ACTIONS: usize = 32;
 const MAX_RESOURCES: usize = 32;
 const MAX_DOCUMENT_BYTES: usize = 64 * 1024;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Supported policy actions corresponding to existing application operations.
+/// Serializes to the same snake_case wire name it deserializes from, which the built-in policy catalogue uses to name its actions.
 pub enum Action {
     TenantGet,
     TenantUpdate,
@@ -121,6 +122,118 @@ pub enum Action {
 }
 
 impl Action {
+    /// Every action, in declaration order.
+    /// The built-in policy catalogue and the access probes derive from this list.
+    /// Keep it in lockstep with the enum: the count test in `tests/models/iam_policy.rs` fails when a variant is added or removed.
+    pub const ALL: &'static [Self] = &[
+        Self::TenantGet,
+        Self::TenantUpdate,
+        Self::WorkspaceList,
+        Self::WorkspaceCreate,
+        Self::WorkspaceGet,
+        Self::WorkspaceUpdate,
+        Self::WorkspaceDelete,
+        Self::EntityList,
+        Self::EntityGet,
+        Self::EntityCreate,
+        Self::EntityUpdate,
+        Self::EntityDelete,
+        Self::EntityDriftGet,
+        Self::RelationList,
+        Self::RelationGet,
+        Self::RelationCreate,
+        Self::RelationUpdate,
+        Self::RelationDelete,
+        Self::SchemaList,
+        Self::SchemaGet,
+        Self::SchemaCreate,
+        Self::SchemaArchive,
+        Self::SchemaDelete,
+        Self::SchemaForkList,
+        Self::SchemaForkGet,
+        Self::SchemaForkCreate,
+        Self::SchemaForkUpdate,
+        Self::SchemaForkDelete,
+        Self::SchemaUpstreamList,
+        Self::SchemaMergePreview,
+        Self::SchemaMergeApply,
+        Self::Search,
+        Self::Recall,
+        Self::Export,
+        Self::ImportCreate,
+        Self::ImportJobGet,
+        Self::MigrationDryRun,
+        Self::MigrationJobGet,
+        Self::MigrationUndo,
+        Self::MigrationFillDefaults,
+        Self::WorkspaceReindex,
+        Self::InferenceCreate,
+        Self::InferenceJobGet,
+        Self::InferenceProposalList,
+        Self::InferenceConfirm,
+        Self::InferenceReject,
+        Self::InferenceDiscard,
+        Self::InferenceConfirmationGet,
+        Self::EmbeddingProviderGet,
+        Self::EmbeddingProviderUpdate,
+        Self::EmbeddingProviderDelete,
+        Self::LlmProviderGet,
+        Self::LlmProviderUpdate,
+        Self::LlmProviderDelete,
+        Self::WorkerClassGet,
+        Self::WorkerClassUpdate,
+        Self::WorkerClassDelete,
+        Self::EntityColumnsGet,
+        Self::EntityColumnsUpdate,
+        Self::EntityColumnsDelete,
+        Self::AuditLogList,
+        Self::IamAuditList,
+        Self::CredentialList,
+        Self::CredentialCreate,
+        Self::CredentialRotate,
+        Self::CredentialRevoke,
+        Self::TenantUserList,
+        Self::TenantUserCreate,
+        Self::TenantUserUpdate,
+        Self::TenantUserDelete,
+        Self::TenantUserPasswordReset,
+        Self::GroupList,
+        Self::GroupGet,
+        Self::GroupCreate,
+        Self::GroupUpdate,
+        Self::GroupDelete,
+        Self::GroupMemberList,
+        Self::GroupMemberAdd,
+        Self::GroupMemberRemove,
+        Self::PolicyList,
+        Self::PolicyGet,
+        Self::PolicyCreate,
+        Self::PolicyUpdate,
+        Self::PolicyDelete,
+        Self::UserPolicyList,
+        Self::GroupPolicyList,
+        Self::UserPolicyAttach,
+        Self::UserPolicyDetach,
+        Self::GroupPolicyAttach,
+        Self::GroupPolicyDetach,
+        Self::TemplateLibraryList,
+        Self::TemplateLibraryGet,
+        Self::TemplateLibraryCreate,
+        Self::TemplateLibraryUpdate,
+        Self::TemplateLibraryDelete,
+        Self::TemplateLibraryFork,
+        Self::TenantOverviewGet,
+        Self::BuiltinTemplateList,
+        Self::BuiltinTemplateGet,
+        Self::MarketplaceList,
+        Self::MarketplaceVersionList,
+        Self::MarketplacePublish,
+        Self::MarketplaceReviewList,
+        Self::MarketplaceReviewSubmit,
+        Self::MarketplaceFork,
+        Self::MarketplaceVisibilityUpdate,
+    ];
+
     pub(crate) fn applies_to(self, resource: Resource) -> bool {
         match self {
             Self::TenantGet
@@ -425,5 +538,18 @@ impl Policy {
             }
         }
         allowed
+    }
+
+    /// Whether the collection grants `target` any action that applies to it, with deny precedence.
+    /// Used to tell a surviving workspace reachability from a lost one, without naming the action.
+    pub fn allows_any_applicable_action(
+        policies: &[Self],
+        tenant_id: Uuid,
+        target: Resource,
+        owns_workspace: impl Fn(Uuid, Uuid) -> bool,
+    ) -> bool {
+        Action::ALL
+            .iter()
+            .any(|action| Self::allows(policies, tenant_id, *action, target, &owns_workspace))
     }
 }

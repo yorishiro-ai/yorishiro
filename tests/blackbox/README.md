@@ -25,8 +25,7 @@ python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro-ee --suite mc
 Common contracts run on CE/SQLite; enterprise-only composition and behavior belong in explicit EE checks, not a duplicate common matrix.
 The edition argument labels evidence; it does not infer or verify the binary's compile-time features.
 The EE MCP delta suite checks edition discovery and entity-column and worker-class setting, scope denial, nonmutation and reset through both transports, without replaying CE business scenarios.
-Both SQLite editions run with the enterprise licence explicitly unset.
-The licensed PostgreSQL suite requires full discovery and owns successful marketplace and inference calls, while the unlicensed SQLite suite requires licensed tools to remain hidden.
+Both editions run with the enterprise licence explicitly unset; licensed capabilities need separate ownership.
 The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or under-scoped writes.
 It uses reserved invalid provider URLs without starting workers, so it proves configuration and enqueue admission, not external inference or reindex completion.
 The separate EE search scenario owns a loopback OpenAI-compatible HTTP stub and a real embedding worker, waits for reindex completion, and checks REST/MCP query results and cross-workspace isolation.
@@ -34,10 +33,7 @@ Its deterministic vectors test transport and worker integration, not semantic mo
 The EE composition scenario adopts a library template, changes its upstream definition, previews and applies a merge, and checks immutable schema history.
 It then creates a second-workspace fork, checks scoped visibility and stale-head rejection, updates and deletes the fork without changing source history.
 
-Each SQLite invocation runs public `db migrate`, starts the server, and calls REST `/setup` against separate owned file-backed SQLite application and queue databases.
-The bootstrap key is a tenant-scoped Owner credential with the existing audit grant; ordinary scenarios use explicitly delegated, workspace-bound keys without audit.
-The owned config sets a one-tenant cap so setup remains available.
-The licensed PostgreSQL suite instead uses REST signup and root login because its unlimited tenant cap disables setup.
+Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
 The CLI suite proves migration and normal tasks succeed.
 It starts one server and reuses it for the whole suite.
 Loco 1.2.0 defaults `start --no-banner` to server-only mode.
@@ -45,7 +41,7 @@ REST and MCP additionally start a separate `--environment test_sqlite start --wo
 The worker uses the server's exact environment, application database and separate queue database.
 Children receive an allowlisted environment, an owned home directory, and embedding provider `none`.
 The owned config disables auto-migration after explicit migration, and the auth rate limit is raised for these isolated checks.
-The server has a 45-second unauthenticated `/setup/status` readiness deadline, individual commands have a 30-second deadline, HTTP operations have timeouts and body limits, and the suite has a 240-second budget checked between operations.
+The server has a 45-second authenticated readiness deadline, individual commands have a 30-second deadline, HTTP operations have timeouts and body limits, and the suite has a 240-second budget checked between operations.
 JSON and SSE bodies are read in bounded available-byte chunks with a decreasing socket timeout, so trickled partial lines cannot extend the response deadline.
 Import completion has a strict 60-second budget within the suite deadline, checks server/worker liveness, and rejects unsuccessful job states.
 Worker cleanup runs on success, timeout and failure, with suite teardown as a fallback.
@@ -57,33 +53,23 @@ These scenarios cover selected workflows, not the entire advertised MCP surface.
 Successful tool calls are not exhaustive behavioral coverage; cross-tenant acceptance and remaining fault and concurrency cases retain explicit owners outside these SQLite scenarios.
 The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL URL and signed licence, and checks that authenticated cross-tenant invite acceptance is rejected without consuming the token, adding a membership or changing the original credential selection.
 The required census assigns CE tools to CE suites except `search_entities` and `accept_invite`, which belong to the owned provider and licensed PostgreSQL EE suites.
-EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite` and `transfer_ownership`, which require rejected calls because accounts cannot join another tenant and tenant root ownership is immutable.
-The licensed marketplace scenario publishes a template version, forks it into another tenant and records a review, comparing persisted REST reads with MCP results.
-The licensed inference scenario creates an entity on the first schema version, bumps the schema so the entity sits on an outdated version, and uses an owned chat-completions endpoint to produce a real proposal for the missing required field.
-It checks that the proposal does not change the entity before confirmation, then confirms it and reads the persisted value through REST.
-It also checks proposal listing and reject/discard response parity; provider failures and late-revocation tests retain their assigned owners.
+EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite`, which requires a rejected call because a valid attributed credential already requires tenant membership.
 This partitions all registered tools without replaying the full CE suite under EE, and does not claim exhaustive behavior coverage.
 Its required GHA job owns a non-superuser PostgreSQL service and its own database; ordinary SQLite suites never inherit that database or licence.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.
 Scenario counts alone are not a public-tool completeness guarantee.
 
-Every CE suite checks authenticated REST key issuance and revocation, REST and MCP acceptance, and immediate rejection by both surfaces using the existing server and MCP session.
+Every suite checks CLI key issuance, REST and MCP acceptance, CLI revocation, and immediate rejection by both surfaces using the existing server and MCP session.
 
 | Suite | Additional checks |
 | --- | --- |
 | `rest` | Schema create/read/archive/delete and entity create/list/read/update/delete through REST, cross-checked through MCP; unauthenticated/invalid credentials, insufficient scope, malformed entity input |
 | `mcp` | Same CRUD through MCP, cross-checked through REST; initialize/session header/initialized notification, tool discovery, authentication protocol errors, scope tool errors, invalid UUID argument-deserialization tool error, missing schema arguments |
-| `cli` | Retained operational task registration and removed task absence, unknown flag/task, missing/invalid/malformed arguments, success/failure exits and diagnostics, maintenance state persistence and read-only HTTP enforcement, then restoration |
+| `cli` | Registered bootstrap/key tasks, unknown flag/task, missing/invalid/malformed arguments, success/failure exits and diagnostics, UUID and one-time credential stdout, key listing without plaintext, revoked ID retained in listing and REST rejection |
 
-`management.human-key-management` delegates a workspace-bound Schema key to the setup Owner through authenticated REST.
-Additional workspaces are created through authenticated REST/MCP using a tenant-scoped credential and selected explicitly when issuing bound keys.
-The membership scenario accepts an invitation through REST signup, logs in as that member through REST, and delegates that member's own keys rather than issuing keys for an arbitrary user.
-All password-bearing setup, signup and login operations remain REST-only.
+`cli.human-key-management` creates an Owner invite through the CLI, accepts it through public signup and issues a user-attributed Schema key through the CLI.
 REST and MCP identity readback must name that human.
-An expiring delegated Read key cannot raise scope, add audit, omit its expiry ceiling or extend it through either transport.
-Audit-history checks delegate an explicitly audit-bearing Read key from the setup credential and revoke it through authenticated REST.
-Service-key issuance has no public equivalent after CLI reduction.
-Service-identity rejection and rotation fixtures remain internal in `tests/requests/mcp.rs` and `tests/requests/api_keys.rs`; the external runner does not relabel human keys as service keys or add a privileged issuance API.
+An expiring delegated Read key cannot raise scope, add audit, omit its expiry ceiling or extend it through either transport; an unattributed service key cannot delegate management credentials.
 MCP rotation must preserve grant metadata, invalidate the predecessor through both transports and retain its successor link in secret-free REST/MCP history.
 REST revocation invalidates the successor through both transports and retains terminal history; a second rotation of the predecessor returns HTTP 409.
 These sequential contracts supplement, not replace, the internal issuance/revocation race and deterministic expiry tests.
@@ -94,10 +80,10 @@ Both reject stale entity updates through REST and MCP and verify unchanged data.
 The human management scenario also creates, renames, caps, grants/revokes membership and deletes a workspace, checking list/get visibility and preservation of the other workspace's credential.
 The shared fixture is an inline schema with one required string field.
 The additional `rest.relation-export-import-worker` and `mcp.relation-export-import-worker` scenarios share one implementation with thin transport adapters.
-Each creates a dedicated source workspace through authenticated REST, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through its selected surface.
+Each creates a dedicated source workspace through the public CLI, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through its selected surface.
 Relation create/read/list/delete and active/deprecated/archived status changes are read back through both surfaces, including omitted properties defaulting to `{}`, read-scope rejection, missing authentication, invalid status and missing endpoints.
 Export while deprecated must return exactly one schema, two entities and one relation in kind order, preserving IDs/data/properties/status, with identical raw REST NDJSON and MCP text.
-A new REST-created destination workspace and delegated Schema key submit the raw document through the selected surface before the real worker starts.
+A new CLI-created destination workspace and schema service key submit the raw document through the selected surface before the real worker starts.
 Both surfaces must report queued with an empty destination, then completed with job name `import` and counts 1/2/1.
 Restored records must have new IDs, remapped schema/endpoints, destination ownership and matching data/properties, while the source export stays unchanged.
 Imported relations are active even when exported as deprecated; this is not lossless history restoration.
@@ -114,36 +100,6 @@ GHA run `41735414722` at commit `d5e1982291eda5a4bbcdad29790af5d699f2e60f` also 
 | `requests::mcp::community_mcp_entities_relations_and_schema_tools_execute_over_protocol` | `mcp.relation-export-import-worker` creates the graph schema, two entities and a relation, lists exactly two `person` entities with Read scope, checks invalid relation-list status and missing-entity tool errors and their diagnostics, and persists archived relation status for Read-scoped readback; successful MCP calls reject tool errors |
 
 Existing export limits, history, security and race tests remain internal.
-
-### Retired IAM tests
-
-The IAM cleanup retired 20 in-process request and task tests whose contracts the public scenarios above already execute.
-Commit `f92794f4` removed the first five and commit `e9eca7d0` the remaining fifteen.
-GHA run `44030019443` at commit `f8304950` passed every retained scenario, including the licensed PostgreSQL suite, before the retirement was allowed to stand.
-The test `template_library::template_update_revalidates_a_previously_authenticated_administrator` was renamed to `template_update_rejects_a_revoked_previously_authenticated_actor`, which keeps only the revalidation contract.
-
-| Retired test | Retained scenario |
-| --- | --- |
-| `api_keys::api_key_lifecycle_rejects_cross_tenant_ids` | `ee.authenticated-cross-tenant-rejection` |
-| `mcp::api_key_tools_reject_cross_tenant_revocation` | `ee.authenticated-cross-tenant-rejection` |
-| `mcp::cross_tenant_invite_acceptance_uses_current_human_identity_without_retargeting` | `ee.authenticated-cross-tenant-rejection` |
-| `members::root_cannot_transfer_ownership` | `mcp.membership-ownership-retirement` |
-| `members::role_preview_does_not_infer_iam_changes_from_membership_labels` | `mcp.membership-ownership-retirement` |
-| `members::add_member_rejects_an_email_with_no_account` | `mcp.membership-ownership-retirement` |
-| `members::members_endpoints_require_authentication` | `mcp.membership-ownership-retirement` |
-| `members::member_role_cannot_manage_members` | `mcp.membership-ownership-retirement` |
-| `api_keys::api_key_lifecycle_rejects_non_admin` | `mcp.membership-ownership-retirement` |
-| `mcp::tenant_retirement_tools_require_confirmation_and_revoke_the_caller` | `mcp.membership-ownership-retirement` |
-| `tasks::inspect_tenant_retirement::confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence` | `mcp.membership-ownership-retirement` |
-| `mcp::api_key_tools_preserve_history_ceilings_and_revocation` | `management.human-key-management` |
-| `members::administrator_can_issue_and_list_secret_free_invites` | `mcp.invite-lifecycle` |
-| `template_library::owner_can_create_update_and_delete_a_template` | `mcp.template-library-lifecycle` |
-| `template_library::another_tenant_cannot_update_or_delete_a_community_template` | `ee.licensed-marketplace-lifecycle` |
-| `template_library::fork_copies_a_community_template_into_the_forking_tenants_own_library` | `ee.licensed-marketplace-lifecycle` |
-| `mcp::update_entity_tool_refuses_a_stale_expected_updated_at` | `rest.schema-entity-crud` and `mcp.schema-entity-crud` |
-| `mcp::mcp_transport_rejects_unconfigured_host_by_default` | `mcp.discovery-auth-scope-input` |
-| `mcp::mcp_transport_requires_protocol_accept_headers` | `mcp.discovery-auth-scope-input` |
-| `mcp::mcp_rejects_missing_auth_and_scope_insufficient_writes` | `mcp.discovery-auth-scope-input` |
 
 ## Evidence and runner checks
 

@@ -50,6 +50,10 @@ async fn tenant_key_issuance_rechecks_admin_after_waiting_for_demotion() {
                 .col_expr(Column::Role, sea_orm::sea_query::Expr::value("member"))
                 .filter(Column::TenantId.eq(tenant.tenant_id)).filter(Column::UserId.eq(admin.id))
                 .exec(&txn).await.unwrap();
+            // The raw write bypasses the admin group sync, so strip the group membership a real demotion would remove.
+            yorishiro::models::_entities::iam_group_memberships::Entity::delete_many()
+                .filter(yorishiro::models::_entities::iam_group_memberships::Column::UserId.eq(admin.id))
+                .exec(&txn).await.unwrap();
             txn.commit().await.unwrap();
         };
         let (response, ()) = tokio::join!(issue, demote);

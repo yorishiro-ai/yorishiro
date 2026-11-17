@@ -254,7 +254,7 @@ async fn signup_then_login_round_trip() {
             &ctx.db,
             tenant.tenant_id,
             round_trip_email.as_str(),
-            MembershipRole::Owner,
+            MembershipRole::Admin,
             chrono::Duration::hours(1),
         )
         .await
@@ -271,7 +271,7 @@ async fn signup_then_login_round_trip() {
         assert_eq!(signup_response.status_code(), StatusCode::CREATED);
         let signup_body: serde_json::Value = signup_response.json();
         assert_eq!(signup_body["email"], round_trip_email.as_str());
-        assert_eq!(signup_body["role"], "owner");
+        assert_eq!(signup_body["role"], "admin");
 
         let login_response = request
             .post("/auth/root/login")
@@ -380,7 +380,7 @@ async fn signup_without_invite_creates_its_own_tenant() {
         );
         let signup_body: serde_json::Value = signup_response.json();
         assert_eq!(signup_body["email"], "no-invite@example.com");
-        assert_eq!(signup_body["role"], "owner");
+        assert_eq!(signup_body["role"], "admin");
         assert_eq!(signup_body["workspaces"].as_array().unwrap().len(), 0);
 
         let login_response = request

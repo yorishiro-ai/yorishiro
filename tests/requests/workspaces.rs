@@ -13,6 +13,7 @@ async fn member_key(
     tenant_id: uuid::Uuid,
     workspace_id: uuid::Uuid,
     role: MembershipRole,
+    key_scope: yorishiro::models::api_keys::ApiKeyScope,
 ) -> String {
     let email = format!("member-{}@example.com", uuid::Uuid::new_v4().simple());
     let member = user_users::create_user(&ctx.db, &email, "hunter2-hunter2", None)
@@ -28,7 +29,7 @@ async fn member_key(
         yorishiro::models::workspace_memberships::WorkspaceRole::Member,
     )
     .await;
-    issue_api_key(ctx, workspace_id, member.id, role.max_scope(), false).await
+    issue_api_key(ctx, workspace_id, member.id, key_scope, false).await
 }
 
 #[tokio::test]
@@ -377,7 +378,14 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             workspace_id: main_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let member_key = member_key(&ctx, tenant_id, main_id, MembershipRole::Member).await;
+        let member_key = member_key(
+            &ctx,
+            tenant_id,
+            main_id,
+            MembershipRole::Member,
+            yorishiro::models::api_keys::ApiKeyScope::Write,
+        )
+        .await;
 
         let response = request
             .post("/api/workspaces")

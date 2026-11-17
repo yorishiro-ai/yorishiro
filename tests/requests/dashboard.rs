@@ -106,7 +106,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
         assert_eq!(body["usage"]["member_count"], 1);
         assert_eq!(body["members"].as_array().unwrap().len(), 1);
         assert_eq!(body["members"][0]["email"], email);
-        assert_eq!(body["members"][0]["role"], "owner");
+        assert_eq!(body["members"][0]["role"], "admin");
     })
     .await;
 }

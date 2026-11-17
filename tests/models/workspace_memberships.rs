@@ -3,7 +3,6 @@ use crate::requests::fixtures::{TenantArgs, TestTenant};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use yorishiro::App;
 use yorishiro::models::workspace_memberships::{self, WorkspaceRole};
-use yorishiro::models::{access, api_keys::ApiKeyScope};
 
 #[tokio::test]
 async fn workspace_memberships_round_trip_roles() {
@@ -29,18 +28,6 @@ async fn workspace_memberships_round_trip_roles() {
         assert_eq!(stored.workspace_id, tenant.workspace_id);
         assert_eq!(stored.user_id, tenant.owner_id);
         assert_eq!(stored.role, "viewer");
-        let inherited = access::workspace_access(
-            &ctx.db,
-            tenant.tenant_id,
-            tenant.workspace_id,
-            tenant.owner_id,
-        )
-        .await
-        .expect("owner access")
-        .expect("inherited authority");
-        assert_eq!(inherited.max_scope, ApiKeyScope::Migration);
-        assert_eq!(inherited.source, "tenant_role");
-        assert!(inherited.workspace_admin);
         assert!(matches!(
             workspace_memberships::Model::role(&ctx.db, tenant.workspace_id, tenant.owner_id)
                 .await
