@@ -919,7 +919,7 @@ def iam_lifecycle(app):
     password = "blackbox-iam-member-password"
     app.secrets.append(password)
     account = app.rest("POST", "/api/members/users", {
-        "user_name": "iam-member", "password": password, "role": "member",
+        "user_name": "iam-member", "password": password,
     }, status=201, key=app.tenant_key)
     user_id = account["user_id"]
     document = {"statements": [{"effect": "allow", "actions": ["workspace_get"],
@@ -1056,11 +1056,7 @@ def iam_lifecycle(app):
     tenant_client = MCP(app, member_key)
     tenant_client.call("list_members", error=True)
     tenant_client.call("list_api_keys", error=True)
-    tenant_client.call("list_invites", error=True)
     tenant_client.call("tenant_retirement_inventory", error=True)
-    invite_request = {"email": "iam-invite@example.invalid", "role": "member",
-                      "expires_at": "2090-01-01T00:00:00Z"}
-    tenant_client.call("create_invite", invite_request, error=True)
     for endpoint in ("/api/members", "/api/api-keys"):
         app.rest("GET", endpoint, status=403, key=member_key)
     admin_document = {"statements": [{"effect": "allow",
@@ -1073,9 +1069,6 @@ def iam_lifecycle(app):
     require(tenant_client.call("tenant_retirement_inventory") ==
             app.rest("GET", "/api/tenants/current/retirement", key=member_key),
             "delegated retirement inventory differs across transports")
-    tenant_client.call("transfer_ownership", {"successor_user_id": user_id}, error=True)
-    tenant_client.call("set_member_role", {"user_id": user_id, "role": "owner"}, error=True)
-    tenant_client.call("preview_member_role_change", {"user_id": user_id, "role": "owner"}, error=True)
     tenant_client.call("remove_member", {"user_id": app.account["user_id"]}, error=True)
     admin_document["statements"].append({"effect": "allow", "actions": ["workspace_get", "workspace_update"],
         "resources": [{"type": "workspace", "tenant_id": app.tenant, "workspace_id": app.workspace}]})
@@ -1085,16 +1078,6 @@ def iam_lifecycle(app):
     require(tenant_client.call("list_workspace_members", {"workspace_id": app.workspace}) ==
             app.rest("GET", f"/api/workspaces/{app.workspace}/members", key=member_key),
             "delegated direct-grant listing differs across transports")
-    invitation = tenant_client.call("create_invite", invite_request)
-    app.secrets.append(invitation["token"])
-    invitation_id = invitation["id"]
-    require(tenant_client.call("list_invites") == app.rest("GET", "/api/members/invites", key=member_key),
-            "delegated invite listing differs across transports")
-    renewed = tenant_client.call("reissue_invite", {"invite_id": invitation_id,
-                                                     "expires_at": invite_request["expires_at"]})
-    app.secrets.append(renewed["token"])
-    require(renewed["token"] != invitation["token"], "invite reissue retained the old token")
-    tenant_client.call("create_invite", {**invite_request, "role": "owner"}, error=True)
     require(tenant_client.call("list_members") == app.rest("GET", "/api/members", key=member_key),
             "delegated member listing differs across transports")
     mcp_keys = tenant_client.call("list_api_keys")["keys"]
@@ -1113,23 +1096,16 @@ def iam_lifecycle(app):
     client.call("update_iam_policy", {"policy_id": delegated["id"], "name": "delegated-management", "document": denied_admin})
     for tool, args in (("list_members", {}), ("list_api_keys", {}),
                        ("tenant_retirement_inventory", {}),
-                       ("create_invite", invite_request), ("list_invites", {}),
-                       ("reissue_invite", {"invite_id": invitation_id, "expires_at": invite_request["expires_at"]}),
-                       ("revoke_invite", {"invite_id": invitation_id}),
                        ("revoke_workspace_member", grant),
                        ("preview_member_removal", {"user_id": user_id}),
-                       ("revoke_api_key", {"key_id": replacement["id"]}),
-                       ("set_member_role", {"user_id": user_id, "role": "member"})):
+                       ("revoke_api_key", {"key_id": replacement["id"]})):
         tenant_client.call(tool, args, error=True)
     app.rest("DELETE", f"/api/api-keys/{replacement['id']}", status=403, key=member_key)
     app.rest("DELETE", f"/api/workspaces/{app.workspace}/members/{user_id}", status=403, key=member_key)
     app.rest("GET", "/api/whoami", key=replacement["full_key"])
-    require(any(row["id"] == invitation_id and row["expires_at"] == renewed["expires_at"]
-                for row in client.call("list_invites")), "denied invite mutation changed expiry")
     client.call("update_iam_policy", {"policy_id": delegated["id"], "name": "delegated-management", "document": admin_document})
     tenant_client.call("revoke_api_key", {"key_id": replacement["id"]})
     tenant_client.call("revoke_workspace_member", grant)
-    app.rest("DELETE", f"/api/members/invites/{invitation_id}", status=204, key=member_key)
     app.rest("GET", "/api/whoami", status=401, key=replacement["full_key"])
     client.call("detach_user_policy", delegated_attachment)
     client.call("delete_iam_policy", {"policy_id": delegated["id"]})
@@ -1244,68 +1220,6 @@ def user_profile_lifecycle(app):
             "REST profile clear not visible to MCP")
 
 
-def invite_lifecycle(app):
-    owner = app.tenant_key
-    client = MCP(app, owner)
-    path = "/api/members/invites"
-    created = client.call("create_invite", {
-        "email": "invited@example.invalid", "role": "viewer", "expires_at": "2090-01-01T00:00:00Z",
-    })
-    app.secrets.append(created["token"])
-    invite_id = created["id"]
-    replaced = app.rest("POST", f"{path}/{invite_id}/reissue", {
-        "expires_at": "2090-01-02T00:00:00Z",
-    }, key=owner)
-    app.secrets.append(replaced["token"])
-    require(replaced["id"] == invite_id and replaced["token"] != created["token"],
-            "invite reissue did not replace the token on the same record")
-    password = "blackbox-invited-password"
-    app.secrets.append(password)
-    app.rest("POST", "/auth/signup", {"invite_token": created["token"], "password": password}, status=422)
-    records = client.call("list_invites")
-    require(records == app.rest("GET", path, key=owner), "REST/MCP invite history differs")
-    require(all("token" not in row and "token_hash" not in row for row in records)
-            and all(secret not in json.dumps(records) for secret in (created["token"], replaced["token"])),
-            "invite listing exposed a credential")
-    accepted = app.rest("POST", "/auth/signup", {
-        "invite_token": replaced["token"], "password": password,
-    }, status=201)
-    require(accepted["tenant_id"] == app.tenant and accepted["role"] == "viewer", "invite redemption lost grants")
-    app.rest("POST", "/auth/signup", {"invite_token": replaced["token"], "password": password}, status=422)
-    app.rest("DELETE", f"{path}/{invite_id}", status=409, key=owner)
-    client.call("reissue_invite", {"invite_id": invite_id, "expires_at": "2090-01-03T00:00:00Z"}, error=True)
-    used = next(row for row in client.call("list_invites") if row["id"] == invite_id)
-    require(used["used_at"] is not None, "consumed invitation history lost")
-    cancelled = app.rest("POST", path, {
-        "email": "cancelled@example.invalid", "role": "viewer", "expires_at": "2090-01-01T00:00:00Z",
-    }, status=201, key=owner)
-    app.secrets.append(cancelled["token"])
-    client.call("revoke_invite", {"invite_id": cancelled["id"]})
-    app.rest("DELETE", f"{path}/{cancelled['id']}", status=204, key=owner)
-    app.rest("POST", "/auth/signup", {"invite_token": cancelled["token"], "password": password}, status=422)
-    require(any(row["id"] == cancelled["id"] and row["used_at"] is None for row in client.call("list_invites")),
-            "cancelled invitation history was deleted")
-    client.call("create_invite", {
-        "email": "owner@example.invalid", "role": "owner", "expires_at": "2090-01-01T00:00:00Z",
-    }, error=True)
-    existing = client.call("create_invite", {
-        "email": "owner@example.invalid", "role": "member", "expires_at": "2090-01-01T00:00:00Z",
-    })
-    app.secrets.append(existing["token"])
-    refreshed = client.call("reissue_invite", {
-        "invite_id": existing["id"], "expires_at": "2090-01-02T00:00:00Z",
-    })
-    app.secrets.append(refreshed["token"])
-    require(refreshed["id"] == existing["id"] and refreshed["token"] != existing["token"],
-            "MCP invite reissue failed to replace the token")
-    identity = client.call("whoami")
-    client.call("accept_invite", {"invite_token": existing["token"]}, error=True)
-    client.call("accept_invite", {"invite_token": refreshed["token"]}, error=True)
-    require(next(row for row in client.call("list_invites") if row["id"] == existing["id"])["used_at"] is None,
-            "rejected existing membership consumed the invitation")
-    require(client.call("whoami") == identity, "invite acceptance changed selected workspace or credentials")
-
-
 def audit_history_lifecycle(app):
     owner = app.management_key
     client = MCP(app, owner)
@@ -1400,6 +1314,67 @@ def workspace_key_lifecycle(app):
     require(client.call("whoami")["user_id"] == identity["user_id"], "workspace deletion invalidated unrelated key")
 
 
+def iam_role_lifecycle(app):
+    client = MCP(app, app.tenant_key)
+    password = "blackbox-role-user-password"
+    app.secrets.append(password)
+    user = app.rest("POST", "/api/members/users", {"user_name": "role-user", "password": password},
+                    status=201, key=app.tenant_key)
+    user_id = user["user_id"]
+    user_key = app.rest("POST", "/auth/tenant/login", {"user_name": "role-user", "password": password},
+                        key="", headers={"X-Tenant-Id": app.tenant})["api_key"]
+    app.secrets.append(user_key)
+    user_client = MCP(app, user_key)
+    reader = client.call("create_iam_policy", {"name": "role-workspace-reader", "document": {"statements": [
+        {"effect": "allow", "actions": ["workspace_get"],
+         "resources": [{"type": "all_workspaces", "tenant_id": app.tenant}]}]}})
+    trust = {"statements": [{"effect": "allow", "principals": [{"type": "user", "user_id": user_id}]}]}
+    role = client.call("create_iam_role", {"name": "workspace-reader", "trust_policy": trust})
+    role_id = role["id"]
+    require(client.call("get_iam_role", {"role_id": role_id}) == role
+            == app.rest("GET", f"/api/iam/roles/{role_id}", key=app.tenant_key), "role lookup differs")
+    require(role in client.call("list_iam_roles")
+            and client.call("list_iam_roles") == app.rest("GET", "/api/iam/roles", key=app.tenant_key),
+            "role listing differs across transports")
+    attachment = {"role_id": role_id, "policy_id": reader["id"]}
+    client.call("attach_role_policy", attachment)
+    attached = client.call("list_iam_role_policies", {"role_id": role_id})
+    require(len(attached) == 1 and attached == app.rest(
+        "GET", f"/api/iam/roles/{role_id}/policies", key=app.tenant_key), "role policy listing differs")
+    # Trust alone is not enough, and a trust policy cannot name another tenant's principal.
+    user_client.call("assume_role", {"role_id": role_id}, error=True)
+    app.rest("POST", "/api/iam/roles", {"name": "stranger", "trust_policy": {"statements": [
+        {"effect": "allow", "principals": [{"type": "user", "user_id": str(uuid.uuid4())}]}]}},
+        status=422, key=app.tenant_key)
+    assumable = client.call("create_iam_policy", {"name": "role-user-assume", "document": {"statements": [
+        {"effect": "allow", "actions": ["role_assume"],
+         "resources": [{"type": "role", "tenant_id": app.tenant, "role_id": role_id}]}]}})
+    assumption = {"user_id": user_id, "policy_id": assumable["id"]}
+    client.call("attach_user_policy", assumption)
+    app.rest("POST", f"/api/iam/roles/{role_id}/assume", {"duration_seconds": 60}, status=422, key=user_key)
+    session = user_client.call("assume_role", {"role_id": role_id, "duration_seconds": 900})
+    app.secrets.append(session["plaintext"])
+    sessions = MCP(app, session["plaintext"])
+    detail = sessions.call("get_workspace", {"workspace_id": app.workspace})
+    require(detail == app.rest("GET", f"/api/workspaces/{app.workspace}", key=session["plaintext"]),
+            "role session workspace detail differs across transports")
+    # The session holds the role's permissions only: no tenant read, no further assumption, and the root cannot assume.
+    sessions.call("get_tenant", error=True)
+    sessions.call("assume_role", {"role_id": role_id}, error=True)
+    client.call("assume_role", {"role_id": role_id}, error=True)
+    updated = client.call("update_iam_role", {"role_id": role_id, "max_session_seconds": 7200})
+    require(updated["max_session_seconds"] == 7200 and updated["name"] == role["name"], "role update failed")
+    client.call("detach_role_policy", attachment)
+    sessions.call("get_workspace", {"workspace_id": app.workspace}, error=True)
+    client.call("detach_user_policy", assumption)
+    client.call("delete_iam_policy", {"policy_id": assumable["id"]})
+    client.call("delete_iam_role", {"role_id": role_id})
+    app.rest("GET", "/api/whoami", status=401, key=session["plaintext"])
+    client.call("get_iam_role", {"role_id": role_id}, error=True)
+    client.call("delete_iam_policy", {"policy_id": reader["id"]})
+    client.call("remove_member", {"user_id": user_id})
+
+
 def membership_retirement_lifecycle(app):
     owner = app.tenant_key
     client = MCP(app, owner)
@@ -1407,40 +1382,42 @@ def membership_retirement_lifecycle(app):
     missing_user = str(uuid.uuid4())
     app.rest("GET", "/api/members", status=401, key="")
     app.rest("DELETE", f"/api/members/{missing_user}", status=401, key="")
-    app.rest("POST", "/api/members", {"email": "missing@example.invalid", "role": "admin"},
-             status=404, key=owner)
-    client.call("set_member_role", {"user_id": missing_user, "role": "admin"}, error=True)
+    # The tenant root is not a member: it is never listed, previewed, removed or reset through membership operations.
     client.call("preview_member_removal", {"user_id": owner_id}, error=True)
-    client.call("preview_member_role_change", {"user_id": owner_id, "role": "member"}, error=True)
     client.call("remove_member", {"user_id": owner_id}, error=True)
-    client.call("set_member_role", {"user_id": owner_id, "role": "member"}, error=True)
-    require(next(row for row in client.call("list_members") if row["user_id"] == owner_id)["role"] == "admin",
-            "rejected root change altered membership")
+    app.rest("DELETE", f"/api/members/{owner_id}", status=409, key=owner)
+    client.call("reset_tenant_user_password", {"user_id": owner_id, "password": "blackbox-root-reset"}, error=True)
+    require(all(row["user_id"] != owner_id for row in client.call("list_members")),
+            "the tenant root was listed as a member")
     password = "blackbox-successor-password"
     app.secrets.append(password)
-    account = client.call("create_tenant_user", {
-        "user_name": "successor", "password": password, "role": "admin",
-    })
+    account = client.call("create_tenant_user", {"user_name": "successor", "password": password})
     user_id = account["user_id"]
-    client.call("grant_workspace_member", {
-        "workspace_id": app.workspace, "user_id": user_id, "role": "viewer",
-    })
     member_name = next(row["user_name"] for row in client.call("list_members") if row["user_id"] == user_id)
     login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
                      key="", headers={"X-Tenant-Id": app.tenant})
-    member_login = login["api_key"]
-    app.secrets.append(member_login)
-    key = member_login
+    key = login["api_key"]
+    app.secrets.append(key)
     member = MCP(app, key)
+    # A new tenant user has no permission until a policy is attached.
+    for path in ("/api/members", "/api/api-keys"):
+        app.rest("GET", path, status=403, key=key)
+    member.call("list_members", error=True)
+    administrator = next(row for row in client.call("list_iam_policies", {"limit": 100})
+                         if row["name"] == "Tenant Administrator")
+    attachment = {"user_id": user_id, "policy_id": administrator["id"]}
+    client.call("attach_user_policy", attachment)
     for path in ("/api/members", "/api/api-keys"):
         app.rest("GET", path, key=key)
     require(not app.rest("GET", "/api/whoami", key=key)["tenant_root"],
-            "admin role was reported as tenant root")
+            "an administrator was reported as tenant root")
     app.rest("DELETE", f"/api/members/{owner_id}", status=409, key=key)
     member.call("list_members")
     member.call("list_api_keys")
     member.call("remove_member", {"user_id": owner_id}, error=True)
-    member.call("transfer_ownership", {"successor_user_id": user_id}, error=True)
+    client.call("grant_workspace_member", {
+        "workspace_id": app.workspace, "user_id": user_id, "role": "viewer",
+    })
     client.call("reset_tenant_user_password", {"user_id": user_id, "password": password})
     app.rest("GET", "/api/whoami", key=key, status=401)
     login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
@@ -1448,26 +1425,13 @@ def membership_retirement_lifecycle(app):
     key = login["api_key"]
     app.secrets.append(key)
     member = MCP(app, key)
-    client.call("reset_tenant_user_password", {"user_id": owner_id, "password": password}, error=True)
     before = client.call("list_members")
     require(before == app.rest("GET", "/api/members", key=owner), "membership lists differ")
-    preview = client.call("preview_member_role_change", {"user_id": user_id, "role": "viewer"})
-    require(preview["current_role"] == "admin" and preview["requested_role"] == "viewer"
-            and preview["last_admin_warning"] is not None and preview["lost_workspace_ids"] == [],
-            "role preview must warn about the last non-root admin and not claim workspace loss")
-    require(preview == app.rest("POST", f"/api/members/{user_id}/role-preview", {"role": "viewer"}, key=owner),
-            "role preview differs across transports")
-    stored_scope = member.call("whoami")["stored_scope"]
-    require(client.call("list_members") == before,
-            "role preview mutated membership or grants")
-    client.call("set_member_role", {"user_id": user_id, "role": "viewer"})
-    require(member.call("whoami")["stored_scope"] == stored_scope,
-            "legacy role change rewrote the credential ceiling")
-    member.call("update_tenant", {"name": "viewer-denied"}, error=True)
     removal = client.call("preview_member_removal", {"user_id": user_id})
     require(removal == app.rest("GET", f"/api/members/{user_id}/removal-preview", key=owner)
-            and not removal["last_admin_warning"] and removal["revoked_api_key_ids"],
+            and removal["member"] and removal["revoked_api_key_ids"],
             "removal preview lost credential impact")
+    require(client.call("list_members") == before, "removal preview mutated membership")
     require(member.call("whoami")["user_id"] == user_id, "removal preview revoked a credential")
     client.call("remove_member", {"user_id": user_id})
     app.rest("DELETE", f"/api/members/{user_id}", status=204, key=owner)
@@ -1475,20 +1439,16 @@ def membership_retirement_lifecycle(app):
     member.call("whoami", error=True)
     require(not any(row["user_id"] == user_id for row in client.call("list_members")),
             "removed membership remains visible")
-    app.rest("GET", "/api/whoami", status=401, key=key)
     replacement = app.rest("POST", "/api/members/users", {
-        "user_name": "replacement-successor", "password": password, "role": "admin",
+        "user_name": "replacement-successor", "password": password,
     }, status=201, key=owner)
     user_id = replacement["user_id"]
     member_name = replacement["user_name"]
+    client.call("attach_user_policy", {"user_id": user_id, "policy_id": administrator["id"]})
     successor_key = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
                              key="", headers={"X-Tenant-Id": app.tenant})["api_key"]
     app.secrets.append(successor_key)
     successor = MCP(app, successor_key)
-    client.call("transfer_ownership", {"successor_user_id": user_id}, error=True)
-    app.rest("POST", "/api/members/transfer-ownership", {"successor_user_id": user_id}, status=409, key=owner)
-    roles = {row["user_id"]: row["role"] for row in client.call("list_members")}
-    require(roles[user_id] == "admin" and roles[owner_id] == "admin", "root transfer changed membership")
     successor.call("tenant_retirement_inventory")
     root_recovery(app)
     new_key = app.login("owner@example.invalid", "blackbox-recovered-password")
@@ -1690,7 +1650,7 @@ def enterprise_providers(app):
     password = "blackbox-provider-admin-password"
     app.secrets.append(password)
     member = app.rest("POST", "/api/members/users", {
-        "user_name": "provider-admin", "password": password, "role": "member",
+        "user_name": "provider-admin", "password": password,
     }, status=201, key=app.tenant_key)
     members = app.rest("GET", "/api/members", key=app.tenant_key)
     name = next(row["user_name"] for row in members if row["user_id"] == member["user_id"])
@@ -1995,17 +1955,6 @@ def cross_tenant_rejection(app):
     administrator = MCP(app, target_login)
     member.call("list_members", error=True)
     app.rest("GET", "/api/members", status=403, key=target_key)
-    invitation = administrator.call("create_invite", {
-        "email": "owner@example.invalid", "role": "admin", "expires_at": "2090-01-01T00:00:00Z",
-    })
-    token = invitation["token"]
-    app.secrets.append(token)
-    rejected = client.call("accept_invite", {"invite_token": token}, error=True)
-    require("an account cannot belong to more than one tenant" in json.dumps(rejected),
-            "cross-tenant acceptance did not report the membership conflict")
-    app.rest("POST", "/auth/invites/accept-authenticated", {"invite_token": token}, status=409, key=key)
-    require(client.call("whoami") == before and app.rest("GET", "/api/whoami", key=key) == before,
-            "rejected acceptance retargeted the existing credential")
     identity = member.call("whoami")
     require(identity["tenant_id"] == target and identity["workspace_id"] == workspace,
             "target administrator selected the wrong workspace")
@@ -2013,13 +1962,11 @@ def cross_tenant_rejection(app):
     require(members == app.rest("GET", "/api/members", key=target_login)
             and not any(row["user_id"] == account["user_id"] for row in members),
             "rejected membership exists or differs across transports")
-    administrator.call("transfer_ownership", {"successor_user_id": account["user_id"]}, error=True)
-    app.rest("POST", "/api/members/transfer-ownership", {"successor_user_id": account["user_id"]},
-             status=409, key=target_login)
-    require(administrator.call("list_members") == members, "root transfer rejection changed tenant members")
-    history = administrator.call("list_invites")
-    require(any(row["email"] == "owner@example.invalid" and row["used_at"] is None for row in history)
-            and token not in json.dumps(history), "rejected invitation was consumed or disclosed")
+    # Removing a user of another tenant changes nothing there: the removal only ever touches the caller's own tenant.
+    app.rest("DELETE", f"/api/members/{account['user_id']}", status=204, key=target_login)
+    require(client.call("whoami") == before and app.rest("GET", "/api/whoami", key=key) == before,
+            "a foreign removal changed the original identity")
+    require(administrator.call("list_members") == members, "a foreign removal changed tenant members")
     for endpoint in (f"/api/api-keys/{app.key_id}", f"/api/api-keys/{app.key_id}/rotate"):
         app.rest("POST" if endpoint.endswith("/rotate") else "DELETE", endpoint, status=404, key=target_login)
     for tool in ("revoke_api_key", "rotate_api_key"):
@@ -2157,6 +2104,7 @@ def scenarios(suite, edition="ce"):
                  ("rest.auth-scope-input", rest_suite)],
         "mcp": [("mcp.schema-entity-crud", lambda app: crud(app, "mcp")),
                 ("mcp.iam-policy-group-lifecycle", iam_lifecycle),
+                ("mcp.iam-role-lifecycle", iam_role_lifecycle),
                 ("mcp.relation-export-import-worker", lambda app: relation_export_import_worker(app, "mcp")),
                 ("mcp.discovery-auth-scope-input", mcp_suite),
                 ("mcp.migration-worker-undo", migration_lifecycle)],
@@ -2164,7 +2112,6 @@ def scenarios(suite, edition="ce"):
                 ("management.human-key-management", human_key_management),
                 ("mcp.user-profile-lifecycle", user_profile_lifecycle),
                 ("mcp.tenant-settings-lifecycle", tenant_settings_lifecycle),
-                ("mcp.invite-lifecycle", invite_lifecycle),
                 ("mcp.template-library-lifecycle", template_library_lifecycle),
                 ("mcp.workspace-key-lifecycle", workspace_key_lifecycle),
                 ("mcp.audit-history-lifecycle", audit_history_lifecycle),

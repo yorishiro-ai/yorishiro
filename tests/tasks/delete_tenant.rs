@@ -29,29 +29,6 @@ async fn assert_disabled_creation_rejected(ctx: &loco_rs::app::AppContext, tenan
         workspace_error,
         yorishiro::YorishiroError::Unauthenticated
     ));
-    let invite_error = yorishiro::models::workspace_invites::create_invite(
-        &ctx.db,
-        tenant_id,
-        "blocked@example.com",
-        yorishiro::models::tenant_memberships::MembershipRole::Member,
-        chrono::Duration::hours(1),
-    )
-    .await
-    .unwrap_err();
-    assert!(matches!(
-        invite_error,
-        yorishiro::YorishiroError::Unauthenticated
-    ));
-    use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
-    use yorishiro::models::workspace_invites;
-    assert_eq!(
-        workspace_invites::Entity::find()
-            .filter(yorishiro::models::_entities::workspace_invites::Column::TenantId.eq(tenant_id))
-            .count(&ctx.db)
-            .await
-            .unwrap(),
-        0
-    );
     let after = tenant_tenants::retirement::inventory(&ctx.db, tenant_id)
         .await
         .unwrap();

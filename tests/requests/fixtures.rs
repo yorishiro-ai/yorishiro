@@ -43,7 +43,7 @@ impl TestTenant {
                 .is_ok_and(|url| url == ctx.config.database.uri)
         {
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-            use yorishiro::models::{tenant_memberships, tenant_tenants};
+            use yorishiro::models::tenant_tenants;
 
             static TENANT: tokio::sync::OnceCell<Uuid> = tokio::sync::OnceCell::const_new();
             let tenant_id = *TENANT
@@ -82,7 +82,6 @@ impl TestTenant {
                 &args.owner_email,
                 &args.owner_password,
                 Some(&args.tenant_name),
-                tenant_memberships::MembershipRole::Admin,
             )
             .await
             .expect("create CE fixture owner");
@@ -166,7 +165,8 @@ pub async fn grant_iam_administrator(
         document: Set(
             serde_json::json!({"statements":[{"effect":"allow","actions":["*"],
             "resources":[{"type":"tenant","tenant_id":tenant_id},
-                {"type":"all_workspaces","tenant_id":tenant_id}]}]}),
+                {"type":"all_workspaces","tenant_id":tenant_id},
+                {"type":"all_roles","tenant_id":tenant_id}]}]}),
         ),
         ..Default::default()
     }

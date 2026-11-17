@@ -33,24 +33,11 @@ pub(crate) struct ResetTenantUserPasswordArgs {
     pub password: String,
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct TransferOwnershipArgs {
-    pub successor_user_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SetMemberRoleArgs {
-    pub user_id: Uuid,
-    pub role: tenant_memberships::MembershipRole,
-}
-
 #[tool_router(vis = "pub(crate)", router = tool_router_members)]
 impl YorishiroMcpServer {
     #[tool(
         meta = super::scope_requirement(ApiKeyScope::Read),
-        description = "Create a tenant user with a tenant-local user name and password; the admin role receives the built-in administrator policy, other roles start with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)"
+        description = "Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies or groups are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn create_tenant_user(
         &self,
@@ -102,72 +89,6 @@ impl YorishiroMcpServer {
         .await
         {
             Ok(()) => ok_json(serde_json::json!({"reset": true})),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
-    }
-
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Change an existing tenant member's role label, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)"
-    )]
-    pub(crate) async fn set_member_role(
-        &self,
-        Parameters(args): Parameters<SetMemberRoleArgs>,
-        Extension(parts): Extension<Parts>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("set_member_role")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match tenant_memberships::update_member_access(
-            &self.app_context().db,
-            &auth,
-            args.user_id,
-            args.role,
-        )
-        .await
-        {
-            Ok(keys) => ok_json(
-                serde_json::json!({"user_id": args.user_id, "role": args.role, "keys": keys}),
-            ),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
-    }
-
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)"
-    )]
-    pub(crate) async fn preview_member_role_change(
-        &self,
-        Parameters(args): Parameters<SetMemberRoleArgs>,
-        Extension(parts): Extension<Parts>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("preview_member_role_change")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match tenant_memberships::preview_role_change(
-            &self.app_context().db,
-            &auth,
-            args.user_id,
-            args.role,
-        )
-        .await
-        {
-            Ok(preview) => ok_json(preview),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
@@ -248,37 +169,6 @@ impl YorishiroMcpServer {
             .await
         {
             Ok(()) => ok_json(serde_json::json!({"removed": true})),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
-    }
-
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Reject tenant ownership transfer because root identity is immutable (requires read scope and tenant_user_update IAM permission)"
-    )]
-    pub(crate) async fn transfer_ownership(
-        &self,
-        Parameters(args): Parameters<TransferOwnershipArgs>,
-        Extension(parts): Extension<Parts>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("transfer_ownership")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match tenant_memberships::transfer_ownership(
-            &self.app_context().db,
-            &auth,
-            args.successor_user_id,
-        )
-        .await
-        {
-            Ok(()) => ok_json(serde_json::json!({"transferred": true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }

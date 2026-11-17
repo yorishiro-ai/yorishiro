@@ -165,6 +165,17 @@ impl Model {
         crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
             .await
             .internal()?;
+        let attached = Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .filter(Column::GroupId.eq(group_id))
+            .count(txn)
+            .await
+            .internal()?;
+        if attached >= 10 {
+            return Err(YorishiroError::Conflict {
+                message: "a group can have at most 10 managed policies attached".into(),
+            });
+        }
         ActiveModel {
             tenant_id: Set(tenant_id),
             group_id: Set(group_id),

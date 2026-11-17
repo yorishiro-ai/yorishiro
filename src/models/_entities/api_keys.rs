@@ -23,6 +23,7 @@ pub struct Model {
     pub expires_at: Option<DateTimeWithTimeZone>,
     pub revoked_at: Option<DateTimeWithTimeZone>,
     pub replaced_by_id: Option<Uuid>,
+    pub role_id: Option<Uuid>,
     pub audit: bool,
 }
 

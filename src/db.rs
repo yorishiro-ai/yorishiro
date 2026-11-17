@@ -458,7 +458,7 @@ pub(crate) async fn begin_workspace_write(
 
 /// Which pools this deployment holds for control-plane vs. tenant-scoped access.
 ///
-/// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`user_users`/`tenant_memberships`/`workspace_invites`) that have no tenant/workspace context yet to scope by.
+/// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`user_users`/`tenant_memberships`) that have no tenant/workspace context yet to scope by.
 #[derive(Clone)]
 pub struct DbHandle {
     pub tenant: TenantDb,

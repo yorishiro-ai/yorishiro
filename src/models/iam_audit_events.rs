@@ -62,9 +62,29 @@ pub(crate) async fn record(
 ) -> Result<(), YorishiroError> {
     ActiveModel {
         tenant_id: Set(actor.tenant_id),
-        user_id: Set(actor.user_id.ok_or(YorishiroError::Unauthenticated)?),
+        user_id: Set(Some(actor.user_id.ok_or(YorishiroError::Unauthenticated)?)),
         api_key_id: Set(actor.api_key_id),
         action: Set(action.to_owned()),
+        detail: Set(detail),
+        ..Default::default()
+    }
+    .insert(txn)
+    .await
+    .internal()?;
+    Ok(())
+}
+
+/// Records a role assumption; unlike [`record`], a service credential with no user can be the actor.
+pub(crate) async fn record_assumption(
+    txn: &DatabaseTransaction,
+    actor: &AuthContext,
+    detail: serde_json::Value,
+) -> Result<(), YorishiroError> {
+    ActiveModel {
+        tenant_id: Set(actor.tenant_id),
+        user_id: Set(actor.user_id),
+        api_key_id: Set(actor.api_key_id),
+        action: Set("role_assume".to_owned()),
         detail: Set(detail),
         ..Default::default()
     }

@@ -236,12 +236,12 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
         return;
     }
     use sea_orm::{EntityTrait, TransactionTrait};
-    use yorishiro::models::{api_keys, tenancy, tenant_memberships::MembershipRole};
+    use yorishiro::models::{api_keys, tenancy};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let txn = ctx.db.begin().await.unwrap();
         let member = tenancy::register_member(&txn, tenant.tenant_id,
-            &super::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None, MembershipRole::Member).await.unwrap();
+            &super::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let key = create_tenant_api_key(&ctx.db, tenant.tenant_id, "read", Some(member.id)).await.unwrap();
         let root_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
@@ -298,7 +298,6 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
             &ctx.db,
             foreign.tenant_id,
             caller.owner_id,
-            yorishiro::models::tenant_memberships::MembershipRole::Viewer,
         )
         .await;
         assert!(matches!(

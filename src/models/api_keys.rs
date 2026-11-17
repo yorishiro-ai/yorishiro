@@ -181,10 +181,10 @@ impl AuthContext {
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
         crate::models::tenant_tenants::Model::require_active(conn, self.tenant_id).await?;
-        if let Some(user_id) = self.user_id {
-            crate::models::tenant_memberships::get_membership_role(conn, self.tenant_id, user_id)
-                .await?
-                .ok_or(YorishiroError::Unauthenticated)?;
+        if let Some(user_id) = self.user_id
+            && !crate::models::tenant_memberships::is_member(conn, self.tenant_id, user_id).await?
+        {
+            return Err(YorishiroError::Unauthenticated);
         }
         Ok(self)
     }
@@ -617,6 +617,41 @@ impl Entity {
             expires_at: ActiveValue::Set(Some(
                 (crate::time::now() + chrono::Duration::hours(LOGIN_SESSION_HOURS)).into(),
             )),
+            ..Default::default()
+        }
+        .insert(txn)
+        .await
+        .internal()?;
+        Ok(CreatedTenantApiKey {
+            id: inserted.id,
+            plaintext,
+        })
+    }
+
+    /// Issues the temporary credential of an assumed role.
+    /// It is tenant-scoped, carries no audit grant and records the role it was assumed from.
+    pub(crate) async fn create_role_session(
+        txn: &sea_orm::DatabaseTransaction,
+        tenant_id: uuid::Uuid,
+        user_id: Option<uuid::Uuid>,
+        role_id: uuid::Uuid,
+        scope: ApiKeyScope,
+        role_name: &str,
+        expires_at: chrono::DateTime<chrono::FixedOffset>,
+    ) -> Result<CreatedTenantApiKey, YorishiroError> {
+        crate::models::access::require_key_attribution(txn, tenant_id, user_id).await?;
+        let (prefix, plaintext) = generate_key();
+        let inserted = ActiveModel {
+            tenant_id: ActiveValue::Set(tenant_id),
+            workspace_id: ActiveValue::Set(None),
+            user_id: ActiveValue::Set(user_id),
+            role_id: ActiveValue::Set(Some(role_id)),
+            key_hash: ActiveValue::Set(hash_key(&plaintext)),
+            key_prefix: ActiveValue::Set(prefix),
+            name: ActiveValue::Set(validate_key_name(&format!("role:{role_name}"))?),
+            scope: ActiveValue::Set(scope.as_db_str().to_string()),
+            audit: ActiveValue::Set(false),
+            expires_at: ActiveValue::Set(Some(expires_at)),
             ..Default::default()
         }
         .insert(txn)

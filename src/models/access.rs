@@ -65,6 +65,24 @@ impl<'a> IamEvaluation<'a> {
         actor: &AuthContext,
         required: ApiKeyScope,
     ) -> Result<Self, YorishiroError> {
+        Self::load_with(txn, actor, required, false).await
+    }
+
+    /// Loads the caller for `Model::assume_as`.
+    /// A service credential has no identity policies and loads empty, the tenant root and a role session are refused.
+    pub(crate) async fn load_for_assumption(
+        txn: &'a DatabaseTransaction,
+        actor: &AuthContext,
+    ) -> Result<Self, YorishiroError> {
+        Self::load_with(txn, actor, ApiKeyScope::Read, true).await
+    }
+
+    async fn load_with(
+        txn: &'a DatabaseTransaction,
+        actor: &AuthContext,
+        required: ApiKeyScope,
+        assumption: bool,
+    ) -> Result<Self, YorishiroError> {
         use crate::models::iam_policy::Policy;
         use sea_orm::EntityTrait;
         crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
@@ -81,14 +99,36 @@ impl<'a> IamEvaluation<'a> {
             YorishiroError::Internal(anyhow::anyhow!("unknown api key scope in database"))
         })?;
         require_scope(&credential, required)?;
-        let user_id = current.user_id.ok_or(YorishiroError::Unauthenticated)?;
-        let root =
-            crate::models::iam_tenant_roots::Model::contains(txn, current.tenant_id, user_id)
-                .await?;
-        let documents = if root {
+        if assumption && key.role_id.is_some() {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: "a role session cannot assume another role".into(),
+                hint: "assume the role with the original credential".into(),
+            });
+        }
+        let mut root = false;
+        let documents = if let Some(role_id) = key.role_id {
+            // A role session is evaluated by the role's policies alone; a deleted role leaves nothing to evaluate.
+            crate::models::iam_policies::Model::for_role(txn, current.tenant_id, role_id).await?
+        } else if let Some(user_id) = current.user_id {
+            root =
+                crate::models::iam_tenant_roots::Model::contains(txn, current.tenant_id, user_id)
+                    .await?;
+            if assumption && root {
+                return Err(YorishiroError::ScopeInsufficient {
+                    message: "the tenant root cannot assume roles".into(),
+                    hint: "the root already holds every permission".into(),
+                });
+            }
+            if root {
+                Vec::new()
+            } else {
+                crate::models::iam_policies::Model::for_user(txn, current.tenant_id, user_id)
+                    .await?
+            }
+        } else if assumption {
             Vec::new()
         } else {
-            crate::models::iam_policies::Model::for_user(txn, current.tenant_id, user_id).await?
+            return Err(YorishiroError::Unauthenticated);
         };
         let mut policies = Vec::with_capacity(documents.len());
         for document in documents {
@@ -129,7 +169,11 @@ impl<'a> IamEvaluation<'a> {
             });
         }
         let workspace = match target {
-            Resource::Tenant { tenant_id } if tenant_id == self.current.tenant_id => {
+            Resource::Tenant { tenant_id }
+            | Resource::Role { tenant_id, .. }
+            | Resource::AllRoles { tenant_id }
+                if tenant_id == self.current.tenant_id =>
+            {
                 if self.bound_workspace_id.is_some() {
                     return Err(YorishiroError::ScopeInsufficient {
                         message: "workspace-bound credentials cannot access tenant resources"
@@ -250,7 +294,7 @@ pub struct AccessCapabilities {
     pub credential_scope: ApiKeyScope,
 }
 
-/// Inspects credential limits without inferring IAM authority from legacy roles.
+/// Inspects credential limits without inferring IAM authority from the credential.
 ///
 /// # Errors
 /// Rejects revoked credentials or missing membership and propagates database failures.
@@ -294,10 +338,10 @@ pub(crate) async fn require_key_attribution(
         .await
         .internal()?;
     crate::models::tenant_tenants::Model::require_active(txn, tenant_id).await?;
-    if let Some(user_id) = user_id {
-        tenant_memberships::get_membership_role(txn, tenant_id, user_id)
-            .await?
-            .ok_or(YorishiroError::Unauthenticated)?;
+    if let Some(user_id) = user_id
+        && !tenant_memberships::is_member(txn, tenant_id, user_id).await?
+    {
+        return Err(YorishiroError::Unauthenticated);
     }
     Ok(())
 }

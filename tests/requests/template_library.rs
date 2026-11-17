@@ -2,7 +2,6 @@ use super::boot_request;
 use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
-use yorishiro::models::tenant_memberships::MembershipRole;
 
 use super::fixtures::{self, TenantArgs, TestTenant, issue_api_key};
 
@@ -54,14 +53,9 @@ async fn member_role_cannot_manage_the_template_library() {
         )
         .await
         .expect("create member");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant.tenant_id,
-            member.id,
-            MembershipRole::Member,
-        )
-        .await
-        .expect("add member");
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id)
+            .await
+            .expect("add member");
         super::fixtures::grant_workspace(
             &ctx,
             tenant.workspace_id,

@@ -248,8 +248,7 @@ async fn retirement_inventory_does_not_expose_accounts() {
             yorishiro::models::tenant_memberships::add_member(
                 &ctx.db,
                 second.tenant_id,
-                first.owner_id,
-                yorishiro::models::tenant_memberships::MembershipRole::Viewer,
+                first.owner_id
             )
             .await
             .is_err()

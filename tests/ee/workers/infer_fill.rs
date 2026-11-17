@@ -669,8 +669,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
         let txn = ctx.db.begin().await.unwrap();
         // A policy-free member: an admin carries the built-in wildcard policy and would survive the detachment.
         let member = yorishiro::models::tenancy::register_member(&txn, fixture.tenant_id,
-            &crate::requests::fixtures::unique_email("infer-iam"), "hunter2-hunter2", None,
-            yorishiro::models::tenant_memberships::MembershipRole::Member).await.unwrap();
+            &crate::requests::fixtures::unique_email("infer-iam"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         for mode in ["revoke", "detach", "deny"] {
         let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_create"],
@@ -787,8 +786,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
         // A policy-free member: an admin carries the built-in wildcard policy and would accept the late proposal.
         let user = yorishiro::models::tenancy::register_member(
             &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
-            "hunter2-hunter2", None, yorishiro::models::tenant_memberships::MembershipRole::Member,
-        ).await.unwrap();
+            "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_create"],
             "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});

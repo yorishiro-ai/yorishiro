@@ -37,7 +37,7 @@ class ReportGateTests(unittest.TestCase):
             validate_discovery(reviewed, "ee", reports[:1])
 
     def test_owned_outcome_gate_partitions_all_tools_and_rejects_missing_outcomes(self):
-        self.assertEqual(REJECTION_ONLY_TOOLS, {"accept_invite", "transfer_ownership"})
+        self.assertEqual(REJECTION_ONLY_TOOLS, set())
         reviewed = json.loads((Path(__file__).resolve().parents[1] / "blackbox/tools.json").read_text())
         owners = []
         for edition in ("ce", "ee"):

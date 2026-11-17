@@ -158,7 +158,6 @@ async fn up_tenant_memberships(manager: &SchemaManager<'_>) -> Result<(), DbErr>
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
         .col(helpers::uuid_col(manager, Alias::new("user_id")).not_null())
-        .col(ColumnDef::new(Alias::new("role")).text().not_null())
         .col(helpers::created_at(manager))
         .foreign_key(
             ForeignKey::create()
@@ -176,16 +175,7 @@ async fn up_tenant_memberships(manager: &SchemaManager<'_>) -> Result<(), DbErr>
         )
         .to_owned();
 
-    helpers::create_table_with_checks(
-        manager,
-        "tenant_memberships",
-        table,
-        &[(
-            "tenant_memberships_role_check",
-            "role IN ('owner', 'admin', 'member', 'viewer')",
-        )],
-    )
-    .await?;
+    helpers::create_table_with_checks(manager, "tenant_memberships", table, &[]).await?;
 
     manager
         .create_index(

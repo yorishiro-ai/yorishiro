@@ -8,7 +8,7 @@ pub use operations::delete_by_operator;
 pub use operations::reset_root_password_by_operator;
 pub(crate) use operations::{create_tenant_user, reset_tenant_password};
 pub(crate) use operations::{current_profile, update_profile};
-pub(crate) use operations::{get_user_by_email, verify_login, verify_tenant_login};
+pub(crate) use operations::{verify_login, verify_tenant_login};
 
 impl Model {
     /// The email of a root user, which every root user has.

@@ -56,7 +56,7 @@ async fn setup(
     )
     .await?;
     // Operator bootstrap issues the first audit-reading key; later grants require an authorized issuer.
-    // The scope is the top of the credential ladder, independent of any membership role.
+    // The scope is the top of the credential ladder, independent of IAM permissions.
     let created = IdentityApiKeys::create_tenant_api_key(
         &ctx.db,
         account.tenant_id,

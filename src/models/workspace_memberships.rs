@@ -139,9 +139,7 @@ impl Model {
             .await
             .internal()?;
         let still_reaches_workspace =
-            crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
-                .await?
-                .is_some()
+            crate::models::tenant_memberships::is_member(txn, tenant_id, user_id).await?
                 && (crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id)
                     .await?
                     || {
@@ -196,9 +194,9 @@ impl Model {
         crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
             .await
             .internal()?;
-        crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
-            .await?
-            .ok_or_else(|| YorishiroError::not_found("tenant membership not found"))?;
+        if !crate::models::tenant_memberships::is_member(txn, tenant_id, user_id).await? {
+            return Err(YorishiroError::not_found("tenant membership not found"));
+        }
         let active = ActiveModel {
             id: crate::db::sqlite_generated_id(txn, sea_orm::ActiveValue::NotSet),
             workspace_id: sea_orm::ActiveValue::Set(workspace_id),

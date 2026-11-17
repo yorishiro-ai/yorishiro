@@ -58,9 +58,7 @@ async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
         // A policy-free member: an admin carries the built-in wildcard policy and would pass the pre-attachment read.
         let member = yorishiro::models::tenancy::register_member(
             &txn, setup.tenant_id, &super::fixtures::unique_email("audit-reader"),
-            "audit-reader-password", None,
-            yorishiro::models::tenant_memberships::MembershipRole::Member,
-        ).await.unwrap();
+            "audit-reader-password", None).await.unwrap();
         txn.commit().await.unwrap();
         let delegated = issue_api_key(&ctx, setup.workspace_id, member.id, ApiKeyScope::Read, true).await;
         let root_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;

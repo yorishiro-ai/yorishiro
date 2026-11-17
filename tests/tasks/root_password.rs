@@ -66,7 +66,7 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
         assert_eq!(after.display_name, before.display_name);
         assert_eq!(after.tenant_id, before.tenant_id);
         assert_eq!(after.user_name, before.user_name);
-        let membership = tenant_memberships::Entity::find()
+        let _membership = tenant_memberships::Entity::find()
             .filter(
                 yorishiro::models::_entities::tenant_memberships::Column::UserId
                     .eq(tenant.owner_id),
@@ -75,7 +75,6 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(membership.role, "admin");
         for id in [login.id, attributed.id] {
             assert!(
                 api_keys::Entity::find_by_id(id)

@@ -4,24 +4,29 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "workspace_invites")]
+#[sea_orm(table_name = "iam_roles")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(
+        primary_key,
+        auto_increment = false,
+        unique_key = "uq_iam_roles_tenant_id_id"
+    )]
     pub id: Uuid,
+    #[sea_orm(unique_key = "uq_iam_roles_tenant_id_name")]
     pub tenant_id: Uuid,
-    #[sea_orm(column_type = "Text")]
-    pub email: String,
-    #[sea_orm(column_type = "Text")]
-    pub role: String,
-    #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
-    pub token_hash: Vec<u8>,
-    pub expires_at: DateTimeWithTimeZone,
-    pub used_at: Option<DateTimeWithTimeZone>,
+    #[sea_orm(column_type = "Text", unique_key = "uq_iam_roles_tenant_id_name")]
+    pub name: String,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub trust_policy: Json,
+    pub max_session_seconds: i32,
     pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::iam_role_policy_attachments::Entity")]
+    IamRolePolicyAttachments,
     #[sea_orm(
         belongs_to = "super::tenant_tenants::Entity",
         from = "Column::TenantId",
@@ -30,6 +35,12 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     TenantTenants,
+}
+
+impl Related<super::iam_role_policy_attachments::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamRolePolicyAttachments.def()
+    }
 }
 
 impl Related<super::tenant_tenants::Entity> for Entity {

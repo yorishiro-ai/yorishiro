@@ -12,8 +12,6 @@ pub struct Model {
     pub tenant_id: Uuid,
     #[sea_orm(unique)]
     pub user_id: Uuid,
-    #[sea_orm(column_type = "Text")]
-    pub role: String,
     pub created_at: DateTimeWithTimeZone,
 }
 

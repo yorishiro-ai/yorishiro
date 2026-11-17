@@ -114,20 +114,14 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities
         return;
     }
     use tenant_tenants::retirement;
-    use yorishiro::models::tenant_memberships::MembershipRole;
     use yorishiro::models::{tenant_memberships, user_users, workspace_workspaces};
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
-            tenant_memberships::add_member(
-                &ctx.db,
-                other.tenant_id,
-                target.owner_id,
-                MembershipRole::Viewer,
-            )
-            .await
-            .is_err()
+            tenant_memberships::add_member(&ctx.db, other.tenant_id, target.owner_id)
+                .await
+                .is_err()
         );
         assert!(
             retirement::delete_by_operator(&ctx.db, target.tenant_id, other.tenant_id)
@@ -296,7 +290,7 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         return;
     }
     use yorishiro::models::api_keys::ApiKeyScope;
-    use yorishiro::models::tenant_memberships::{self, MembershipRole};
+    use yorishiro::models::tenant_memberships;
     use yorishiro::models::{tenant_tenants::retirement, user_users};
 
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -344,10 +338,10 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         )
         .await
         .unwrap();
-        tenant_memberships::add_member(&ctx.db, other.tenant_id, guest.id, MembershipRole::Member)
+        tenant_memberships::add_member(&ctx.db, other.tenant_id, guest.id)
             .await
             .unwrap();
-        assert!(tenant_memberships::add_member(&ctx.db, target.tenant_id, guest.id, MembershipRole::Member)
+        assert!(tenant_memberships::add_member(&ctx.db, target.tenant_id, guest.id)
             .await.is_err());
         assert!(
             user_users::delete_by_operator(&ctx.db, guest.id, guest.id)

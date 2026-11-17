@@ -76,10 +76,7 @@ impl Model {
         {
             return Err(YorishiroError::not_found("IAM group was not found"));
         }
-        if crate::models::tenant_memberships::get_membership_role(&txn, actor.tenant_id, user_id)
-            .await?
-            .is_none()
-        {
+        if !crate::models::tenant_memberships::is_member(&txn, actor.tenant_id, user_id).await? {
             return Err(YorishiroError::not_found("tenant user was not found"));
         }
         Self::add(&txn, actor.tenant_id, group_id, user_id)
@@ -134,10 +131,7 @@ impl Model {
         {
             return Err(YorishiroError::not_found("IAM group was not found"));
         }
-        if crate::models::tenant_memberships::get_membership_role(&txn, actor.tenant_id, user_id)
-            .await?
-            .is_none()
-        {
+        if !crate::models::tenant_memberships::is_member(&txn, actor.tenant_id, user_id).await? {
             return Err(YorishiroError::not_found("tenant user was not found"));
         }
         if !Self::remove(&txn, actor.tenant_id, group_id, user_id).await? {

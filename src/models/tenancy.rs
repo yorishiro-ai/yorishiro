@@ -87,9 +87,9 @@ pub async fn issue_login_key(
     {
         return Err(YorishiroError::Unauthenticated);
     }
-    crate::models::tenant_memberships::get_membership_role(&txn, tenant_id, user_id)
-        .await?
-        .ok_or(YorishiroError::Unauthenticated)?;
+    if !crate::models::tenant_memberships::is_member(&txn, tenant_id, user_id).await? {
+        return Err(YorishiroError::Unauthenticated);
+    }
     let scope = crate::models::api_keys::ApiKeyScope::Migration;
     let key =
         crate::models::api_keys::Entity::create_login_key(&txn, tenant_id, user_id, scope).await?;
@@ -97,7 +97,8 @@ pub async fn issue_login_key(
     Ok((key, tenant_id, scope))
 }
 
-/// Creates an account and its membership in the caller's transaction.
+/// Creates an email account and its membership in the caller's transaction.
+/// Only tenant roots sign in with an email; every other user is created as a tenant user.
 ///
 /// # Errors
 /// Returns an error if account creation or membership insertion fails.
@@ -107,11 +108,9 @@ pub async fn register_member(
     email: &str,
     password: &str,
     display_name: Option<&str>,
-    role: crate::models::tenant_memberships::MembershipRole,
 ) -> Result<crate::models::user_users::Model, YorishiroError> {
     let user = crate::models::user_users::create_user(txn, email, password, display_name).await?;
-    crate::models::tenant_memberships::add_member_in_transaction(txn, tenant_id, user.id, role)
-        .await?;
+    crate::models::tenant_memberships::add_member_in_transaction(txn, tenant_id, user.id).await?;
     Ok(user)
 }
 
@@ -130,15 +129,7 @@ pub(crate) async fn signup_account(
     )
     .await?;
     crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
-    let user = register_member(
-        &txn,
-        tenant.id,
-        email,
-        password,
-        display_name,
-        crate::models::tenant_memberships::MembershipRole::Admin,
-    )
-    .await?;
+    let user = register_member(&txn, tenant.id, email, password, display_name).await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
     Ok((user, tenant.id))
@@ -151,7 +142,7 @@ pub(crate) async fn setup_first_account(
     password: &str,
     display_name: Option<&str>,
 ) -> Result<SetupAccount, YorishiroError> {
-    use crate::models::{tenant_memberships, tenant_tenants};
+    use crate::models::tenant_tenants;
 
     if max_tenants.is_none() {
         return Err(YorishiroError::not_found(
@@ -168,15 +159,7 @@ pub(crate) async fn setup_first_account(
     let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
     crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
     let workspace = create_workspace(&txn, tenant.id, "default", None, None).await?;
-    let user = register_member(
-        &txn,
-        tenant.id,
-        email,
-        password,
-        display_name,
-        tenant_memberships::MembershipRole::Admin,
-    )
-    .await?;
+    let user = register_member(&txn, tenant.id, email, password, display_name).await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
     Ok(SetupAccount {
@@ -271,7 +254,6 @@ pub async fn discover_workspaces(
 pub struct LoginMembership {
     pub tenant_id: Uuid,
     pub tenant_name: String,
-    pub role: crate::models::tenant_memberships::MembershipRole,
 }
 
 /// Discovers recovery options only after the caller has verified credentials.
@@ -290,19 +272,16 @@ async fn login_options(
         .await
         .internal()?;
     let mut memberships = Vec::with_capacity(rows.len());
-    for (membership, tenant) in rows {
+    for (_, tenant) in rows {
         let tenant = tenant.ok_or_else(|| {
             YorishiroError::Internal(anyhow::anyhow!("membership tenant missing"))
         })?;
         if tenant.disabled_at.is_some() {
             continue;
         }
-        let role = crate::models::tenant_memberships::MembershipRole::from_db_str(&membership.role)
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown membership role")))?;
         memberships.push(LoginMembership {
             tenant_id: tenant.id,
             tenant_name: tenant.name,
-            role,
         });
     }
     memberships.sort_by_key(|membership| membership.tenant_id);

@@ -379,15 +379,3 @@ pub(crate) async fn reset_tenant_password(
     )
     .await
 }
-
-/// Looks up a user by email, for `POST /api/members` (which attaches an *existing* account by email, never creates one).
-pub(crate) async fn get_user_by_email(
-    conn: &impl ConnectionTrait,
-    email: &str,
-) -> Result<Option<Model>, YorishiroError> {
-    Entity::find()
-        .filter(Column::Email.eq(email))
-        .one(conn)
-        .await
-        .internal()
-}

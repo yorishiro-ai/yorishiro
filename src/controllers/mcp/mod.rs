@@ -4,7 +4,6 @@ pub mod entities;
 mod export;
 mod iam;
 mod import;
-mod invites;
 mod members;
 mod recall;
 pub mod relations;
@@ -170,7 +169,6 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_entities(),
         YorishiroMcpServer::tool_router_export(),
         YorishiroMcpServer::tool_router_import(),
-        YorishiroMcpServer::tool_router_invites(),
         YorishiroMcpServer::tool_router_members(),
         YorishiroMcpServer::tool_router_recall(),
         YorishiroMcpServer::tool_router_relations(),
@@ -300,8 +298,10 @@ pub(crate) fn read_only_tool(name: &str) -> bool {
             | "list_iam_group_policies"
             | "list_iam_groups"
             | "list_iam_policies"
+            | "list_iam_roles"
+            | "get_iam_role"
+            | "list_iam_role_policies"
             | "list_iam_user_policies"
-            | "list_invites"
             | "list_members"
             | "list_relations"
             | "list_schemas"
@@ -310,7 +310,6 @@ pub(crate) fn read_only_tool(name: &str) -> bool {
             | "list_workspace_members"
             | "list_workspaces"
             | "preview_member_removal"
-            | "preview_member_role_change"
             | "recall_context"
             | "search_entities"
             | "tenant_retirement_inventory"

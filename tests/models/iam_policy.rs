@@ -283,5 +283,67 @@ fn stale_unrelated_selectors_do_not_block_grants_or_hide_denies() {
 // The built-in policy catalogue and the access probes derive from `Action::ALL`, so the list must stay in lockstep with the enum.
 #[test]
 fn action_all_matches_the_enum() {
-    assert_eq!(Action::ALL.len(), 106);
+    assert_eq!(Action::ALL.len(), 115);
+}
+
+#[test]
+fn role_assume_targets_roles_and_an_all_roles_selector_covers_each_role() {
+    let (role, other) = (Uuid::new_v4(), Uuid::new_v4());
+    let document = |resources: serde_json::Value| {
+        serde_json::json!({"statements": [
+            {"effect": "allow", "actions": ["role_assume"], "resources": resources}]})
+        .to_string()
+    };
+    let one = Policy::parse(
+        &document(serde_json::json!([{"type": "role", "tenant_id": tenant(), "role_id": role}])),
+        tenant(),
+        owns_workspace,
+    )
+    .unwrap();
+    let target = |role_id| Resource::Role {
+        tenant_id: tenant(),
+        role_id,
+    };
+    assert!(Policy::allows(
+        &[one],
+        tenant(),
+        Action::RoleAssume,
+        target(role),
+        owns_workspace
+    ));
+    let one = Policy::parse(
+        &document(serde_json::json!([{"type": "role", "tenant_id": tenant(), "role_id": role}])),
+        tenant(),
+        owns_workspace,
+    )
+    .unwrap();
+    assert!(!Policy::allows(
+        &[one],
+        tenant(),
+        Action::RoleAssume,
+        target(other),
+        owns_workspace
+    ));
+    let all = Policy::parse(
+        &document(serde_json::json!([{"type": "all_roles", "tenant_id": tenant()}])),
+        tenant(),
+        owns_workspace,
+    )
+    .unwrap();
+    assert!(Policy::allows(
+        &[all],
+        tenant(),
+        Action::RoleAssume,
+        target(other),
+        owns_workspace
+    ));
+    // Role actions do not apply to tenant or workspace resources, and the reverse.
+    assert!(
+        Policy::parse(
+            &document(serde_json::json!([{"type": "tenant", "tenant_id": tenant()}])),
+            tenant(),
+            owns_workspace,
+        )
+        .is_err()
+    );
 }

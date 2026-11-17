@@ -35,10 +35,7 @@ impl Model {
             },
         )
         .await?;
-        if crate::models::tenant_memberships::get_membership_role(&txn, actor.tenant_id, user_id)
-            .await?
-            .is_none()
-        {
+        if !crate::models::tenant_memberships::is_member(&txn, actor.tenant_id, user_id).await? {
             return Err(YorishiroError::not_found("tenant user was not found"));
         }
         let rows = Entity::find()
@@ -126,14 +123,23 @@ impl Model {
         crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
             .await
             .internal()?;
+        let attached = Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .filter(Column::UserId.eq(user_id))
+            .count(txn)
+            .await
+            .internal()?;
+        if attached >= 10 {
+            return Err(YorishiroError::Conflict {
+                message: "a user can have at most 10 managed policies attached".into(),
+            });
+        }
         if crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await? {
             return Err(YorishiroError::Conflict {
                 message: "policies cannot be attached to the tenant root".into(),
             });
         }
-        if crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
-            .await?
-            .is_none()
+        if !crate::models::tenant_memberships::is_member(txn, tenant_id, user_id).await?
             || crate::models::iam_policies::Model::find(txn, tenant_id, policy_id)
                 .await?
                 .is_none()

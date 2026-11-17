@@ -68,6 +68,52 @@ impl MigrationTrait for Migration {
             }
         }
 
+        let mut roles = Table::create();
+        roles
+            .table(Alias::new("iam_roles"))
+            .col(helpers::uuidv7_pk(manager))
+            .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
+            .col(ColumnDef::new(Alias::new("name")).text().not_null())
+            .col(helpers::json_col(manager, Alias::new("trust_policy")).not_null())
+            .col(
+                ColumnDef::new(Alias::new("max_session_seconds"))
+                    .integer()
+                    .not_null()
+                    .default(3600),
+            );
+        for timestamp in helpers::timestamps(manager) {
+            roles.col(timestamp);
+        }
+        roles.foreign_key(
+            ForeignKey::create()
+                .from(Alias::new("iam_roles"), Alias::new("tenant_id"))
+                .to(Alias::new("tenant_tenants"), Alias::new("id"))
+                .on_delete(ForeignKeyAction::Cascade),
+        );
+        helpers::create_table_with_checks(
+            manager,
+            "iam_roles",
+            roles,
+            &[(
+                "iam_roles_max_session_seconds_check",
+                "max_session_seconds BETWEEN 3600 AND 43200",
+            )],
+        )
+        .await?;
+        for (suffix, column) in [("id", "id"), ("name", "name")] {
+            manager
+                .create_index(
+                    Index::create()
+                        .name(format!("uq_iam_roles_tenant_id_{suffix}"))
+                        .table(Alias::new("iam_roles"))
+                        .col(Alias::new("tenant_id"))
+                        .col(Alias::new(column))
+                        .unique()
+                        .to_owned(),
+                )
+                .await?;
+        }
+
         for (table, left, left_table, right, right_table) in [
             (
                 "iam_group_memberships",
@@ -87,6 +133,13 @@ impl MigrationTrait for Migration {
                 "iam_group_policy_attachments",
                 "group_id",
                 "iam_groups",
+                "policy_id",
+                "iam_policies",
+            ),
+            (
+                "iam_role_policy_attachments",
+                "role_id",
+                "iam_roles",
                 "policy_id",
                 "iam_policies",
             ),
@@ -145,7 +198,7 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("iam_audit_events"))
                     .col(helpers::uuidv7_pk(manager))
                     .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
-                    .col(helpers::uuid_col(manager, Alias::new("user_id")).not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("user_id")))
                     .col(helpers::uuid_col(manager, Alias::new("api_key_id")).not_null())
                     .col(ColumnDef::new(Alias::new("action")).text().not_null())
                     .col(helpers::json_col(manager, Alias::new("detail")).not_null())
@@ -174,9 +227,11 @@ impl MigrationTrait for Migration {
             "iam_audit_events",
             "iam_groups",
             "iam_policies",
+            "iam_roles",
             "iam_group_memberships",
             "iam_user_policy_attachments",
             "iam_group_policy_attachments",
+            "iam_role_policy_attachments",
         ] {
             helpers::enable_rls_with_policy(
                 manager,
@@ -200,9 +255,11 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for table in [
             "iam_audit_events",
+            "iam_role_policy_attachments",
             "iam_group_policy_attachments",
             "iam_user_policy_attachments",
             "iam_group_memberships",
+            "iam_roles",
             "iam_policies",
             "iam_groups",
             "iam_tenant_roots",

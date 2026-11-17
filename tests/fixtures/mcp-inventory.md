@@ -14,28 +14,6 @@ Authorization remains enforced by the existing centralized MCP authorization pat
 <!-- BEGIN GENERATED MCP INVENTORY -->
 ## Community tools
 
-### `accept_invite`
-
-Accept a tenant invitation as the authenticated human account (requires read scope and matching account email); service credentials cannot accept, no login credential is issued and the selected workspace does not change
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "invite_token": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "invite_token"
-  ],
-  "type": "object"
-}
-```
-
 ### `add_group_member`
 
 Add group member in the current tenant (requires read scope and IAM permission)
@@ -86,6 +64,66 @@ Input schema:
 }
 ```
 
+### `assume_role`
+
+Assume an IAM role for a temporary credential shown once; the role trust policy and a role_assume permission must both allow it, and the session is evaluated by the role's policies alone (requires read scope; the tenant root and role sessions cannot assume roles)
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ApiKeyScope": {
+      "description": "Permission level held by an API key.\nDeclaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.\nThe wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').",
+      "oneOf": [
+        {
+          "enum": [
+            "read",
+            "write",
+            "schema"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "migration",
+          "description": "Running a batch migration, and switching maintenance mode.\nAbove `schema` because both act on data already stored.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "duration_seconds": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "role_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApiKeyScope"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "role_id"
+  ],
+  "type": "object"
+}
+```
+
 ### `attach_group_policy`
 
 Attach group policy in the current tenant (requires read scope and IAM permission)
@@ -108,6 +146,34 @@ Input schema:
   },
   "required": [
     "group_id",
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
+### `attach_role_policy`
+
+Attach a managed policy to a role, at most 20 per role (requires read scope and role_policy_attach IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "role_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "role_id",
     "policy_id"
   ],
   "type": "object"
@@ -300,43 +366,35 @@ Input schema:
 }
 ```
 
-### `create_invite`
+### `create_iam_role`
 
-Create an expiring tenant invitation and return its token for caller delivery, without sending email (requires read scope and tenant_user_create IAM permission)
+Create a tenant IAM role with a trust policy naming who may assume it (requires read scope and role_create IAM permission)
 
 Input schema:
 
 ```json
 {
-  "$defs": {
-    "MembershipRole": {
-      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
-      "enum": [
-        "admin",
-        "member",
-        "viewer"
-      ],
-      "type": "string"
-    }
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "email": {
+    "max_session_seconds": {
+      "description": "Longest session, in seconds, a caller can request: 3600 to 43200, default 3600.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
       "type": "string"
     },
-    "expires_at": {
-      "format": "date-time",
-      "type": "string"
-    },
-    "role": {
-      "$ref": "#/$defs/MembershipRole"
+    "trust_policy": {
+      "description": "`{\"statements\":[{\"effect\":\"allow\",\"principals\":[{\"type\":\"user\",\"user_id\":\"…\"}]}]}`.\nPrincipal types are `tenant`, `user`, `group` and `service_key`; an explicit deny wins over an allow."
     }
   },
   "required": [
-    "email",
-    "role",
-    "expires_at"
+    "name",
+    "trust_policy"
   ],
   "type": "object"
 }
@@ -453,23 +511,12 @@ Input schema:
 
 ### `create_tenant_user`
 
-Create a tenant user with a tenant-local user name and password; the admin role receives the built-in administrator policy, other roles start with no IAM permissions until policies are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)
+Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies or groups are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)
 
 Input schema:
 
 ```json
 {
-  "$defs": {
-    "MembershipRole": {
-      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
-      "enum": [
-        "admin",
-        "member",
-        "viewer"
-      ],
-      "type": "string"
-    }
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -483,10 +530,6 @@ Input schema:
       "description": "At least 12 characters.",
       "type": "string"
     },
-    "role": {
-      "$ref": "#/$defs/MembershipRole",
-      "description": "Admin, member or viewer; a tenant user cannot own the tenant."
-    },
     "user_name": {
       "description": "Unique within the tenant: 1 to 64 letters, digits, `.`, `_` or `-`.",
       "type": "string"
@@ -494,8 +537,7 @@ Input schema:
   },
   "required": [
     "user_name",
-    "password",
-    "role"
+    "password"
   ],
   "type": "object"
 }
@@ -600,6 +642,29 @@ Input schema:
   },
   "required": [
     "policy_id"
+  ],
+  "type": "object"
+}
+```
+
+### `delete_iam_role`
+
+Delete a tenant IAM role and revoke every session assumed from it (requires read scope and role_delete IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "role_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "role_id"
   ],
   "type": "object"
 }
@@ -716,6 +781,34 @@ Input schema:
   },
   "required": [
     "group_id",
+    "policy_id"
+  ],
+  "type": "object"
+}
+```
+
+### `detach_role_policy`
+
+Detach a managed policy from a role (requires read scope and role_policy_detach IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "policy_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "role_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "role_id",
     "policy_id"
   ],
   "type": "object"
@@ -995,6 +1088,29 @@ Input schema:
   },
   "required": [
     "policy_id"
+  ],
+  "type": "object"
+}
+```
+
+### `get_iam_role`
+
+Get a tenant IAM role (requires read scope and role_get IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "role_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "role_id"
   ],
   "type": "object"
 }
@@ -1468,6 +1584,73 @@ Input schema:
 }
 ```
 
+### `list_iam_role_policies`
+
+List the managed policies attached to a role (requires read scope and role_policy_list IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "role_id": {
+      "format": "uuid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "role_id"
+  ],
+  "type": "object"
+}
+```
+
+### `list_iam_roles`
+
+List tenant IAM roles with bounded pagination (requires read scope and role_list IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
 ### `list_iam_user_policies`
 
 List tenant IAM user policies with bounded pagination (requires read scope and IAM permission)
@@ -1501,36 +1684,6 @@ Input schema:
   "required": [
     "user_id"
   ],
-  "type": "object"
-}
-```
-
-### `list_invites`
-
-List current-tenant invitations without exposing their tokens (requires read scope and tenant_user_list IAM permission with a tenant-scoped credential)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "limit": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "offset": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    }
-  },
   "type": "object"
 }
 ```
@@ -1800,44 +1953,6 @@ Input schema:
 }
 ```
 
-### `preview_member_role_change`
-
-Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
-
-Input schema:
-
-```json
-{
-  "$defs": {
-    "MembershipRole": {
-      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
-      "enum": [
-        "admin",
-        "member",
-        "viewer"
-      ],
-      "type": "string"
-    }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "role": {
-      "$ref": "#/$defs/MembershipRole"
-    },
-    "user_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "user_id",
-    "role"
-  ],
-  "type": "object"
-}
-```
-
 ### `recall_context`
 
 Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope and recall IAM permission)
@@ -1892,34 +2007,6 @@ Input schema:
 ```json
 {
   "properties": {},
-  "type": "object"
-}
-```
-
-### `reissue_invite`
-
-Replace an unused current-tenant invitation token and expiry, invalidating the old token, for caller delivery (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "expires_at": {
-      "format": "date-time",
-      "type": "string"
-    },
-    "invite_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "invite_id",
-    "expires_at"
-  ],
   "type": "object"
 }
 ```
@@ -2026,29 +2113,6 @@ Input schema:
 }
 ```
 
-### `revoke_invite`
-
-Cancel an unused current-tenant invitation; repeated cancellation is safe (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "invite_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "invite_id"
-  ],
-  "type": "object"
-}
-```
-
 ### `revoke_workspace_member`
 
 Revoke a direct workspace grant and affected workspace-bound credentials; inherited tenant authority remains (requires read scope and workspace_update IAM permission)
@@ -2139,44 +2203,6 @@ Input schema:
 }
 ```
 
-### `set_member_role`
-
-Change an existing tenant member's role label, returning existing credential metadata; IAM policies determine permissions and tenant root identity cannot be changed (requires read scope and tenant_user_update IAM permission with a tenant-scoped credential)
-
-Input schema:
-
-```json
-{
-  "$defs": {
-    "MembershipRole": {
-      "description": "Display label for a tenant membership; permissions come from IAM policies, not from this value.\n`from_db_str` and `FromStr` also accept the retired `\"owner\"` spelling, which the data migration rewrote to `\"admin\"`.",
-      "enum": [
-        "admin",
-        "member",
-        "viewer"
-      ],
-      "type": "string"
-    }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "role": {
-      "$ref": "#/$defs/MembershipRole"
-    },
-    "user_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "user_id",
-    "role"
-  ],
-  "type": "object"
-}
-```
-
 ### `set_relation_status`
 
 Set a relation's status to active, deprecated or archived (requires write scope and relation_update IAM permission). Retiring a relation this way keeps the record that it existed, which delete_relation does not; graph traversal follows active relations only.
@@ -2213,29 +2239,6 @@ Input schema:
 ```json
 {
   "properties": {},
-  "type": "object"
-}
-```
-
-### `transfer_ownership`
-
-Reject tenant ownership transfer because root identity is immutable (requires read scope and tenant_user_update IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "successor_user_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "successor_user_id"
-  ],
   "type": "object"
 }
 ```
@@ -2370,6 +2373,43 @@ Input schema:
     "policy_id",
     "name",
     "document"
+  ],
+  "type": "object"
+}
+```
+
+### `update_iam_role`
+
+Update a tenant IAM role's name, trust policy or maximum session length (requires read scope and role_update IAM permission)
+
+Input schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "max_session_seconds": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "trust_policy": true
+  },
+  "required": [
+    "role_id"
   ],
   "type": "object"
 }

@@ -13,8 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SUITES = ("rest", "mcp", "cli")
-EE_OWNED_COMMON_TOOLS = {"accept_invite", "search_entities"}
-REJECTION_ONLY_TOOLS = {"accept_invite", "transfer_ownership"}
+EE_OWNED_COMMON_TOOLS = {"search_entities"}
+# Every public tool now has a successful attributed call; a tool that can only be rejected would be listed here.
+REJECTION_ONLY_TOOLS: set[str] = set()
 
 
 def require_owned_successes(reviewed: dict, edition: str, calls: list[dict]) -> set[str]:

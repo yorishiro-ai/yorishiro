@@ -347,9 +347,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             yorishiro::models::tenant_memberships::add_member(
                 &ctx.db,
                 tenant_id,
-                user.id,
-                yorishiro::models::tenant_memberships::MembershipRole::Viewer,
-            )
+                user.id)
             .await
             .unwrap();
             let user_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
@@ -720,6 +718,129 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_ne!(deleted["result"]["isError"], true, "{deleted}");
             request.post("/api/iam/groups").add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"deleted-denied"})).await.assert_status(StatusCode::FORBIDDEN);
+        })
+        .await;
+    })
+    .await;
+}
+
+/// A role session is evaluated by the role's policies alone: the caller's own permissions are neither added nor lost.
+#[tokio::test]
+#[serial(process_environment)]
+async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
+    with_max_tenants("1", async move {
+        boot_request_isolated::<App, _, _>(|request, _ctx| async move {
+            macro_rules! bearer {
+                ($key:expr, $builder:expr) => {
+                    $builder.add_header("Authorization", format!("Bearer {}", $key))
+                };
+            }
+            let response = request
+                .post("/setup")
+                .json(&serde_json::json!({
+                    "email": "owner@example.com",
+                    "password": "hunter2-hunter2",
+                }))
+                .await;
+            assert_eq!(response.status_code(), 201, "{}", response.text());
+            let body: serde_json::Value = response.json();
+            let root_key = body["api_key"].as_str().unwrap().to_string();
+            let workspace_id = body["workspace_id"].as_str().unwrap().to_string();
+            let identity = bearer!(root_key, request.get("/api/whoami")).await.json::<serde_json::Value>();
+            let tenant_id = identity["tenant_id"].as_str().unwrap().to_string();
+
+            let user = bearer!(root_key, request.post("/api/members/users"))
+                .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
+                .await;
+            user.assert_status(StatusCode::CREATED);
+            let user_id = user.json::<serde_json::Value>()["user_id"].as_str().unwrap().to_string();
+            let login = request
+                .post("/auth/tenant/login")
+                .add_header("x-tenant-id", &tenant_id)
+                .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
+                .await;
+            login.assert_status_ok();
+            let user_key = login.json::<serde_json::Value>()["api_key"].as_str().unwrap().to_string();
+
+            // The role may read workspaces; its trust policy names the user.
+            let role_policy = bearer!(root_key, request.post("/api/iam/policies"))
+                .json(&serde_json::json!({"name": "role-workspace-reader", "document": {"statements": [
+                    {"effect": "allow", "actions": ["workspace_get"],
+                     "resources": [{"type": "all_workspaces", "tenant_id": tenant_id}]}]}}))
+                .await;
+            role_policy.assert_status(StatusCode::CREATED);
+            let role_policy_id = role_policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_string();
+            let trust = |effect: &str| serde_json::json!({"statements": [
+                {"effect": effect, "principals": [{"type": "user", "user_id": user_id}]}]});
+            let role = bearer!(root_key, request.post("/api/iam/roles"))
+                .json(&serde_json::json!({"name": "workspace-reader", "trust_policy": trust("allow")}))
+                .await;
+            role.assert_status(StatusCode::CREATED);
+            let role_id = role.json::<serde_json::Value>()["id"].as_str().unwrap().to_string();
+            bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}/policies/{role_policy_id}")))
+                .await
+                .assert_status(StatusCode::NO_CONTENT);
+            let assume = format!("/api/iam/roles/{role_id}/assume");
+
+            // Trust alone is not enough: the caller also needs a role_assume permission.
+            bearer!(user_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
+
+            // The user's own policy allows assuming this role and reading the tenant, but not reading workspaces.
+            let user_policy = bearer!(root_key, request.post("/api/iam/policies"))
+                .json(&serde_json::json!({"name": "user-assume-and-tenant", "document": {"statements": [
+                    {"effect": "allow", "actions": ["role_assume"],
+                     "resources": [{"type": "role", "tenant_id": tenant_id, "role_id": role_id}]},
+                    {"effect": "allow", "actions": ["tenant_get"],
+                     "resources": [{"type": "tenant", "tenant_id": tenant_id}]}]}}))
+                .await;
+            user_policy.assert_status(StatusCode::CREATED);
+            let user_policy_id = user_policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_string();
+            bearer!(root_key, request.put(&format!("/api/iam/users/{user_id}/policies/{user_policy_id}")))
+                .await
+                .assert_status(StatusCode::NO_CONTENT);
+
+            // An explicit deny in the trust policy wins over an allow.
+            let denied_trust = serde_json::json!({"statements": [
+                {"effect": "allow", "principals": [{"type": "tenant"}]},
+                {"effect": "deny", "principals": [{"type": "user", "user_id": user_id}]}]});
+            bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
+                .json(&serde_json::json!({"trust_policy": denied_trust}))
+                .await
+                .assert_status_ok();
+            bearer!(user_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
+            bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
+                .json(&serde_json::json!({"trust_policy": trust("allow")}))
+                .await
+                .assert_status_ok();
+
+            // The duration must stay between 15 minutes and the role maximum.
+            for seconds in [60, 50_000] {
+                bearer!(user_key, request.post(&assume))
+                    .json(&serde_json::json!({"duration_seconds": seconds}))
+                    .await
+                    .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+            }
+            let session = bearer!(user_key, request.post(&assume)).json(&serde_json::json!({})).await;
+            session.assert_status(StatusCode::CREATED);
+            let session = session.json::<serde_json::Value>();
+            let session_key = session["plaintext"].as_str().unwrap().to_string();
+
+            // The session reads the workspace through the role, and loses the tenant read the user itself has.
+            let workspace = format!("/api/workspaces/{workspace_id}");
+            bearer!(session_key, request.get(&workspace)).await.assert_status_ok();
+            bearer!(session_key, request.get("/api/tenants/current")).await.assert_status(StatusCode::FORBIDDEN);
+            bearer!(user_key, request.get("/api/tenants/current")).await.assert_status_ok();
+            bearer!(user_key, request.get(&workspace)).await.assert_status(StatusCode::FORBIDDEN);
+
+            // A role session cannot assume another role, and the tenant root cannot assume at all.
+            bearer!(session_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
+            bearer!(root_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
+
+            // Deleting the role revokes its sessions.
+            bearer!(root_key, request.delete(&format!("/api/iam/roles/{role_id}")))
+                .await
+                .assert_status(StatusCode::NO_CONTENT);
+            bearer!(session_key, request.get(&workspace)).await.assert_status(StatusCode::UNAUTHORIZED);
         })
         .await;
     })

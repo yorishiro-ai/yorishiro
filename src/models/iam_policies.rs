@@ -212,6 +212,27 @@ impl Model {
         Ok(policy)
     }
 
+    /// The managed policies attached to a role; this is everything a role session is evaluated by.
+    pub(crate) async fn for_role(
+        txn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+        role_id: Uuid,
+    ) -> Result<Vec<Self>, YorishiroError> {
+        use crate::models::_entities::iam_role_policy_attachments;
+        let attached = iam_role_policy_attachments::Entity::find()
+            .filter(iam_role_policy_attachments::Column::TenantId.eq(tenant_id))
+            .filter(iam_role_policy_attachments::Column::RoleId.eq(role_id))
+            .all(txn)
+            .await
+            .internal()?;
+        Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .filter(Column::Id.is_in(attached.into_iter().map(|a| a.policy_id)))
+            .all(txn)
+            .await
+            .internal()
+    }
+
     pub(crate) async fn for_user(
         txn: &impl ConnectionTrait,
         tenant_id: Uuid,

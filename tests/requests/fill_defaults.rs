@@ -240,9 +240,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         // A policy-free member: an admin carries the built-in wildcard policy and would survive the attachment removal.
         let member = yorishiro::models::tenancy::register_member(
             &txn, tenant, &super::fixtures::unique_email("queued-member"),
-            "hunter2-hunter2", None,
-            yorishiro::models::tenant_memberships::MembershipRole::Member,
-        ).await.unwrap();
+            "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let document = json!({"statements":[{"effect":"allow","actions":["migration_fill_defaults"],
             "resources":[{"type":"workspace","tenant_id":tenant,"workspace_id":workspace}]}]});
@@ -298,8 +296,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
         let removed_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
         yorishiro::models::tenant_memberships::remove_member(&ctx.db, tenant, member.id).await.unwrap();
-        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id,
-            yorishiro::models::tenant_memberships::MembershipRole::Admin).await.unwrap();
+        yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id).await.unwrap();
         for id in [attributed.id, removed.id] {
             assert!(yorishiro::models::api_keys::Entity::find_by_id(id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
         }
@@ -513,7 +510,6 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
     use serde_json::json;
     use yorishiro::models::{
         api_keys, schema_schemas, tenancy,
-        tenant_memberships::MembershipRole,
         workspace_memberships::{Model, WorkspaceRole},
     };
 
@@ -531,9 +527,7 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
             tenant.tenant_id,
             &super::fixtures::unique_email("queued-workspace"),
             "hunter2-hunter2",
-            None,
-            MembershipRole::Member,
-        )
+            None)
         .await
         .unwrap();
         Model::grant(&txn, tenant.workspace_id, member.id, WorkspaceRole::Admin)

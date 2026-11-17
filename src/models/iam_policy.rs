@@ -119,6 +119,15 @@ pub enum Action {
     MarketplaceReviewSubmit,
     MarketplaceFork,
     MarketplaceVisibilityUpdate,
+    RoleList,
+    RoleGet,
+    RoleCreate,
+    RoleUpdate,
+    RoleDelete,
+    RolePolicyList,
+    RolePolicyAttach,
+    RolePolicyDetach,
+    RoleAssume,
 }
 
 impl Action {
@@ -232,6 +241,15 @@ impl Action {
         Self::MarketplaceReviewSubmit,
         Self::MarketplaceFork,
         Self::MarketplaceVisibilityUpdate,
+        Self::RoleList,
+        Self::RoleGet,
+        Self::RoleCreate,
+        Self::RoleUpdate,
+        Self::RoleDelete,
+        Self::RolePolicyList,
+        Self::RolePolicyAttach,
+        Self::RolePolicyDetach,
+        Self::RoleAssume,
     ];
 
     pub(crate) fn applies_to(self, resource: Resource) -> bool {
@@ -284,8 +302,19 @@ impl Action {
             | Self::MarketplaceReviewList
             | Self::MarketplaceReviewSubmit
             | Self::MarketplaceFork
-            | Self::MarketplaceVisibilityUpdate => {
+            | Self::MarketplaceVisibilityUpdate
+            | Self::RoleList
+            | Self::RoleGet
+            | Self::RoleCreate
+            | Self::RoleUpdate
+            | Self::RoleDelete
+            | Self::RolePolicyList
+            | Self::RolePolicyAttach
+            | Self::RolePolicyDetach => {
                 matches!(resource, Resource::Tenant { .. })
+            }
+            Self::RoleAssume => {
+                matches!(resource, Resource::Role { .. } | Resource::AllRoles { .. })
             }
             Self::WorkspaceGet
             | Self::WorkspaceUpdate
@@ -371,6 +400,8 @@ pub enum Resource {
     Tenant { tenant_id: Uuid },
     Workspace { tenant_id: Uuid, workspace_id: Uuid },
     AllWorkspaces { tenant_id: Uuid },
+    Role { tenant_id: Uuid, role_id: Uuid },
+    AllRoles { tenant_id: Uuid },
 }
 
 impl Resource {
@@ -378,7 +409,9 @@ impl Resource {
         match self {
             Self::Tenant { tenant_id }
             | Self::Workspace { tenant_id, .. }
-            | Self::AllWorkspaces { tenant_id } => tenant_id,
+            | Self::AllWorkspaces { tenant_id }
+            | Self::Role { tenant_id, .. }
+            | Self::AllRoles { tenant_id } => tenant_id,
         }
     }
 
@@ -386,12 +419,14 @@ impl Resource {
         self == target
             || matches!((self, target),
                 (Self::AllWorkspaces { tenant_id: a }, Self::Workspace { tenant_id: b, .. }) if a == b)
+            || matches!((self, target),
+                (Self::AllRoles { tenant_id: a }, Self::Role { tenant_id: b, .. }) if a == b)
     }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum Effect {
+pub(crate) enum Effect {
     Allow,
     Deny,
 }
@@ -517,7 +552,10 @@ impl Policy {
         owns_workspace: impl Fn(Uuid, Uuid) -> bool,
     ) -> bool {
         if target.tenant_id() != tenant_id
-            || matches!(target, Resource::AllWorkspaces { .. })
+            || matches!(
+                target,
+                Resource::AllWorkspaces { .. } | Resource::AllRoles { .. }
+            )
             || !action.applies_to(target)
             || policies.iter().any(|policy| policy.tenant_id != tenant_id)
             || matches!(target, Resource::Workspace { tenant_id, workspace_id } if !owns_workspace(tenant_id, workspace_id))

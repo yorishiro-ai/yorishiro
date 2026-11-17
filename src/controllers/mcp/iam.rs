@@ -601,6 +601,277 @@ impl YorishiroMcpServer {
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Create a tenant IAM role with a trust policy naming who may assume it (requires read scope and role_create IAM permission)")]
+    pub(crate) async fn create_iam_role(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::CreateRole>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("create_iam_role")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_roles::Model::create_as(
+            &self.app_context().db,
+            &auth,
+            crate::models::iam_roles::CreateRole {
+                name: args.name,
+                trust_policy: args.trust_policy,
+                max_session_seconds: args.max_session_seconds,
+            },
+        )
+        .await
+        {
+            Ok(value) => ok_json(crate::dtos::iam::RoleRecord::from(value)),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List tenant IAM roles with bounded pagination (requires read scope and role_list IAM permission)")]
+    pub(crate) async fn list_iam_roles(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::ListIam>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("list_iam_roles")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_roles::Model::list_as(
+            &self.app_context().db,
+            &auth,
+            crate::models::pagination::ListParams::new(args.limit, args.offset),
+        )
+        .await
+        {
+            Ok(value) => ok_json(
+                value
+                    .into_iter()
+                    .map(crate::dtos::iam::RoleRecord::from)
+                    .collect::<Vec<_>>(),
+            ),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Get a tenant IAM role (requires read scope and role_get IAM permission)")]
+    pub(crate) async fn get_iam_role(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::RoleId>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("get_iam_role")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_roles::Model::get_as(&self.app_context().db, &auth, args.role_id)
+            .await
+        {
+            Ok(value) => ok_json(crate::dtos::iam::RoleRecord::from(value)),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Update a tenant IAM role's name, trust policy or maximum session length (requires read scope and role_update IAM permission)")]
+    pub(crate) async fn update_iam_role(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::UpdateRoleArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("update_iam_role")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_roles::Model::update_as(
+            &self.app_context().db,
+            &auth,
+            args.role_id,
+            crate::models::iam_roles::UpdateRole {
+                name: args.name,
+                trust_policy: args.trust_policy,
+                max_session_seconds: args.max_session_seconds,
+            },
+        )
+        .await
+        {
+            Ok(value) => ok_json(crate::dtos::iam::RoleRecord::from(value)),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Delete a tenant IAM role and revoke every session assumed from it (requires read scope and role_delete IAM permission)")]
+    pub(crate) async fn delete_iam_role(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::RoleId>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("delete_iam_role")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_roles::Model::delete_as(
+            &self.app_context().db,
+            &auth,
+            args.role_id,
+        )
+        .await
+        {
+            Ok(_) => ok_json(serde_json::json!({"deleted": true})),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List the managed policies attached to a role (requires read scope and role_policy_list IAM permission)")]
+    pub(crate) async fn list_iam_role_policies(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::ListRolePolicies>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("list_iam_role_policies")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_role_policy_attachments::Model::list_as(
+            &self.app_context().db,
+            &auth,
+            args.role_id,
+            crate::models::pagination::ListParams::new(args.limit, args.offset),
+        )
+        .await
+        {
+            Ok(value) => ok_json(
+                value
+                    .into_iter()
+                    .map(crate::dtos::iam::RolePolicyRecord::from)
+                    .collect::<Vec<_>>(),
+            ),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Attach a managed policy to a role, at most 20 per role (requires read scope and role_policy_attach IAM permission)")]
+    pub(crate) async fn attach_role_policy(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::RolePolicy>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("attach_role_policy")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_role_policy_attachments::Model::add_as(
+            &self.app_context().db,
+            &auth,
+            args.role_id,
+            args.policy_id,
+        )
+        .await
+        {
+            Ok(_) => ok_json(serde_json::json!({"attached": true})),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Detach a managed policy from a role (requires read scope and role_policy_detach IAM permission)")]
+    pub(crate) async fn detach_role_policy(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::RolePolicy>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("detach_role_policy")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_role_policy_attachments::Model::remove_as(
+            &self.app_context().db,
+            &auth,
+            args.role_id,
+            args.policy_id,
+        )
+        .await
+        {
+            Ok(_) => ok_json(serde_json::json!({"detached": true})),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
+
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Assume an IAM role for a temporary credential shown once; the role trust policy and a role_assume permission must both allow it, and the session is evaluated by the role's policies alone (requires read scope; the tenant root and role sessions cannot assume roles)")]
+    pub(crate) async fn assume_role(
+        &self,
+        Parameters(args): Parameters<crate::dtos::iam::AssumeRoleArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = match super::verify(
+            self.app_context(),
+            &parts,
+            self.required_scope("assume_role")?,
+        )
+        .await?
+        {
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        match crate::models::iam_roles::Model::assume_as(
+            &self.app_context().db,
+            &auth,
+            args.role_id,
+            args.scope,
+            args.duration_seconds,
+        )
+        .await
+        {
+            Ok(value) => ok_json(value),
+            Err(error) => Ok(err_to_tool_result(error)),
+        }
+    }
 }
 
 fn iam_audit_requirement() -> rmcp::model::MetaObject {

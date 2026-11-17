@@ -115,8 +115,7 @@ impl RouteMounts {
         mounts
             .guard_credentials("/auth/signup")
             .guard_credentials("/auth/root/login")
-            .guard_credentials("/auth/tenant/login")
-            .guard_credentials("/auth/invites/accept");
+            .guard_credentials("/auth/tenant/login");
 
         // Registers a route group with Loco and records it, with its OpenAPI document when the
         // `openapi` feature is on, in the inventory.

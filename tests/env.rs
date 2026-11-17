@@ -24,8 +24,6 @@ pub(crate) enum TestEnv {
     QueryEmbeddingPollIntervalMs,
     PlanPolicyEnabled,
     #[cfg(feature = "enterprise")]
-    AuthRateLimitMax,
-    #[cfg(feature = "enterprise")]
     OauthIssuerUrl,
     #[cfg(feature = "enterprise")]
     OauthClientSecret,
@@ -77,8 +75,6 @@ impl TestEnv {
             Self::QueryEmbeddingRetentionSecs => "YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS",
             Self::QueryEmbeddingPollIntervalMs => "YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS",
             Self::PlanPolicyEnabled => "YORISHIRO_PLAN_POLICY_ENABLED",
-            #[cfg(feature = "enterprise")]
-            Self::AuthRateLimitMax => "YORISHIRO_AUTH_RATE_LIMIT_MAX",
             #[cfg(feature = "enterprise")]
             Self::OauthIssuerUrl => "YORISHIRO_OAUTH_ISSUER_URL",
             #[cfg(feature = "enterprise")]

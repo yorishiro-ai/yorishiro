@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub tenant_id: Uuid,
-    pub user_id: Uuid,
+    pub user_id: Option<Uuid>,
     pub api_key_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub action: String,

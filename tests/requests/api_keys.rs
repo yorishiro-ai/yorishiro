@@ -504,9 +504,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             tenant.tenant_id,
             &super::fixtures::unique_email("tenant-scoped-member"),
             "hunter2-hunter2",
-            None,
-            yorishiro::models::tenant_memberships::MembershipRole::Member,
-        )
+            None)
         .await
         .unwrap();
         txn.commit().await.unwrap();

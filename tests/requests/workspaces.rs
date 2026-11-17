@@ -4,22 +4,21 @@ use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::tenant_memberships::{self, MembershipRole};
+use yorishiro::models::tenant_memberships;
 use yorishiro::models::user_users;
 
-/// A member of an existing tenant with a key of their own, created through the same model operations an invite redemption uses.
+/// A member of an existing tenant with a key of their own, created through the same model operations an administrator's user creation uses.
 async fn member_key(
     ctx: &loco_rs::app::AppContext,
     tenant_id: uuid::Uuid,
     workspace_id: uuid::Uuid,
-    role: MembershipRole,
     key_scope: yorishiro::models::api_keys::ApiKeyScope,
 ) -> String {
     let email = format!("member-{}@example.com", uuid::Uuid::new_v4().simple());
     let member = user_users::create_user(&ctx.db, &email, "hunter2-hunter2", None)
         .await
         .expect("create member");
-    tenant_memberships::add_member(&ctx.db, tenant_id, member.id, role)
+    tenant_memberships::add_member(&ctx.db, tenant_id, member.id)
         .await
         .expect("add member");
     super::fixtures::grant_workspace(
@@ -267,7 +266,6 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             &super::fixtures::unique_email("workspace-stale-admin"),
             "hunter2-hunter2",
             None,
-            MembershipRole::Admin,
         )
         .await
         .unwrap();
@@ -313,14 +311,9 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             tokio::time::timeout(std::time::Duration::from_secs(10), resolved.notified())
                 .await
                 .expect("request must authenticate before demotion");
-            tenant_memberships::add_member(
-                &ctx.db,
-                tenant.tenant_id,
-                admin.id,
-                MembershipRole::Member,
-            )
-            .await
-            .unwrap();
+            tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id)
+                .await
+                .unwrap();
             resume.notify_one();
         };
         let (response, ()) = tokio::join!(async { create.await }, demote_after_authentication);
@@ -329,7 +322,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
             Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
         ));
-        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id)
             .await
             .unwrap();
         let create = request
@@ -382,7 +375,6 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             &ctx,
             tenant_id,
             main_id,
-            MembershipRole::Member,
             yorishiro::models::api_keys::ApiKeyScope::Write,
         )
         .await;
@@ -446,9 +438,7 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             tenant_memberships::add_member(
                 &ctx.db,
                 tenant.tenant_id,
-                user_id,
-                MembershipRole::Member,
-            )
+                user_id)
             .await
             .unwrap();
         }
