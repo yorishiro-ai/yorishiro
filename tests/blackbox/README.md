@@ -115,6 +115,36 @@ GHA run `41735414722` at commit `d5e1982291eda5a4bbcdad29790af5d699f2e60f` also 
 
 Existing export limits, history, security and race tests remain internal.
 
+### Retired IAM tests
+
+The IAM cleanup retired 20 in-process request and task tests whose contracts the public scenarios above already execute.
+Commit `f92794f4` removed the first five and commit `e9eca7d0` the remaining fifteen.
+GHA run `44030019443` at commit `f8304950` passed every retained scenario, including the licensed PostgreSQL suite, before the retirement was allowed to stand.
+The test `template_library::template_update_revalidates_a_previously_authenticated_administrator` was renamed to `template_update_rejects_a_revoked_previously_authenticated_actor`, which keeps only the revalidation contract.
+
+| Retired test | Retained scenario |
+| --- | --- |
+| `api_keys::api_key_lifecycle_rejects_cross_tenant_ids` | `ee.authenticated-cross-tenant-rejection` |
+| `mcp::api_key_tools_reject_cross_tenant_revocation` | `ee.authenticated-cross-tenant-rejection` |
+| `mcp::cross_tenant_invite_acceptance_uses_current_human_identity_without_retargeting` | `ee.authenticated-cross-tenant-rejection` |
+| `members::root_cannot_transfer_ownership` | `mcp.membership-ownership-retirement` |
+| `members::role_preview_does_not_infer_iam_changes_from_membership_labels` | `mcp.membership-ownership-retirement` |
+| `members::add_member_rejects_an_email_with_no_account` | `mcp.membership-ownership-retirement` |
+| `members::members_endpoints_require_authentication` | `mcp.membership-ownership-retirement` |
+| `members::member_role_cannot_manage_members` | `mcp.membership-ownership-retirement` |
+| `api_keys::api_key_lifecycle_rejects_non_admin` | `mcp.membership-ownership-retirement` |
+| `mcp::tenant_retirement_tools_require_confirmation_and_revoke_the_caller` | `mcp.membership-ownership-retirement` |
+| `tasks::inspect_tenant_retirement::confirmed_owner_disablement_revokes_keys_and_retains_data_and_evidence` | `mcp.membership-ownership-retirement` |
+| `mcp::api_key_tools_preserve_history_ceilings_and_revocation` | `management.human-key-management` |
+| `members::administrator_can_issue_and_list_secret_free_invites` | `mcp.invite-lifecycle` |
+| `template_library::owner_can_create_update_and_delete_a_template` | `mcp.template-library-lifecycle` |
+| `template_library::another_tenant_cannot_update_or_delete_a_community_template` | `ee.licensed-marketplace-lifecycle` |
+| `template_library::fork_copies_a_community_template_into_the_forking_tenants_own_library` | `ee.licensed-marketplace-lifecycle` |
+| `mcp::update_entity_tool_refuses_a_stale_expected_updated_at` | `rest.schema-entity-crud` and `mcp.schema-entity-crud` |
+| `mcp::mcp_transport_rejects_unconfigured_host_by_default` | `mcp.discovery-auth-scope-input` |
+| `mcp::mcp_transport_requires_protocol_accept_headers` | `mcp.discovery-auth-scope-input` |
+| `mcp::mcp_rejects_missing_auth_and_scope_insufficient_writes` | `mcp.discovery-auth-scope-input` |
+
 ## Evidence and runner checks
 
 Exit status is zero only when all selected assertions and cleanup pass.
