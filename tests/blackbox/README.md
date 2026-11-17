@@ -59,10 +59,13 @@ The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL 
 The required census assigns CE tools to CE suites except `search_entities` and `accept_invite`, which belong to the owned provider and licensed PostgreSQL EE suites.
 EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite` and `transfer_ownership`, which require rejected calls because accounts cannot join another tenant and tenant root ownership is immutable.
 The licensed marketplace scenario publishes a template version, forks it into another tenant and records a review, comparing persisted REST reads with MCP results.
-The licensed inference scenario uses an owned chat-completions endpoint to produce a real proposal, checks that it does not change the entity before confirmation, then confirms it and reads the persisted value through REST.
+The licensed inference scenario creates an entity on the first schema version, bumps the schema so the entity sits on an outdated version, and runs infer-fill against the workspace LLM provider.
+The provider is the deployment's `YORISHIRO_INFERENCE_BASE_URL`, `YORISHIRO_INFERENCE_MODEL` and `YORISHIRO_INFERENCE_API_KEY` values when all three are set; otherwise an owned in-process chat-completions endpoint stands in and the expected answer is exact.
+A real provider must answer with the JSON object the request's `json_object` response format requires, and it must do so inside the deployment's inference deadline, which defaults to 120 seconds.
+It checks that the proposal does not change the entity before confirmation, then confirms it and reads the persisted value through REST.
 It also checks proposal listing and reject/discard response parity; provider failures and late-revocation tests retain their assigned owners.
 This partitions all registered tools without replaying the full CE suite under EE, and does not claim exhaustive behavior coverage.
-Its required GHA job owns a non-superuser PostgreSQL service and its own database; ordinary SQLite suites never inherit that database or licence.
+Its required GHA job owns a non-superuser PostgreSQL service and its own database, and passes the three optional `YORISHIRO_INFERENCE_*` repository secrets to the scenario, so a published OpenAI-compatible provider answers the proposal while the key stays redacted from every artifact; ordinary SQLite suites never inherit that database or licence.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.
 Scenario counts alone are not a public-tool completeness guarantee.
 

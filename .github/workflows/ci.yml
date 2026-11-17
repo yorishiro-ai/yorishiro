@@ -399,6 +399,9 @@ jobs:
         env:
           YORISHIRO_PUBLIC_POSTGRES_URL: postgres://yorishiro:yorishiro@localhost:5432/public_contract
           YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+          YORISHIRO_INFERENCE_BASE_URL: ${{ secrets.YORISHIRO_INFERENCE_BASE_URL }}
+          YORISHIRO_INFERENCE_MODEL: ${{ secrets.YORISHIRO_INFERENCE_MODEL }}
+          YORISHIRO_INFERENCE_API_KEY: ${{ secrets.YORISHIRO_INFERENCE_API_KEY }}
         run: |
           test -n "$YORISHIRO_LICENSE_KEY"
           tar -xzf "$RUNNER_TEMP/binary/public-contract-ee.tar.gz" -C "$RUNNER_TEMP/binary"

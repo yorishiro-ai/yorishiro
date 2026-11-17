@@ -2085,7 +2085,22 @@ def licensed_inference(app):
     client.call("create_schema", {"definition": definition})
     entity = client.call("create_entity", {"schema_name": definition["name"], "entity_type": "note",
                                             "data": {"title": "owned inference document"}})
-    app.secrets.append("owned-llm-secret")
+    # The entity already sits on the active version, and infer_fill only walks entities still on an
+    # earlier version of the schema, so the fixture bumps the schema after creating the entity:
+    # it then lacks the newly required summary, which is exactly what the provider proposes.
+    definition["entity_types"]["note"]["fields"]["summary"] = {"type": "string", "required": True}
+    bumped = client.call("create_schema", {"definition": definition})
+    require(bumped["schema"]["version"] == 2, "the schema bump did not add a second version")
+    # A deployment can publish an OpenAI-compatible provider through the YORISHIRO_INFERENCE_*
+    # values (GHA repository secrets in CI); the scenario then exercises the real endpoint and
+    # accepts whatever non-empty answer it gives. Without them, an owned in-process endpoint
+    # stands in and the answer is exact.
+    provider = {name: os.environ.get(name, "")
+                for name in ("YORISHIRO_INFERENCE_BASE_URL", "YORISHIRO_INFERENCE_MODEL",
+                             "YORISHIRO_INFERENCE_API_KEY")}
+    secret_provider = all(provider.values())
+    if secret_provider:
+        app.secrets.append(provider["YORISHIRO_INFERENCE_API_KEY"])
 
     def completed(tool, job_id, path, worker):
         while True:
@@ -2098,30 +2113,47 @@ def licensed_inference(app):
                 return record
             time.sleep(min(0.1, app.remaining()))
 
-    with inference_endpoint() as (url, requests), app.job_worker() as worker:
-        client.call("set_llm_provider", {"base_url": url, "model": "blackbox-inference", "api_key": "owned-llm-secret"})
-        job = client.call("infer_fill", {"schema_name": definition["name"]})
-        job_id = job["job_id"]
-        path = f"/api/inference-jobs/{job_id}"
-        result = completed("get_inference_job", job_id, path, worker)
-        require(result["proposed"] == 1 and len(requests) == 1, "inference did not produce the owned proposal")
-        proposals = client.call("list_inference_proposals", {"job_id": job_id})
-        require(proposals == app.rest("GET", path + "/proposals", key=app.key)
-                and len(proposals) == 1 and proposals[0]["proposed"] == "owned proposal",
-                "inference proposals differ across transports")
-        require("summary" not in client.call("get_entity", {"id": entity["id"]})["data"],
-                "inference wrote an unconfirmed proposal")
-        confirmation = client.call("confirm_inference_proposals", {"job_id": job_id})
-        confirmed = completed("get_inference_confirmation", confirmation["job_id"],
-                              f"/api/inference-jobs/confirmations/{confirmation['job_id']}", worker)
-        require(confirmed["result"]["confirmed"] == 1, "confirmation did not apply the proposal")
-        require(app.rest("GET", f"/api/entities/{entity['id']}")["data"]["summary"] == "owned proposal",
-                "confirmed proposal is not persisted")
-        for tool, suffix in (("reject_inference_proposals", "reject"), ("discard_inference_proposals", "discard")):
-            report = client.call(tool, {"job_id": job_id})
-            require(report == app.rest("POST", path + "/" + suffix, key=app.key),
-                    "proposal action differs across transports")
-    client.call("reset_llm_provider")
+    def lifecycle(base_url, model, api_key, requests):
+        with app.job_worker() as worker:
+            client.call("set_llm_provider", {"base_url": base_url, "model": model, "api_key": api_key})
+            job = client.call("infer_fill", {"schema_name": definition["name"]})
+            job_id = job["job_id"]
+            path = f"/api/inference-jobs/{job_id}"
+            result = completed("get_inference_job", job_id, path, worker)
+            require(result["proposed"] == 1, "inference did not produce the proposal")
+            if requests is not None:
+                require(len(requests) == 1, "the owned endpoint served an unexpected number of requests")
+            proposals = client.call("list_inference_proposals", {"job_id": job_id})
+            require(proposals == app.rest("GET", path + "/proposals", key=app.key)
+                    and len(proposals) == 1 and proposals[0]["source_field"] == "summary",
+                    "inference proposals differ across transports")
+            if requests is not None:
+                require(proposals[0]["proposed"] == "owned proposal",
+                        "inference did not persist the owned answer")
+            else:
+                require(isinstance(proposals[0]["proposed"], str) and proposals[0]["proposed"].strip(),
+                        "the provider answer did not persist as a proposal")
+            require("summary" not in client.call("get_entity", {"id": entity["id"]})["data"],
+                    "inference wrote an unconfirmed proposal")
+            confirmation = client.call("confirm_inference_proposals", {"job_id": job_id})
+            confirmed = completed("get_inference_confirmation", confirmation["job_id"],
+                                  f"/api/inference-jobs/confirmations/{confirmation['job_id']}", worker)
+            require(confirmed["result"]["confirmed"] == 1, "confirmation did not apply the proposal")
+            require(app.rest("GET", f"/api/entities/{entity['id']}")["data"]["summary"] == proposals[0]["proposed"],
+                    "confirmed proposal is not persisted")
+            for tool, suffix in (("reject_inference_proposals", "reject"), ("discard_inference_proposals", "discard")):
+                report = client.call(tool, {"job_id": job_id})
+                require(report == app.rest("POST", path + "/" + suffix, key=app.key),
+                        "proposal action differs across transports")
+        client.call("reset_llm_provider")
+
+    if secret_provider:
+        lifecycle(provider["YORISHIRO_INFERENCE_BASE_URL"], provider["YORISHIRO_INFERENCE_MODEL"],
+                  provider["YORISHIRO_INFERENCE_API_KEY"], None)
+    else:
+        app.secrets.append("owned-llm-secret")
+        with inference_endpoint() as (url, requests):
+            lifecycle(url, "blackbox-inference", "owned-llm-secret", requests)
 
 
 def scenarios(suite, edition="ce"):
