@@ -155,3 +155,15 @@ pub async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id: Uuid) 
 pub fn unique_email(prefix: &str) -> String {
     format!("{prefix}-{}@example.com", Uuid::new_v4().simple())
 }
+
+/// A one-field `note` schema definition named `name`; `embedded` marks its title for embedding.
+pub fn note_schema(name: &str, embedded: bool) -> serde_json::Value {
+    let mut title = serde_json::json!({"type": "string", "required": true});
+    if embedded {
+        title["x-embed"] = true.into();
+    }
+    serde_json::json!({
+        "name": name,
+        "entity_types": {"note": {"fields": {"title": title}}}
+    })
+}

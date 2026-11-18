@@ -9,6 +9,7 @@ mod api_keys;
 #[cfg(feature = "enterprise")]
 mod compute_credit_ledger;
 mod content_entities_sqlite;
+mod db_enum;
 mod entities;
 mod iam_policy;
 mod iam_trust_policy;

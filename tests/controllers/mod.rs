@@ -1,4 +1,5 @@
 mod mcp;
+mod middleware;
 mod openapi;
 
 use rmcp::model::Tool;

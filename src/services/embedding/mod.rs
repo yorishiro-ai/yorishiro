@@ -35,7 +35,7 @@ pub fn deployment_embedding_metadata(
     match config.provider {
         crate::data::settings::EmbeddingProvider::None => Ok(None),
         crate::data::settings::EmbeddingProvider::Openai => {
-            return Err("embedding provider openai requires base_url and model".into());
+            Err("embedding provider openai requires base_url and model".into())
         }
         crate::data::settings::EmbeddingProvider::Local => {
             let def = if config.local_model == model_fetch::DEFAULT_MODEL.short_id {
@@ -241,7 +241,7 @@ pub async fn build_embedding_provider(
             tracing::info!(
                 "no explicit embedding configuration (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL/YORISHIRO_EMBEDDING_PROVIDER unset); defaulting to local provider with recommended model"
             );
-            return Err("embedding provider openai requires base_url and model".into());
+            Err("embedding provider openai requires base_url and model".into())
         }
     }
 }
@@ -254,11 +254,11 @@ fn resolve_local_model(
     if requested == model_fetch::DEFAULT_MODEL.short_id {
         Ok(model_fetch::DEFAULT_MODEL)
     } else {
-        return Err(format!(
+        Err(format!(
             "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
             model_fetch::DEFAULT_MODEL.short_id
         )
-        .into());
+        .into())
     }
 }
 

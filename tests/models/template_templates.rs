@@ -9,16 +9,7 @@ use yorishiro::models::_entities::template_templates;
 use yorishiro::models::template_templates::{self as templates, TemplateVisibility};
 
 fn note_definition(name: &str) -> serde_json::Value {
-    serde_json::json!({
-        "name": name,
-        "entity_types": {
-            "note": {
-                "fields": {
-                    "title": { "type": "string", "required": true }
-                }
-            }
-        }
-    })
+    crate::requests::fixtures::note_schema(name, false)
 }
 
 #[test]

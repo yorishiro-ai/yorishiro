@@ -24,12 +24,7 @@ async fn create_template(
 }
 
 fn note_definition() -> serde_json::Value {
-    json!({
-        "name": "library-note",
-        "entity_types": {
-            "note": { "fields": { "title": { "type": "string", "required": true } } }
-        }
-    })
+    crate::requests::fixtures::note_schema("library-note", false)
 }
 
 /// A schema with no origin template reports nothing to follow, and merge-preview/merge both refuse it: the whole point of the origin/merge chain only applies to a schema copied from a template.

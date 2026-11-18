@@ -16,12 +16,7 @@ use yorishiro::services::embedding::{
 };
 
 fn note_definition() -> serde_json::Value {
-    serde_json::json!({
-        "name": "note",
-        "entity_types": {
-            "note": { "fields": { "title": { "type": "string", "required": true, "x-embed": true } } }
-        }
-    })
+    crate::requests::fixtures::note_schema("note", true)
 }
 
 #[tokio::test]

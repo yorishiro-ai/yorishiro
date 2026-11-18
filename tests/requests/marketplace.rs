@@ -8,12 +8,7 @@ use yorishiro::App;
 use super::fixtures::{TenantArgs, TestTenant};
 
 fn note_definition() -> serde_json::Value {
-    json!({
-        "name": "crm-starter",
-        "entity_types": {
-            "note": { "fields": { "title": { "type": "string", "required": true } } }
-        }
-    })
+    crate::requests::fixtures::note_schema("crm-starter", false)
 }
 
 async fn listings(request: &loco_rs::TestServer, key: &str) -> Vec<serde_json::Value> {

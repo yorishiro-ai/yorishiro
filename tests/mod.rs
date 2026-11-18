@@ -1,7 +1,6 @@
 mod controllers;
 mod data;
 mod db;
-mod db_enum;
 #[cfg(feature = "enterprise")]
 mod ee;
 mod error;

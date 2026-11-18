@@ -6,12 +6,7 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use super::fixtures::{self, TenantArgs, TestTenant, issue_api_key};
 
 fn note_definition() -> serde_json::Value {
-    serde_json::json!({
-        "name": "library-note",
-        "entity_types": {
-            "note": { "fields": { "title": { "type": "string", "required": true } } }
-        }
-    })
+    crate::requests::fixtures::note_schema("library-note", false)
 }
 
 #[tokio::test]

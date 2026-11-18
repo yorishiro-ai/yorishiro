@@ -1,5 +1,5 @@
 mod queue_tasks;
-mod reindex_embeddings;
+mod resync_embeddings;
 mod scheduler_config;
 mod tenant_reindex_scheduler;
 
@@ -8,6 +8,6 @@ pub mod inspect_tenant_retirement;
 pub mod disable_tenant;
 
 pub mod delete_tenant;
-mod users;
+mod delete_user;
 
-mod root_password;
+mod reset_root_password;

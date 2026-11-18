@@ -87,14 +87,14 @@ The integration tests are one binary rooted at `tests/mod.rs`:
 
 - `tests/licence.rs` — licence verification, expiry boundaries
 - `tests/config/`, `tests/data/` — configuration loading and validation, typed settings, built-in templates
-- `tests/controllers/` — MCP tool routing, route inventory, OpenAPI assembly
-- `tests/db.rs`, `tests/db_enum.rs` — connection primitives and the `db_enum!` conversions
+- `tests/controllers/` — MCP tool routing, middleware, route inventory, OpenAPI assembly
+- `tests/db.rs` — connection primitives
 - `tests/initializers/` — process-lifetime initializers (`db_load_guard`)
 - `tests/metaschema/` — nesting, projection, validation, type resolution, versioning
-- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle
+- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle, the `db_enum!` conversions
 - `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
-- `tests/services/` — embedding, rate limiting
-- `tests/tasks/` — task commands (reindex_embeddings)
+- `tests/services/` — embedding providers
+- `tests/tasks/` — task commands, named after the task they run
 - `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle
 - `tests/ee/` — mirrors `ee/`; compiled only with the `enterprise` feature
 
