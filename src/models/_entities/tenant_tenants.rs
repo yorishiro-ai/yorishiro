@@ -13,6 +13,7 @@ pub struct Model {
     pub max_workspaces: Option<i32>,
     pub created_at: DateTimeWithTimeZone,
     pub disabled_at: Option<DateTimeWithTimeZone>,
+    pub delete_scheduled_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

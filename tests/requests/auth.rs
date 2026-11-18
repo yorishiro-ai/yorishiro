@@ -26,7 +26,7 @@ async fn signup_without_invite_creates_its_own_tenant() {
         );
         let signup_body: serde_json::Value = signup_response.json();
         assert_eq!(signup_body["email"], "no-invite@example.com");
-        assert_eq!(signup_body["role"], "admin");
+        assert!(signup_body.get("role").is_none(), "signup no longer reports a role label");
         assert_eq!(signup_body["workspaces"].as_array().unwrap().len(), 0);
 
         let login_response = request

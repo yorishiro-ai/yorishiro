@@ -7,6 +7,9 @@ use uuid::Uuid;
 
 const DISABLED_REASON: &str = "tenant disabled";
 
+/// How long a tenant survives after its root account is deleted before the sweep removes it.
+const DELETE_GRACE_PERIOD: chrono::Duration = chrono::Duration::days(7);
+
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
     api_keys, entity_entities, entity_relations, queue_job_dispatch_outbox, queue_job_lifecycles,
@@ -21,6 +24,8 @@ pub struct RetirementInventory {
     pub tenant_id: Uuid,
     pub tenant_name: String,
     pub disabled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    /// Set when the tenant's root account was deleted; the sweep removes the tenant when this passes.
+    pub delete_scheduled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub workspace_ids: Vec<Uuid>,
     pub memberships: u64,
     pub shared_user_accounts: u64,
@@ -215,6 +220,132 @@ pub async fn delete_by_operator(
     }
     delete_disabled_in(&txn, tenant_id).await?;
     txn.commit().await.internal()
+}
+
+/// Schedules an active tenant for deletion after the grace period, or deletes an already-disabled tenant at once.
+/// The caller holds the membership fence and has already removed the root row.
+///
+/// # Errors
+/// Rejects the infrastructure tenant and propagates persistence failures.
+pub(crate) async fn root_deleted(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    deleted_user_id: Uuid,
+) -> Result<crate::models::user_users::DeletionOutcome, YorishiroError> {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    if tenant_id == super::INFRASTRUCTURE_TENANT_ID {
+        return Err(YorishiroError::ValidationFailed {
+            message: "the infrastructure tenant cannot be retired".into(),
+            details: vec![],
+            hint: "select a non-infrastructure tenant".into(),
+        });
+    }
+    let tenant = super::Model::find_by_id(txn, tenant_id).await?;
+    if tenant.disabled_at.is_some() {
+        delete_disabled_in(txn, tenant_id).await?;
+        return Ok(crate::models::user_users::DeletionOutcome::TenantDeleted { tenant_id });
+    }
+    let due = crate::time::database_instant(crate::time::now() + DELETE_GRACE_PERIOD);
+    super::ActiveModel {
+        id: Set(tenant_id),
+        delete_scheduled_at: Set(Some(due)),
+        ..Default::default()
+    }
+    .update(txn)
+    .await
+    .internal()?;
+    crate::models::tenant_retirement_events::ActiveModel {
+        tenant_id: Set(tenant_id),
+        actor_user_id: Set(Some(deleted_user_id)),
+        action: Set("delete_scheduled".into()),
+        ..Default::default()
+    }
+    .insert(txn)
+    .await
+    .internal()?;
+    Ok(
+        crate::models::user_users::DeletionOutcome::TenantDeletionScheduled {
+            tenant_id,
+            delete_scheduled_at: due,
+        },
+    )
+}
+
+/// Deletes every tenant whose scheduled deletion deadline is at or before `now`.
+/// A tenant that still has unresolved external forks is skipped and retried on the next run.
+///
+/// # Errors
+/// Propagates database failures.
+pub async fn reap_due(
+    db: &sea_orm::DatabaseConnection,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<u64, YorishiroError> {
+    use crate::models::_entities::tenant_tenants::Column;
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    let scheduled = super::Entity::find()
+        .filter(Column::DeleteScheduledAt.is_not_null())
+        .filter(Column::Id.ne(super::INFRASTRUCTURE_TENANT_ID))
+        .all(db)
+        .await
+        .internal()?;
+    let mut deleted = 0u64;
+    for candidate in scheduled {
+        if candidate
+            .delete_scheduled_at
+            .is_none_or(|due| due.to_utc() > now)
+        {
+            continue;
+        }
+        let tenant_id = candidate.id;
+        // Serialize quota release with tenant creation and cleanup with membership/publication writes.
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::db::lock_for_update(&txn, "create_tenant")
+            .await
+            .internal()?;
+        crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
+            .await
+            .internal()?;
+        let Some(tenant) = super::Entity::find_by_id(tenant_id)
+            .one(&txn)
+            .await
+            .internal()?
+        else {
+            txn.rollback().await.internal()?;
+            continue;
+        };
+        let outcome = async {
+            if tenant.disabled_at.is_none() {
+                super::ActiveModel {
+                    id: Set(tenant_id),
+                    disabled_at: Set(Some(crate::time::database_instant(now))),
+                    ..Default::default()
+                }
+                .update(&txn)
+                .await
+                .internal()?;
+                api_keys::Entity::revoke_matching(
+                    &txn,
+                    sea_orm::Condition::all().add(api_keys::Column::TenantId.eq(tenant_id)),
+                )
+                .await?;
+                cancel_work(&txn, tenant_id).await?;
+            }
+            delete_disabled_in(&txn, tenant_id).await
+        }
+        .await;
+        if let Err(err) = outcome {
+            txn.rollback().await.internal()?;
+            tracing::warn!(
+                tenant_id = %tenant_id,
+                error = %err,
+                "scheduled tenant deletion blocked; retrying on the next run"
+            );
+            continue;
+        }
+        txn.commit().await.internal()?;
+        deleted += 1;
+    }
+    Ok(deleted)
 }
 
 /// Deletes a disabled tenant and records the durable evidence inside the caller's transaction.
@@ -504,6 +635,7 @@ pub async fn inventory(
         tenant_id,
         tenant_name: tenant.name,
         disabled_at: tenant.disabled_at,
+        delete_scheduled_at: tenant.delete_scheduled_at,
         workspace_ids,
         memberships,
         shared_user_accounts,

@@ -115,8 +115,7 @@ impl Model {
     }
 
     /// Revokes a direct grant and its workspace-bound credentials under the membership fence.
-    /// Workspace-bound credentials survive while the user can still reach the workspace through an IAM policy;
-    /// tenant-bound credentials remain stored and must recheck each selected workspace.
+    /// Tenant-bound credentials remain stored and must recheck each selected workspace.
     ///
     /// # Errors
     /// Propagates workspace lookup or persistence failures.
@@ -126,7 +125,6 @@ impl Model {
         user_id: Uuid,
     ) -> Result<(), YorishiroError> {
         use crate::models::_entities::api_keys;
-        use crate::models::iam_policy::{Policy, Resource};
         let tenant_id =
             crate::models::workspace_workspaces::get_workspace_tenant(txn, workspace_id).await?;
         crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
@@ -138,34 +136,9 @@ impl Model {
             .exec(txn)
             .await
             .internal()?;
-        let still_reaches_workspace =
-            crate::models::tenant_memberships::is_member(txn, tenant_id, user_id).await?
-                && (crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id)
-                    .await?
-                    || {
-                        let documents =
-                            crate::models::iam_policies::Model::for_user(txn, tenant_id, user_id)
-                                .await?;
-                        let mut policies = Vec::with_capacity(documents.len());
-                        for document in documents {
-                            let rendered = serde_json::to_string(&document.document).internal()?;
-                            // Unrelated stale selectors must not block the probe, same as the request-path evaluation.
-                            policies.push(Policy::parse(&rendered, tenant_id, |tenant, _| {
-                                tenant == tenant_id
-                            })?);
-                        }
-                        let target = Resource::Workspace {
-                            tenant_id,
-                            workspace_id,
-                        };
-                        Policy::allows_any_applicable_action(
-                            &policies,
-                            tenant_id,
-                            target,
-                            |tenant, workspace| tenant == tenant_id && workspace == workspace_id,
-                        )
-                    });
-        if !still_reaches_workspace {
+        let is_root =
+            crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await?;
+        if !is_root {
             api_keys::Entity::revoke_matching(
                 txn,
                 sea_orm::Condition::all()

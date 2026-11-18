@@ -92,22 +92,57 @@ pub async fn reset_root_password_by_operator(
     Ok(())
 }
 
+/// The effect of an operator account deletion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeletionOutcome {
+    /// A local account without a tenant membership was deleted.
+    Deleted,
+    /// The account was a tenant root; the tenant is removed when its grace period elapses.
+    TenantDeletionScheduled {
+        tenant_id: uuid::Uuid,
+        delete_scheduled_at: chrono::DateTime<chrono::FixedOffset>,
+    },
+    /// The account was the root of an already-disabled tenant, deleted with it.
+    TenantDeleted { tenant_id: uuid::Uuid },
+}
+
 /// Deletes an account with a trusted operator identity.
-/// Every tenant membership must be removed before deleting the account.
+/// A non-root account must have no remaining tenant membership.
+/// Deleting the tenant root account also removes the tenant: an active tenant is
+/// scheduled for deletion after the grace period, and an already-disabled one is deleted immediately.
 ///
 /// # Errors
-/// Rejects a mismatched confirmation or any remaining tenant membership.
+/// Rejects a mismatched confirmation, the infrastructure tenant's root, or a
+/// non-root account with a remaining membership.
 pub async fn delete_by_operator(
     db: &sea_orm::DatabaseConnection,
     user_id: uuid::Uuid,
     confirmed_user_id: uuid::Uuid,
-) -> Result<(), YorishiroError> {
+) -> Result<DeletionOutcome, YorishiroError> {
     if user_id != confirmed_user_id {
         return Err(YorishiroError::Conflict {
             message: "confirmed_user_id must match user_id".into(),
         });
     }
     let txn = crate::db::begin_write(db).await.internal()?;
+    use crate::models::_entities::tenant_memberships as memberships;
+    // Match login key issuance and membership mutation lock ordering: tenant fence, then user fence, before the row lock.
+    let preliminary = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user_id))
+        .one(&txn)
+        .await
+        .internal()?;
+    if let Some(preliminary) = &preliminary {
+        crate::db::lock_for_update(
+            &txn,
+            &format!("tenant-membership:{}", preliminary.tenant_id),
+        )
+        .await
+        .internal()?;
+    }
+    crate::db::lock_for_update(&txn, &format!("user-membership:{user_id}"))
+        .await
+        .internal()?;
     // The row lock also serializes concurrent membership/key inserts through their user foreign key.
     Entity::find_by_id(user_id)
         .lock_exclusive()
@@ -115,20 +150,38 @@ pub async fn delete_by_operator(
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found("user not found"))?;
-    use crate::models::_entities::tenant_memberships as memberships;
-    if let Some(membership) = memberships::Entity::find()
+    let membership = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))
         .one(&txn)
         .await
-        .internal()?
-    {
+        .internal()?;
+    let Some(membership) = membership else {
+        // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
+        crate::models::api_keys::Entity::revoke_matching(
+            &txn,
+            Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+        )
+        .await?;
+        Entity::delete_by_id(user_id).exec(&txn).await.internal()?;
+        txn.commit().await.internal()?;
+        return Ok(DeletionOutcome::Deleted);
+    };
+    let tenant_id = membership.tenant_id;
+    if !crate::models::iam_tenant_roots::Model::contains(&txn, tenant_id, user_id).await? {
         return Err(YorishiroError::Conflict {
             message: format!(
                 "remove the user's membership in tenant {} before deleting the account",
-                membership.tenant_id
+                tenant_id
             ),
         });
     }
+    // The root row references the membership row, so it comes off first; the cascade then removes the membership.
+    crate::models::iam_tenant_roots::Entity::delete_by_id(tenant_id)
+        .exec(&txn)
+        .await
+        .internal()?;
+    let outcome =
+        crate::models::tenant_tenants::retirement::root_deleted(&txn, tenant_id, user_id).await?;
     // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
     crate::models::api_keys::Entity::revoke_matching(
         &txn,
@@ -137,7 +190,7 @@ pub async fn delete_by_operator(
     .await?;
     Entity::delete_by_id(user_id).exec(&txn).await.internal()?;
     txn.commit().await.internal()?;
-    Ok(())
+    Ok(outcome)
 }
 
 pub(crate) async fn current_profile(

@@ -1,4 +1,5 @@
 pub(crate) mod db_load_guard;
+pub(crate) mod delete_due_tenants;
 pub(crate) mod delete_user;
 pub(crate) mod embedding_index_maintenance;
 pub mod maintenance;

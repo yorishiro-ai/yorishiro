@@ -22,7 +22,7 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::iam_policies::Entity",
         from = "(Column::TenantId, Column::PolicyId)",
-        to = "(super::iam_policies::Column::TenantId, super::iam_policies::Column::Id)",
+        to = "(super::iam_policies::Column::Id, super::iam_policies::Column::TenantId, super::iam_policies::Column::Id, super::iam_policies::Column::TenantId)",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
@@ -30,7 +30,7 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::iam_roles::Entity",
         from = "(Column::TenantId, Column::RoleId)",
-        to = "(super::iam_roles::Column::TenantId, super::iam_roles::Column::Id)",
+        to = "(super::iam_roles::Column::Id, super::iam_roles::Column::TenantId, super::iam_roles::Column::Id, super::iam_roles::Column::TenantId)",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]

@@ -3,6 +3,7 @@ use sea_orm::entity::prelude::*;
 
 mod operations;
 
+pub use operations::DeletionOutcome;
 pub use operations::create_user;
 pub use operations::delete_by_operator;
 pub use operations::reset_root_password_by_operator;

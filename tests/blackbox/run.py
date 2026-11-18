@@ -844,6 +844,7 @@ def cli_suite(app):
     out, _ = app.cli("task")
     registered = set(re.findall(r"^(\w+)\s+\[", out, re.MULTILINE))
     retained = {"inspect_tenant_retirement", "disable_tenant", "delete_tenant", "delete_user",
+                "delete_due_tenants",
                 "resync_embeddings", "embedding_index_maintenance", "maintenance", "maintenance_status",
                 "recover_worker_dispatches", "tenant_reindex_scheduler", "db_load_guard",
                 "reset_root_password"}

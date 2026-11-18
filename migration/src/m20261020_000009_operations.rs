@@ -169,7 +169,7 @@ async fn up_tenant_retirement_events(manager: &SchemaManager<'_>) -> Result<(), 
         table,
         &[(
             "tenant_retirement_events_action_check",
-            "action IN ('disabled', 'deleted')",
+            "action IN ('disabled', 'delete_scheduled', 'deleted')",
         )],
     )
     .await?;

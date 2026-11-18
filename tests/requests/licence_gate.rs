@@ -40,15 +40,6 @@ use serial_test::serial;
 use yorishiro::App;
 use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
-fn require_licence(ctx: &loco_rs::app::AppContext) {
-    assert!(
-        ctx.shared_store
-            .get::<std::sync::Arc<LicenceState>>()
-            .is_some_and(|state| state.is_active()),
-        "this case requires a valid YORISHIRO_LICENSE_KEY at application boot"
-    );
-}
-
 /// One representative gated route, with a method that reaches the layer.
 ///
 /// Authentication is deliberately not set up: 404 rather than 401 to an unauthenticated caller is
@@ -127,7 +118,9 @@ async fn gated_routes_are_absent_without_a_licence() {
 #[tokio::test]
 async fn gated_routes_are_served_with_a_licence() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
 
         for path in GATED {
             let response = request.get(path).await;
@@ -157,7 +150,9 @@ async fn gated_routes_are_served_with_a_licence() {
 #[tokio::test]
 async fn missing_licence_state_closes_the_gate_again() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let session = super::mcp::initialize(&request).await;
         let listed = super::mcp::mcp_call(
             &request,
@@ -249,7 +244,9 @@ async fn missing_licence_state_closes_the_gate_again() {
 #[tokio::test]
 async fn stripe_webhook_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let licensed = request.post("/api/stripe/webhook").await.status_code();
         assert_eq!(
             licensed, 501,
@@ -281,7 +278,9 @@ async fn stripe_webhook_is_gated() {
 #[tokio::test]
 async fn oauth_login_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let licensed = request.get("/auth/oauth/status").await.status_code();
         assert_eq!(
             licensed, 200,

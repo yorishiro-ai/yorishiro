@@ -79,6 +79,10 @@ scheduler:
       run: "embedding_index_maintenance"
       schedule: "0 */10 * * * *"
       run_on_start: true
+    delete_due_tenants:
+      run: "delete_due_tenants"
+      schedule: "0 0 * * * *"
+      run_on_start: true
 # SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
 # PostgreSQL scheduler replicas use a detached session advisory lock and may run concurrently.
 

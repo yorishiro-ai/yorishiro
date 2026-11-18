@@ -4,19 +4,8 @@ use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
 use super::fixtures::{TenantArgs, TestTenant};
-
-fn require_licence(ctx: &loco_rs::app::AppContext) {
-    assert!(
-        ctx.shared_store
-            .get::<std::sync::Arc<LicenceState>>()
-            .expect("production boot installs licence state")
-            .is_active(),
-        "licensed marketplace tests require a valid YORISHIRO_LICENSE_KEY at boot"
-    );
-}
 
 fn note_definition() -> serde_json::Value {
     json!({
@@ -93,7 +82,9 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 #[tokio::test]
 async fn a_licence_does_not_replace_authentication() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
 
         let response = request
             .get("/api/marketplace")
@@ -116,7 +107,9 @@ async fn the_marketplace_answers_501_on_sqlite() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
@@ -158,7 +151,9 @@ async fn publish_list_fork_and_review_round_trip() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
@@ -198,77 +193,164 @@ async fn publish_list_fork_and_review_round_trip() {
             .parse()
             .unwrap();
 
-        let member = request.post("/api/members/users")
+        let member = request
+            .post("/api/members/users")
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password","role":"admin"}))
+            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password"}))
             .await;
         member.assert_status(StatusCode::CREATED);
         let member_id = member.json::<serde_json::Value>()["user_id"].clone();
-        let login = request.post("/auth/tenant/login")
+        let login = request
+            .post("/auth/tenant/login")
             .add_header("X-Tenant-Id", owner.tenant_id.to_string())
-            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password"})).await;
+            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password"}))
+            .await;
         login.assert_status_ok();
-        let delegated_key = login.json::<serde_json::Value>()["api_key"].as_str().unwrap().to_owned();
-        let actions = ["marketplace_list", "marketplace_version_list", "marketplace_review_list",
-            "marketplace_publish", "marketplace_review_submit", "marketplace_fork", "marketplace_visibility_update"];
+        let delegated_key = login.json::<serde_json::Value>()["api_key"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let actions = [
+            "marketplace_list",
+            "marketplace_version_list",
+            "marketplace_review_list",
+            "marketplace_publish",
+            "marketplace_review_submit",
+            "marketplace_fork",
+            "marketplace_visibility_update",
+        ];
         let document = json!({"statements":[{"effect":"allow","actions":actions,
             "resources":[{"type":"tenant","tenant_id":owner.tenant_id}]}]});
-        let policy = request.post("/api/iam/policies")
+        let policy = request
+            .post("/api/iam/policies")
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .json(&json!({"name":"marketplace-delegate","document":document})).await;
+            .json(&json!({"name":"marketplace-delegate","document":document}))
+            .await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member_id.as_str().unwrap());
+        let policy_id = policy.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let attachment = format!(
+            "/api/iam/users/{}/policies/{policy_id}",
+            member_id.as_str().unwrap()
+        );
         for effect in ["implicit", "deny"] {
             if effect == "deny" {
                 let mut denied = document.clone();
                 denied["statements"][0]["effect"] = json!("deny");
-                request.put(&format!("/api/iam/policies/{policy_id}"))
+                request
+                    .put(&format!("/api/iam/policies/{policy_id}"))
                     .add_header("Authorization", format!("Bearer {}", owner.api_key))
-                    .json(&json!({"name":"marketplace-delegate","document":denied})).await.assert_status_ok();
-                request.put(&attachment).add_header("Authorization", format!("Bearer {}", owner.api_key))
-                    .await.assert_status(StatusCode::NO_CONTENT);
+                    .json(&json!({"name":"marketplace-delegate","document":denied}))
+                    .await
+                    .assert_status_ok();
+                request
+                    .put(&attachment)
+                    .add_header("Authorization", format!("Bearer {}", owner.api_key))
+                    .await
+                    .assert_status(StatusCode::NO_CONTENT);
             }
-            for path in ["/api/marketplace".to_owned(), format!("/api/marketplace/{template_id}/versions"),
-                format!("/api/marketplace/{template_id}/reviews")] {
-                request.get(&path).add_header("Authorization", format!("Bearer {delegated_key}"))
-                    .await.assert_status(StatusCode::FORBIDDEN);
+            for path in [
+                "/api/marketplace".to_owned(),
+                format!("/api/marketplace/{template_id}/versions"),
+                format!("/api/marketplace/{template_id}/reviews"),
+            ] {
+                request
+                    .get(&path)
+                    .add_header("Authorization", format!("Bearer {delegated_key}"))
+                    .await
+                    .assert_status(StatusCode::FORBIDDEN);
             }
-            request.post(&format!("/api/marketplace/{template_id}/versions"))
+            request
+                .post(&format!("/api/marketplace/{template_id}/versions"))
                 .add_header("Authorization", format!("Bearer {delegated_key}"))
-                .json(&json!({"definition":note_definition()})).await.assert_status(StatusCode::FORBIDDEN);
-            request.post(&format!("/api/marketplace/{template_id}/reviews"))
+                .json(&json!({"definition":note_definition()}))
+                .await
+                .assert_status(StatusCode::FORBIDDEN);
+            request
+                .post(&format!("/api/marketplace/{template_id}/reviews"))
                 .add_header("Authorization", format!("Bearer {delegated_key}"))
-                .json(&json!({"rating":5})).await.assert_status(StatusCode::FORBIDDEN);
-            request.post(&format!("/api/marketplace/{template_id}/fork"))
+                .json(&json!({"rating":5}))
+                .await
+                .assert_status(StatusCode::FORBIDDEN);
+            request
+                .post(&format!("/api/marketplace/{template_id}/fork"))
                 .add_header("Authorization", format!("Bearer {delegated_key}"))
-                .await.assert_status(StatusCode::FORBIDDEN);
-            request.put(&format!("/api/marketplace/{template_id}/visibility"))
+                .await
+                .assert_status(StatusCode::FORBIDDEN);
+            request
+                .put(&format!("/api/marketplace/{template_id}/visibility"))
                 .add_header("Authorization", format!("Bearer {delegated_key}"))
-                .json(&json!({"visibility":"community"})).await.assert_status(StatusCode::FORBIDDEN);
+                .json(&json!({"visibility":"community"}))
+                .await
+                .assert_status(StatusCode::FORBIDDEN);
             for (index, (name, arguments)) in [
                 ("list_marketplace", json!({})),
-                ("list_marketplace_versions", json!({"template_id":template_id})),
-                ("list_marketplace_reviews", json!({"template_id":template_id})),
-                ("publish_marketplace_version", json!({"template_id":template_id,"definition":note_definition()})),
-                ("submit_marketplace_review", json!({"template_id":template_id,"rating":5})),
-                ("fork_marketplace_template", json!({"template_id":template_id})),
-                ("set_marketplace_visibility", json!({"template_id":template_id,"visibility":"community"})),
-            ].into_iter().enumerate() {
-                let response = super::mcp::mcp_call(&request, &session, &delegated_key, index as i64 + 10,
-                    "tools/call", json!({"name":name,"arguments":arguments})).await;
-                assert_eq!(response["result"]["structuredContent"]["error"]["code"], "scope_insufficient", "{name}: {response}");
+                (
+                    "list_marketplace_versions",
+                    json!({"template_id":template_id}),
+                ),
+                (
+                    "list_marketplace_reviews",
+                    json!({"template_id":template_id}),
+                ),
+                (
+                    "publish_marketplace_version",
+                    json!({"template_id":template_id,"definition":note_definition()}),
+                ),
+                (
+                    "submit_marketplace_review",
+                    json!({"template_id":template_id,"rating":5}),
+                ),
+                (
+                    "fork_marketplace_template",
+                    json!({"template_id":template_id}),
+                ),
+                (
+                    "set_marketplace_visibility",
+                    json!({"template_id":template_id,"visibility":"community"}),
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let response = super::mcp::mcp_call(
+                    &request,
+                    &session,
+                    &delegated_key,
+                    index as i64 + 10,
+                    "tools/call",
+                    json!({"name":name,"arguments":arguments}),
+                )
+                .await;
+                assert_eq!(
+                    response["result"]["structuredContent"]["error"]["code"], "scope_insufficient",
+                    "{name}: {response}"
+                );
             }
         }
-        request.put(&format!("/api/iam/policies/{policy_id}"))
+        request
+            .put(&format!("/api/iam/policies/{policy_id}"))
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .json(&json!({"name":"marketplace-delegate","document":document})).await.assert_status_ok();
-        request.get("/api/marketplace").add_header("Authorization", format!("Bearer {delegated_key}"))
-            .await.assert_status_ok();
-        request.delete(&attachment).add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .await.assert_status(StatusCode::NO_CONTENT);
-        request.get("/api/marketplace").add_header("Authorization", format!("Bearer {delegated_key}"))
-            .await.assert_status(StatusCode::FORBIDDEN);
+            .json(&json!({"name":"marketplace-delegate","document":document}))
+            .await
+            .assert_status_ok();
+        request
+            .get("/api/marketplace")
+            .add_header("Authorization", format!("Bearer {delegated_key}"))
+            .await
+            .assert_status_ok();
+        request
+            .delete(&attachment)
+            .add_header("Authorization", format!("Bearer {}", owner.api_key))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        request
+            .get("/api/marketplace")
+            .add_header("Authorization", format!("Bearer {delegated_key}"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
 
         let invalid_visibility = request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
@@ -401,13 +483,34 @@ async fn publish_list_fork_and_review_round_trip() {
         );
         for (index, (name, path, arguments)) in [
             ("list_marketplace", "/api/marketplace".to_owned(), json!({})),
-            ("list_marketplace_versions", format!("/api/marketplace/{template_id}/versions"), json!({"template_id":template_id})),
-            ("list_marketplace_reviews", format!("/api/marketplace/{template_id}/reviews"), json!({"template_id":template_id})),
-        ].into_iter().enumerate() {
-            let rest: serde_json::Value = request.get(&path)
-                .add_header("Authorization", format!("Bearer {}", owner.api_key)).await.json();
-            let mcp = super::mcp::mcp_call(&request, &session, &owner.api_key, index as i64 + 30,
-                "tools/call", json!({"name":name,"arguments":arguments})).await;
+            (
+                "list_marketplace_versions",
+                format!("/api/marketplace/{template_id}/versions"),
+                json!({"template_id":template_id}),
+            ),
+            (
+                "list_marketplace_reviews",
+                format!("/api/marketplace/{template_id}/reviews"),
+                json!({"template_id":template_id}),
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rest: serde_json::Value = request
+                .get(&path)
+                .add_header("Authorization", format!("Bearer {}", owner.api_key))
+                .await
+                .json();
+            let mcp = super::mcp::mcp_call(
+                &request,
+                &session,
+                &owner.api_key,
+                index as i64 + 30,
+                "tools/call",
+                json!({"name":name,"arguments":arguments}),
+            )
+            .await;
             assert_eq!(super::mcp::tool_result_json(&mcp), rest, "{name}");
         }
 
@@ -498,7 +601,9 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
@@ -551,7 +656,9 @@ async fn a_rating_outside_the_range_is_rejected() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;

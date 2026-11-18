@@ -347,6 +347,7 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(tasks::inspect_tenant_retirement::InspectTenantRetirement);
     tasks.register(tasks::disable_tenant::DisableTenant);
     tasks.register(tasks::delete_tenant::DeleteTenant);
+    tasks.register(tasks::delete_due_tenants::DeleteDueTenants);
     tasks.register(tasks::reset_root_password::ResetRootPassword);
     // tasks-inject
     tasks.register(tasks::delete_user::DeleteUser);

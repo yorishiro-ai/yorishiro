@@ -69,28 +69,16 @@ async fn competing_tenant_memberships_allow_only_one() {
 }
 
 #[tokio::test]
-async fn competing_root_demotion_and_removal_preserve_the_root() {
+async fn root_removal_conflicts_and_preserves_the_root() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::_entities::tenant_memberships::Column;
     use yorishiro::models::tenant_memberships;
 
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let barrier = tokio::sync::Barrier::new(2);
-        let demote = async {
-            barrier.wait().await;
-            tenant_memberships::add_member(&ctx.db, tenant.tenant_id, tenant.owner_id).await
-        };
-        let remove = async {
-            barrier.wait().await;
-            tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, tenant.owner_id).await
-        };
-        let (demoted, removed) = tokio::join!(demote, remove);
-        // The tenant root can neither be demoted nor removed, whichever lands first.
-        assert!(
-            matches!(demoted, Err(yorishiro::YorishiroError::Conflict { .. })),
-            "root demotion must conflict: {demoted:?}"
-        );
+        let removed =
+            tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, tenant.owner_id).await;
+        // The tenant root cannot be removed through membership operations.
         assert!(
             matches!(removed, Err(yorishiro::YorishiroError::Conflict { .. })),
             "root removal must conflict: {removed:?}"
@@ -275,23 +263,18 @@ async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
         };
         let user_name = format!("alice-{}", uuid::Uuid::new_v4());
         let password = "tenant-user-password";
-        let created =
-            create(serde_json::json!({"user_name":user_name,"password":password,"role":"admin"}))
-                .await;
+        let created = create(serde_json::json!({"user_name":user_name,"password":password})).await;
         created.assert_status(StatusCode::CREATED);
         let body: serde_json::Value = created.json();
         assert!(body["email"].is_null());
         assert_eq!(body["user_name"], user_name);
         let user_id = body["user_id"].as_str().unwrap().to_owned();
 
-        // The legacy `owner` role, duplicates and weak passwords are refused.
-        create(serde_json::json!({"user_name":"bob","password":password,"role":"owner"}))
-            .await
-            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
-        create(serde_json::json!({"user_name":user_name,"password":password,"role":"member"}))
+        // Duplicates and weak passwords are refused.
+        create(serde_json::json!({"user_name":user_name,"password":password}))
             .await
             .assert_status(StatusCode::CONFLICT);
-        create(serde_json::json!({"user_name":"carol","password":"short","role":"member"}))
+        create(serde_json::json!({"user_name":"carol","password":"short"}))
             .await
             .assert_status(StatusCode::CONFLICT);
 

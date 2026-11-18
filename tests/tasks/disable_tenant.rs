@@ -315,16 +315,10 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
         let created = request.post("/api/members/users")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
-            .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password","role":"member"})).await;
+            .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password"})).await;
         created.assert_status(axum::http::StatusCode::CREATED);
         let tenant_user_id: uuid::Uuid = created.json::<serde_json::Value>()["user_id"].as_str().unwrap().parse().unwrap();
 
-        // An enabled tenant protects its owner.
-        assert!(
-            user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id)
-                .await
-                .is_err()
-        );
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
             .await
             .unwrap();
@@ -356,7 +350,6 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
                 .is_some()
         );
 
-        assert!(user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id).await.is_err());
         retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
             .await
             .unwrap();

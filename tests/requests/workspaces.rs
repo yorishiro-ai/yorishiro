@@ -544,9 +544,9 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .await
             .assert_status(StatusCode::FORBIDDEN);
         request
-            .post(&format!("/api/members/{}/role-preview", target.id))
+            .post("/api/members/users")
             .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"role":"admin"}))
+            .json(&serde_json::json!({"user_name":"denied","password":"workspace-bound-key"}))
             .await
             .assert_status(StatusCode::FORBIDDEN);
         let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(

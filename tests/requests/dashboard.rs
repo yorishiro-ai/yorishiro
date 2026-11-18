@@ -71,13 +71,11 @@ async fn overview_distinguishes_billing_manual_and_active_limits() {
     .await;
 }
 
-/// The freshly bootstrapped owner can read their own tenant's overview: zero usage, no plan (never subscribed), and themselves as the sole member.
+/// The freshly bootstrapped owner can read their own tenant's overview: no plan (never subscribed); the root's membership row is counted in usage, but the member list stays empty because the root is a separate identity, not a member.
 #[tokio::test]
 async fn tenant_overview_returns_usage_and_members_for_the_owner() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let args = TenantArgs::default();
-        let email = args.owner_email.clone();
-        let tenant = TestTenant::create(&request, &ctx, args).await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let api_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         request
@@ -104,9 +102,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
         assert_eq!(body["plan"], serde_json::Value::Null);
         assert_eq!(body["usage"]["workspace_count"], 1);
         assert_eq!(body["usage"]["member_count"], 1);
-        assert_eq!(body["members"].as_array().unwrap().len(), 1);
-        assert_eq!(body["members"][0]["email"], email);
-        assert_eq!(body["members"][0]["role"], "admin");
+        assert!(body["members"].as_array().unwrap().is_empty());
     })
     .await;
 }

@@ -46,6 +46,10 @@ async fn up_tenants(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .col(ColumnDef::new(Alias::new("max_workspaces")).integer())
                 .col(helpers::created_at(manager))
                 .col(helpers::ts_tz_col(manager, Alias::new("disabled_at")))
+                .col(helpers::ts_tz_col(
+                    manager,
+                    Alias::new("delete_scheduled_at"),
+                ))
                 .to_owned(),
         )
         .await?;
