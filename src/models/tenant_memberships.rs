@@ -10,8 +10,6 @@ pub use operations::{add_member, remove_member, remove_member_as};
 pub(crate) use operations::{add_member_in_transaction, is_member, list_members, list_members_as};
 pub use operations::{create_tenant_user_member, reset_tenant_user_password};
 
-/// A tenant account as listed to administrators.
-/// Permissions are not part of the record: they come from the IAM policies attached to the user and its groups.
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MembershipRecord {
@@ -26,7 +24,6 @@ pub struct MembershipRecord {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MembershipRemovalPreview {
     pub user_id: Uuid,
-    /// False when the user does not belong to the tenant, so a repeated removal has nothing left to do.
     pub member: bool,
     pub revoked_api_key_ids: Vec<Uuid>,
     pub lost_workspace_ids: Vec<Uuid>,

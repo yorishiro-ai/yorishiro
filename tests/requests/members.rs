@@ -78,7 +78,6 @@ async fn root_removal_conflicts_and_preserves_the_root() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let removed =
             tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, tenant.owner_id).await;
-        // The tenant root cannot be removed through membership operations.
         assert!(
             matches!(removed, Err(yorishiro::YorishiroError::Conflict { .. })),
             "root removal must conflict: {removed:?}"
@@ -270,7 +269,6 @@ async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
         assert_eq!(body["user_name"], user_name);
         let user_id = body["user_id"].as_str().unwrap().to_owned();
 
-        // Duplicates and weak passwords are refused.
         create(serde_json::json!({"user_name":user_name,"password":password}))
             .await
             .assert_status(StatusCode::CONFLICT);

@@ -49,7 +49,6 @@ mod tenant_auth;
 mod worker_class;
 mod workspaces;
 
-/// Whether a valid, unexpired licence was installed at boot.
 #[cfg(feature = "enterprise")]
 fn licence_active(ctx: &loco_rs::app::AppContext) -> bool {
     use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
@@ -58,11 +57,6 @@ fn licence_active(ctx: &loco_rs::app::AppContext) -> bool {
         .is_some_and(|state| state.is_active())
 }
 
-/// Licensed request tests skip when no valid licence was installed at boot:
-/// CI supplies the signed key only to the licensed jobs, and a local run opts in
-/// by setting `YORISHIRO_LICENSE_KEY`.
-/// Under the assigned-test contract a skip must fail rather than pass silently,
-/// so a job without the key still goes red.
 #[cfg(feature = "enterprise")]
 pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
     if licence_active(ctx) {

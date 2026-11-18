@@ -74,7 +74,6 @@ pub(crate) async fn record(
     Ok(())
 }
 
-/// Records a role assumption; unlike [`record`], a service credential with no user can be the actor.
 pub(crate) async fn record_assumption(
     txn: &DatabaseTransaction,
     actor: &AuthContext,

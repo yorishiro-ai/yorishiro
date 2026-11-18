@@ -12,7 +12,6 @@ struct Setup {
     owner_id: Uuid,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    /// `Migration` scope, `audit: false`: what triggers the audited operations, but must not itself be able to read them.
     migration_key: String,
     /// `Read` scope, `audit: true`: the independent grant this suite exists to prove, paired with the lowest scope on purpose to show the grant works with any scope, not only a high one.
     audit_key: String,
@@ -36,8 +35,6 @@ async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) ->
     }
 }
 
-/// Audit reads require both an IAM allow and the independent credential grant.
-/// Timestamps use the configured timezone.
 #[tokio::test]
 async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
     boot_request_with_timezone::<App, _, _>("Asia/Tokyo", |request, ctx| async move {

@@ -1,9 +1,3 @@
-//! IAM roles: a named set of managed policies that a trusted principal can assume for a temporary credential.
-//!
-//! A role has two documents, as in AWS.
-//! The trust policy says who may assume it, and the attached managed policies say what the session may do.
-//! A session is one `ysr_` key whose `role_id` is set; it is evaluated by the role's policies alone, never merged with the caller's.
-
 pub use crate::models::_entities::iam_roles::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 use serde::Serialize;
@@ -13,13 +7,9 @@ use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::iam_policy::{Action, Resource};
 use crate::models::iam_trust_policy::{Caller, Principal, TrustPolicy};
 
-/// Shortest session a caller can ask for, as in AWS.
 pub const MIN_SESSION_SECONDS: i64 = 900;
-/// Session length when the caller names none, and the lowest value a role can cap sessions at.
 pub const DEFAULT_SESSION_SECONDS: i64 = 3600;
-/// Highest session cap a role can set.
 pub const MAX_SESSION_SECONDS: i64 = 43_200;
-/// Managed policies one role can carry.
 pub const MAX_POLICIES_PER_ROLE: u64 = 20;
 
 #[loco_rs::prelude::async_trait]
@@ -33,21 +23,18 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-/// Input for creating a role.
 pub struct CreateRole {
     pub name: String,
     pub trust_policy: serde_json::Value,
     pub max_session_seconds: Option<i64>,
 }
 
-/// Fields to change; `None` leaves the field as it is.
 pub struct UpdateRole {
     pub name: Option<String>,
     pub trust_policy: Option<serde_json::Value>,
     pub max_session_seconds: Option<i64>,
 }
 
-/// A fresh role session, shown once.
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RoleSession {
@@ -101,7 +88,6 @@ fn unique_name_conflict(error: DbErr) -> YorishiroError {
     }
 }
 
-/// Checks the shape of a trust document and that every principal it names belongs to the tenant.
 async fn validated_trust(
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
@@ -289,7 +275,6 @@ impl Model {
         Ok(role)
     }
 
-    /// Deletes the role and revokes every session assumed from it.
     pub(crate) async fn delete_as(
         db: &DatabaseConnection,
         actor: &AuthContext,
@@ -334,11 +319,6 @@ impl Model {
         Ok(())
     }
 
-    /// Assumes a role: checks the trust policy and the caller's own permission, then issues a temporary key.
-    ///
-    /// The caller needs an allow of `role_assume` on the role and a trust statement naming it, and neither a deny.
-    /// A service credential has no identity policies, so the trust policy must name that key explicitly.
-    /// The tenant root cannot assume roles and a role session cannot assume another role.
     pub(crate) async fn assume_as(
         db: &DatabaseConnection,
         actor: &AuthContext,

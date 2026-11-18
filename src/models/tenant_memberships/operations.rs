@@ -1,8 +1,3 @@
-//! Tenant membership operations.
-//!
-//! A membership only records that an account belongs to a tenant; what the account may do comes from IAM policies.
-//! The tenant root is a separate identity: it is never listed, changed or removed through these operations.
-
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect,
@@ -16,7 +11,6 @@ use crate::models::iam_policy::{Action, Resource};
 
 use super::{ActiveModel, Entity, MembershipRecord};
 
-/// Serializes membership changes and refuses touching the tenant root.
 async fn protect_root(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
@@ -94,8 +88,6 @@ pub async fn preview_removal(
     })
 }
 
-/// Adds a user to a tenant; repeating it for the same tenant changes nothing.
-///
 /// # Errors
 /// Rejects changing the tenant root, accounts of another tenant, or persistence failures.
 pub async fn add_member(
@@ -151,7 +143,6 @@ pub(crate) async fn add_member_in_transaction(
     Ok(())
 }
 
-/// A tenant-bound user belongs to its own tenant only.
 async fn guard_tenant_bound_user(
     conn: &DatabaseTransaction,
     tenant_id: Uuid,
@@ -197,9 +188,6 @@ pub async fn create_tenant_user_member(
     Ok(user)
 }
 
-/// Creates a tenant user after checking the caller's IAM permission.
-/// The new user starts with the implicit deny; policies and groups are attached separately.
-///
 /// # Errors
 /// Rejects unauthorized credentials, invalid credentials and duplicate names.
 pub(crate) async fn create_tenant_user_as(
@@ -235,8 +223,6 @@ pub(crate) async fn create_tenant_user_as(
     })
 }
 
-/// Resets a tenant user's password with IAM authorization.
-///
 /// # Errors
 /// Rejects unauthorized credentials, root recovery and users outside the tenant.
 pub async fn reset_tenant_user_password(
@@ -283,8 +269,6 @@ pub async fn remove_member(
     Ok(())
 }
 
-/// Removes a member only if the presented credential is still authorized.
-///
 /// # Errors
 /// Rejects revoked credentials, unauthorized callers, removing the tenant root and persistence failures.
 pub async fn remove_member_as(
@@ -350,7 +334,6 @@ async fn remove_member_in_transaction(
     Ok(())
 }
 
-/// Every non-root member of a tenant, joined against their user row.
 pub(crate) async fn list_members_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
@@ -407,7 +390,6 @@ pub(crate) async fn list_members(
         .collect())
 }
 
-/// Whether the user belongs to the tenant.
 pub(crate) async fn is_member(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

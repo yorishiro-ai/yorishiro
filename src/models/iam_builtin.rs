@@ -1,9 +1,3 @@
-//! System-managed IAM objects that every tenant has, the tenant equivalent of AWS managed policies.
-//!
-//! A fixed catalogue of tenant-scoped policies is created with the tenant, and the API refuses to create, rename, update or delete the built-ins by name.
-//! An administrator is an ordinary tenant user who has the Tenant Administrator policy attached, the way an AWS user carries `AdministratorAccess`.
-//! The tenant root is a separate identity and needs no policy; every other user starts with the implicit deny.
-
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
     QueryFilter,
@@ -19,7 +13,6 @@ pub(crate) const ADMINISTRATOR_POLICY_NAME: &str = "Tenant Administrator";
 pub(crate) const WRITER_POLICY_NAME: &str = "Tenant Writer";
 pub(crate) const READER_POLICY_NAME: &str = "Tenant Reader";
 
-/// Names the system reserves: the API refuses to create, rename, update or delete objects under them.
 pub(crate) fn is_builtin_policy_name(name: &str) -> bool {
     matches!(
         name,
@@ -27,7 +20,6 @@ pub(crate) fn is_builtin_policy_name(name: &str) -> bool {
     )
 }
 
-/// Read classification is name-based on purpose: an added action defaults to write and must be named to join the reader policy.
 fn is_read_action(action: Action) -> bool {
     let value =
         serde_json::to_value(action).expect("actions serialize to their snake_case wire name");
@@ -38,7 +30,6 @@ fn is_read_action(action: Action) -> bool {
         || matches!(name, "search" | "recall" | "export" | "migration_dry_run")
 }
 
-/// Identity and permission management the writer policy denies: a writer manages content, not the tenant's people, groups, policies or credentials.
 fn is_admin_only_action(action: Action) -> bool {
     matches!(
         action,
@@ -90,7 +81,6 @@ fn action_values(actions: impl IntoIterator<Item = Action>) -> Vec<serde_json::V
         .collect()
 }
 
-/// Statements for one effect and resource set, chunked to the parser's per-statement action cap.
 fn statements(
     effect: &str,
     actions: Vec<serde_json::Value>,
@@ -102,7 +92,6 @@ fn statements(
         .collect()
 }
 
-/// The system-managed policy documents for a tenant, in a stable order.
 pub(crate) fn policy_documents(tenant_id: Uuid) -> Vec<(String, serde_json::Value)> {
     let tenant = json!({"type": "tenant", "tenant_id": tenant_id});
     let all_workspaces = json!({"type": "all_workspaces", "tenant_id": tenant_id});
@@ -186,9 +175,6 @@ async fn find_policy(
         .internal()
 }
 
-/// Creates the system-managed policies for a tenant.
-/// Idempotent: rows that already exist are left untouched, so every tenant-creating path can call it.
-///
 /// # Errors
 /// Returns a validation error when a generated document does not parse, or a persistence failure.
 pub(crate) async fn bootstrap(
@@ -200,7 +186,6 @@ pub(crate) async fn bootstrap(
         .internal()?;
     for (name, document) in policy_documents(tenant_id) {
         let rendered = serde_json::to_string(&document).internal()?;
-        // Built-in documents never name concrete workspaces, so tenant ownership is the whole check.
         Policy::parse(&rendered, tenant_id, |tenant, _| tenant == tenant_id)?;
         if find_policy(txn, tenant_id, &name).await?.is_some() {
             continue;

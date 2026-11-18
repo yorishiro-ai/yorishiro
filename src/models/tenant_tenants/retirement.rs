@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 const DISABLED_REASON: &str = "tenant disabled";
 
-/// How long a tenant survives after its root account is deleted before the sweep removes it.
 const DELETE_GRACE_PERIOD: chrono::Duration = chrono::Duration::days(7);
 
 use crate::error::{ResultExt, YorishiroError};
@@ -24,7 +23,6 @@ pub struct RetirementInventory {
     pub tenant_id: Uuid,
     pub tenant_name: String,
     pub disabled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
-    /// Set when the tenant's root account was deleted; the sweep removes the tenant when this passes.
     pub delete_scheduled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub workspace_ids: Vec<Uuid>,
     pub memberships: u64,
@@ -44,8 +42,6 @@ pub struct RetirementInventory {
     pub identity_policy: &'static str,
 }
 
-/// Returns an IAM-authorized retirement snapshot without changing tenant data.
-///
 /// # Errors
 /// Rejects unauthorized credentials and propagates inventory failures.
 pub async fn inventory_as(
@@ -68,7 +64,6 @@ pub async fn inventory_as(
     Ok(snapshot)
 }
 
-/// Disables the authorized tenant without deleting retained data or user identities.
 /// Confirmation names the tenant UUID, not a workspace or a mutable display name.
 ///
 /// # Errors
@@ -222,11 +217,6 @@ pub async fn delete_by_operator(
     txn.commit().await.internal()
 }
 
-/// Schedules an active tenant for deletion after the grace period, or deletes an already-disabled tenant at once.
-/// The caller holds the membership fence and has already removed the root row.
-///
-/// # Errors
-/// Rejects the infrastructure tenant and propagates persistence failures.
 pub(crate) async fn root_deleted(
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
@@ -271,9 +261,6 @@ pub(crate) async fn root_deleted(
     )
 }
 
-/// Deletes every tenant whose scheduled deletion deadline is at or before `now`.
-/// A tenant that still has unresolved external forks is skipped and retried on the next run.
-///
 /// # Errors
 /// Propagates database failures.
 pub async fn reap_due(
@@ -297,7 +284,6 @@ pub async fn reap_due(
             continue;
         }
         let tenant_id = candidate.id;
-        // Serialize quota release with tenant creation and cleanup with membership/publication writes.
         let txn = crate::db::begin_write(db).await.internal()?;
         crate::db::lock_for_update(&txn, "create_tenant")
             .await

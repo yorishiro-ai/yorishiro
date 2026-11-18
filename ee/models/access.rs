@@ -25,8 +25,6 @@ pub(crate) async fn workspace_transaction(
     Ok(txn)
 }
 
-/// Holds control-plane IAM authorization until the caller commits its workspace mutation.
-///
 /// # Errors
 /// Rejects inactive credentials, missing membership, foreign workspaces or insufficient scope.
 pub(crate) async fn authorize_job_actor(

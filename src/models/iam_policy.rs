@@ -10,8 +10,6 @@ const MAX_DOCUMENT_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-/// Supported policy actions corresponding to existing application operations.
-/// Serializes to the same snake_case wire name it deserializes from, which the built-in policy catalogue uses to name its actions.
 pub enum Action {
     TenantGet,
     TenantUpdate,
@@ -131,8 +129,6 @@ pub enum Action {
 }
 
 impl Action {
-    /// Every action, in declaration order.
-    /// The built-in policy catalogue and the access probes derive from this list.
     /// Keep it in lockstep with the enum: the count test in `tests/models/iam_policy.rs` fails when a variant is added or removed.
     pub const ALL: &'static [Self] = &[
         Self::TenantGet,
@@ -395,7 +391,6 @@ enum All {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-/// A tenant-scoped resource or a selector for all workspaces in a tenant.
 pub enum Resource {
     Tenant { tenant_id: Uuid },
     Workspace { tenant_id: Uuid, workspace_id: Uuid },
@@ -445,7 +440,6 @@ struct Document {
     statements: Vec<Statement>,
 }
 
-/// A validated policy bound to exactly one tenant.
 #[derive(Debug)]
 pub struct Policy {
     tenant_id: Uuid,
@@ -477,9 +471,6 @@ impl Policy {
             })
             .collect())
     }
-    /// Parses and validates a document for the specified tenant.
-    /// The verifier must use authoritative workspace ownership data and reject lookup failures.
-    ///
     /// # Errors
     /// Returns a validation error for malformed, unsupported, oversized, or cross-tenant documents.
     pub fn parse(
@@ -538,12 +529,6 @@ impl Policy {
         })
     }
 
-    /// Evaluates a collection with explicit deny precedence and default deny.
-    ///
-    /// The verifier must use current authoritative workspace ownership data and reject lookup failures.
-    /// Concrete workspace selectors only match the same verified workspace target.
-    /// Unrelated stale selectors do not affect the decision, and matching denies still take precedence.
-    /// A collection containing a policy from any other tenant denies the request.
     pub fn allows(
         policies: &[Self],
         tenant_id: Uuid,
@@ -578,8 +563,6 @@ impl Policy {
         allowed
     }
 
-    /// Whether the collection grants `target` any action that applies to it, with deny precedence.
-    /// Used to tell a surviving workspace reachability from a lost one, without naming the action.
     pub fn allows_any_applicable_action(
         policies: &[Self],
         tenant_id: Uuid,

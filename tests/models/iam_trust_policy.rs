@@ -65,10 +65,8 @@ fn a_service_key_must_be_named_explicitly() {
     assert!(named.permits(&caller(None, &[], key)));
     assert!(named.names_service_key(key));
     assert!(!named.permits(&caller(None, &[], other)));
-    // A user session never matches a service key principal, even with the same key id.
     assert!(!named.permits(&caller(Some(Uuid::new_v4()), &[], key)));
 
-    // The tenant principal trusts every caller, but it is not an explicit service key grant.
     let tenant = parse(serde_json::json!({"statements": [
         {"effect": "allow", "principals": [{"type": "tenant"}]},
     ]}))

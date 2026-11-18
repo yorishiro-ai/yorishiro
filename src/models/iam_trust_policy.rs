@@ -1,9 +1,3 @@
-//! The trust policy of an IAM role: which principals of the same tenant may assume it.
-//!
-//! It is the counterpart of an AWS role trust policy.
-//! Permissions are not in this document; they come from the managed policies attached to the role.
-//! Evaluation mirrors the permission policies: a matching deny wins, and without a matching allow the answer is no.
-
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -16,20 +10,11 @@ const MAX_DOCUMENT_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-/// A same-tenant principal a trust statement can name.
 pub enum Principal {
-    /// Every principal of the tenant, still subject to its own `role_assume` permission, like the AWS account root principal.
     Tenant,
-    User {
-        user_id: Uuid,
-    },
-    Group {
-        group_id: Uuid,
-    },
-    /// A service credential (an API key without a user).
-    ServiceKey {
-        api_key_id: Uuid,
-    },
+    User { user_id: Uuid },
+    Group { group_id: Uuid },
+    ServiceKey { api_key_id: Uuid },
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,14 +30,12 @@ struct Document {
     statements: Vec<Statement>,
 }
 
-/// Who is asking to assume a role.
 pub struct Caller<'a> {
     pub user_id: Option<Uuid>,
     pub group_ids: &'a [Uuid],
     pub api_key_id: Uuid,
 }
 
-/// A validated trust policy.
 #[derive(Debug)]
 pub struct TrustPolicy {
     statements: Vec<Statement>,
@@ -68,9 +51,6 @@ fn invalid(message: &'static str) -> YorishiroError {
 }
 
 impl TrustPolicy {
-    /// Parses and validates the shape of a trust document.
-    /// Whether the named users, groups and service keys exist in the tenant is checked by the role model, which has the database.
-    ///
     /// # Errors
     /// Returns a validation error for malformed or oversized documents.
     pub fn parse(document: &str) -> Result<Self, YorishiroError> {
@@ -94,7 +74,6 @@ impl TrustPolicy {
         })
     }
 
-    /// Every principal the document names, for referential validation.
     #[must_use]
     pub fn principals(&self) -> Vec<Principal> {
         self.statements
@@ -114,7 +93,6 @@ impl TrustPolicy {
         }
     }
 
-    /// Whether the caller is trusted: some allow matches and no deny does.
     #[must_use]
     pub fn permits(&self, caller: &Caller<'_>) -> bool {
         let mut allowed = false;
@@ -133,7 +111,6 @@ impl TrustPolicy {
         allowed
     }
 
-    /// Whether the document names this service key explicitly with an allow, which is what lets a caller with no identity policies assume the role.
     #[must_use]
     pub fn names_service_key(&self, api_key_id: Uuid) -> bool {
         self.statements.iter().any(|s| {

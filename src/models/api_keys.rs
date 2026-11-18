@@ -22,8 +22,6 @@ pub struct KeyGrant {
     pub revoked_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub replaced_by_id: Option<Uuid>,
     pub scope: ApiKeyScope,
-    /// The currently authenticated scope ceiling, not permission to execute an IAM action.
-    /// Inactive or unauthenticatable credentials have no effective scope.
     pub effective_scope: Option<ApiKeyScope>,
     pub audit: bool,
     pub workspace_id: Option<Uuid>,
@@ -174,7 +172,6 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    /// Requires current membership without changing the credential's stored ceiling.
     /// Requests already authenticated may finish; later authentications read the committed membership.
     pub(crate) async fn with_current_membership(
         self,
@@ -523,7 +520,6 @@ impl Entity {
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
-    /// An audit-reading key is an explicit grant, not a side effect of provisioning a key for an ordinary user.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -628,8 +624,6 @@ impl Entity {
         })
     }
 
-    /// Issues the temporary credential of an assumed role.
-    /// It is tenant-scoped, carries no audit grant and records the role it was assumed from.
     pub(crate) async fn create_role_session(
         txn: &sea_orm::DatabaseTransaction,
         tenant_id: uuid::Uuid,

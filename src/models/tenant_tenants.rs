@@ -7,8 +7,6 @@ pub mod retirement;
 pub(crate) use operations::count_tenants;
 pub use operations::create_tenant;
 
-/// Reads the authenticated tenant's metadata under the membership fence.
-///
 /// # Errors
 /// Rejects unauthorized credentials or propagates database errors.
 pub(crate) async fn detail_as(

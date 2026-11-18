@@ -27,7 +27,6 @@ pub(crate) async fn iam_mcp_call(
     serde_json::from_str(payload).expect("MCP JSON response")
 }
 
-/// The setup key does not select a workspace implicitly; workspace-scoped keys retain their binding.
 #[tokio::test]
 #[serial(process_environment)]
 async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
@@ -163,7 +162,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(events.len(), 2);
             assert!(events.iter().any(|event| event.action == "policy_create"));
 
-            // An unavailable audit sink must roll back the already-inserted resource.
             use sea_orm::ConnectionTrait;
             ctx.db
                 .execute_unprepared(
@@ -199,7 +197,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].name, "operators");
 
-            // Even with one workspace, tenant authentication does not select it.
             let no_workspace = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {api_key}"))
@@ -225,7 +222,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let identity: serde_json::Value = whoami.json();
             assert_eq!(identity["workspace_id"], workspace_id.to_string());
 
-            // A second workspace can also be selected explicitly.
             let created = request
                 .post("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {api_key}"))
@@ -257,7 +253,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 assert_eq!(chosen["workspace_id"], second_id.to_string());
             }
 
-            // A workspace-scoped key acts on its own workspace and refuses a foreign header.
             let user_id: uuid::Uuid = identity["user_id"].as_str().unwrap().parse().unwrap();
             let scoped_key = yorishiro::models::api_keys::Entity::create_api_key(
                 &ctx.db,
@@ -296,7 +291,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .await
                 .assert_status(StatusCode::FORBIDDEN);
-            // A foreign header is a scope denial (403), not a validation failure (422).
             let scoped = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
@@ -438,7 +432,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let bound_detail = iam_mcp_call(&request, &session, &scoped_key.plaintext,
                 "get_workspace", serde_json::json!({"workspace_id":second_id})).await;
             assert_eq!(bound_detail["result"]["isError"], true, "{bound_detail}");
-            // No legacy workspace grant or selected workspace is needed for an explicit target.
             request.put(&workspace_path)
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"IAM workspace"})).await.assert_status_ok();
@@ -539,7 +532,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .add_header("Authorization", format!("Bearer {api_key}")).await.json::<serde_json::Value>();
             assert_eq!(first.as_array().unwrap().len(), 1);
             assert!(next.as_array().unwrap().is_empty());
-            // A foreign tenant's resources must not appear even to this tenant's root.
             use sea_orm::{ActiveModelTrait, ActiveValue::Set, TransactionTrait};
             let txn = ctx.db.begin().await.unwrap();
             let foreign_tenant = yorishiro::models::tenant_tenants::ActiveModel {
@@ -724,7 +716,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
     .await;
 }
 
-/// A role session is evaluated by the role's policies alone: the caller's own permissions are neither added nor lost.
 #[tokio::test]
 #[serial(process_environment)]
 async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
@@ -762,7 +753,6 @@ async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
             login.assert_status_ok();
             let user_key = login.json::<serde_json::Value>()["api_key"].as_str().unwrap().to_string();
 
-            // The role may read workspaces; its trust policy names the user.
             let role_policy = bearer!(root_key, request.post("/api/iam/policies"))
                 .json(&serde_json::json!({"name": "role-workspace-reader", "document": {"statements": [
                     {"effect": "allow", "actions": ["workspace_get"],
@@ -782,10 +772,8 @@ async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
                 .assert_status(StatusCode::NO_CONTENT);
             let assume = format!("/api/iam/roles/{role_id}/assume");
 
-            // Trust alone is not enough: the caller also needs a role_assume permission.
             bearer!(user_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
 
-            // The user's own policy allows assuming this role and reading the tenant, but not reading workspaces.
             let user_policy = bearer!(root_key, request.post("/api/iam/policies"))
                 .json(&serde_json::json!({"name": "user-assume-and-tenant", "document": {"statements": [
                     {"effect": "allow", "actions": ["role_assume"],
@@ -799,7 +787,6 @@ async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
                 .await
                 .assert_status(StatusCode::NO_CONTENT);
 
-            // An explicit deny in the trust policy wins over an allow.
             let denied_trust = serde_json::json!({"statements": [
                 {"effect": "allow", "principals": [{"type": "tenant"}]},
                 {"effect": "deny", "principals": [{"type": "user", "user_id": user_id}]}]});
@@ -813,7 +800,6 @@ async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
                 .await
                 .assert_status_ok();
 
-            // The duration must stay between 15 minutes and the role maximum.
             for seconds in [60, 50_000] {
                 bearer!(user_key, request.post(&assume))
                     .json(&serde_json::json!({"duration_seconds": seconds}))
@@ -825,18 +811,15 @@ async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
             let session = session.json::<serde_json::Value>();
             let session_key = session["plaintext"].as_str().unwrap().to_string();
 
-            // The session reads the workspace through the role, and loses the tenant read the user itself has.
             let workspace = format!("/api/workspaces/{workspace_id}");
             bearer!(session_key, request.get(&workspace)).await.assert_status_ok();
             bearer!(session_key, request.get("/api/tenants/current")).await.assert_status(StatusCode::FORBIDDEN);
             bearer!(user_key, request.get("/api/tenants/current")).await.assert_status_ok();
             bearer!(user_key, request.get(&workspace)).await.assert_status(StatusCode::FORBIDDEN);
 
-            // A role session cannot assume another role, and the tenant root cannot assume at all.
             bearer!(session_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
             bearer!(root_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
 
-            // Deleting the role revokes its sessions.
             bearer!(root_key, request.delete(&format!("/api/iam/roles/{role_id}")))
                 .await
                 .assert_status(StatusCode::NO_CONTENT);

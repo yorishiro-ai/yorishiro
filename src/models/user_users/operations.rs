@@ -10,9 +10,6 @@ use super::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::user_users::Column;
 
-/// Resets an existing root password with a trusted operator identity and revokes all attributed keys.
-/// Does not convert passwordless accounts or change membership, roles or account identity.
-///
 /// # Errors
 /// Rejects mismatched confirmation, weak passwords, non-root or passwordless accounts and missing, ambiguous or disabled tenant memberships.
 /// Password and key changes roll back together if persistence fails.
@@ -92,24 +89,19 @@ pub async fn reset_root_password_by_operator(
     Ok(())
 }
 
-/// The effect of an operator account deletion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeletionOutcome {
-    /// A local account without a tenant membership was deleted.
     Deleted,
-    /// The account was a tenant root; the tenant is removed when its grace period elapses.
     TenantDeletionScheduled {
         tenant_id: uuid::Uuid,
         delete_scheduled_at: chrono::DateTime<chrono::FixedOffset>,
     },
-    /// The account was the root of an already-disabled tenant, deleted with it.
-    TenantDeleted { tenant_id: uuid::Uuid },
+    TenantDeleted {
+        tenant_id: uuid::Uuid,
+    },
 }
 
 /// Deletes an account with a trusted operator identity.
-/// A non-root account must have no remaining tenant membership.
-/// Deleting the tenant root account also removes the tenant: an active tenant is
-/// scheduled for deletion after the grace period, and an already-disabled one is deleted immediately.
 ///
 /// # Errors
 /// Rejects a mismatched confirmation, the infrastructure tenant's root, or a

@@ -33,7 +33,6 @@ pub struct ReindexArgs {
     pub actor: Option<ReindexActor>,
 }
 
-/// Credential identity retained for user-requested reindex authorization.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ReindexActor {
     pub tenant_id: Uuid,

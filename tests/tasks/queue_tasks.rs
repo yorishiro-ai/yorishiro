@@ -1,7 +1,3 @@
-//! The operational resync task and authenticated reindex endpoint queue worker jobs without a provider.
-//!
-//! A task runs in a CLI process, and only a worker process loads an embedding model, so the task hands the work to the queue.
-
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use std::sync::Arc;
 

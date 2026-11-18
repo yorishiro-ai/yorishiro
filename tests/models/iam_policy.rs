@@ -280,7 +280,6 @@ fn stale_unrelated_selectors_do_not_block_grants_or_hide_denies() {
     ));
 }
 
-// The built-in policy catalogue and the access probes derive from `Action::ALL`, so the list must stay in lockstep with the enum.
 #[test]
 fn action_all_matches_the_enum() {
     assert_eq!(Action::ALL.len(), 115);
@@ -337,7 +336,6 @@ fn role_assume_targets_roles_and_an_all_roles_selector_covers_each_role() {
         target(other),
         owns_workspace
     ));
-    // Role actions do not apply to tenant or workspace resources, and the reverse.
     assert!(
         Policy::parse(
             &document(serde_json::json!([{"type": "tenant", "tenant_id": tenant()}])),

@@ -71,7 +71,6 @@ async fn overview_distinguishes_billing_manual_and_active_limits() {
     .await;
 }
 
-/// The freshly bootstrapped owner can read their own tenant's overview: no plan (never subscribed); the root's membership row is counted in usage, but the member list stays empty because the root is a separate identity, not a member.
 #[tokio::test]
 async fn tenant_overview_returns_usage_and_members_for_the_owner() {
     boot_request::<App, _, _>(|request, ctx| async move {

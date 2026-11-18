@@ -8,7 +8,6 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::tenant_memberships;
 
-/// Keeps the identity authorization fence alive until the workspace operation finishes.
 pub(crate) async fn authorize_workspace_action(
     txn: &DatabaseTransaction,
     identity: &sea_orm::DatabaseConnection,
@@ -35,7 +34,6 @@ pub(crate) async fn authorize_workspace_action(
     Ok(authorization)
 }
 
-/// Checks a concrete IAM action while holding the tenant membership fence.
 pub(crate) async fn require_iam_action(
     txn: &DatabaseTransaction,
     actor: &AuthContext,
@@ -49,8 +47,6 @@ pub(crate) async fn require_iam_action(
         .await
 }
 
-/// Validated authorization state usable only while its transaction holds the membership fence.
-/// Reload after changing credentials, root, policies or attachments in that transaction.
 pub(crate) struct IamEvaluation<'a> {
     txn: &'a DatabaseTransaction,
     current: AuthContext,
@@ -68,8 +64,6 @@ impl<'a> IamEvaluation<'a> {
         Self::load_with(txn, actor, required, false).await
     }
 
-    /// Loads the caller for `Model::assume_as`.
-    /// A service credential has no identity policies and loads empty, the tenant root and a role session are refused.
     pub(crate) async fn load_for_assumption(
         txn: &'a DatabaseTransaction,
         actor: &AuthContext,
@@ -283,7 +277,6 @@ pub async fn identity(
     })
 }
 
-/// Credential ceilings and root identity, not authorization for a later request.
 #[derive(serde::Serialize)]
 pub struct AccessCapabilities {
     pub database_backend: &'static str,
@@ -294,8 +287,6 @@ pub struct AccessCapabilities {
     pub credential_scope: ApiKeyScope,
 }
 
-/// Inspects credential limits without inferring IAM authority from the credential.
-///
 /// # Errors
 /// Rejects revoked credentials or missing membership and propagates database failures.
 pub async fn capabilities(
@@ -346,8 +337,6 @@ pub(crate) async fn require_key_attribution(
     Ok(())
 }
 
-/// Delegated credentials cannot exceed the issuer's scope or audit grant.
-///
 /// # Errors
 /// Rejects inactive tenants and grants the issuer does not hold.
 pub async fn require_key_grant(

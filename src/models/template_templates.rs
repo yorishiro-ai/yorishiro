@@ -101,7 +101,6 @@ db_enum! {
 }
 
 impl TemplateVisibility {
-    ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
     pub fn parse_input(value: &str) -> Result<Self, YorishiroError> {
@@ -307,8 +306,6 @@ pub(crate) async fn create_as(
     Ok(template)
 }
 
-/// Updates a template after revalidating IAM permission under the membership fence.
-///
 /// # Errors
 /// Rejects stale or unauthorized credentials and propagates validation and persistence errors.
 pub async fn update_as(

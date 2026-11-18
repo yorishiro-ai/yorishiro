@@ -7,7 +7,6 @@ use yorishiro::App;
 use yorishiro::models::tenant_memberships;
 use yorishiro::models::user_users;
 
-/// A member of an existing tenant with a key of their own, created through the same model operations an administrator's user creation uses.
 async fn member_key(
     ctx: &loco_rs::app::AppContext,
     tenant_id: uuid::Uuid,
@@ -392,7 +391,6 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             .await;
         assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
 
-        // A bound credential cannot enumerate tenant resources.
         let response = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {member_key}"))

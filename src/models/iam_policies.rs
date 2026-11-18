@@ -212,7 +212,6 @@ impl Model {
         Ok(policy)
     }
 
-    /// The managed policies attached to a role; this is everything a role session is evaluated by.
     pub(crate) async fn for_role(
         txn: &impl ConnectionTrait,
         tenant_id: Uuid,

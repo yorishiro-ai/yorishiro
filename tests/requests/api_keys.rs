@@ -550,7 +550,6 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .await.assert_status(StatusCode::NO_CONTENT);
-        // The stored write ceiling is preserved, but the legacy member role is not an issuance gate.
         request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .json(&serde_json::json!({"name":"iam-member-write","scope":"write","tenant_scoped":true}))

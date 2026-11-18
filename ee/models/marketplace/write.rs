@@ -1,6 +1,5 @@
 //! Decisions about the template marketplace: ownership, status/rating validation, version numbering under lock, and how a fork's name collision is reported.
 //!
-//! Read authorization lives in the actor-aware operations in `models::marketplace`.
 //! This module holds only the writes, calling into `models::marketplace` for the insert/update itself once a decision allows it.
 
 use crate::db;

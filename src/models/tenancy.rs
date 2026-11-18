@@ -18,8 +18,6 @@ pub(crate) struct SetupAccount {
     pub(crate) workspace_id: Uuid,
 }
 
-/// Records the initial root after its tenant membership has been created.
-///
 /// # Errors
 /// Returns an error if the root is not a member or a root already exists.
 pub async fn assign_initial_root(
@@ -97,9 +95,6 @@ pub async fn issue_login_key(
     Ok((key, tenant_id, scope))
 }
 
-/// Creates an email account and its membership in the caller's transaction.
-/// Only tenant roots sign in with an email; every other user is created as a tenant user.
-///
 /// # Errors
 /// Returns an error if account creation or membership insertion fails.
 pub async fn register_member(
@@ -170,7 +165,6 @@ pub(crate) async fn setup_first_account(
     })
 }
 
-/// Every workspace `user_id` can discover through IAM workspace-get permission.
 /// Used by sign-in to list explicit workspace choices.
 ///
 /// Deliberately unpaginated: sign-in must show every reachable workspace.
@@ -466,8 +460,6 @@ pub(crate) async fn create_workspace_in_context(
     Ok(workspace)
 }
 
-/// Deletes a workspace after revalidating IAM permission and target ownership.
-///
 /// # Errors
 /// Rejects revoked credentials, missing permission, foreign targets or the last workspace.
 pub async fn delete_workspace_as(

@@ -2419,7 +2419,6 @@ async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
             .to_owned();
         let session = initialize(&request).await;
 
-        // Listing shows the name and no email;
         let listed = mcp_call(
             &request,
             &session,
