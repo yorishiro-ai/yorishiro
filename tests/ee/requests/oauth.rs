@@ -1,7 +1,7 @@
 //! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests).
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
 
-use super::boot_request;
+use crate::requests::boot_request;
 use axum::http::StatusCode;
 use axum::http::header;
 use sea_orm::{EntityTrait, TransactionTrait};
@@ -39,7 +39,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
         ambient.remove(variable);
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let disabled = request.get("/auth/oauth/status").await;
@@ -56,7 +56,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
                 serde_json::json!({"enabled": false})
             );
             boot_request::<App, _, _>(|request, ctx| async move {
-                if super::skip_unlicensed(&ctx) {
+                if crate::requests::skip_unlicensed(&ctx) {
                     return;
                 }
                 let enabled = request.get("/auth/oauth/status").await;
@@ -82,7 +82,7 @@ async fn status_errors_loudly_when_partially_configured() {
     guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
     guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let response = request.get("/auth/oauth/status").await;
@@ -103,7 +103,7 @@ async fn status_errors_loudly_when_partially_configured() {
 #[serial(process_environment)]
 async fn authorize_and_callback_404_when_unconfigured() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let authorize = request.get("/auth/oauth/authorize").await;
@@ -132,7 +132,7 @@ async fn authorize_and_callback_404_when_unconfigured() {
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let response = request.get("/auth/oauth/authorize").await;
@@ -154,7 +154,7 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let response = request
@@ -191,7 +191,7 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let missing_state = request.get("/auth/oauth/callback?code=abc").await;
@@ -219,7 +219,7 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 async fn callback_rejects_a_state_with_a_bad_signature() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
             let response = request
@@ -240,7 +240,7 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 async fn callback_rejects_an_expired_state() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
@@ -273,8 +273,12 @@ async fn callback_rejects_an_expired_state() {
 #[tokio::test]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        super::fixtures::TestTenant::create(&request, &ctx, super::fixtures::TenantArgs::default())
-            .await;
+        crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
 
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         for max_tenants in [Some(1), None] {
@@ -393,7 +397,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
         }
         boot_request::<App, _, _>(|_request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let txn = ctx.db.begin().await.expect("begin");
@@ -434,7 +438,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
 #[tokio::test]
 async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         for path in ["/auth/oauth/authorize", "/auth/oauth/callback"] {

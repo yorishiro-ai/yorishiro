@@ -147,7 +147,7 @@ async fn configured_live_provider_embeds_stores_and_searches() {
         ];
         embedded_notes(&ctx, &setup, provider.as_ref(), &documents).await;
         #[cfg(feature = "enterprise")]
-        let session = super::mcp::initialize(&request).await;
+        let session = crate::ee::requests::mcp::initialize(&request).await;
         for (query, expected) in [
             ("A cat sleeps on a warm sofa.", documents[0]),
             ("How do I back up and restore a PostgreSQL database?", documents[1]),
@@ -163,12 +163,12 @@ async fn configured_live_provider_embeds_stores_and_searches() {
             assert!(hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
             #[cfg(feature = "enterprise")]
             {
-                let response = super::mcp::mcp_call(&request, &session, &setup.api_key,
+                let response = crate::ee::requests::mcp::mcp_call(&request, &session, &setup.api_key,
                     20, "tools/call", serde_json::json!({
                         "name":"search_entities", "arguments":{"query_text":query,"limit":3}
                     })).await;
                 assert_eq!(response["result"]["isError"], false, "live MCP search failed");
-                let mcp_hits = super::mcp::tool_result_json(&response);
+                let mcp_hits = crate::ee::requests::mcp::tool_result_json(&response);
                 assert_eq!(titles(&mcp_hits)[0], expected, "live MCP semantic ranking");
                 let ids = |value: &serde_json::Value| value.as_array().unwrap().iter()
                     .map(|hit| hit["entity"]["id"].clone()).collect::<Vec<_>>();

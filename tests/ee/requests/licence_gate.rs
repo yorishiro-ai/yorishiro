@@ -35,7 +35,7 @@
 //! this code can produce, it guards the change that widens where the layer is applied. Without it,
 //! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
-use super::boot_request;
+use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::App;
 use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
@@ -118,7 +118,7 @@ async fn gated_routes_are_absent_without_a_licence() {
 #[tokio::test]
 async fn gated_routes_are_served_with_a_licence() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
 
@@ -150,7 +150,7 @@ async fn gated_routes_are_served_with_a_licence() {
 #[tokio::test]
 async fn missing_licence_state_closes_the_gate_again() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let session = super::mcp::initialize(&request).await;
@@ -164,7 +164,7 @@ async fn missing_licence_state_closes_the_gate_again() {
         )
         .await;
         let licensed_tools: Vec<_> =
-            serde_json::from_str::<serde_json::Value>(include_str!("../blackbox/tools.json"))
+            serde_json::from_str::<serde_json::Value>(include_str!("../../blackbox/tools.json"))
                 .unwrap()["licensed"]
                 .as_array()
                 .unwrap()
@@ -244,7 +244,7 @@ async fn missing_licence_state_closes_the_gate_again() {
 #[tokio::test]
 async fn stripe_webhook_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let licensed = request.post("/api/stripe/webhook").await.status_code();
@@ -278,7 +278,7 @@ async fn stripe_webhook_is_gated() {
 #[tokio::test]
 async fn oauth_login_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let licensed = request.get("/auth/oauth/status").await.status_code();

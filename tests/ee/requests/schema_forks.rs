@@ -1,5 +1,5 @@
-use super::boot_request;
-use super::fixtures::{self, TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{self, TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
@@ -389,11 +389,11 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
 
 #[tokio::test]
 async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let TestTenant {
@@ -613,7 +613,7 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
 
 #[tokio::test]
 async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -732,7 +732,7 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
 
 #[tokio::test]
 async fn fork_creation_shares_the_schema_version_lock() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -822,11 +822,11 @@ async fn fork_creation_shares_the_schema_version_lock() {
 
 #[tokio::test]
 async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let TestTenant {
@@ -952,7 +952,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
 
 #[tokio::test]
 async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

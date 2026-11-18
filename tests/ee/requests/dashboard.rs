@@ -1,5 +1,5 @@
-use super::boot_request;
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use yorishiro::App;
 
 #[tokio::test]
@@ -14,7 +14,8 @@ async fn overview_distinguishes_billing_manual_and_active_limits() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
         yorishiro::models::tenant_tenants::ActiveModel {
             id: Set(tenant.tenant_id),
             max_workspaces: Set(Some(17)),
@@ -76,7 +77,8 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let api_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
         request
             .get("/api/tenant/overview")
             .await

@@ -68,10 +68,10 @@ where
                 .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .expect("build queue test server");
-        let tenant = super::fixtures::TestTenant::create(
+        let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
             &boot_res.app_context,
-            super::fixtures::TenantArgs::default(),
+            crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
         test(
@@ -386,8 +386,9 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
         }),
     ))
     .await;
-    super::boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = super::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant =
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         let provider = Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
             base_url: server.url.clone(),
             api_key: "priority-test".into(),
@@ -406,7 +407,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
             QueueConfig::Redis(config) => config.num_workers = 1,
             _ => panic!("unsupported queue"),
         }
-        let queue = super::query_worker::shared_target_queue(&mut worker_ctx).await;
+        let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
         let mut ids = Vec::new();
         // Fault-inject competing provider deliveries with explicit priorities; request creation and execution use production models and workers.
         for (text, priority) in [("low", 100), ("high", 300)] {

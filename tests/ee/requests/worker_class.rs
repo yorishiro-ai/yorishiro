@@ -1,5 +1,5 @@
-use super::boot_request;
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;

@@ -1,4 +1,4 @@
-use super::boot_request;
+use crate::requests::boot_request;
 use axum::http::StatusCode;
 use sea_orm::TransactionTrait;
 use serde_json::json;
@@ -6,7 +6,7 @@ use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 async fn create_template(
     request: &loco_rs::TestServer,
@@ -102,7 +102,8 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
         )
         .await;
         let library_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
         let template = create_template(&request, &library_key, note_definition()).await;
         for _ in 0..2 {
             let txn = ctx.db.begin().await.unwrap();
@@ -116,7 +117,7 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
             .await
             .unwrap();
             txn.commit().await.unwrap();
-            let key = super::fixtures::issue_api_key(
+            let key = crate::requests::fixtures::issue_api_key(
                 &ctx,
                 workspace.id,
                 tenant.owner_id,
@@ -169,7 +170,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             key_scope: ApiKeyScope::Schema,
             ..Default::default()
         }).await;
-        let library_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let library_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let template = create_template(&request, &library_key, note_definition()).await;
 
         let create = request
@@ -360,7 +361,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             },
         )
         .await;
-        let library_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let library_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let template = create_template(&request, &library_key, note_definition()).await;
         let create = request
             .post("/api/schemas")
@@ -482,7 +483,8 @@ async fn merging_a_conflicting_field_is_refused() {
             }
         });
         let library_key =
-            super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id)
+                .await;
         let template = create_template(&request, &library_key, base_def.clone()).await;
 
         let create = request

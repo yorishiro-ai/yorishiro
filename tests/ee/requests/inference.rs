@@ -1,5 +1,5 @@
-use super::boot_request;
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
@@ -118,7 +118,7 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 async fn infer_fill_without_a_configured_key_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -249,7 +249,7 @@ pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &TestTen
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -263,7 +263,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             .await
             .expect("claim proposal job");
         {
-            let txn = super::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
+            let txn = crate::requests::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
             let schema = yorishiro::models::schema_schemas::get_active_schema(
                 &txn,
                 setup.workspace_id,
@@ -307,11 +307,11 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             "the proposal must not be written before confirmation: {fetched:?}"
         );
 
-        let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let iam_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let txn = ctx.db.begin().await.unwrap();
         // A policy-free member: an admin carries the built-in wildcard policy and would survive the attachment removal.
         let member = yorishiro::models::tenancy::register_member(&txn, setup.tenant_id,
-            &super::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None).await.unwrap();
+            &crate::requests::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, setup.workspace_id,
             yorishiro::models::api_keys::ApiKeyScope::Schema, Some(member.id), false).await.unwrap();
@@ -340,7 +340,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
                 request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
             }
-            super::fill_defaults::fail_via_api(&request, &ctx, id, &setup.api_key,
+            crate::requests::fill_defaults::fail_via_api(&request, &ctx, id, &setup.api_key,
                 &format!("/api/inference-jobs/confirmations/{id}")).await;
             let unchanged = request.get(&format!("/api/entities/{entity}"))
                 .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
@@ -374,7 +374,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id)
             .await
             .expect("revoke queued confirmation actor");
-        super::fill_defaults::fail_via_api(
+        crate::requests::fill_defaults::fail_via_api(
             &request,
             &ctx,
             denied_id,
@@ -397,7 +397,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             serde_json::json!({"name":"confirm_inference_proposals","arguments":{"job_id":job_id}})).await;
         let accepted = super::mcp::tool_result_json(&confirm);
         let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
-        super::fill_defaults::finish_via_api(
+        crate::requests::fill_defaults::finish_via_api(
             &request,
             &ctx,
             confirmation_id,
@@ -427,7 +427,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         );
         let undo_report: serde_json::Value = undo.json();
         let undo_id = undo_report["job_id"].as_str().unwrap().parse().unwrap();
-        super::fill_defaults::finish_via_api(
+        crate::requests::fill_defaults::finish_via_api(
             &request,
             &ctx,
             undo_id,
@@ -463,7 +463,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         inference_jobs::claim(&ctx.db, job_id)
             .await
             .expect("claim proposal job");
-        let txn = super::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
+        let txn = crate::requests::workspace_txn(&ctx, setup.tenant_id, setup.workspace_id).await;
         let schema =
             yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
                 .await
@@ -521,7 +521,7 @@ async fn create_completed_proposal(
     inference_jobs::claim(&ctx.db, job_id)
         .await
         .expect("claim proposal job");
-    let txn = super::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
+    let txn = crate::requests::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
     let schema =
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
@@ -545,7 +545,7 @@ async fn create_completed_proposal(
 #[tokio::test]
 async fn proposals_can_be_listed_rejected_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let session = super::mcp::initialize(&request).await;
@@ -570,11 +570,11 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         )
         .await;
 
-        let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let iam_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let txn = ctx.db.begin().await.unwrap();
         // A policy-free member: an admin carries the built-in wildcard policy and would pass the implicit-deny checks.
         let member = yorishiro::models::tenancy::register_member(
-            &txn, setup.tenant_id, &super::fixtures::unique_email("proposal-reviewer"),
+            &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("proposal-reviewer"),
             "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let key = yorishiro::models::api_keys::Entity::create_api_key(
@@ -686,7 +686,7 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -837,7 +837,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
 #[tokio::test]
 async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -897,7 +897,7 @@ async fn create_pending_proposal(
     inference_jobs::claim(&ctx.db, job_id)
         .await
         .expect("claim proposal job");
-    let txn = super::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
+    let txn = crate::requests::workspace_txn(ctx, setup.tenant_id, setup.workspace_id).await;
     let schema =
         yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
@@ -926,7 +926,7 @@ async fn create_pending_proposal(
 #[tokio::test]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -1044,7 +1044,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
 #[tokio::test]
 async fn infer_fill_dispatch_failure_rolls_back_job() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -1089,7 +1089,7 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
 #[tokio::test]
 async fn inference_status_polling_preserves_all_wire_values() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -1161,7 +1161,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
 #[tokio::test]
 async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -1198,8 +1198,14 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
             .unwrap()
             .expect("infer-fill dispatch records a lifecycle");
         let path = format!("/api/inference-jobs/{job_id}");
-        super::fill_defaults::finish_via_api(&request, &ctx, lifecycle.id, &setup.api_key, &path)
-            .await;
+        crate::requests::fill_defaults::finish_via_api(
+            &request,
+            &ctx,
+            lifecycle.id,
+            &setup.api_key,
+            &path,
+        )
+        .await;
         let response = request
             .get(&path)
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

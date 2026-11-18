@@ -2,7 +2,7 @@ use axum::http::StatusCode;
 use serde_json::Value;
 use yorishiro::App;
 
-use super::boot_request;
+use crate::requests::boot_request;
 
 #[tokio::test]
 async fn openapi_document_is_mounted_with_enterprise_routes() {

@@ -1,5 +1,5 @@
-use super::boot_request;
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue};
@@ -80,7 +80,7 @@ fn checkout_completed_body(event_id: &str, created: i64, tenant_id: Uuid) -> Vec
 async fn a_duplicate_event_id_is_not_reapplied() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let changed = crate::EnvGuard::capture(&[
@@ -168,7 +168,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
     policy.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
@@ -244,7 +244,7 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
     policy.remove("YORISHIRO_PLAN_POLICY_ENABLED");
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
@@ -306,7 +306,7 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
 #[serial(process_environment)]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
@@ -331,7 +331,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 async fn a_tampered_payload_is_rejected() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let body = subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_t");
@@ -363,7 +363,7 @@ async fn a_tampered_payload_is_rejected() {
 async fn malformed_signature_headers_have_exact_plain_text_rejections() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let body = subscription_updated_body("evt_header", 1_000, "cus_header");
@@ -420,7 +420,7 @@ async fn malformed_signature_headers_have_exact_plain_text_rejections() {
 async fn malformed_json_is_rejected_after_signature_verification() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let body = b"not json".to_vec();
@@ -457,7 +457,7 @@ async fn malformed_json_is_rejected_after_signature_verification() {
 async fn a_stale_subscription_event_is_not_reapplied() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
@@ -509,7 +509,7 @@ async fn a_stale_subscription_event_is_not_reapplied() {
 async fn checkout_completion_links_the_stripe_customer() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
-            if super::skip_unlicensed(&ctx) {
+            if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())

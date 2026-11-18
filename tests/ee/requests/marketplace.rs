@@ -1,11 +1,11 @@
-use super::boot_request;
+use crate::requests::boot_request;
 use axum::http::StatusCode;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::App;
 
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 fn note_definition() -> serde_json::Value {
     crate::requests::fixtures::note_schema("crm-starter", false)
@@ -77,7 +77,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 #[tokio::test]
 async fn a_licence_does_not_replace_authentication() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
 
@@ -102,12 +102,13 @@ async fn the_marketplace_answers_501_on_sqlite() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
-            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
+                .await;
 
         let listing = request
             .get("/api/marketplace")
@@ -146,12 +147,13 @@ async fn publish_list_fork_and_review_round_trip() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
-            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
+                .await;
 
         // Publishing a version of a template that doesn't exist must 404.
         let session = super::mcp::initialize(&request).await;
@@ -512,7 +514,8 @@ async fn publish_list_fork_and_review_round_trip() {
         // A second tenant forks it.
         let mut forker = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         forker.api_key =
-            super::fixtures::issue_tenant_key(&ctx, forker.tenant_id, forker.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, forker.tenant_id, forker.owner_id)
+                .await;
         assert_ne!(forker.tenant_id, owner.tenant_id);
 
         let fork = request
@@ -596,15 +599,17 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
-            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
+                .await;
         let mut other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         other.api_key =
-            super::fixtures::issue_tenant_key(&ctx, other.tenant_id, other.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, other.tenant_id, other.owner_id)
+                .await;
 
         let create_template = request
             .post("/api/template-library")
@@ -651,15 +656,20 @@ async fn a_rating_outside_the_range_is_rejected() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
-            super::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
+                .await;
         let mut reviewer = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        reviewer.api_key =
-            super::fixtures::issue_tenant_key(&ctx, reviewer.tenant_id, reviewer.owner_id).await;
+        reviewer.api_key = crate::requests::fixtures::issue_tenant_key(
+            &ctx,
+            reviewer.tenant_id,
+            reviewer.owner_id,
+        )
+        .await;
 
         let create_template = request
             .post("/api/template-library")

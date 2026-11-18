@@ -1,5 +1,5 @@
-use super::boot_request;
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::db::DbHandle;
@@ -9,7 +9,7 @@ use yorishiro::edition::ee::models::api_keys::create_tenant_api_key;
 /// Enterprise edition composition must not break a workspace-scoped key on a route base itself defines.
 #[tokio::test]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -33,7 +33,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
 /// Tenant keys need a workspace only for workspace-scoped operations.
 #[tokio::test]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -241,10 +241,10 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let txn = ctx.db.begin().await.unwrap();
         let member = tenancy::register_member(&txn, tenant.tenant_id,
-            &super::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None).await.unwrap();
+            &crate::requests::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let key = create_tenant_api_key(&ctx.db, tenant.tenant_id, "read", Some(member.id)).await.unwrap();
-        let root_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let root_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let created = request.post("/api/iam/policies")
             .add_header("Authorization", format!("Bearer {root_key}"))
             .json(&serde_json::json!({"name":"schema-reader", "document":{"statements":[{"effect":"allow","actions":["schema_list"],"resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]}]}})).await;
@@ -288,11 +288,11 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
 /// A tenant-scoped key cannot retarget another tenant's workspace through the header, even though the key itself is valid.
 #[tokio::test]
 async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let caller = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
