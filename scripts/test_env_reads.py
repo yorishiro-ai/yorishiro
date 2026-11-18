@@ -31,8 +31,8 @@ class EnvReadsTest(unittest.TestCase):
         '''
         self.assertEqual(violations("src/app.rs", source), [])
 
-    def test_registries_and_generic_guard_are_allowed(self):
-        for path in ("src/data/env.rs", "tests/env.rs", "tests/mod.rs"):
+    def test_registry_and_generic_guard_are_allowed(self):
+        for path in ("src/data/env.rs", "tests/mod.rs"):
             self.assertEqual(violations(path, 'std::env::var("KEY")'), [])
 
 

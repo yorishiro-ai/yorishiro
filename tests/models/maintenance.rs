@@ -20,7 +20,7 @@ async fn race_transition(
 
 #[tokio::test]
 async fn competing_enter_transitions_do_not_overwrite_each_other() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let first = ctx.db.clone();
         let second = Database::connect(&ctx.config.database.uri)
             .await
@@ -53,7 +53,7 @@ async fn competing_enter_transitions_do_not_overwrite_each_other() {
 
 #[tokio::test]
 async fn competing_exit_and_manual_lock_do_not_clear_each_other() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let first = ctx.db.clone();
         let second = Database::connect(&ctx.config.database.uri)
             .await

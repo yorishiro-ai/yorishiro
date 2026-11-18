@@ -5,7 +5,7 @@ use loco_rs::app::{AppContext, Hooks};
 use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
 use uuid::Uuid;
 
-pub(crate) use super::boot_request_isolated as boot_request;
+pub(crate) use super::boot_request;
 
 #[cfg(feature = "enterprise")]
 pub(crate) async fn finish(ctx: &AppContext, id: Uuid) {

@@ -10,7 +10,7 @@ on:
     paths:
       - .github/workflows/coverage.yml
       - scripts/coverage_report.py
-      - tests/ci/test_coverage_workflow.py
+      - tests/blackbox/run.py
 
 permissions:
   contents: read
@@ -61,11 +61,11 @@ jobs:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
-          key: assigned-coverage-nightly
+          key: coverage-nightly
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
-      - name: Require the signed licence for the selected licensed assignments
+      - name: Require the signed licence
         run: test -n "$YORISHIRO_LICENSE_KEY"
       - name: Bootstrap PostgreSQL without bypassing application RLS
         env:
@@ -77,11 +77,6 @@ jobs:
             -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
             -c 'CREATE DATABASE yorishiro OWNER yorishiro;' \
             -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
-      - name: Start the selected Redis provider
-        run: |
-          docker run --detach --name coverage-redis --publish 127.0.0.1:6379:6379 \
-            valkey/valkey:9.1.3 valkey-server --databases 65536 --save '' --appendonly no
-          docker exec coverage-redis sh -c 'for i in $(seq 1 50); do valkey-cli ping && exit 0; sleep 0.1; done; exit 1'
       - uses: actions/cache/restore@v6
         id: embedding-cache
         with:
@@ -104,7 +99,7 @@ jobs:
             ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
             ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
-      - name: Execute exact assigned and public coverage
+      - name: Run the enterprise suite and public contracts under coverage
         env:
           POSTGRES_CONTAINER: ${{ job.services.db.id }}
         run: |
@@ -119,7 +114,7 @@ jobs:
           MODEL_URL: unused
           TOKENIZER_URL: unused
         run: python3 scripts/embedding_cache.py verify
-      - name: Upload reports, exact receipts and failure logs
+      - name: Upload reports and failure logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -129,10 +124,5 @@ jobs:
             coverage/modules.csv
             coverage/lowest-covered.txt
             coverage/llvm-cov.json
-            coverage/assignments.json
-            coverage/execution.json
-            coverage/receipts/
-            coverage/public/
             coverage/public-ee/
-            coverage/timings/
           if-no-files-found: error

@@ -14,7 +14,7 @@ async fn operator_cli_can_configure_replace_inspect_and_disable_a_tenant_schedul
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let tenant =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         let config_dir = tempfile::tempdir().unwrap();
@@ -38,11 +38,8 @@ async fn operator_cli_can_configure_replace_inspect_and_disable_a_tenant_schedul
                 .arg(format!("tenant_id:{}", tenant.tenant_id))
                 .args(args)
                 .current_dir(env!("CARGO_MANIFEST_DIR"))
-                .env(
-                    crate::env::TestEnv::LocoConfigFolder.name(),
-                    config_dir.path(),
-                )
-                .env(crate::env::TestEnv::LocoEnvironment.name(), "development")
+                .env("LOCO_CONFIG_FOLDER", config_dir.path())
+                .env("LOCO_ENV", "development")
                 .stdout(Stdio::from(log.try_clone().unwrap()))
                 .stderr(Stdio::from(log))
                 .spawn()
@@ -111,7 +108,7 @@ async fn operator_cli_can_configure_replace_inspect_and_disable_a_tenant_schedul
 
 #[tokio::test]
 async fn schedules_validate_timezones_with_the_application_parser() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         let tenant =
@@ -157,7 +154,7 @@ fn install_active_licence(ctx: &loco_rs::app::AppContext) {
 
 #[tokio::test]
 async fn disabled_tenant_retains_schedule_and_history_without_new_dispatches() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         install_active_licence(&ctx);
@@ -215,7 +212,7 @@ async fn postgres_tick_waits_for_disable_and_rechecks_tenant_activity() {
     if !crate::require_postgres_backend() {
         return;
     }
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         use sea_orm::{EntityTrait, QuerySelect, TransactionTrait};
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
@@ -392,7 +389,7 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
 
 #[tokio::test]
 async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
     install_active_licence(&ctx);
     if !crate::require_sqlite_backend() { return; }
 
@@ -494,7 +491,7 @@ async fn intervals_that_cannot_be_scheduled_are_refused() {
 /// The first run is one interval after the schedule is set, and every tick schedules the next run one interval after itself.
 #[tokio::test]
 async fn a_schedule_advances_by_its_own_interval() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         install_active_licence(&ctx);
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
@@ -543,7 +540,7 @@ async fn licensed_task_ticks_schedule_while_unlicensed_task_only_scans_mismatche
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         install_active_licence(&ctx);
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
@@ -595,7 +592,7 @@ async fn licensed_task_ticks_schedule_while_unlicensed_task_only_scans_mismatche
 /// Invalid stored intervals fail without advancing the schedule.
 #[tokio::test]
 async fn invalid_stored_intervals_are_rejected_without_advancement() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         install_active_licence(&ctx);
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};

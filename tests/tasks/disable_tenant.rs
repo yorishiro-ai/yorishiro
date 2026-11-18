@@ -25,6 +25,9 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
     use yorishiro::models::api_keys::ApiKeyScope;
 
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
@@ -78,7 +81,7 @@ async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
     use tenant_tenants::retirement;
     use yorishiro::models::workspace_workspaces;
 
-    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
         let before = retirement::inventory(&ctx.db, target.tenant_id).await.unwrap();
@@ -116,6 +119,9 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities
     use tenant_tenants::retirement;
     use yorishiro::models::{tenant_memberships, user_users, workspace_workspaces};
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
@@ -205,6 +211,9 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let task = Some("disable_tenant".to_owned());
@@ -294,6 +303,9 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
     use yorishiro::models::{tenant_tenants::retirement, user_users};
 
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(
             &request,
             &ctx,

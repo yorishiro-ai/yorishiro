@@ -61,8 +61,18 @@ fn enterprise_inventory_contract_is_disjoint_and_contains_community() {
         .split_once(start)
         .and_then(|(_, rest)| rest.split_once(end).map(|(body, _)| body))
         .expect("English MCP documentation markers");
+    let expected = render_inventory_fragment(&community, &enterprise);
+    if std::env::var_os("UPDATE_FIXTURES").is_some() && generated != expected {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mcp-inventory.md"
+        );
+        std::fs::write(path, docs.replacen(generated, &expected, 1))
+            .expect("rewrite the MCP inventory");
+        return;
+    }
     assert_eq!(
-        generated,
-        render_inventory_fragment(&community, &enterprise)
+        generated, expected,
+        "MCP inventory drifted; run `UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` and review the diff"
     );
 }

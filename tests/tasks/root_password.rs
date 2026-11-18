@@ -3,14 +3,14 @@ use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilt
 use yorishiro::App;
 use yorishiro::models::{api_keys, tenant_memberships, tenant_tenants, user_users};
 
+use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use crate::requests::{boot_request, boot_request_isolated};
 
 const NEW_PASSWORD: &str = "new-root-password-123";
 
 #[tokio::test]
 async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let before = user_users::Entity::find_by_id(tenant.owner_id)
             .one(&ctx.db)
@@ -124,7 +124,7 @@ async fn postgres_root_reset_fences_login_waiting_with_verified_old_password() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         use sea_orm::{QuerySelect, TransactionTrait};
 
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -202,7 +202,7 @@ async fn wait_for_membership_lock(db: &sea_orm::DatabaseConnection, fence: &str,
 
 #[tokio::test]
 async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let original = user_users::Entity::find_by_id(tenant.owner_id)
             .one(&ctx.db)

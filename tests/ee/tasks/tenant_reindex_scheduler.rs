@@ -23,7 +23,7 @@ fn tenant_reindex_scheduler_is_registered_in_enterprise() {
 
 #[tokio::test]
 async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
@@ -150,7 +150,7 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
 
 #[tokio::test]
 async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         ctx.shared_store.insert(Arc::new(LicenceState::default()));
         assert!(
             !ctx.shared_store

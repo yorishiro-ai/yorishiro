@@ -14,6 +14,9 @@ async fn owner_can_inspect_and_confirm_disablement_without_deleting_data() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target_admin =
             super::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;

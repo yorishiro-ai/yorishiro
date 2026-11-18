@@ -47,11 +47,14 @@ Async waits release the task to do other work, but one physical connection still
 
 Run the full suite with Rust's default parallel test execution.
 
-Use `make test-postgres`, `make test-sqlite`, or `make test-redis` locally.
-For the four supported topologies, use `uv run scripts/test_topology.py <topology>`.
-The wrapper selects CE or EE explicitly and requires configured-app evidence from a successful Loco boot.
+Use `make test-sqlite` or `make test-postgres` locally; `EDITION=ce` selects the community edition.
+The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
 
-Request tests must call `close_app_pools` before returning. See `tests/requests/mod.rs` for the pattern.
+Request tests boot through `boot_request`: SQLite gets its own database file and PostgreSQL its own throwaway database per test, both torn down with the test.
+An app booted by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.
+
+Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip without `models/multilingual-e5-base/`.
+`UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff before committing.
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 

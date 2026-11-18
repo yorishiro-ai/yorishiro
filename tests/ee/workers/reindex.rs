@@ -52,7 +52,7 @@ async fn record_delivery(ctx: &loco_rs::app::AppContext, workspace_id: Uuid) -> 
 
 #[tokio::test]
 async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
     let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, api_key, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
     let default_calls = Arc::new(Mutex::new(0));
     let workspace_calls = Arc::new(Mutex::new(0));
@@ -138,7 +138,7 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
 
 #[tokio::test]
 async fn disabled_provider_is_a_terminal_worker_error() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut settings = ctx
             .config
             .settings::<yorishiro::data::settings::Settings>()

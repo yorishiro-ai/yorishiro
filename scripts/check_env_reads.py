@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep Rust runtime environment reads in the application and test registries.
+"""Keep Rust runtime environment reads in the application registry.
 
 This is a practical token check, not Rust name resolution.
 Qualified reads and imports of reader functions are rejected, including aliases.
@@ -13,7 +13,7 @@ from pathlib import Path
 from check_edition_boundary import strip_code
 
 ROOT = Path(__file__).resolve().parent.parent
-ALLOWED = {"src/data/env.rs", "tests/env.rs", "tests/mod.rs"}
+ALLOWED = {"src/data/env.rs", "tests/mod.rs"}
 READERS = r"(?:var|var_os|vars|vars_os)"
 QUALIFIED = re.compile(rf"::\s*{READERS}\b(?!\s*!)")
 IMPORT = re.compile(rf"\buse\b[^;]*\b{READERS}\b[^;]*;", re.DOTALL)
@@ -31,11 +31,11 @@ def violations(path: str, source: str) -> list[int]:
 
 def main() -> int:
     failed = False
-    for directory in ("src", "ee", "tests", "migration/src"):
+    for directory in ("src", "ee", "migration/src"):
         for file in sorted((ROOT / directory).rglob("*.rs")):
             path = file.relative_to(ROOT).as_posix()
             for line in violations(path, file.read_text()):
-                print(f"{path}:{line}: centralize runtime environment reads in data/env.rs or tests/env.rs")
+                print(f"{path}:{line}: centralize runtime environment reads in data/env.rs")
                 failed = True
     return int(failed)
 

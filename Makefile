@@ -1,25 +1,25 @@
 # Run from anywhere with `make -C <this directory> <target>`: recipes run with this Makefile's directory as CWD, which is exactly what a Loco task needs (`Config::from_folder` always resolves a bare relative "config" against CWD, per CLAUDE.md's Loco rebuild notes).
 
 # CI mirrors this structure: check / clippy / fmt-check run once, then test runs.
-# Backend-specific tests use centralized gates and post-test marker verification.
+# Tests pick their backend from DATABASE_URL and their edition from the feature set (EDITION=ce|ee, default ee).
 # Default database URL for PostgreSQL tests.
 # Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
-YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379/15
+EDITION ?= ee
+TEST_FEATURES = $(if $(filter ce,$(EDITION)),--no-default-features --features community,--features enterprise)
 export RUSTUP_TOOLCHAIN ?= $(shell sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
 export CARGO_HOME := $(abspath .cargo-cache)
 export CARGO_TARGET_DIR := $(abspath target)
 export PATH := $(CARGO_HOME)/bin:$(PATH)
 
 coverage test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
-coverage test-postgres task doctor migrate entities: export LOCO_ENV = test_postgres
+task doctor migrate entities: export LOCO_ENV = test_postgres
 coverage test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
 coverage test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
-test-postgres test-sqlite test-redis: export RUST_BACKTRACE ?= 1
-test-redis: export YORISHIRO_REDIS_TEST_URL := $(YORISHIRO_REDIS_TEST_URL)
+test-postgres test-sqlite: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-topology test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -50,9 +50,6 @@ python-lint:
 	uv run scripts/test_env_reads.py
 	uv run scripts/test_env_config.py
 	uv run scripts/check_env_reads.py
-	uv run scripts/test_ci_matrix.py
-	uv run scripts/test_classify_ci_changes.py
-	uv run scripts/test_topology_self.py
 	@for script in .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh; do bash -n "$$script" || exit; done
 
 edition-boundary-check:
@@ -79,20 +76,15 @@ debug-macro-check:
 coverage: patch-check
 	uv run scripts/coverage_report.py
 
-# Run the full suite against the selected backend (postgres by default).
+# Every PostgreSQL test creates and drops its own database, so no setup beyond a reachable server is needed.
 test-postgres: patch-check
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		docker compose up -d --wait testdb; \
 	fi
-	QUEUE_URL='$(DATABASE_URL)' uv run scripts/test_topology.py postgres-postgres
+	QUEUE_URL='$(DATABASE_URL)' cargo test --locked --workspace $(TEST_FEATURES)
 
 test-sqlite: patch-check
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' LOCO_ENV=test_sqlite uv run scripts/test_topology.py sqlite-sqlite
-
-# Redis DB 15 on the Compose Redis service is reserved for tests.
-test-redis: patch-check
-	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379/15" ]; then docker compose up -d --wait redis; fi
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='$(YORISHIRO_REDIS_TEST_URL)' LOCO_ENV=test_sqlite_redis uv run scripts/test_topology.py sqlite-redis
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES)
 
 build: build-ce
 

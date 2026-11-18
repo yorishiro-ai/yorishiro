@@ -87,7 +87,7 @@ async fn acknowledgement_preserves_correlation_after_consumer_starts() {
 
 #[tokio::test]
 async fn record_is_recoverable_until_attempted() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let db = ctx.db.clone();
         let id = Uuid::now_v7();
         record(
@@ -200,7 +200,7 @@ async fn durable_claim_excludes_a_second_relay_and_requires_matching_ack_token()
 
 #[tokio::test]
 async fn recovery_eligibility_uses_lifecycle_status_and_retry_at() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let db = ctx.db.clone();
 
         let cases = [
@@ -308,7 +308,7 @@ async fn recovery_eligibility_uses_lifecycle_status_and_retry_at() {
 
 #[tokio::test]
 async fn ordinary_retry_eligibility_uses_retry_at_not_provider_job_id() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let db = ctx.db.clone();
         let now = Utc::now().fixed_offset();
         let workspace_id = Uuid::now_v7();

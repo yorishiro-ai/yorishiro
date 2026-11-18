@@ -130,7 +130,9 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 
 - `tests/` is a plain Loco integration-test crate (one binary, no `#[path]` includes).
 - `tests/requests/mod.rs` owns `close_app_pools`.
-- Request tests using `request_with_create_db` **must** call `close_app_pools` before returning.
+- Request tests boot through `boot_request`: SQLite gets its own file and PostgreSQL its own throwaway database per test.
+- `make test-sqlite` and `make test-postgres` run the whole suite (`EDITION=ce|ee`); there is no per-test assignment or registration.
+- Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip without the model files.
 - Tests need PostgreSQL with `vector` and `pg_trgm` in `template1` (not just the deployment database). Loco's harness creates each test database via `CREATE DATABASE`, which copies `template1`.
 - Tests need a non-superuser role (superuser bypasses RLS regardless of `FORCE`).
 

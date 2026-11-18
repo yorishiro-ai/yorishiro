@@ -75,7 +75,7 @@ async fn disabled_policy_bypasses_resolution_even_with_valid_licence() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
-    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "false");
     crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
@@ -101,7 +101,7 @@ async fn enabled_policy_rechecks_licence_before_each_admission() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
-    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "true");
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {

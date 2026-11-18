@@ -1,5 +1,5 @@
+use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use crate::requests::{boot_request, boot_request_isolated};
 use sea_orm::{ActiveModelTrait, ConnectionTrait, Set, TransactionTrait};
 use serde_json::json;
 use uuid::Uuid;
@@ -30,7 +30,7 @@ async fn persisted_row_with_unknown_status_returns_internal_error() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         assert_eq!(InferenceJobStatus::from_db_str("paused"), None);
         let fixture = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         // Corrupt-row injection must pin PRAGMA and writes to the same pooled connection.
@@ -122,7 +122,7 @@ async fn claim_rejects_stale_and_invalid_rows() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let fixture = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         // Corrupt-row injection must pin PRAGMA and writes to the same pooled connection.
         let db = ctx.db.begin().await.expect("begin corrupt-row fixture");

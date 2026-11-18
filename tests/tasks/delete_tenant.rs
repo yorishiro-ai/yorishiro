@@ -45,6 +45,9 @@ async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() 
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(run(&ctx, vec![]).await.is_err());

@@ -88,6 +88,9 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         use crate::requests::fixtures::{TenantArgs, TestTenant};
         use yorishiro::models::pagination::ListParams;
 

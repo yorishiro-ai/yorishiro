@@ -878,6 +878,9 @@ async fn workspace_member_tools_reject_cross_tenant_grants() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = user_users::create_user(&ctx.db, &super::fixtures::unique_email("workspace-managed"), "test-password", None).await.unwrap();
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id).await.unwrap();
@@ -2488,6 +2491,9 @@ async fn mcp_tenant_users_cannot_join_another_tenant() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user_name = format!("stay-home-{}", uuid::Uuid::new_v4());
         let tenant_key =

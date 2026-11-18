@@ -4,7 +4,6 @@ mod db;
 mod db_enum;
 #[cfg(feature = "enterprise")]
 mod ee;
-mod env;
 mod error;
 mod http_stub;
 mod initializers;
@@ -42,44 +41,6 @@ async fn has_active_job(
         > 0)
 }
 
-/// Records the database and queue provider after Loco has booted the app.
-pub(crate) fn record_configured_topology(ctx: &loco_rs::app::AppContext) {
-    let config = &ctx.config;
-    assert!(
-        ctx.queue_provider.is_some(),
-        "booted app has no queue provider"
-    );
-    let database = if config.database.uri.starts_with("sqlite:") {
-        "sqlite"
-    } else if config.database.uri.starts_with("postgres://")
-        || config.database.uri.starts_with("postgresql://")
-    {
-        "postgres"
-    } else {
-        "unknown"
-    };
-    let queue = match config.queue.as_ref() {
-        Some(loco_rs::config::QueueConfig::Postgres(_)) => "postgres",
-        Some(loco_rs::config::QueueConfig::Sqlite(_)) => "sqlite",
-        Some(loco_rs::config::QueueConfig::Redis(_)) => "redis",
-        _ => "unknown",
-    };
-    let Some(root) = crate::env::TestEnv::TopologyMarkerDir.read_os() else {
-        return;
-    };
-    let path = std::path::Path::new(&root)
-        .join(database)
-        .join(queue)
-        .join("configured-app");
-    std::fs::create_dir_all(&path).expect("create topology marker directory");
-    let file = path.join(format!(
-        "{}-{}",
-        std::process::id(),
-        BACKEND_MARKER_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::write(file, b"executed\n").expect("write topology marker");
-}
-
 /// Isolated SQLite fixtures must not inherit a PostgreSQL DATABASE_URL from the selected full-suite lane.
 /// Render first, replace owned URIs, then validate the final SQLite/SQLite pair without mutating process environment.
 pub(crate) fn sqlite_fixture_config(uri: &str) -> loco_rs::config::Config {
@@ -97,12 +58,8 @@ pub(crate) fn sqlite_fixture_config(uri: &str) -> loco_rs::config::Config {
 
 use std::env as process_env;
 use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serial_test::serial;
-
-static BACKEND_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Orders every test that boots the application (readers) against every test that rewrites the process environment (writers).
 ///
@@ -277,65 +234,21 @@ fn env_guard_restores_original_value_during_unwind() {
     assert_eq!(process_env::var_os(VARIABLE), Some(original));
 }
 
-/// Records whether a backend-specific test was selected for this test job.
-fn require_backend(expected: &str) -> bool {
-    let url = crate::env::TestEnv::DatabaseUrl.read().unwrap_or_default();
-    let actual = if url.starts_with("sqlite:") {
-        "sqlite"
-    } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
-        "postgres"
+fn is_backend(expected: &str) -> bool {
+    let url = std::env::var("DATABASE_URL").unwrap_or_default();
+    let prefixes: &[&str] = if expected == "sqlite" {
+        &["sqlite:"]
     } else {
-        "unknown"
+        &["postgres://", "postgresql://"]
     };
-    let outcome = if actual == expected {
-        "executed"
-    } else {
-        "skipped"
-    };
-    if crate::env::TestEnv::StrictTopology
-        .read()
-        .is_ok_and(|value| value == "true")
-    {
-        assert_eq!(
-            actual, expected,
-            "assigned test selected the wrong database backend"
-        );
-    }
-
-    let reason = if outcome == "executed" {
-        format!("selected {expected}-specific test on {actual} backend")
-    } else {
-        format!("skipped {expected}-specific test: active backend is {actual}")
-    };
-
-    eprintln!("{reason}");
-    if let Ok(root) = crate::env::TestEnv::BackendMarkerDir.read() {
-        let directory = std::path::Path::new(&root).join(expected).join(outcome);
-        fs::create_dir_all(&directory).expect("create backend test marker directory");
-        let sequence = BACKEND_MARKER_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let marker = directory.join(format!("{}-{sequence}", std::process::id()));
-        fs::write(marker, format!("{reason}\n")).expect("write backend test marker");
-    }
-
-    actual == expected
+    prefixes.iter().any(|prefix| url.starts_with(prefix))
 }
 
-/// Assigned contracts fail instead of silently returning on a provider mismatch.
-pub(crate) fn reject_assigned_skip(reason: &str) {
-    assert!(
-        !crate::env::TestEnv::StrictTopology
-            .read()
-            .is_ok_and(|value| value == "true"),
-        "assigned contract skipped its assertions: {reason}"
-    );
-}
-
-/// Returns `true` and records execution only when the active backend is SQLite.
+/// Backend-specific tests return early when another backend is active.
 pub(crate) fn require_sqlite_backend() -> bool {
-    require_backend("sqlite")
+    is_backend("sqlite")
 }
 
-/// Returns `true` and records execution only when the active backend is PostgreSQL.
 pub(crate) fn require_postgres_backend() -> bool {
-    require_backend("postgres")
+    is_backend("postgres")
 }

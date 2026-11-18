@@ -12,11 +12,11 @@ use sea_orm::sqlx::postgres::PgPoolOptions;
 use yorishiro::edition::ee::db::{acquire_sqlite_scheduler_lock, sqlite_scheduler_lock_path};
 
 fn postgres_test_url() -> Option<String> {
-    let url = crate::env::TestEnv::DatabaseUrl.read().ok();
+    let url = std::env::var("DATABASE_URL").ok();
     let is_postgres = url
         .as_deref()
         .is_some_and(|url| url.starts_with("postgres://") || url.starts_with("postgresql://"));
-    if crate::env::TestEnv::LocoEnvironment.read().as_deref() == Ok("test_postgres") {
+    if std::env::var("LOCO_ENV").as_deref() == Ok("test_postgres") {
         assert!(
             is_postgres,
             "test_postgres must provide a PostgreSQL DATABASE_URL"
@@ -185,7 +185,7 @@ fn sqlite_scheduler_lock_subprocess_aliases_contend_and_release() {
             ])
             .current_dir(dir.path())
             .env(
-                crate::env::TestEnv::SqliteLockChildUri.name(),
+                "YORISHIRO_SQLITE_LOCK_CHILD_URI",
                 "sqlite://app.sqlite?mode=rwc",
             )
             .stdin(Stdio::piped())
@@ -216,10 +216,10 @@ fn sqlite_scheduler_lock_subprocess_aliases_contend_and_release() {
 
 #[test]
 fn sqlite_scheduler_lock_child() {
-    let Some(uri) = crate::env::TestEnv::SqliteLockChildUri.read_os() else {
+    let Ok(uri) = std::env::var("YORISHIRO_SQLITE_LOCK_CHILD_URI") else {
         return;
     };
-    let ownership = acquire_sqlite_scheduler_lock(uri.to_str().unwrap(), "unused")
+    let ownership = acquire_sqlite_scheduler_lock(&uri, "unused")
         .unwrap()
         .unwrap();
     println!("ready");

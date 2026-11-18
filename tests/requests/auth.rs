@@ -1,10 +1,10 @@
-use super::boot_request_isolated;
+use super::boot_request;
 use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::App;
 #[tokio::test]
 async fn signup_without_invite_creates_its_own_tenant() {
-    boot_request_isolated::<App, _, _>(|request, _ctx| async move {
+    boot_request::<App, _, _>(|request, _ctx| async move {
         request
             .post("/auth/signup")
             .json(&serde_json::json!({"email":"weak@example.com", "password":"short"}))
@@ -51,7 +51,7 @@ async fn signup_without_invite_creates_its_own_tenant() {
 #[serial(process_environment)]
 async fn signup_without_invite_respects_the_tenant_cap() {
     super::with_max_tenants("1", async move {
-        boot_request_isolated::<App, _, _>(|request, _ctx| async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
             let first = request
                 .post("/auth/signup")
                 .json(&serde_json::json!({
@@ -91,10 +91,10 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
     if !crate::require_postgres_backend() {
         return;
     }
-    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
-    guard.remove(crate::env::TestEnv::LicenseKey.name());
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
     super::with_max_tenants("100", async move {
-        boot_request_isolated::<App, _, _>(|request, _ctx| async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
             for email in ["first@example.com", "second@example.com"] {
                 let response = request
                     .post("/auth/signup")
@@ -117,8 +117,8 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
 
 /// Widens `DB_MAX_CONNECTIONS` past `config/test_postgres.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
 async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::DbMaxConnections.name()]);
-    guard.set(crate::env::TestEnv::DbMaxConnections.name(), value);
+    let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);
+    guard.set("DB_MAX_CONNECTIONS", value);
     fut.await
 }
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.
@@ -131,7 +131,7 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
         return;
     }
     with_db_max_connections("4", async move {
-        boot_request_isolated::<App, _, _>(|_request, ctx| async move {
+        boot_request::<App, _, _>(|_request, ctx| async move {
             let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
             yorishiro::db::lock_for_update(&holder, "create_tenant")
                 .await

@@ -6,10 +6,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 
 | Command | What it does | Backend |
 |---|---|---|
-| `make test-postgres` | PostgreSQL DB and PostgreSQL queue topology | PostgreSQL/PostgreSQL |
-| `make test-sqlite` | SQLite DB and SQLite queue topology using separate files | SQLite/SQLite |
-| `make test-redis` | SQLite DB and Redis-compatible `redis://` queue topology | SQLite/Redis |
-| `uv run scripts/test_topology.py <topology>` | Full topology suite with configured-app evidence | Any supported topology |
+| `make test-sqlite` | The whole suite on SQLite (`cargo test`); `EDITION=ce` selects community, the default is `ee` | SQLite |
+| `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Clippy for every CE target, including public error and panic docs | CE |
@@ -28,16 +26,17 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `DATABASE_URL` | `postgres://yorishiro:yorishiro@localhost:15432/yorishiro` | Target database for the test command |
 | `DB_MAX_CONNECTIONS` | `100` in CI and the PostgreSQL example | PostgreSQL pool maximum; production defaults are documented separately |
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
-| `LOCO_ENV` | `test_postgres` or `test_sqlite` | Selects the test configuration |
-
-Supported topologies are `postgres-postgres`, `sqlite-sqlite`, `postgres-redis`, and `sqlite-redis`.
-Crossed SQLite/PostgreSQL SQL queues are forbidden by config validation and are not full-suite or CI targets.
+The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
+A Redis queue runs only behind `YORISHIRO_TEST_TOPOLOGY=sqlite-redis` with `YORISHIRO_TEST_REDIS_BASE_URL` naming a server; CI never selects it, and its tests skip otherwise.
+Licensed tests skip unless `YORISHIRO_LICENSE_KEY` holds a valid key; the CI job `ee-postgres-licensed` supplies it.
+The pinned E5 model tests skip unless `models/multilingual-e5-base/` holds the model files.
+`UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff.
 
 Custom PostgreSQL:
 
 ```sh
 DATABASE_URL=postgres://user:pass@host:5432/db \
-  DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres \
+  DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 \
   make test-postgres
 ```
 
@@ -61,15 +60,27 @@ make entities
 
 ## Test structure
 
-### GHA responsibility groups
+### Multi-tenant tests
 
-CI assigns compiled CE/EE identities through `tests/ci/assignments.json` rather than replaying the common suite across database and queue combinations.
-Common assertions run on SQLite, with explicit enterprise-delta, PostgreSQL, licensed and queue-provider owners.
+Community Edition and unlicensed Enterprise enforce a one-tenant deployment cap.
+A test that creates more than one tenant in one boot therefore only passes on a licensed Enterprise deployment: gate it after boot, so it runs in CI's `ee-postgres-licensed` job and skips everywhere else.
+
+```rust
+boot_request::<App, _, _>(|request, ctx| async move {
+    if super::skip_unlicensed(&ctx) {
+        return;
+    }
+```
+
+Outside `tests/requests/`, call it as `crate::requests::skip_unlicensed(&ctx)`.
+A test that must observe the unlicensed cap instead captures and removes `YORISHIRO_LICENSE_KEY` before boot, so the gate never sees a key.
+
+### CI
+
+CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus a licensed EE PostgreSQL job.
+Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
 The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
-New tests must join the compiled inventory and produce their assigned execution receipt; a backend/provider early return is not passed coverage.
-See `tests/ci/README.md` for assignment rules, artifact provenance and GHA reproduction commands.
-The full-topology commands above remain available for deliberate manual diagnosis, not automatic duplication in every CI topology.
 
 The integration tests are one binary rooted at `tests/mod.rs`:
 
@@ -106,29 +117,21 @@ Do not dismiss an editor diagnostic because a narrower CI command omits its targ
 ## SQLite gate
 
 `tests/mod.rs` exports centralized `require_sqlite_backend()` and `require_postgres_backend()` gates.
-Each gate records selected and skipped gate markers when `YORISHIRO_BACKEND_MARKER_DIR` is set.
 Call sites:
 
 ```rust
 if !require_sqlite_backend() { return; }
 ```
 
-Dedicated SQLite files use this gate:
-- `tests/models/content_entities_sqlite.rs` — entity CRUD (in-memory, seeds via raw SQL)
-- `tests/models/tenancy_sqlite.rs` — tenancy cap
-- `tests/models/search.rs` — vector and FTS5 fallback
-- `tests/requests/auth_sqlite.rs` — authentication
-- `tests/requests/schemas_sqlite.rs` — schema CRUD
-- `tests/requests/workspaces_sqlite.rs` — workspace CRUD
+Files that need a specific backend guard with it:
+- `tests/models/content_entities_sqlite.rs` — entity CRUD seeded via raw SQL
+- `tests/models/tenancy_sqlite.rs` — the SQLite tenancy cap
+- `tests/models/search.rs` — PostgreSQL-only query shapes, guarded the other way
 
-`uv run scripts/test_topology.py` runs the suite with explicit CE or EE feature flags and verifies a configured-app marker emitted after `Hooks::load_config(Environment::Test)` resolves the expected database URI and `QueueConfig` variant.
-The runner rejects unexpected marker directories and fails when the expected topology has no configured-app evidence.
-
-`request_with_create_db` is not wired for SQLite (`CREATE DATABASE` has no SQLite equivalent).
 
 ## `close_app_pools` (required)
 
-**A request test that boots through `request_with_create_db` must call `close_app_pools` before its closure returns, or teardown panics even on a passing test.**
+**`boot_request` closes the pools itself; a test that boots an app by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.**
 
 One definition, in `tests/requests/mod.rs`. One crate means one binary, so every suite reaches it by path.
 
@@ -137,7 +140,7 @@ Test teardown must explicitly close both pools before `DROP DATABASE`.
 
 ## Boot failure diagnostics
 
-A boot failure inside `request_with_create_db` surfaces as a `DROP DATABASE` panic during cleanup, not as the actual boot error. `after_context` opens the identity pool eagerly before `db::converge` runs; if `converge` then fails, that pool holds a session that blocks `DROP DATABASE`.
+A boot failure that leaves a pool open surfaces as a `DROP DATABASE` panic during cleanup, not as the actual boot error. `after_context` opens the identity pool eagerly before `db::converge` runs; if `converge` then fails, that pool holds a session that blocks `DROP DATABASE`.
 
 `close_app_pools` in `tests/requests/mod.rs` closes every pool this app opens. Use it before assuming a `DROP DATABASE` panic is the actual failure.
 

@@ -17,7 +17,7 @@ async fn production_dispatch_records_each_resolved_target() {
     use yorishiro::workers::embedding_sync::WorkerClass;
     use yorishiro::workers::reindex::{ReindexArgs, enqueue_for_class};
 
-    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         for class in [
@@ -76,7 +76,7 @@ async fn production_dispatch_records_each_resolved_target() {
 
 #[tokio::test]
 async fn injected_deliveries_are_consumed_only_by_their_target() {
-    crate::requests::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request::<App, _, _>(|_request, ctx| async move {
         let targets = [
             WorkerTarget::Shared,
             WorkerTarget::Official,

@@ -180,9 +180,9 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::LicenseKey.name()]);
-    guard.remove(crate::env::TestEnv::LicenseKey.name());
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
+    guard.remove("YORISHIRO_LICENSE_KEY");
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let with_key = request
@@ -1043,7 +1043,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
 /// A dispatch failure rolls back the job together with its durable dispatch records.
 #[tokio::test]
 async fn infer_fill_dispatch_failure_rolls_back_job() {
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         if super::skip_unlicensed(&ctx) {
             return;
         }

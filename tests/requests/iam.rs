@@ -1,4 +1,4 @@
-use super::{boot_request_isolated, with_max_tenants};
+use super::{boot_request, with_max_tenants};
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use serial_test::serial;
@@ -31,7 +31,7 @@ pub(crate) async fn iam_mcp_call(
 #[serial(process_environment)]
 async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
     with_max_tenants("1", async move {
-        boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             let response = request
                 .post("/setup")
                 .json(&serde_json::json!({
@@ -720,7 +720,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
 #[serial(process_environment)]
 async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
     with_max_tenants("1", async move {
-        boot_request_isolated::<App, _, _>(|request, _ctx| async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
             macro_rules! bearer {
                 ($key:expr, $builder:expr) => {
                     $builder.add_header("Authorization", format!("Bearer {}", $key))
