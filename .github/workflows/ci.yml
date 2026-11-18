@@ -335,7 +335,7 @@ jobs:
         with:
           shared-key: test-ee-valkey
       - name: Run the Valkey queue tests
-        run: make test-valkey EDITION=ee VALKEY_URL=redis://localhost:6379
+        run: make test-valkey EDITION=ee VALKEY_URL=redis://127.0.0.1:6379
 
   public-contract:
     name: Public contracts (SQLite, ${{ matrix.edition }}, ${{ matrix.suite }})
