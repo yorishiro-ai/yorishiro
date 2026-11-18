@@ -2,7 +2,7 @@
 
 ## Repository overview
 
-This repository is a [Loco](https://loco.rs) 1.2.0 application with a Laravel-like design: thin entry points, fat models, transport DTOs, jobs, and providers.
+This repository is a [Loco](https://loco.rs) 1.3.1 application with a Laravel-like design: thin entry points, fat models, transport DTOs, jobs, and providers.
 
 ## Repository layout
 

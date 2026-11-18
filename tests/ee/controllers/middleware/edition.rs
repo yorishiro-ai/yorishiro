@@ -25,7 +25,7 @@ async fn resolved_licence_settings_fail_closed_without_blocking_startup() {
             directory.path().join("queue.sqlite3").display()
         ),
     );
-    let env = loco_rs::environment::Environment::Any("test_sqlite".into());
+    let env = loco_rs::environment::Environment::Test;
     let mut config = yorishiro::App::load_config(&env).await.unwrap();
     assert_eq!(
         config.initializers.as_ref().unwrap()["licence_key"],

@@ -224,7 +224,7 @@ class ArgumentTests(unittest.TestCase):
                     patch.dict("os.environ", values, clear=True):
                 if valid:
                     app = run.App(args, directory)
-                    self.assertEqual(app.environment, "test_postgres")
+                    self.assertEqual(app.environment, "test")
                     self.assertEqual(app.env["DATABASE_URL"], "postgres://owned/db")
                     self.assertEqual(app.env["YORISHIRO_LICENSE_KEY"], "signed")
                 else:
@@ -417,7 +417,7 @@ class ArgumentTests(unittest.TestCase):
                 self.assertLessEqual(app.deadline, deadline)
                 app.deadline = 0
                 app.remaining()
-            self.assertEqual(popen.call_args.args[0], [str(args.binary), "--environment", "test_sqlite",
+            self.assertEqual(popen.call_args.args[0], [str(args.binary), "--environment", "test",
                                                       "start", "--worker=job-target:shared", "--no-banner"])
             self.assertIs(popen.call_args.kwargs["env"], app.env)
             self.assertTrue(popen.call_args.kwargs["start_new_session"])

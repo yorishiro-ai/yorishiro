@@ -1,3 +1,7 @@
+# Test environment (LOCO_ENV=test, Loco's default under cargo test).
+# The database follows DATABASE_URL's scheme; the queue follows YORISHIRO_QUEUE_KIND, or the database when unset.
+# The tenant cap policy lives in the edition, not here.
+
 # Loco configuration file documentation
 
 # Application logging configuration
@@ -44,14 +48,42 @@ scheduler:
 
 
 # Queue Configuration
-# This environment keeps the application database independent from the external Redis-compatible provider.
+#
 queue:
+<% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL") %>
   dangerously_flush: false
   queues: null
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper: null
+<% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
+  kind: Sqlite
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: 500
+  idle_timeout: 500
+  min_connections: 1
+  max_connections: 10
+  uri: '<%= get_env(name="QUEUE_URL", default="sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc") %>'
+  dangerously_flush: false
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="1") %>
+  reaper:
+    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
+    interval_seconds: 60
+<% else %>
+  kind: Postgres
+  enable_logging: true
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
+  dangerously_flush: false
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+  reaper:
+    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
+    interval_seconds: 60
+<% endif %>
 
 workers:
   mode: BackgroundQueue
@@ -87,25 +119,25 @@ settings:
 #      - client_identifier: google # Identifier for the OAuth2 provider. Replace 'google' with your provider's name if different, must be unique within the oauth2 config.
 #        ... other fields
 
-# Database Configuration
 database:
-  # Database connection URI
+<% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
+  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") %>'
+  run_on_start: "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA mmap_size = 134217728; PRAGMA journal_size_limit = 67108864; PRAGMA cache_size = 2000; PRAGMA busy_timeout = 5000;"
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: 500
+  idle_timeout: 500
+  min_connections: 1
+  max_connections: 10
+<% else %>
   uri: <%= get_env(name="DATABASE_URL") %>
-  # When enabled, the sql query will be logged.
   enable_logging: true
-  # Set the timeout duration when acquiring a connection.
   connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
-  # Set the idle duration before closing a connection.
   idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
-  # Minimum number of connections for a pool.
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
-  # Maximum number of connections for a pool.
   max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
-  # Run migration up when application loaded
+<% endif %>
   auto_migrate: true
-  # Truncate database when application loaded. This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
-  # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
 
 # Authentication Configuration

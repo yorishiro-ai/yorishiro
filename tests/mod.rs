@@ -41,17 +41,16 @@ async fn has_active_job(
         > 0)
 }
 
-/// Isolated SQLite fixtures must not inherit a PostgreSQL DATABASE_URL from the selected full-suite lane.
-/// Render first, replace owned URIs, then validate the final SQLite/SQLite pair without mutating process environment.
+/// A SQLite application config for fixtures, whichever backend the suite runs on.
+/// The ambient `DATABASE_URL` and queue settings are replaced while the test configuration renders, then restored.
 pub(crate) fn sqlite_fixture_config(uri: &str) -> loco_rs::config::Config {
-    let _environment = EnvironmentRead::enter();
-    let mut config = loco_rs::environment::Environment::Any("test_sqlite".into())
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
+    guard.set("DATABASE_URL", uri);
+    guard.set("QUEUE_URL", "sqlite::memory:");
+    guard.remove("YORISHIRO_QUEUE_KIND");
+    let config = loco_rs::environment::Environment::Test
         .load()
         .expect("render SQLite fixture configuration");
-    config.database.uri = uri.into();
-    if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
-        queue.uri = "sqlite::memory:".into();
-    }
     yorishiro::data::config::validate_queue_policy(&config).expect("validate SQLite fixture pair");
     config
 }
@@ -235,6 +234,7 @@ fn env_guard_restores_original_value_during_unwind() {
 }
 
 fn is_backend(expected: &str) -> bool {
+    let _environment = EnvironmentRead::enter();
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
     let prefixes: &[&str] = if expected == "sqlite" {
         &["sqlite:"]

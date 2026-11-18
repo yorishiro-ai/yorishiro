@@ -19,20 +19,17 @@ use crate::error::YorishiroError;
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn load(environment: &Environment) -> Result<Config> {
-    let environment = test_environment(environment);
-    let folder = crate::data::env::Env::LocoConfigFolder
-        .read_os()
-        .map(PathBuf::from);
+    let folder = crate::data::env::config_folder().map(PathBuf::from);
     let config = if let Some(folder) = folder.as_ref()
         && matches!(environment, Environment::Production)
         && !folder.join("production.yaml").exists()
         && !folder.join("production.local.yaml").exists()
         && folder.join("production.yaml.example").exists()
     {
-        load_example(folder, &environment)?
+        load_example(folder, environment)?
     } else {
         Config::from_folder(
-            &environment,
+            environment,
             folder.as_deref().unwrap_or_else(|| Path::new("config")),
         )?
     };
@@ -57,29 +54,6 @@ fn load_example(folder: &Path, environment: &Environment) -> Result<Config> {
     })();
     fs::remove_dir_all(example_folder)?;
     result
-}
-
-fn test_environment(environment: &Environment) -> Environment {
-    match environment {
-        Environment::Test => {
-            if let Ok(topology) = crate::data::env::Env::TestTopology.read() {
-                return Environment::Any(match topology.as_str() {
-                    "sqlite-sqlite" => "test_sqlite".into(),
-                    "postgres-postgres" => "test_postgres".into(),
-                    _ => format!("test_{}", topology.replace('-', "_")),
-                });
-            }
-            let sqlite = crate::data::env::Env::DatabaseUrl
-                .read()
-                .is_ok_and(|url| is_sqlite_uri(&url));
-            if sqlite {
-                Environment::Any("test_sqlite".into())
-            } else {
-                Environment::Any("test_postgres".into())
-            }
-        }
-        other => other.clone(),
-    }
 }
 
 /// Validates application-owned settings that are stricter than Loco's generic config.

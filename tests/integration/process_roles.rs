@@ -9,7 +9,7 @@ fn yorishiro(dir: &std::path::Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_yorishiro"))
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .env("LOCO_ENV", "test_sqlite")
+        .env("LOCO_ENV", "test")
         .env("DATABASE_URL", uri("app.sqlite3"))
         .env("QUEUE_URL", uri("queue.sqlite3"))
         .env("YORISHIRO_EMBEDDING_PROVIDER", "local")
@@ -182,12 +182,7 @@ fn a_worker_target_is_read_from_every_form_the_command_line_accepts() {
             "--port",
             "5151",
         ],
-        vec![
-            "-e",
-            "test_sqlite",
-            "start",
-            "--worker=worker-target:shared",
-        ],
+        vec!["-e", "test", "start", "--worker=worker-target:shared"],
         vec![
             "start",
             "--worker=worker-target:tenant:0198f3a0-0000-7000-8000-00000000000a",

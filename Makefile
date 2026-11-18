@@ -14,12 +14,12 @@ export CARGO_TARGET_DIR := $(abspath target)
 export PATH := $(CARGO_HOME)/bin:$(PATH)
 
 coverage test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
-task doctor migrate entities: export LOCO_ENV = test_postgres
+task doctor migrate entities: export LOCO_ENV = test
 coverage test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
 coverage test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
-test-postgres test-sqlite: export RUST_BACKTRACE ?= 1
+test-postgres test-sqlite test-valkey: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -85,6 +85,13 @@ test-postgres: patch-check
 
 test-sqlite: patch-check
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES)
+
+# The Valkey queue (Redis-compatible) next to a SQLite database. Set VALKEY_URL to use another server.
+# Only the tests that exercise the provider itself run here; everything else is queue-provider agnostic and runs on the SQL queues.
+VALKEY_URL ?= redis://localhost:6379
+test-valkey: patch-check
+	@if [ "$(VALKEY_URL)" = "redis://localhost:6379" ]; then docker compose up -d --wait redis; fi
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' YORISHIRO_QUEUE_KIND=Redis QUEUE_URL='$(VALKEY_URL)' cargo test --locked --workspace $(TEST_FEATURES) -- workers::dispatch workers::queue::upstream_fixes requests::queue::configured_queue_orders_competing_jobs_by_priority
 
 build: build-ce
 

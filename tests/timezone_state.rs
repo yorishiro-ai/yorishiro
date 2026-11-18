@@ -140,7 +140,7 @@ async fn sqlite_current_timestamp_default_uses_configured_zone_on_each_boot() {
         .into_iter()
         .enumerate()
     {
-        let env = loco_rs::environment::Environment::Any("test_sqlite".into());
+        let env = loco_rs::environment::Environment::Test;
         let mut config = yorishiro::App::load_config(&env).await.unwrap();
         config.database.uri = format!("sqlite://{db_path}?mode=rwc");
         if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
@@ -246,7 +246,7 @@ async fn sqlite_app_pool_executes_startup_effects_once_not_per_connection() {
     let db_path = directory
         .path()
         .join(format!("custom-pragmas-{}.sqlite3", uuid::Uuid::now_v7()));
-    let env = loco_rs::environment::Environment::Any("test_sqlite".into());
+    let env = loco_rs::environment::Environment::Test;
     let mut config = yorishiro::App::load_config(&env).await.unwrap();
     config.database.uri = format!("sqlite://{}?mode=rwc", db_path.display());
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
@@ -300,7 +300,7 @@ async fn sqlite_timestamp_fixture_is_independent_of_redis_queue_url() {
     let queue_guard = crate::EnvGuard::capture(&["QUEUE_URL"]);
     queue_guard.set("QUEUE_URL", "redis://127.0.0.1:6379/15");
     let directory = tempfile::tempdir().unwrap();
-    let env = loco_rs::environment::Environment::Any("test_sqlite".into());
+    let env = loco_rs::environment::Environment::Test;
     let mut config = yorishiro::App::load_config(&env).await.unwrap();
     config.database.uri = format!(
         "sqlite://{}?mode=rwc",

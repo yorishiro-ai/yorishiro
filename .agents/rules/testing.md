@@ -7,6 +7,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | Command | What it does | Backend |
 |---|---|---|
 | `make test-sqlite` | The whole suite on SQLite (`cargo test`); `EDITION=ce` selects community, the default is `ee` | SQLite |
+| `make test-valkey` | Only the Valkey queue provider tests, with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` (default: the compose `redis` service) | SQLite + Valkey |
 | `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
@@ -27,7 +28,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `DB_MAX_CONNECTIONS` | `100` in CI and the PostgreSQL example | PostgreSQL pool maximum; production defaults are documented separately |
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
 The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
-A Redis queue runs only behind `YORISHIRO_TEST_TOPOLOGY=sqlite-redis` with `YORISHIRO_TEST_REDIS_BASE_URL` naming a server; CI never selects it, and its tests skip otherwise.
+A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` naming a server; the Valkey tests skip otherwise.
 Licensed tests skip unless `YORISHIRO_LICENSE_KEY` holds a valid key; the CI job `ee-postgres-licensed` supplies it.
 The pinned E5 model tests skip unless `models/multilingual-e5-base/` holds the model files.
 `UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff.

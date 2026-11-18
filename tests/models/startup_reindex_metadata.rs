@@ -75,7 +75,7 @@ fn local_metadata_uses_provider_model_id_and_declared_width() {
 }
 
 fn config_with_embedding(embedding: serde_json::Value) -> loco_rs::config::Config {
-    let mut config = loco_rs::environment::Environment::Any("test_sqlite".into())
+    let mut config = loco_rs::environment::Environment::Test
         .load()
         .expect("load test settings");
     config.settings.as_mut().unwrap()["embedding"] = embedding;

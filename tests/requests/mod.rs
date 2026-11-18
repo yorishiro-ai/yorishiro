@@ -98,7 +98,7 @@ use std::str::FromStr;
 /// `after_context` adds a tenant pool and shares the application pool with identity operations.
 /// Leaving a pool open means a session survives on the throwaway test database,
 /// and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
-/// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
+/// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
     yorishiro::App::on_shutdown(ctx).await;
@@ -301,13 +301,16 @@ where
 async fn serve<H: Hooks>(
     mut config: loco_rs::config::Config,
 ) -> (TestServer, loco_rs::app::AppContext) {
+    static NEXT_DATABASE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
     if let Some(loco_rs::config::QueueConfig::Redis(queue)) = config.queue.as_mut() {
-        static NEXT_DATABASE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let service = std::env::var("YORISHIRO_TEST_REDIS_BASE_URL")
-            .expect("Redis app fixtures require the matrix service URL");
+        // Each app gets its own logical Redis database on the configured server.
         let database = NEXT_DATABASE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         assert!(database < 65536, "matrix Redis logical databases exhausted");
-        let (base, _) = service.rsplit_once('/').expect("Redis database URL");
+        let uri = queue.uri.trim_end_matches('/');
+        let base = match uri.rsplit_once('/') {
+            Some((head, db)) if !db.is_empty() && db.bytes().all(|b| b.is_ascii_digit()) => head,
+            _ => uri,
+        };
         queue.uri = format!("{base}/{database}");
     }
     config.server.port = loco_rs::testing::prelude::get_available_port().await;

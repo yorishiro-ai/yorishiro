@@ -12,7 +12,7 @@ Their internal predecessors were retired after the expanded replacement passed G
 
 Requires Python 3.10+ and an already-built SQLite-capable application binary.
 No Python dependencies, database access library, network embedding provider, model download, licence, or running external service is needed.
-The runner reads the repository's `config/test_sqlite.yaml` and copies it into its owned temporary working directory.
+The runner reads the repository's `config/test.yaml` and copies it into its owned temporary working directory.
 Run from any directory, retaining this repository checkout beside the runner.
 
 ```sh
@@ -37,7 +37,7 @@ Each invocation runs public `db migrate` and CLI tenant/workspace/key creation a
 The CLI suite proves migration and normal tasks succeed.
 It starts one server and reuses it for the whole suite.
 Loco 1.2.0 defaults `start --no-banner` to server-only mode.
-REST and MCP additionally start a separate `--environment test_sqlite start --worker=job-target:shared --no-banner` process only after import submission and queued/empty-destination assertions.
+REST and MCP additionally start a separate `--environment test start --worker=job-target:shared --no-banner` process only after import submission and queued/empty-destination assertions.
 The worker uses the server's exact environment, application database and separate queue database.
 Children receive an allowlisted environment, an owned home directory, and embedding provider `none`.
 The owned config disables auto-migration after explicit migration, and the auth rate limit is raised for these isolated checks.
