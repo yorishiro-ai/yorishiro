@@ -2517,7 +2517,24 @@ async fn mcp_tenant_users_cannot_join_another_tenant() {
             json!({"name":"remove_member","arguments":{"user_id":home_user}}),
         )
         .await;
-        assert_eq!(joined["result"]["isError"], true, "{joined}");
+        assert_eq!(joined["result"]["isError"], false, "{joined}");
+        let listed = mcp_call(
+            &request,
+            &session,
+            &tenant_key,
+            8,
+            "tools/call",
+            json!({"name":"list_members","arguments":{}}),
+        )
+        .await;
+        assert!(
+            tool_result_json(&listed)
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|member| member["user_id"] == home_user),
+            "another tenant cannot remove this tenant's user"
+        );
     })
     .await;
 }
