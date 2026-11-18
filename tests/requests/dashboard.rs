@@ -8,7 +8,7 @@ async fn overview_distinguishes_billing_manual_and_active_limits() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "true");
     boot_request::<App, _, _>(|request, ctx| async move {

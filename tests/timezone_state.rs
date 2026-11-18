@@ -47,7 +47,7 @@ async fn postgres_pool_replacement_keeps_uri_settings_without_replaying_startup(
     if !crate::require_postgres_backend() {
         return;
     }
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|_request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let mut config = ctx.config.clone();
         config.database.min_connections = 1;
         config.database.max_connections = 2;
@@ -297,11 +297,8 @@ async fn sqlite_timestamp_fixture_is_independent_of_redis_queue_url() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    let queue_guard = crate::EnvGuard::capture(&[crate::env::TestEnv::QueueUrl.name()]);
-    queue_guard.set(
-        crate::env::TestEnv::QueueUrl.name(),
-        "redis://127.0.0.1:6379/15",
-    );
+    let queue_guard = crate::EnvGuard::capture(&["QUEUE_URL"]);
+    queue_guard.set("QUEUE_URL", "redis://127.0.0.1:6379/15");
     let directory = tempfile::tempdir().unwrap();
     let env = loco_rs::environment::Environment::Any("test_sqlite".into());
     let mut config = yorishiro::App::load_config(&env).await.unwrap();

@@ -386,7 +386,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
         }),
     ))
     .await;
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = super::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         let provider = Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
             base_url: server.url.clone(),

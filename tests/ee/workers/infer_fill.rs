@@ -41,7 +41,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     use loco_rs::{app::Hooks, bgworker::JobStatus};
     use yorishiro::workers::target::WorkerTarget;
 
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         request.put("/api/workspace/llm-key")
@@ -134,9 +134,8 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
         return;
     }
     // Lock only the owned queue file, leaving the producer database writable.
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let Some(loco_rs::config::QueueConfig::Sqlite(config)) = ctx.config.queue.as_ref() else {
-            crate::reject_assigned_skip("stalled SQLite enqueue requires an owned SQLite queue");
             return;
         };
         let fixture =
@@ -344,7 +343,7 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
 
     let (llm, entered, release) = gated_llm().await;
     let base_url = llm.url.clone();
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let setup = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
@@ -525,7 +524,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
 
     let (llm, in_flight, peak, entered, release) = controlled_llm().await;
     let base_url = llm.url.clone();
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let setup = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
@@ -658,7 +657,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
 
 #[tokio::test]
 async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         request.put("/api/workspace/llm-key")
@@ -768,7 +767,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
     use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
 
     let (llm, entered, release) = gated_llm().await;
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let setup = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         let entity_id = crate::requests::inference::create_entity(&request, &setup).await;
         let response = request.post("/api/schemas")

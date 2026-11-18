@@ -17,7 +17,7 @@ use yorishiro::workers::embedding_sync::WorkerClass;
 use yorishiro::workers::startup_reindex;
 
 use crate::http_stub::HttpStub;
-use crate::requests::boot_request_isolated;
+use crate::requests::boot_request;
 
 /// A workspace stamped with `model`, and a worker context that enqueues through the configured Loco provider.
 async fn scenario(
@@ -70,7 +70,7 @@ async fn deployment_document_prefix_change_queues_and_restamps_after_publication
     use yorishiro::models::{
         entity_embeddings, entity_entities, schema_schemas, workspace_workspaces,
     };
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace = tenant.workspace_id;
         let inputs = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
@@ -185,7 +185,7 @@ async fn deployment_document_prefix_change_queues_and_restamps_after_publication
 
 #[tokio::test]
 async fn a_workspace_stamped_with_another_model_is_queued_for_reindex() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
         assert!(matches!(worker.environment, Environment::Test));
         startup_reindex::run(&worker).await;
@@ -204,7 +204,7 @@ async fn a_workspace_stamped_with_another_model_is_queued_for_reindex() {
 
 #[tokio::test]
 async fn a_workspace_already_on_the_configured_model_is_left_alone() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (worker, _server, workspace) = scenario(&request, &ctx, "startup-test-model").await;
         startup_reindex::run(&worker).await;
         assert!(!queued(&ctx, workspace).await);
@@ -214,7 +214,7 @@ async fn a_workspace_already_on_the_configured_model_is_left_alone() {
 
 #[tokio::test]
 async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace = tenant.workspace_id;
         let matching_workspace = {
@@ -284,7 +284,7 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
 #[tokio::test]
 async fn a_workspace_with_a_reindex_already_active_is_skipped() {
     for startup in [false, true] {
-        boot_request_isolated::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
             yorishiro::workers::reindex::enqueue_for_class(
                 &worker,
@@ -322,7 +322,7 @@ async fn postgres_replicas_take_the_scan_lock_one_at_a_time() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
 
         let holder = ctx.db.begin().await.expect("begin");
@@ -351,7 +351,7 @@ async fn concurrent_sqlite_scans_admit_only_one_reindex() {
     if !crate::require_sqlite_backend() {
         return;
     }
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (worker, _server, workspace) = scenario(&request, &ctx, "an-older-model").await;
         let first = startup_reindex::run(&worker);
         let second = startup_reindex::run(&worker);
@@ -380,7 +380,7 @@ async fn parallel_sqlite_boots_keep_their_database_parents_alive() {
     }
 
     let boots = (0..8).map(|_| async {
-        crate::requests::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
+        crate::requests::boot_request::<App, _, _>(|_request, ctx| async move {
             ctx.db.ping().await.expect("ping sqlite test database");
         })
         .await;

@@ -16,7 +16,7 @@ use yorishiro::App;
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::workers::target::WorkerTarget;
 
-use super::boot_request_isolated;
+use super::boot_request;
 
 /// Configures and registers a shared-target consumer through Loco, without starting its loop.
 ///
@@ -111,5 +111,5 @@ pub(crate) async fn boot_with_query_worker_and_drain<F, Fut, D, Done>(
         close_result.expect("close query worker queue");
         after_drain(ctx).await;
     };
-    boot_request_isolated::<App, _, _>(run).await;
+    boot_request::<App, _, _>(run).await;
 }

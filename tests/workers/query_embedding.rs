@@ -15,7 +15,7 @@ use yorishiro::services::embedding::{
 use yorishiro::workers::query_embedding::{QueryEmbeddingArgs, QueryEmbeddingWorker};
 use yorishiro::workers::target::WorkerTarget;
 
-use crate::requests::boot_request_isolated as boot_request;
+use crate::requests::boot_request;
 
 async fn workspace(request: &loco_rs::TestServer, ctx: &AppContext) -> Uuid {
     crate::requests::fixtures::TestTenant::create(request, ctx, Default::default())

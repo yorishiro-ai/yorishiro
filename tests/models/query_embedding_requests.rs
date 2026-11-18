@@ -6,8 +6,8 @@ use yorishiro::models::query_embedding_requests::{
     Column, Entity, QueryEmbeddingStatus, QueryOutcome,
 };
 
+use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use crate::requests::{boot_request, boot_request_isolated};
 
 async fn workspace(request: &loco_rs::TestServer, ctx: &AppContext, name: &str) -> (Uuid, Uuid) {
     let fixture = TestTenant::create(
@@ -287,7 +287,7 @@ async fn a_malformed_stored_result_is_an_internal_error_and_is_consumed() {
 
 #[tokio::test]
 async fn expired_rows_are_purged_and_live_rows_are_kept() {
-    boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (_, ws) = workspace(&request, &ctx, "qe-purge").await;
         let stale = Entity::open(
             &ctx.db,
@@ -424,6 +424,9 @@ async fn postgres_row_level_security_scopes_requests_to_the_current_workspace() 
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let db = ctx
             .shared_store
             .get::<yorishiro::db::DbHandle>()

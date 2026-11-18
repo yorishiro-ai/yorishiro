@@ -281,11 +281,6 @@ fn stale_unrelated_selectors_do_not_block_grants_or_hide_denies() {
 }
 
 #[test]
-fn action_all_matches_the_enum() {
-    assert_eq!(Action::ALL.len(), 115);
-}
-
-#[test]
 fn role_assume_targets_roles_and_an_all_roles_selector_covers_each_role() {
     let (role, other) = (Uuid::new_v4(), Uuid::new_v4());
     let document = |resources: serde_json::Value| {

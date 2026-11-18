@@ -21,7 +21,7 @@ fn tenant_reindex_scheduler_is_registered_in_community() {
 
 #[tokio::test]
 async fn community_task_scans_mismatch_without_constructing_a_provider() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
         let fixture =
@@ -150,7 +150,7 @@ async fn community_task_scans_mismatch_without_constructing_a_provider() {
 async fn enqueue_rejection_is_workspace_scoped_and_scan_continues() {
     use sea_orm::DbBackend;
 
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
         let first = crate::requests::fixtures::TestTenant::create(
@@ -220,7 +220,7 @@ async fn enqueue_rejection_is_workspace_scoped_and_scan_continues() {
 async fn all_enqueue_failures_are_aggregated_with_each_workspace_id() {
     use sea_orm::DbBackend;
 
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
         let first = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
@@ -263,7 +263,7 @@ async fn all_enqueue_failures_are_aggregated_with_each_workspace_id() {
 
 #[tokio::test]
 async fn missing_lifecycle_table_returns_workspace_lookup_error() {
-    crate::requests::boot_request_isolated::<yorishiro::App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
         let fixture =

@@ -15,18 +15,18 @@ const ISSUER_URL: &str = "http://127.0.0.1:1";
 const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
 const OAUTH_VARS: [&str; 3] = [
-    crate::env::TestEnv::OauthIssuerUrl.name(),
-    crate::env::TestEnv::OauthClientId.name(),
-    crate::env::TestEnv::OauthClientSecret.name(),
+    "YORISHIRO_OAUTH_ISSUER_URL",
+    "YORISHIRO_OAUTH_CLIENT_ID",
+    "YORISHIRO_OAUTH_CLIENT_SECRET",
 ];
 
 /// The shipped Loco configuration interpolates these values before each app boots.
 /// Callers that change these variables take `serial(process_environment)`.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
-    guard.set(crate::env::TestEnv::OauthIssuerUrl.name(), ISSUER_URL);
-    guard.set(crate::env::TestEnv::OauthClientId.name(), CLIENT_ID);
-    guard.set(crate::env::TestEnv::OauthClientSecret.name(), CLIENT_SECRET);
+    guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
+    guard.set("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
+    guard.set("YORISHIRO_OAUTH_CLIENT_SECRET", CLIENT_SECRET);
     fut.await
 }
 /// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
@@ -78,12 +78,9 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 #[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
-    guard.remove(crate::env::TestEnv::OauthClientId.name());
-    guard.remove(crate::env::TestEnv::OauthClientSecret.name());
-    guard.set(
-        crate::env::TestEnv::OauthIssuerUrl.name(),
-        "https://idp.example.com",
-    );
+    guard.remove("YORISHIRO_OAUTH_CLIENT_ID");
+    guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
+    guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
     boot_request::<App, _, _>(|request, ctx| async move {
         if super::skip_unlicensed(&ctx) {
             return;
@@ -275,7 +272,7 @@ async fn callback_rejects_an_expired_state() {
 /// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
 #[tokio::test]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         super::fixtures::TestTenant::create(&request, &ctx, super::fixtures::TenantArgs::default())
             .await;
 
@@ -318,7 +315,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 /// The workspace is provisioned with a schema from the built-in `general-notes` template and left `active`.
 #[tokio::test]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
-    super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
+    super::boot_request::<App, _, _>(|_request, ctx| async move {
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
@@ -387,15 +384,15 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 #[tokio::test]
 #[serial(process_environment)]
 async fn oauth_provisioning_policy_controls_new_caps() {
-    let guard = crate::EnvGuard::capture(&[crate::env::TestEnv::PlanPolicyEnabled.name()]);
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
     for (index, value, expected_tenant, expected_entities) in
         [(0, None, None, None), (1, Some("true"), None, None)]
     {
         match value {
-            Some(v) => guard.set(crate::env::TestEnv::PlanPolicyEnabled.name(), v),
-            None => guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name()),
+            Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
+            None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
         }
-        super::boot_request_isolated::<App, _, _>(|_request, ctx| async move {
+        super::boot_request::<App, _, _>(|_request, ctx| async move {
             if super::skip_unlicensed(&ctx) {
                 return;
             }

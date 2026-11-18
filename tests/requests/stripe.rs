@@ -1,4 +1,4 @@
-use super::boot_request_isolated as boot_request;
+use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant};
 use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
@@ -16,16 +16,13 @@ const WEBHOOK_SECRET: &str = "whsec_test";
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&[
-        crate::env::TestEnv::StripeWebhookSecret.name(),
-        crate::env::TestEnv::StripePricePro.name(),
-        crate::env::TestEnv::StripePriceTeam.name(),
+        "YORISHIRO_STRIPE_WEBHOOK_SECRET",
+        "YORISHIRO_STRIPE_PRICE_PRO",
+        "YORISHIRO_STRIPE_PRICE_TEAM",
     ]);
-    guard.set(
-        crate::env::TestEnv::StripeWebhookSecret.name(),
-        WEBHOOK_SECRET,
-    );
-    guard.set(crate::env::TestEnv::StripePricePro.name(), "price_pro");
-    guard.set(crate::env::TestEnv::StripePriceTeam.name(), "price_team");
+    guard.set("YORISHIRO_STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET);
+    guard.set("YORISHIRO_STRIPE_PRICE_PRO", "price_pro");
+    guard.set("YORISHIRO_STRIPE_PRICE_TEAM", "price_team");
     fut.await
 }
 fn sign(secret: &str, timestamp: i64, payload: &[u8]) -> String {
@@ -87,20 +84,20 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                 return;
             }
             let changed = crate::EnvGuard::capture(&[
-                crate::env::TestEnv::StripeWebhookSecret.name(),
-                crate::env::TestEnv::StripePricePro.name(),
-                crate::env::TestEnv::StripePriceTeam.name(),
+                "YORISHIRO_STRIPE_WEBHOOK_SECRET",
+                "YORISHIRO_STRIPE_PRICE_PRO",
+                "YORISHIRO_STRIPE_PRICE_TEAM",
             ]);
             changed.set(
-                crate::env::TestEnv::StripeWebhookSecret.name(),
+                "YORISHIRO_STRIPE_WEBHOOK_SECRET",
                 "changed-after-config-load",
             );
             changed.set(
-                crate::env::TestEnv::StripePricePro.name(),
+                "YORISHIRO_STRIPE_PRICE_PRO",
                 "changed-price-after-config-load",
             );
             changed.set(
-                crate::env::TestEnv::StripePriceTeam.name(),
+                "YORISHIRO_STRIPE_PRICE_TEAM",
                 "changed-team-after-config-load",
             );
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
@@ -167,8 +164,8 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_cancellation_returns_the_tenant_to_free() {
-    let policy = crate::EnvGuard::capture(&[crate::env::TestEnv::PlanPolicyEnabled.name()]);
-    policy.set(crate::env::TestEnv::PlanPolicyEnabled.name(), "true");
+    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    policy.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             if super::skip_unlicensed(&ctx) {
@@ -243,8 +240,8 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 #[tokio::test]
 #[serial(process_environment)]
 async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
-    let policy = crate::EnvGuard::capture(&[crate::env::TestEnv::PlanPolicyEnabled.name()]);
-    policy.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
+    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
+    policy.remove("YORISHIRO_PLAN_POLICY_ENABLED");
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             if super::skip_unlicensed(&ctx) {

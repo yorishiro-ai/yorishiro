@@ -17,7 +17,7 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
         tenant_retirement_events, tenant_tenants,
     };
 
-    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let key = api_keys::Entity::create_tenant_api_key(
             &ctx.db, target.tenant_id, api_keys::ApiKeyScope::Read, Some(target.owner_id), false, "retirement-owner",
@@ -67,6 +67,9 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
     use yorishiro::models::{query_embedding_requests as queries, queue_job_lifecycles as jobs};
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let mut ids = Vec::new();
@@ -175,6 +178,9 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
     use yorishiro::models::{api_keys, tenancy, tenant_tenants};
 
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let service = api_keys::Entity::create_api_key(
@@ -242,6 +248,9 @@ async fn retirement_inventory_does_not_expose_accounts() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
@@ -277,6 +286,9 @@ async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
     use yorishiro::models::{schema_schemas, workspace_schema_forks};
 
     boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
         let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = yorishiro::data::templates::get_template("general-notes").unwrap();

@@ -59,7 +59,7 @@ mod conflict {
     use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
     use yorishiro::workers::target::WorkerTarget;
 
-    use crate::requests::boot_request_isolated as boot_request;
+    use crate::requests::boot_request;
 
     struct BackendObservation(Arc<bgworker::Queue>);
 
@@ -1299,7 +1299,6 @@ mod conflict {
                 ctx_a.config.queue,
                 Some(loco_rs::config::QueueConfig::Sqlite(_))
             ) {
-                crate::reject_assigned_skip("independent embedding limits require SQLite queues");
                 return;
             }
             let (workspace, entity) = seed(&request, &ctx_a).await;

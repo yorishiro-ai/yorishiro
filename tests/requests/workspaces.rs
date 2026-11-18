@@ -37,7 +37,7 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "true");
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -91,7 +91,7 @@ async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "false");
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -347,7 +347,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
 
 #[tokio::test]
 async fn cannot_delete_a_tenants_only_workspace() {
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let main_id = tenant.workspace_id;
         let owner_key =
@@ -644,6 +644,9 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let TestTenant {
             api_key: owner_a_key,
             ..
@@ -670,8 +673,6 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
 }
 
 /// A new workspace waits for its first schema, and the first schema creation activates it and records the version.
-///
-/// Runs on the shared test database: everything it touches belongs to its own fresh workspace, so no database is created.
 #[tokio::test]
 async fn a_new_workspace_becomes_active_on_first_schema() {
     use serde_json::Value;

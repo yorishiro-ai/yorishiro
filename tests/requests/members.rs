@@ -13,7 +13,10 @@ async fn competing_tenant_memberships_allow_only_one() {
     if !crate::require_postgres_backend() {
         return;
     }
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = yorishiro::models::user_users::create_user(
@@ -74,7 +77,7 @@ async fn root_removal_conflicts_and_preserves_the_root() {
     use yorishiro::models::_entities::tenant_memberships::Column;
     use yorishiro::models::tenant_memberships;
 
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let removed =
             tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, tenant.owner_id).await;

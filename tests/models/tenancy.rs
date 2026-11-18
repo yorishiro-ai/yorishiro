@@ -18,7 +18,7 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    crate::requests::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
         const RACERS: usize = 8;
 
         // A cap of 2 with one workspace already present leaves exactly one slot for eight racers to fight over.

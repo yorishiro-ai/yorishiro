@@ -9,24 +9,17 @@ async fn resolved_licence_settings_fail_closed_without_blocking_startup() {
     use std::sync::Arc;
 
     let directory = tempfile::tempdir().unwrap();
-    let guard = crate::EnvGuard::capture(&[
-        crate::env::TestEnv::LicenseKey.name(),
-        crate::env::TestEnv::DatabaseUrl.name(),
-        crate::env::TestEnv::QueueUrl.name(),
-    ]);
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY", "DATABASE_URL", "QUEUE_URL"]);
+    guard.set("YORISHIRO_LICENSE_KEY", "invalid-key-from-config-load");
     guard.set(
-        crate::env::TestEnv::LicenseKey.name(),
-        "invalid-key-from-config-load",
-    );
-    guard.set(
-        crate::env::TestEnv::DatabaseUrl.name(),
+        "DATABASE_URL",
         format!(
             "sqlite://{}?mode=rwc",
             directory.path().join("app.sqlite3").display()
         ),
     );
     guard.set(
-        crate::env::TestEnv::QueueUrl.name(),
+        "QUEUE_URL",
         format!(
             "sqlite://{}?mode=rwc",
             directory.path().join("queue.sqlite3").display()
@@ -38,10 +31,7 @@ async fn resolved_licence_settings_fail_closed_without_blocking_startup() {
         config.initializers.as_ref().unwrap()["licence_key"],
         "invalid-key-from-config-load"
     );
-    guard.set(
-        crate::env::TestEnv::LicenseKey.name(),
-        "changed-after-config-load",
-    );
+    guard.set("YORISHIRO_LICENSE_KEY", "changed-after-config-load");
     config.database.auto_migrate = false;
     config.database.dangerously_recreate = false;
     config.database.dangerously_truncate = false;

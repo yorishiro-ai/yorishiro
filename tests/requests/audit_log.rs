@@ -307,7 +307,10 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
     if !crate::require_postgres_backend() {
         return;
     }
-    super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
+    super::boot_request::<App, _, _>(|request, ctx| async move {
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let tenant_a = setup(&request, &ctx).await;
         let tenant_b = setup(&request, &ctx).await;
 

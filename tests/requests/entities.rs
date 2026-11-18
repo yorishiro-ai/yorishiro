@@ -13,7 +13,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = crate::env::TestEnv::PlanPolicyEnabled.name();
+    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "true");
     super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
@@ -273,8 +273,6 @@ async fn list_entities_with_filter_returns_501_on_sqlite() {
 }
 
 /// A writer that passes the `updated_at` it read is refused with a conflict when another write lands in between, and a retry with the fresh value succeeds.
-///
-/// Runs on the shared test database: everything it touches is scoped to its own workspace, so a throwaway database would only trip the shared-suite DDL gate.
 #[tokio::test]
 async fn entity_update_refuses_a_stale_expected_updated_at() {
     use axum::http::StatusCode;

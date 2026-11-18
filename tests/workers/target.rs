@@ -297,14 +297,11 @@ mod concurrency {
     #[serial_test::serial(process_environment)]
     async fn same_tenant_private_jobs_keep_their_key_without_a_default_cap() {
         let guard = crate::EnvGuard::capture(&[
-            crate::env::TestEnv::PlanPolicyEnabled.name(),
-            crate::env::TestEnv::WorkerClassTenantPrivateLimit.name(),
+            "YORISHIRO_PLAN_POLICY_ENABLED",
+            "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
         ]);
-        guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
-        guard.set(
-            crate::env::TestEnv::WorkerClassTenantPrivateLimit.name(),
-            "1",
-        );
+        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+        guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
             let a_second = workspace_of(&ctx, tenant_a).await;
@@ -341,15 +338,15 @@ mod concurrency {
             return;
         }
         let guard = crate::EnvGuard::capture(&[
-            crate::env::TestEnv::PlanPolicyEnabled.name(),
-            crate::env::TestEnv::WorkerClassTenantPrivateLimit.name(),
+            "YORISHIRO_PLAN_POLICY_ENABLED",
+            "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
         ]);
-        guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
-        guard.set(
-            crate::env::TestEnv::WorkerClassTenantPrivateLimit.name(),
-            "1",
-        );
+        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+        guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+            if crate::requests::skip_unlicensed(&ctx) {
+                return;
+            }
             let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
             let a_second = workspace_of(&ctx, tenant_a).await;
             let (tenant_b, b_first) = workspace_of_new_tenant(&request, &ctx).await;
@@ -382,13 +379,13 @@ mod concurrency {
     #[serial_test::serial(process_environment)]
     async fn same_tenant_shared_and_official_jobs_keep_their_keys_without_default_caps() {
         let guard = crate::EnvGuard::capture(&[
-            crate::env::TestEnv::PlanPolicyEnabled.name(),
-            crate::env::TestEnv::WorkerClassSharedLimit.name(),
-            crate::env::TestEnv::WorkerOfficialLimit.name(),
+            "YORISHIRO_PLAN_POLICY_ENABLED",
+            "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
+            "YORISHIRO_WORKER_OFFICIAL_LIMIT",
         ]);
-        guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
-        guard.set(crate::env::TestEnv::WorkerClassSharedLimit.name(), "1");
-        guard.set(crate::env::TestEnv::WorkerOfficialLimit.name(), "1");
+        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+        guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "1");
+        guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
             for (class, key) in [
@@ -422,14 +419,17 @@ mod concurrency {
             return;
         }
         let guard = crate::EnvGuard::capture(&[
-            crate::env::TestEnv::PlanPolicyEnabled.name(),
-            crate::env::TestEnv::WorkerClassSharedLimit.name(),
-            crate::env::TestEnv::WorkerOfficialLimit.name(),
+            "YORISHIRO_PLAN_POLICY_ENABLED",
+            "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
+            "YORISHIRO_WORKER_OFFICIAL_LIMIT",
         ]);
-        guard.remove(crate::env::TestEnv::PlanPolicyEnabled.name());
-        guard.set(crate::env::TestEnv::WorkerClassSharedLimit.name(), "1");
-        guard.set(crate::env::TestEnv::WorkerOfficialLimit.name(), "1");
+        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+        guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "1");
+        guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+            if crate::requests::skip_unlicensed(&ctx) {
+                return;
+            }
             let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
             for (class, key) in [
                 (WorkerClass::Shared, "shared:shared"),
