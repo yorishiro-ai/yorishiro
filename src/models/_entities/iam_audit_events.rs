@@ -4,19 +4,17 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "workspace_invites")]
+#[sea_orm(table_name = "iam_audit_events")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub tenant_id: Uuid,
+    pub user_id: Option<Uuid>,
+    pub api_key_id: Uuid,
     #[sea_orm(column_type = "Text")]
-    pub email: String,
-    #[sea_orm(column_type = "Text")]
-    pub role: String,
-    #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
-    pub token_hash: Vec<u8>,
-    pub expires_at: DateTimeWithTimeZone,
-    pub used_at: Option<DateTimeWithTimeZone>,
+    pub action: String,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub detail: Json,
     pub created_at: DateTimeWithTimeZone,
 }
 

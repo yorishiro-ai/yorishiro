@@ -293,6 +293,7 @@ async fn a_workspace_with_a_reindex_already_active_is_skipped() {
                     worker_class: WorkerClass::Shared,
                     workspace_id: workspace,
                     startup,
+                    actor: None,
                 },
             )
             .await

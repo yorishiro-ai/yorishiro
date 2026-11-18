@@ -101,13 +101,13 @@ impl TryFrom<ListEntitiesArgs> for entity_entities::ListEntitiesQuery {
 #[tool_router(vis = "pub(crate)", router = tool_router_entities)]
 impl YorishiroMcpServer {
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Create a new entity (requires write scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Create a new entity (requires write scope and entity_create IAM permission)")]
     pub async fn create_entity(
         &self,
         Parameters(args): Parameters<CreateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("create_entity")?,
@@ -117,6 +117,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityCreate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let input = args.into();
 
@@ -155,13 +161,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "Get a single entity by ID (requires read scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "Get a single entity by ID (requires read scope and entity_get IAM permission)")]
     pub async fn get_entity(
         &self,
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("get_entity")?,
@@ -171,6 +177,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let record = match entity_entities::get(authorized.txn(), workspace_id, args.id).await {
@@ -181,13 +193,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Replace the data of an existing entity (requires write scope); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Replace the data of an existing entity (requires write scope and entity_update IAM permission); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between")]
     pub(crate) async fn update_entity(
         &self,
         Parameters(args): Parameters<UpdateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("update_entity")?,
@@ -197,6 +209,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityUpdate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let updated_by = authorized.auth_context().user_id;
@@ -230,13 +248,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Delete an entity (requires write scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Delete an entity (requires write scope and entity_delete IAM permission)")]
     pub(crate) async fn delete_entity(
         &self,
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("delete_entity")?,
@@ -246,6 +264,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityDelete)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         match entity_entities::delete(authorized.txn(), workspace_id, args.id).await {
@@ -257,13 +281,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "List entities (requires read scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "List entities (requires read scope and entity_list IAM permission)")]
     pub async fn list_entities(
         &self,
         Parameters(args): Parameters<ListEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("list_entities")?,
@@ -273,6 +297,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityList)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let query = match args.try_into() {
             Ok(query) => query,
@@ -290,7 +320,7 @@ impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Report how an entity stands against the active version of its schema \
-                           (requires read scope). Entities are migrated lazily, so one written \
+                           (requires read scope and entity_drift_get IAM permission). Entities are migrated lazily, so one written \
                            against an older version can still contain newer fields. Reports active \
                            fields absent from stored data, including nested fields in existing \
                            objects. Present nulls and type errors are not missing-value diagnostics."
@@ -300,7 +330,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("get_entity_drift")?,
@@ -310,6 +340,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::EntityDriftGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let drift = match entity_entities::drift(authorized.txn(), workspace_id, args.id).await {
@@ -322,7 +358,7 @@ impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Count what migrating a schema's entities to its active version would \
-                           face, without doing it (requires read scope). Reports how many are \
+                           face, without doing it (requires read scope and migration_dry_run IAM permission). Reports how many are \
                            current, how many are behind without missing required fields, and how many lack a \
                            field the active version requires: the last being the work a \
                            migration would have to fill in. Inspects stored data, not only schema \
@@ -333,7 +369,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MigrationDryRunArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("migration_dry_run")?,
@@ -343,6 +379,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::MigrationDryRun)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let report =
@@ -357,7 +399,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Enqueue a fill-defaults job (requires migration scope). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log."
+        description = "Enqueue a fill-defaults job (requires migration scope and migration_fill_defaults IAM permission, rechecked at execution). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log."
     )]
     pub async fn fill_defaults(
         &self,
@@ -395,14 +437,14 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Get a migration job's status (requires migration scope)"
+        description = "Get a migration job's status (requires migration scope and migration_job_get IAM permission)"
     )]
     pub(crate) async fn migration_job_status(
         &self,
         Parameters(args): Parameters<MigrationJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("migration_job_status")?,
@@ -412,6 +454,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::MigrationJobGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         match crate::models::queue_job_lifecycles::migration_job_status(
             authorized.txn(),
             authorized.workspace_id(),
@@ -426,7 +475,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Enqueue workspace embedding reindex (requires migration scope)"
+        description = "Enqueue workspace embedding reindex (requires migration scope and workspace_reindex IAM permission, rechecked before execution and publication)"
     )]
     pub(crate) async fn reindex_workspace(
         &self,
@@ -458,7 +507,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Enqueue undo of a migration job's snapshots (requires migration scope)"
+        description = "Enqueue undo of a migration job's snapshots (requires migration scope and migration_undo IAM permission, rechecked at execution)"
     )]
     pub(crate) async fn undo_migration_job(
         &self,

@@ -23,104 +23,87 @@ use crate::edition::ee::models::marketplace::{
 };
 use crate::models::template_templates::TemplateVisibility;
 
-/// Authentication for every route in this module.
-///
-/// The licence check is not here: `app::licence_gate` covers this module's whole route group and
-/// runs before any handler, so an unlicensed deployment answers the same `404` to everyone rather
-/// than 401ing and thereby telling an anonymous prober that the endpoint exists and is merely
-/// locked. That ordering holds by construction rather than by every handler remembering to check.
-async fn licensed_tenant(
-    ctx: &AppContext,
-    headers: &HeaderMap,
-) -> Result<(Uuid, Option<Uuid>), crate::YorishiroError> {
-    authz::authenticate_tenant(ctx, headers).await
-}
-
 /// `GET /api/marketplace`: community-visible templates from every tenant, ordered by name then id.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::MarketplaceListing]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::MarketplaceListing]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_list"]))), tag = "enterprise"))]
 async fn list_marketplace(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MarketplaceListing>>, ApiError> {
-    // The listing spans every tenant, so the identity is not read, but a valid key is still required, which is what authenticating here enforces.
-    let _ = licensed_tenant(&ctx, &headers).await?;
-    let listings = marketplace_models::list_marketplace(&ctx.db, page.try_into()?).await?;
+    let actor = authz::authenticate(&ctx, &headers).await?;
+    let listings = marketplace_models::list_as(&ctx.db, &actor, page.try_into()?).await?;
     Ok(Json(listings))
 }
 
 /// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::TemplateVersionRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::TemplateVersionRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_version_list"]))), tag = "enterprise"))]
 async fn list_versions(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateVersionRecord>>, ApiError> {
-    let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
+    let actor = authz::authenticate(&ctx, &headers).await?;
     let versions =
-        marketplace_models::list_versions(&ctx.db, tenant_id, template_id, page.try_into()?)
-            .await?;
+        marketplace_models::versions_as(&ctx.db, &actor, template_id, page.try_into()?).await?;
     Ok(Json(versions))
 }
 
 /// `POST /api/marketplace/{id}/versions`: publish the next version of your own template.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::PublishVersionRequest, responses((status = 201, body = crate::edition::ee::controllers::openapi::TemplateVersionRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::PublishVersionRequest, responses((status = 201, body = crate::edition::ee::controllers::openapi::TemplateVersionRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_publish"]))), tag = "enterprise"))]
 async fn publish_version(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
     Json(body): Json<PublishVersionInput>,
 ) -> Result<(StatusCode, Json<TemplateVersionRecord>), ApiError> {
-    let (tenant_id, user_id) = licensed_tenant(&ctx, &headers).await?;
+    let actor = authz::authenticate(&ctx, &headers).await?;
     let request = PublishVersionRequest {
         definition: body.definition,
         changelog: body.changelog,
         status: TemplateVersionStatus::parse_publish(&body.status)?,
     };
-    let record =
-        marketplace::publish_version(&ctx, tenant_id, template_id, user_id, request).await?;
+    let record = marketplace::publish_version(&ctx, &actor, template_id, request).await?;
     Ok((StatusCode::CREATED, Json(record)))
 }
 
 /// `GET /api/marketplace/{id}/reviews`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::TemplateReviewRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::TemplateReviewRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_review_list"]))), tag = "enterprise"))]
 async fn list_reviews(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateReviewRecord>>, ApiError> {
-    let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
+    let actor = authz::authenticate(&ctx, &headers).await?;
     let reviews =
-        marketplace_models::list_reviews(&ctx.db, tenant_id, template_id, page.try_into()?).await?;
+        marketplace_models::reviews_as(&ctx.db, &actor, template_id, page.try_into()?).await?;
     Ok(Json(reviews))
 }
 
 /// `POST /api/marketplace/{id}/reviews`: leave or replace this tenant's review.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::SubmitReviewRequest, responses((status = 200, body = crate::edition::ee::controllers::openapi::TemplateReviewRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::SubmitReviewRequest, responses((status = 200, body = crate::edition::ee::controllers::openapi::TemplateReviewRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_review_submit"]))), tag = "enterprise"))]
 async fn submit_review(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
     Json(body): Json<SubmitReviewRequest>,
 ) -> Result<Json<TemplateReviewRecord>, ApiError> {
-    let (tenant_id, user_id) = licensed_tenant(&ctx, &headers).await?;
-    let record = marketplace::submit_review(&ctx, tenant_id, template_id, user_id, body).await?;
+    let actor = authz::authenticate(&ctx, &headers).await?;
+    let record = marketplace::submit_review(&ctx, &actor, template_id, body).await?;
     Ok(Json(record))
 }
 
 /// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/fork", params(("id" = Uuid, Path), ("version" = Option<i32>, Query)), responses((status = 201, body = crate::edition::ee::controllers::openapi::ForkResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/fork", params(("id" = Uuid, Path), ("version" = Option<i32>, Query)), responses((status = 201, body = crate::edition::ee::controllers::openapi::ForkResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_fork"]))), tag = "enterprise"))]
 async fn fork_template(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
     Query(params): Query<ForkParams>,
 ) -> Result<(StatusCode, Json<ForkResponse>), ApiError> {
-    let (tenant_id, user_id) = licensed_tenant(&ctx, &headers).await?;
-    let forked =
-        marketplace::fork_template(&ctx, tenant_id, template_id, params.version, user_id).await?;
+    let actor = authz::authenticate(&ctx, &headers).await?;
+    let forked = marketplace::fork_template(&ctx, &actor, template_id, params.version).await?;
     Ok((
         StatusCode::CREATED,
         Json(ForkResponse {
@@ -130,16 +113,16 @@ async fn fork_template(
 }
 
 /// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/marketplace/{id}/visibility", params(("id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::SetVisibilityRequest, responses((status = 204, description = "Marketplace visibility updated"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/marketplace/{id}/visibility", params(("id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::SetVisibilityRequest, responses((status = 204, description = "Marketplace visibility updated"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_visibility_update"]))), tag = "enterprise"))]
 async fn set_visibility(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
     Json(body): Json<SetVisibilityRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
+    let actor = authz::authenticate(&ctx, &headers).await?;
     let visibility = TemplateVisibility::parse_input(&body.visibility)?;
-    marketplace::set_visibility(&ctx, tenant_id, template_id, visibility).await?;
+    marketplace::set_visibility(&ctx, &actor, template_id, visibility).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

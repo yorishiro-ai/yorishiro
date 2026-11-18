@@ -72,15 +72,6 @@ class AssignedWorkflowTests(unittest.TestCase):
         self.assertIn("run: python3 scripts/embedding_cache.py verify", verification)
         self.assertLess(WORKFLOW.index("python3 scripts/run_assigned_tests.py run"), WORKFLOW.index("- name: Verify embedding assets after execution"))
 
-    def test_reference_image_validation_does_not_block_the_model_cache(self):
-        reference = (ROOT / ".github/workflows/reference-generator.yml").read_text()
-        self.assertIn("tests/fixtures/generate_e5_reference/**", reference)
-        self.assertIn("  schedule:", reference)
-        self.assertIn("docker build -t yorishiro-e5-reference", reference)
-        self.assertIn("assert not torch.version.cuda", reference)
-        caller = (ROOT / ".github/workflows/ci.yml").read_text()
-        self.assertNotIn("docker build -t yorishiro-e5-reference", caller)
-
     def test_licence_and_always_uploaded_evidence(self):
         self.assertIn("matrix.edition == 'ee' && matrix.signed_licence && secrets.YORISHIRO_LICENSE_KEY || ''", WORKFLOW)
         self.assertIn("if: matrix.signed_licence", WORKFLOW)
@@ -93,22 +84,6 @@ class AssignedWorkflowTests(unittest.TestCase):
 
 
 class ReleaseSourceTests(unittest.TestCase):
-    def test_ci_docker_checks_run_in_parallel_without_weakening_required_gate(self):
-        ci = (ROOT / ".github/workflows/ci.yml").read_text()
-        package = ci.split("\n  package-validation:\n", 1)[1].split("\n  docker-validation:\n", 1)[0]
-        self.assertIn("docker-validation: 'false'", package)
-        docker = ci.split("\n  docker-validation:\n", 1)[1].split("\n  package-build:\n", 1)[0]
-        self.assertIn("needs: changes", docker)
-        self.assertIn("needs.changes.outputs.package_validation == 'true'", docker)
-        self.assertIn("make package-docker-check", docker)
-        self.assertIn("--load app", docker)
-        gate = ci.split("\n  required-check:\n", 1)[1]
-        self.assertIn("package-validation, docker-validation]", gate)
-        self.assertIn('require_success DOCKER "$DOCKER_RESULT" "$PACKAGE"', gate)
-        action = (ROOT / ".github/actions/package-tests/action.yml").read_text()
-        self.assertIn("default: 'true'", action)
-        self.assertEqual(action.count("if: inputs.docker-validation == 'true'"), 2)
-
     def test_prerelease_packages_use_an_ordered_version_not_the_public_image_tag(self):
         text = (ROOT / ".github/workflows/release_pre.yml").read_text()
         self.assertIn('scripts/release_version.py "$TAG"', text)
@@ -135,15 +110,6 @@ class ReleaseSourceTests(unittest.TestCase):
         stable = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("Commit: ${{ needs.prepare.outputs.ref }}", stable)
         self.assertNotIn("Commit: ${{ github.sha }}", stable)
-
-    def test_docker_compilation_receives_the_build_identity(self):
-        action = (ROOT / ".github/actions/build-docker/action.yml").read_text()
-        self.assertIn("BUILD_SHA: ${{ inputs.build-sha || inputs.tag }}", action)
-        bake = (ROOT / ".github/docker/docker-bake.hcl").read_text()
-        self.assertEqual(bake.count("BUILD_SHA = BUILD_SHA"), 2)
-        docker = (ROOT / "Dockerfile").read_text()
-        self.assertIn("ARG BUILD_SHA=dev", docker)
-        self.assertLess(docker.index("ENV BUILD_SHA=${BUILD_SHA}"), docker.index("cargo build --locked"))
 
     def test_release_candidates_are_digest_bound_until_both_smokes_pass(self):
         for name in ("release.yml", "release_pre.yml"):

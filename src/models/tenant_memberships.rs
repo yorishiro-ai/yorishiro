@@ -2,43 +2,13 @@ pub use crate::models::_entities::tenant_memberships::{ActiveModel, Entity, Mode
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 
-use crate::db_enum::db_enum;
-use crate::models::api_keys::ApiKeyScope;
-
 mod operations;
 
+pub(crate) use operations::create_tenant_user_as;
 pub use operations::preview_removal;
-pub use operations::preview_role_change;
-pub use operations::transfer_ownership;
-pub use operations::{add_member, remove_member, remove_member_as, update_member_access};
-pub(crate) use operations::{add_member_in_transaction, get_membership_role, list_members};
+pub use operations::{add_member, remove_member, remove_member_as};
+pub(crate) use operations::{add_member_in_transaction, is_member, list_members, list_members_as};
 pub use operations::{create_tenant_user_member, reset_tenant_user_password};
-
-db_enum! {
-    /// Mirrors the `tenant_memberships.role` check constraint.
-    #[derive(Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
-    #[schemars(rename_all = "lowercase")]
-    pub enum MembershipRole {
-        Owner = "owner",
-        Admin = "admin",
-        Member = "member",
-        Viewer = "viewer",
-    }
-}
-
-impl MembershipRole {
-    pub fn max_scope(self) -> ApiKeyScope {
-        match self {
-            Self::Owner | Self::Admin => ApiKeyScope::Migration,
-            Self::Member => ApiKeyScope::Write,
-            Self::Viewer => ApiKeyScope::Read,
-        }
-    }
-
-    pub(crate) fn administers_tenant(self) -> bool {
-        matches!(self, Self::Owner | Self::Admin)
-    }
-}
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -47,20 +17,6 @@ pub struct MembershipRecord {
     pub email: Option<String>,
     pub user_name: Option<String>,
     pub display_name: Option<String>,
-    pub role: MembershipRole,
-}
-
-/// Key access under the requested membership role, excluding secret material.
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct MembershipKeyAccess {
-    pub api_key_id: Uuid,
-    pub stored_scope: ApiKeyScope,
-    /// Tenant-level ceiling for tenant-scoped keys, or workspace ceiling for workspace-bound keys.
-    /// A workspace-bound key has no effective scope when the user lacks access to its workspace.
-    pub effective_scope: Option<ApiKeyScope>,
-    /// Explicit operator grant, independent of the membership's ordered scope cap.
-    pub audit: bool,
 }
 
 /// A point-in-time snapshot, not authorization for a later mutation.
@@ -68,21 +24,9 @@ pub struct MembershipKeyAccess {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MembershipRemovalPreview {
     pub user_id: Uuid,
-    pub role: Option<MembershipRole>,
-    pub blocked_by_last_owner: bool,
+    pub member: bool,
     pub revoked_api_key_ids: Vec<Uuid>,
     pub lost_workspace_ids: Vec<Uuid>,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct MembershipRolePreview {
-    pub user_id: Uuid,
-    pub current_role: MembershipRole,
-    pub requested_role: MembershipRole,
-    pub blocked_by_last_owner: bool,
-    pub lost_workspace_ids: Vec<Uuid>,
-    pub keys: Vec<MembershipKeyAccess>,
 }
 
 #[loco_rs::prelude::async_trait]

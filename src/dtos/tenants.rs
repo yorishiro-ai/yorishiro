@@ -5,7 +5,7 @@ use uuid::Uuid;
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct DisableTenantRequest {
-    /// Explicitly confirms the authenticated owner's tenant UUID.
+    /// Explicitly confirms the authenticated administrator's tenant UUID.
     pub(crate) confirmed_tenant_id: Uuid,
 }
 

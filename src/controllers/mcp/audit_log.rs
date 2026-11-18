@@ -23,7 +23,7 @@ pub(crate) struct AuditLogArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = audit_requirement(),
-        description = "List the selected workspace's paginated audit history (requires the independent audit grant; tenant or workspace administration does not grant audit access)"
+        description = "List the selected workspace's paginated audit history (requires audit_log_list IAM permission and the independent audit grant; administration does not grant audit access)"
     )]
     pub(crate) async fn list_audit_log(
         &self,
@@ -51,6 +51,18 @@ impl YorishiroMcpServer {
         };
         let workspace_id = match actor.require_workspace() {
             Ok(id) => id,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
+        let _authorization = match crate::models::access::authorize_workspace_action(
+            &txn,
+            &self.app_context().db,
+            &actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::AuditLogList,
+        )
+        .await
+        {
+            Ok(authorization) => authorization,
             Err(error) => return Ok(err_to_tool_result(error)),
         };
         match crate::models::api_key_audit_log::list_for_workspace(&txn, workspace_id, page).await {

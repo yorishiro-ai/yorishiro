@@ -58,6 +58,13 @@ impl ImportWorker {
         let id = args
             .lifecycle_id
             .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("import lifecycle missing")))?;
+        // Hold control-plane permission stable until the workspace write commits.
+        let authorization =
+            if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+                Some(crate::db::begin_write(&self.ctx.db).await.internal()?)
+            } else {
+                None
+            };
         let txn =
             crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id).await?;
         crate::db::lock_for_update(&txn, &format!("import:{id}"))
@@ -71,16 +78,22 @@ impl ImportWorker {
         )
         .await?
         {
-            crate::models::access::require_job_actor(
-                &txn,
-                &self.ctx.db,
-                &AuditActor {
+            crate::models::access::require_iam_action(
+                authorization.as_ref().unwrap_or(&txn),
+                &AuthContext {
                     tenant_id: args.tenant_id,
-                    workspace_id: args.workspace_id,
+                    workspace_id: Some(args.workspace_id),
                     api_key_id: args.api_key_id,
                     user_id: args.user_id,
+                    scope: crate::models::api_keys::ApiKeyScope::Schema,
+                    audit: false,
                 },
                 crate::models::api_keys::ApiKeyScope::Schema,
+                crate::models::iam_policy::Action::ImportCreate,
+                crate::models::iam_policy::Resource::Workspace {
+                    tenant_id: args.tenant_id,
+                    workspace_id: args.workspace_id,
+                },
             )
             .await?;
             let quotas = crate::quotas(&self.ctx, args.tenant_id).await?;
@@ -108,6 +121,9 @@ impl ImportWorker {
             }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "schemas": result.schemas, "entities": result.entities, "relations": result.relations})).await?;
         }
         txn.commit().await.internal()?;
+        if let Some(authorization) = authorization {
+            authorization.commit().await.internal()?;
+        }
         Ok(())
     }
 }
@@ -118,6 +134,22 @@ pub(crate) async fn enqueue(
     auth: &AuthContext,
     jsonl: String,
 ) -> Result<Uuid, YorishiroError> {
+    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        Some(crate::db::begin_write(&ctx.db).await.internal()?)
+    } else {
+        None
+    };
+    crate::models::access::require_iam_action(
+        authorization.as_ref().unwrap_or(txn),
+        auth,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam_policy::Action::ImportCreate,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: auth.tenant_id,
+            workspace_id: auth.require_workspace()?,
+        },
+    )
+    .await?;
     let worker_class =
         crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
             .await
@@ -145,5 +177,8 @@ pub(crate) async fn enqueue(
     )
     .await
     .internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
     id.parse().internal()
 }

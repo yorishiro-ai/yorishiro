@@ -62,6 +62,7 @@ impl ConfirmProposalsWorker {
         crate::db::lock_for_update(&txn, &format!("confirm-proposals:{id}"))
             .await
             .internal()?;
+        let mut authorization = None;
         if !api_key_audit_log::job_completed(
             &txn,
             args.workspace_id,
@@ -70,7 +71,7 @@ impl ConfirmProposalsWorker {
         )
         .await?
         {
-            crate::models::access::require_job_actor(
+            authorization = crate::ee::models::access::authorize_job_actor(
                 &txn,
                 &self.ctx.db,
                 &AuditActor {
@@ -80,6 +81,7 @@ impl ConfirmProposalsWorker {
                     user_id: args.user_id,
                 },
                 crate::models::api_keys::ApiKeyScope::Schema,
+                crate::models::iam_policy::Action::InferenceConfirm,
             )
             .await?;
             let report = crate::edition::ee::models::inference_proposals::confirm(
@@ -95,18 +97,41 @@ impl ConfirmProposalsWorker {
             }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "inference_job_id": args.inference_job_id, "confirmed": report.confirmed, "stale": report.stale, "invalid": report.invalid})).await?;
         }
         txn.commit().await.internal()?;
+        if let Some(authorization) = authorization {
+            authorization.commit().await.internal()?;
+        }
         Ok(())
     }
 }
 
 pub(crate) async fn enqueue(
     ctx: &AppContext,
-    txn: &sea_orm::DatabaseTransaction,
     auth: &AuthContext,
     inference_job_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
+    let txn =
+        crate::db::begin_workspace_write(ctx, auth.tenant_id, auth.require_workspace()?).await?;
+    let authorization = crate::ee::models::access::authorize_job_actor(
+        &txn,
+        &ctx.db,
+        &AuditActor {
+            tenant_id: auth.tenant_id,
+            workspace_id: auth.require_workspace()?,
+            api_key_id: auth.api_key_id,
+            user_id: auth.user_id,
+        },
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam_policy::Action::InferenceConfirm,
+    )
+    .await?;
+    crate::edition::ee::models::inference_jobs::workspace_job(
+        &txn,
+        auth.require_workspace()?,
+        inference_job_id,
+    )
+    .await?;
     crate::edition::ee::models::inference_proposals::require_completed_job(
-        txn,
+        &txn,
         auth.require_workspace()?,
         inference_job_id,
     )
@@ -134,9 +159,13 @@ pub(crate) async fn enqueue(
             dispatch_payload: serde_json::to_value(args).internal()?,
             use_queue_concurrency: true,
         },
-        Some(txn),
+        Some(&txn),
     )
     .await
     .internal()?;
+    txn.commit().await.internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
     id.parse().internal()
 }

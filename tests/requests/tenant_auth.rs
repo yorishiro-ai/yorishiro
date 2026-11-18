@@ -17,7 +17,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
             TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
-            .get("/api/workspaces")
+            .get("/api/schemas")
             .add_header("Authorization", format!("Bearer {api_key}"))
             .await;
         assert_eq!(
@@ -133,7 +133,8 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert_eq!(missing_target.status_code(), 200);
         let tenant_identity = missing_target.json::<serde_json::Value>();
         assert!(tenant_identity["workspace_id"].is_null());
-        assert!(tenant_identity["workspace_access"].is_null());
+        assert!(tenant_identity.get("workspace_access").is_none());
+        assert_eq!(tenant_identity["tenant_root"], true);
         request
             .get("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -230,34 +231,38 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
 }
 
 #[tokio::test]
-async fn tenant_key_rechecks_direct_workspace_grants_after_revocation() {
+async fn tenant_key_rechecks_iam_policy_after_detachment() {
     if !crate::require_postgres_backend() {
         return;
     }
     use sea_orm::{EntityTrait, TransactionTrait};
-    use yorishiro::models::{
-        api_keys, tenancy,
-        tenant_memberships::MembershipRole,
-        workspace_memberships::{Model, WorkspaceRole},
-    };
+    use yorishiro::models::{api_keys, tenancy};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let txn = ctx.db.begin().await.unwrap();
         let member = tenancy::register_member(&txn, tenant.tenant_id,
-            &super::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None, MembershipRole::Member).await.unwrap();
-        Model::grant(&txn, tenant.workspace_id, member.id, WorkspaceRole::Viewer).await.unwrap();
+            &super::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let key = create_tenant_api_key(&ctx.db, tenant.tenant_id, "read", Some(member.id)).await.unwrap();
+        let root_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let created = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {root_key}"))
+            .json(&serde_json::json!({"name":"schema-reader", "document":{"statements":[{"effect":"allow","actions":["schema_list"],"resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]}]}})).await;
+        created.assert_status(StatusCode::CREATED);
+        let policy_id = created.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
         let session = super::mcp::initialize(&request).await;
         for (id, allowed) in [(2, true), (3, false), (4, true)] {
             if id == 3 {
-                let txn = ctx.db.begin().await.unwrap();
-                Model::revoke(&txn, tenant.workspace_id, member.id).await.unwrap();
-                txn.commit().await.unwrap();
+                request.delete(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
             } else if id == 4 {
-                super::fixtures::grant_workspace(&ctx, tenant.workspace_id, member.id, WorkspaceRole::Viewer).await;
+                request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
             }
-            let response = request.get("/api/whoami")
+            let response = request.get("/api/schemas")
                 .add_header("Authorization", format!("Bearer {}", key.plaintext))
                 .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await;
             assert_eq!(response.status_code().as_u16(), if allowed { 200 } else { 403 }, "{}", response.text());
@@ -267,7 +272,7 @@ async fn tenant_key_rechecks_direct_workspace_grants_after_revocation() {
                 .add_header("MCP-Protocol-Version", "2025-03-26")
                 .add_header("Authorization", format!("Bearer {}", key.plaintext))
                 .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
-                .json(&serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"whoami","arguments":{}}})).await;
+                .json(&serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"list_schemas","arguments":{}}})).await;
             let body = super::mcp::rpc_body(&response.text());
             if allowed {
                 assert_ne!(body["result"]["isError"], true, "{body}");
@@ -293,7 +298,6 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
             &ctx.db,
             foreign.tenant_id,
             caller.owner_id,
-            yorishiro::models::tenant_memberships::MembershipRole::Viewer,
         )
         .await;
         assert!(matches!(

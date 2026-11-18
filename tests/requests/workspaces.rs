@@ -4,21 +4,20 @@ use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::tenant_memberships::{self, MembershipRole};
+use yorishiro::models::tenant_memberships;
 use yorishiro::models::user_users;
 
-/// A member of an existing tenant with a key of their own, created through the same model operations an invite redemption uses.
 async fn member_key(
     ctx: &loco_rs::app::AppContext,
     tenant_id: uuid::Uuid,
     workspace_id: uuid::Uuid,
-    role: MembershipRole,
+    key_scope: yorishiro::models::api_keys::ApiKeyScope,
 ) -> String {
     let email = format!("member-{}@example.com", uuid::Uuid::new_v4().simple());
     let member = user_users::create_user(&ctx.db, &email, "hunter2-hunter2", None)
         .await
         .expect("create member");
-    tenant_memberships::add_member(&ctx.db, tenant_id, member.id, role)
+    tenant_memberships::add_member(&ctx.db, tenant_id, member.id)
         .await
         .expect("add member");
     super::fixtures::grant_workspace(
@@ -28,7 +27,7 @@ async fn member_key(
         yorishiro::models::workspace_memberships::WorkspaceRole::Member,
     )
     .await;
-    issue_api_key(ctx, workspace_id, member.id, role.max_scope(), false).await
+    issue_api_key(ctx, workspace_id, member.id, key_scope, false).await
 }
 
 #[tokio::test]
@@ -266,7 +265,6 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             &super::fixtures::unique_email("workspace-stale-admin"),
             "hunter2-hunter2",
             None,
-            MembershipRole::Admin,
         )
         .await
         .unwrap();
@@ -312,14 +310,9 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             tokio::time::timeout(std::time::Duration::from_secs(10), resolved.notified())
                 .await
                 .expect("request must authenticate before demotion");
-            tenant_memberships::add_member(
-                &ctx.db,
-                tenant.tenant_id,
-                admin.id,
-                MembershipRole::Member,
-            )
-            .await
-            .unwrap();
+            tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id)
+                .await
+                .unwrap();
             resume.notify_one();
         };
         let (response, ()) = tokio::join!(async { create.await }, demote_after_authentication);
@@ -328,7 +321,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
             Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
         ));
-        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id, MembershipRole::Admin)
+        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id)
             .await
             .unwrap();
         let create = request
@@ -377,7 +370,13 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             workspace_id: main_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let member_key = member_key(&ctx, tenant_id, main_id, MembershipRole::Member).await;
+        let member_key = member_key(
+            &ctx,
+            tenant_id,
+            main_id,
+            yorishiro::models::api_keys::ApiKeyScope::Write,
+        )
+        .await;
 
         let response = request
             .post("/api/workspaces")
@@ -392,12 +391,11 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             .await;
         assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
 
-        // A Member-role key can still list/view workspaces, just not create/delete them.
         let response = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
-        assert_eq!(response.status_code(), StatusCode::OK);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
     })
     .await;
 }
@@ -412,11 +410,12 @@ async fn workspaces_endpoints_require_authentication() {
 }
 
 #[tokio::test]
-async fn workspace_administrators_manage_only_their_direct_grants() {
+async fn workspace_grant_management_requires_iam_and_respects_credential_binding() {
     use sea_orm::TransactionTrait;
     use yorishiro::models::workspace_memberships::WorkspaceRole;
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let administrator_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let local = user_users::create_user(
             &ctx.db,
             &format!("local-{}@example.com", uuid::Uuid::new_v4()),
@@ -437,9 +436,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             tenant_memberships::add_member(
                 &ctx.db,
                 tenant.tenant_id,
-                user_id,
-                MembershipRole::Member,
-            )
+                user_id)
             .await
             .unwrap();
         }
@@ -461,6 +458,21 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             false,
         )
         .await;
+        request.put(&local_path)
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"role":"admin"}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {administrator_key}"))
+            .json(&serde_json::json!({"name":"workspace-grant-manager", "document":{"statements":[{
+                "effect":"allow", "actions":["workspace_get", "workspace_update"],
+                "resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]
+            }]}})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        request.put(&format!("/api/iam/users/{}/policies/{policy_id}", local.id))
+            .add_header("Authorization", format!("Bearer {administrator_key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
         let path = format!(
             "/api/workspaces/{}/members/{}",
             tenant.workspace_id, target.id
@@ -509,7 +521,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             .add_header("Authorization", format!("Bearer {}", service.plaintext))
             .json(&serde_json::json!({"role":"admin"}))
             .await
-            .assert_status(StatusCode::FORBIDDEN);
+            .assert_status(StatusCode::UNAUTHORIZED);
         request
             .delete(&format!(
                 "/api/workspaces/{}/members/{}",
@@ -530,9 +542,9 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             .await
             .assert_status(StatusCode::FORBIDDEN);
         request
-            .post(&format!("/api/members/{}/role-preview", target.id))
+            .post("/api/members/users")
             .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"role":"admin"}))
+            .json(&serde_json::json!({"user_name":"denied","password":"workspace-bound-key"}))
             .await
             .assert_status(StatusCode::FORBIDDEN);
         let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
@@ -579,7 +591,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             .delete(&format!("/api/workspaces/{sibling_id}"))
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await
-            .assert_status(StatusCode::NOT_FOUND);
+            .assert_status(StatusCode::FORBIDDEN);
         let txn = ctx.db.begin().await.unwrap();
         yorishiro::models::workspace_memberships::Model::grant(
             &txn,
@@ -620,68 +632,7 @@ async fn workspace_administrators_manage_only_their_direct_grants() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({"role":"admin"}))
             .await
-            .assert_status(StatusCode::FORBIDDEN);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn workspace_inventory_respects_direct_grants_and_service_binding() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let tenant_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let response = request
-            .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {tenant_key}"))
-            .json(&serde_json::json!({"name":format!("private-sibling-{}", Uuid::new_v4())}))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::CREATED);
-        let sibling = response.json::<serde_json::Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        request
-            .get(&format!("/api/workspaces/{sibling}"))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .await
-            .assert_status(StatusCode::NOT_FOUND);
-        let member = member_key(
-            &ctx,
-            tenant.tenant_id,
-            tenant.workspace_id,
-            MembershipRole::Member,
-        )
-        .await;
-        let service = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db,
-            tenant.workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Read,
-            None,
-            false,
-        )
-        .await
-        .unwrap();
-        for key in [&member, &service.plaintext] {
-            let response = request
-                .get("/api/workspaces")
-                .add_header("Authorization", format!("Bearer {key}"))
-                .await;
-            assert_eq!(response.status_code(), StatusCode::OK);
-            let workspaces = response.json::<serde_json::Value>();
-            assert_eq!(workspaces.as_array().unwrap().len(), 1);
-            assert_eq!(workspaces[0]["id"], tenant.workspace_id.to_string());
-            let response = request
-                .get(&format!("/api/workspaces/{sibling}"))
-                .add_header("Authorization", format!("Bearer {key}"))
-                .await;
-            assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
-            let response = request
-                .get(&format!("/api/workspaces/{}", tenant.workspace_id))
-                .add_header("Authorization", format!("Bearer {key}"))
-                .await;
-            assert_eq!(response.status_code(), StatusCode::OK);
-        }
+            .assert_status(StatusCode::NO_CONTENT);
     })
     .await;
 }
@@ -727,10 +678,12 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_key =
+            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
 
         let listed = request
             .get("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .await;
         listed.assert_status(StatusCode::OK);
         let row = listed
@@ -760,7 +713,7 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
 
         let listed = request
             .get("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .await;
         listed.assert_status(StatusCode::OK);
         let row = listed

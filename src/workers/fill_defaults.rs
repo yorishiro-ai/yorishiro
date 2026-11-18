@@ -49,6 +49,13 @@ impl FillDefaultsWorker {
         let job_id = args
             .lifecycle_id
             .ok_or_else(|| loco_rs::Error::Message("fill-defaults lifecycle missing".into()))?;
+        // Keep control-plane authorization fenced until the workspace mutation commits.
+        let authorization =
+            if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+                Some(crate::db::begin_write(&self.ctx.db).await?)
+            } else {
+                None
+            };
         let txn = crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id)
             .await
             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
@@ -67,16 +74,22 @@ impl FillDefaultsWorker {
             txn.commit().await?;
             return Ok(());
         }
-        crate::models::access::require_job_actor(
-            &txn,
-            &self.ctx.db,
-            &api_key_audit_log::AuditActor {
+        crate::models::access::require_iam_action(
+            authorization.as_ref().unwrap_or(&txn),
+            &crate::models::api_keys::AuthContext {
                 tenant_id: args.tenant_id,
-                workspace_id: args.workspace_id,
+                workspace_id: Some(args.workspace_id),
                 api_key_id: args.api_key_id,
                 user_id: args.user_id,
+                scope: crate::models::api_keys::ApiKeyScope::Migration,
+                audit: false,
             },
             crate::models::api_keys::ApiKeyScope::Migration,
+            crate::models::iam_policy::Action::MigrationFillDefaults,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: args.tenant_id,
+                workspace_id: args.workspace_id,
+            },
         )
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
@@ -100,6 +113,9 @@ impl FillDefaultsWorker {
                 "entities_updated": report.entities_updated, "fields_filled": report.fields_filled}),
         ).await.map_err(|error| loco_rs::Error::Message(error.to_string()))?;
         txn.commit().await?;
+        if let Some(authorization) = authorization {
+            authorization.commit().await?;
+        }
         Ok(())
     }
 }
@@ -110,6 +126,23 @@ pub(crate) async fn enqueue(
     auth: &crate::models::api_keys::AuthContext,
     schema_name: String,
 ) -> Result<Uuid, crate::YorishiroError> {
+    use crate::error::ResultExt;
+    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        Some(crate::db::begin_write(&ctx.db).await.internal()?)
+    } else {
+        None
+    };
+    crate::models::access::require_iam_action(
+        authorization.as_ref().unwrap_or(txn),
+        auth,
+        crate::models::api_keys::ApiKeyScope::Migration,
+        crate::models::iam_policy::Action::MigrationFillDefaults,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: auth.tenant_id,
+            workspace_id: auth.require_workspace()?,
+        },
+    )
+    .await?;
     // Validate against the caller's scoped transaction before accepting a durable request.
     crate::models::schema_schemas::get_active_schema(txn, auth.require_workspace()?, &schema_name)
         .await?;
@@ -141,6 +174,9 @@ pub(crate) async fn enqueue(
     )
     .await
     .map_err(|error| crate::YorishiroError::Internal(error.into()))?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
     id.parse()
         .map_err(|error| crate::YorishiroError::Internal(anyhow::Error::new(error)))
 }

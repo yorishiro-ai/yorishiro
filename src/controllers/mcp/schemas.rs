@@ -63,14 +63,14 @@ pub(crate) struct CreateSchemaArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
-        description = "Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema scope)"
+        description = "Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema scope and schema_archive IAM permission)"
     )]
     pub(crate) async fn archive_schema(
         &self,
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("archive_schema")?,
@@ -80,6 +80,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaArchive)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         match schema_schemas::archive(authorized.txn(), authorized.workspace_id(), args.schema_id)
             .await
         {
@@ -92,14 +99,14 @@ impl YorishiroMcpServer {
     }
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
-        description = "Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema scope)"
+        description = "Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema scope and schema_delete IAM permission)"
     )]
     pub(crate) async fn delete_schema(
         &self,
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("delete_schema")?,
@@ -109,6 +116,13 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaDelete)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
+
         match schema_schemas::delete(authorized.txn(), authorized.workspace_id(), args.schema_id)
             .await
         {
@@ -123,14 +137,14 @@ impl YorishiroMcpServer {
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "List summaries of all schemas registered for the workspace (all \
                            versions, including archived). Use this to discover what schemas \
-                           exist (requires read scope)"
+                           exist (requires read scope and schema_list IAM permission)"
     )]
     pub(crate) async fn list_schemas(
         &self,
         Parameters(args): Parameters<ListSchemasArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("list_schemas")?,
@@ -140,6 +154,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaList)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
@@ -152,14 +172,14 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Get the currently active schema definition by name (requires read scope)"
+        description = "Get the currently active schema definition by name (requires read scope and schema_get IAM permission)"
     )]
     pub async fn get_active_schema(
         &self,
         Parameters(args): Parameters<GetActiveSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("get_active_schema")?,
@@ -169,6 +189,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let record =
@@ -183,14 +209,14 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Get a specific version of a schema definition by ID (requires read scope)"
+        description = "Get a specific version of a schema definition by ID (requires read scope and schema_get IAM permission)"
     )]
     pub(crate) async fn get_schema_by_id(
         &self,
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("get_schema_by_id")?,
@@ -200,6 +226,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let record =
@@ -213,14 +245,14 @@ impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
         description = "Register a new schema, or add a new version to an existing schema \
-                           (requires schema scope)"
+                           (requires schema scope and schema_create IAM permission)"
     )]
     pub async fn create_schema(
         &self,
         Parameters(args): Parameters<CreateSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("create_schema")?,
@@ -230,6 +262,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaCreate)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let mut origin_template_id = None;
         let mut origin_snapshot = None;
@@ -353,7 +391,7 @@ impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Get a specific entity_type within the active schema as a JSON Schema \
-                           (requires read scope). Use this to let an agent learn field types, \
+                           (requires read scope and schema_get IAM permission). Use this to let an agent learn field types, \
                            required fields, enums, etc. ahead of time."
     )]
     pub(crate) async fn get_entity_type_json_schema(
@@ -361,7 +399,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityTypeJsonSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("get_entity_type_json_schema")?,
@@ -371,6 +409,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::SchemaGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let record = match schema_schemas::get_active_schema(

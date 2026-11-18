@@ -1,111 +1,11 @@
-use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use chrono::{DateTime, Duration, Utc};
 use sea_orm::ActiveModelTrait;
 use sea_orm::TransactionTrait;
 use std::sync::Arc;
 use tokio::sync::Barrier;
 use yorishiro::App;
 use yorishiro::models::_entities::tenant_tenants;
-use yorishiro::models::{tenancy, tenant_memberships, workspace_invites};
-
-pub(crate) async fn assert_invitation_boundaries(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
-) {
-    let txn = db.begin().await.expect("begin invite boundary transaction");
-    let now = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-        .expect("parse fixed timestamp")
-        .with_timezone(&Utc);
-
-    let (at_expiry, token) = workspace_invites::create_invite_at(
-        &txn,
-        tenant_id,
-        &crate::requests::fixtures::unique_email("at-expiry"),
-        tenant_memberships::MembershipRole::Member,
-        Duration::seconds(1),
-        now - Duration::seconds(1),
-    )
-    .await
-    .expect("create at-expiry invite");
-    assert_eq!(DateTime::<Utc>::from(at_expiry.expires_at), now);
-    assert!(
-        workspace_invites::redeem_invite_at(&txn, &token, now)
-            .await
-            .expect("redeem at-expiry invite")
-            .is_none()
-    );
-
-    let (before_expiry, token) = workspace_invites::create_invite_at(
-        &txn,
-        tenant_id,
-        &crate::requests::fixtures::unique_email("before-expiry"),
-        tenant_memberships::MembershipRole::Member,
-        Duration::seconds(1),
-        now,
-    )
-    .await
-    .expect("create before-expiry invite");
-    assert_eq!(
-        DateTime::<Utc>::from(before_expiry.expires_at),
-        now + Duration::seconds(1)
-    );
-    assert!(
-        workspace_invites::redeem_invite_at(&txn, &token, now)
-            .await
-            .expect("redeem before-expiry invite")
-            .is_some()
-    );
-
-    let (after_expiry, token) = workspace_invites::create_invite_at(
-        &txn,
-        tenant_id,
-        &crate::requests::fixtures::unique_email("after-expiry"),
-        tenant_memberships::MembershipRole::Member,
-        Duration::seconds(1),
-        now,
-    )
-    .await
-    .expect("create after-expiry invite");
-    assert_eq!(
-        DateTime::<Utc>::from(after_expiry.expires_at),
-        now + Duration::seconds(1)
-    );
-    assert!(
-        workspace_invites::redeem_invite_at(&txn, &token, now + Duration::seconds(2))
-            .await
-            .expect("redeem after-expiry invite")
-            .is_none()
-    );
-
-    let ttl = Duration::hours(72);
-    let (issued, _) = workspace_invites::create_invite_at(
-        &txn,
-        tenant_id,
-        &crate::requests::fixtures::unique_email("ttl"),
-        tenant_memberships::MembershipRole::Member,
-        ttl,
-        now,
-    )
-    .await
-    .expect("create TTL invite");
-    assert_eq!(DateTime::<Utc>::from(issued.expires_at), now + ttl);
-    txn.rollback()
-        .await
-        .expect("rollback invite boundary transaction");
-}
-
-#[tokio::test]
-async fn invite_expiry_boundaries_match_postgres_gt() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        assert_invitation_boundaries(&ctx.db, tenant.tenant_id).await;
-    })
-    .await;
-}
+use yorishiro::models::tenancy;
 
 /// Eight concurrent `create_workspace` calls against a tenant with one workspace slot left must produce exactly one workspace, not eight.
 ///

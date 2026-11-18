@@ -10,48 +10,11 @@ use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::AuthContext;
 use crate::dtos::auth::{
-    AcceptInviteRequest, AcceptInviteResponse, LoginResponse, RootLoginRequest, SignupRequest,
-    SignupResponse, TenantLoginRequest,
+    LoginResponse, RootLoginRequest, SignupRequest, SignupResponse, TenantLoginRequest,
 };
 use crate::error::YorishiroError;
-use crate::models::tenant_memberships::MembershipRole;
-use crate::models::{tenancy, user_users, workspace_invites};
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/invites/accept-authenticated", request_body = crate::dtos::auth::AcceptAuthenticatedInviteRequest, responses((status = 200, body = crate::dtos::auth::AcceptInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
-async fn accept_authenticated_invite(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    Json(body): Json<crate::dtos::auth::AcceptAuthenticatedInviteRequest>,
-) -> Result<Json<AcceptInviteResponse>, ApiError> {
-    let (user, invite) =
-        workspace_invites::accept_authenticated_user(&ctx.db, &actor, &body.invite_token).await?;
-    Ok(Json(AcceptInviteResponse {
-        user_id: user.id,
-        tenant_id: invite.tenant_id,
-        role: invite.role,
-    }))
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/invites/accept", request_body = crate::dtos::auth::AcceptInviteRequest, responses((status = 200, body = crate::dtos::auth::AcceptInviteResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
-async fn accept_invite(
-    State(ctx): State<AppContext>,
-    Json(body): Json<AcceptInviteRequest>,
-) -> Result<Json<AcceptInviteResponse>, ApiError> {
-    let (user, invite) = workspace_invites::accept_existing_user(
-        &ctx.db,
-        &body.invite_token,
-        &body.email,
-        &body.password,
-    )
-    .await?;
-    Ok(Json(AcceptInviteResponse {
-        user_id: user.id,
-        tenant_id: invite.tenant_id,
-        role: invite.role,
-    }))
-}
+use crate::models::{tenancy, user_users};
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -61,6 +24,9 @@ async fn accept_invite(
     security(()),
     tag = "community"
 ))]
+/// Creates a brand-new tenant whose root is the caller; there is no workspace yet.
+///
+/// The new tenant can be managed using a tenant-scoped login key.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -68,64 +34,6 @@ async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
-    match body.invite_token {
-        Some(ref token) => signup_with_invite(&ctx, token, &body).await,
-        None => signup_without_invite(&ctx, &body).await,
-    }
-}
-
-async fn signup_with_invite(
-    ctx: &AppContext,
-    token: &str,
-    body: &SignupRequest,
-) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
-    if body.email.is_some() {
-        return Err(YorishiroError::ValidationFailed {
-            message: "email must not be given alongside invite_token".into(),
-            details: vec![],
-            hint: "an invite already specifies the email it was issued to".into(),
-        }
-        .into());
-    }
-
-    let (user, invite) = workspace_invites::register_user(
-        &ctx.db,
-        token,
-        &body.password,
-        body.display_name.as_deref(),
-    )
-    .await?;
-
-    let workspaces = tenancy::list_workspaces_for_user(&ctx.db, user.id).await?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(SignupResponse {
-            user_id: user.id,
-            email: user.root_email(),
-            tenant_id: invite.tenant_id,
-            role: invite.role,
-            workspaces,
-        }),
-    ))
-}
-
-/// No invite: creates a brand-new tenant and joins the caller as `Owner`, but no workspace.
-///
-/// The new tenant can be managed using a tenant-scoped login key.
-async fn signup_without_invite(
-    ctx: &AppContext,
-    body: &SignupRequest,
-) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
-    let email = body
-        .email
-        .as_deref()
-        .ok_or_else(|| YorishiroError::ValidationFailed {
-            message: "email is required when invite_token is omitted".into(),
-            details: vec![],
-            hint: "either provide invite_token, or provide email to create a new tenant".into(),
-        })?;
-
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
@@ -134,7 +42,7 @@ async fn signup_without_invite(
     let (user, tenant_id) = tenancy::signup_account(
         &ctx.db,
         max_tenants,
-        email,
+        &body.email,
         &body.password,
         body.display_name.as_deref(),
     )
@@ -146,7 +54,6 @@ async fn signup_without_invite(
             user_id: user.id,
             email: user.root_email(),
             tenant_id,
-            role: MembershipRole::Owner,
             workspaces: vec![],
         }),
     ))
@@ -210,11 +117,6 @@ pub fn routes() -> Routes {
         .add("/signup", post(signup))
         .add("/root/login", post(root_login))
         .add("/tenant/login", post(tenant_login))
-        .add("/invites/accept", post(accept_invite))
-        .add(
-            "/invites/accept-authenticated",
-            post(accept_authenticated_invite),
-        )
 }
 
 #[cfg(feature = "openapi")]
@@ -223,7 +125,5 @@ pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
         super::route_inventory::path_doc(__path_signup),
         super::route_inventory::path_doc(__path_root_login),
         super::route_inventory::path_doc(__path_tenant_login),
-        super::route_inventory::path_doc(__path_accept_invite),
-        super::route_inventory::path_doc(__path_accept_authenticated_invite),
     ]
 }

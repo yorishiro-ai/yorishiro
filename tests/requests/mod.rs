@@ -12,6 +12,7 @@ mod entity_columns;
 mod export;
 pub(crate) mod fill_defaults;
 pub(crate) mod fixtures;
+mod iam;
 mod import;
 #[cfg(feature = "enterprise")]
 pub(crate) mod inference;
@@ -47,6 +48,24 @@ mod tenant_auth;
 #[cfg(feature = "enterprise")]
 mod worker_class;
 mod workspaces;
+
+#[cfg(feature = "enterprise")]
+fn licence_active(ctx: &loco_rs::app::AppContext) -> bool {
+    use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
+    ctx.shared_store
+        .get::<std::sync::Arc<LicenceState>>()
+        .is_some_and(|state| state.is_active())
+}
+
+#[cfg(feature = "enterprise")]
+pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
+    if licence_active(ctx) {
+        return false;
+    }
+    crate::reject_assigned_skip("licensed test skipped: no valid licence at boot");
+    eprintln!("skipping licensed test: set YORISHIRO_LICENSE_KEY to run it");
+    true
+}
 
 /// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future.
 pub(crate) async fn with_max_tenants<T>(

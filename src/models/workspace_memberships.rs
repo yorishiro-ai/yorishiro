@@ -17,16 +17,6 @@ db_enum! {
     }
 }
 
-impl WorkspaceRole {
-    pub fn max_scope(self) -> ApiKeyScope {
-        match self {
-            Self::Admin => ApiKeyScope::Migration,
-            Self::Member => ApiKeyScope::Write,
-            Self::Viewer => ApiKeyScope::Read,
-        }
-    }
-}
-
 impl Model {
     /// Lists direct grants, independently of inherited tenant administrator access.
     ///
@@ -39,7 +29,17 @@ impl Model {
     ) -> Result<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>, YorishiroError> {
         use sea_orm::QueryOrder;
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::WorkspaceGet,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id,
+            },
+        )
+        .await?;
         let records = Entity::find()
             .filter(Column::WorkspaceId.eq(workspace_id))
             .order_by_asc(Column::UserId)
@@ -73,7 +73,17 @@ impl Model {
         role: WorkspaceRole,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::WorkspaceUpdate,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id,
+            },
+        )
+        .await?;
         Self::grant(&txn, workspace_id, user_id, role).await?;
         txn.commit().await.internal()
     }
@@ -89,7 +99,17 @@ impl Model {
         user_id: Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_workspace_admin(&txn, actor, workspace_id).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::WorkspaceUpdate,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: actor.tenant_id,
+                workspace_id,
+            },
+        )
+        .await?;
         Self::revoke(&txn, workspace_id, user_id).await?;
         txn.commit().await.internal()
     }
@@ -116,11 +136,9 @@ impl Model {
             .exec(txn)
             .await
             .internal()?;
-        let inherited =
-            crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
-                .await?
-                .is_some_and(|role| role.administers_tenant());
-        if !inherited {
+        let is_root =
+            crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await?;
+        if !is_root {
             api_keys::Entity::revoke_matching(
                 txn,
                 sea_orm::Condition::all()
@@ -149,9 +167,9 @@ impl Model {
         crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
             .await
             .internal()?;
-        crate::models::tenant_memberships::get_membership_role(txn, tenant_id, user_id)
-            .await?
-            .ok_or_else(|| YorishiroError::not_found("tenant membership not found"))?;
+        if !crate::models::tenant_memberships::is_member(txn, tenant_id, user_id).await? {
+            return Err(YorishiroError::not_found("tenant membership not found"));
+        }
         let active = ActiveModel {
             id: crate::db::sqlite_generated_id(txn, sea_orm::ActiveValue::NotSet),
             workspace_id: sea_orm::ActiveValue::Set(workspace_id),

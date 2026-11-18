@@ -2,7 +2,7 @@ use axum::http::StatusCode;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait};
 use yorishiro::{
     App,
-    models::{api_keys, tenancy, tenant_memberships},
+    models::{api_keys, tenancy},
 };
 
 use crate::requests::{
@@ -11,7 +11,7 @@ use crate::requests::{
 };
 
 #[tokio::test]
-async fn tenant_key_issuance_rechecks_admin_after_waiting_for_demotion() {
+async fn tenant_key_issuance_rechecks_authority_after_waiting_for_policy_detachment() {
     if !crate::require_postgres_backend() {
         return;
     }
@@ -19,7 +19,8 @@ async fn tenant_key_issuance_rechecks_admin_after_waiting_for_demotion() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let txn = ctx.db.begin().await.unwrap();
         let admin = tenancy::register_member(&txn, tenant.tenant_id, &unique_email("issuing-admin"),
-            "hunter2-hunter2", None, tenant_memberships::MembershipRole::Admin).await.unwrap();
+            "hunter2-hunter2", None).await.unwrap();
+        crate::requests::fixtures::grant_iam_administrator(&txn, tenant.tenant_id, admin.id).await;
         txn.commit().await.unwrap();
         let issuer = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id,
             api_keys::ApiKeyScope::Migration, Some(admin.id), false, "demotion-issuer").await.unwrap();
@@ -45,10 +46,8 @@ async fn tenant_key_issuance_rechecks_admin_after_waiting_for_demotion() {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
             }).await.expect("issuance must wait on the membership fence");
-            use yorishiro::models::_entities::tenant_memberships::Column;
-            tenant_memberships::Entity::update_many()
-                .col_expr(Column::Role, sea_orm::sea_query::Expr::value("member"))
-                .filter(Column::TenantId.eq(tenant.tenant_id)).filter(Column::UserId.eq(admin.id))
+            yorishiro::models::_entities::iam_user_policy_attachments::Entity::delete_many()
+                .filter(yorishiro::models::_entities::iam_user_policy_attachments::Column::UserId.eq(admin.id))
                 .exec(&txn).await.unwrap();
             txn.commit().await.unwrap();
         };

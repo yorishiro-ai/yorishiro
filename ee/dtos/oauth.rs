@@ -12,10 +12,3 @@ pub(crate) struct CallbackParams {
     pub(crate) state: Option<String>,
     pub(crate) error: Option<String>,
 }
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub(crate) struct AcceptOAuthInviteRequest {
-    pub(crate) invite_token: String,
-}

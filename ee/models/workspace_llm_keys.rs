@@ -7,6 +7,8 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_llm_keys::{ActiveModel, Column, Entity};
+use crate::models::api_keys::{ApiKeyScope, AuthContext};
+use crate::models::iam_policy::Action;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::Serialize;
@@ -28,8 +30,51 @@ pub(crate) struct LlmKeyDescription {
     pub(crate) configured: bool,
 }
 
+pub(crate) async fn set_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+) -> Result<(), YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        ApiKeyScope::Schema,
+        Action::LlmProviderUpdate,
+    )
+    .await?;
+    set(&txn, actor.require_workspace()?, base_url, model, api_key).await?;
+    txn.commit().await.internal()
+}
+
+pub(crate) async fn clear_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+) -> Result<(), YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        ApiKeyScope::Schema,
+        Action::LlmProviderDelete,
+    )
+    .await?;
+    clear(&txn, actor.require_workspace()?).await?;
+    txn.commit().await.internal()
+}
+
+pub(crate) async fn describe_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+) -> Result<Option<LlmKeyDescription>, YorishiroError> {
+    let txn =
+        super::access::workspace_transaction(db, actor, ApiKeyScope::Read, Action::LlmProviderGet)
+            .await?;
+    describe(&txn, actor.require_workspace()?).await
+}
+
 /// Stores or replaces a workspace's credentials.
-pub(crate) async fn set(
+async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     base_url: &str,
@@ -65,10 +110,7 @@ pub(crate) async fn set(
 
 /// Removes a workspace's credentials.
 /// Inference then refuses until one is configured again.
-pub(crate) async fn clear(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<(), YorishiroError> {
+async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .exec(conn)
@@ -79,7 +121,7 @@ pub(crate) async fn clear(
 
 /// What is configured, for an endpoint to report.
 /// Never includes the key.
-pub(crate) async fn describe(
+async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {

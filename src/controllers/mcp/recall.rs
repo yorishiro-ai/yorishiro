@@ -28,14 +28,14 @@ pub(crate) struct RecallContextArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope)"
+        description = "Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope and recall IAM permission)"
     )]
     pub async fn recall_context(
         &self,
         Parameters(args): Parameters<RecallContextArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(
+        let mut authorized = match super::authorize(
             self.app_context(),
             &parts,
             self.required_scope("recall_context")?,
@@ -45,6 +45,12 @@ impl YorishiroMcpServer {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam_policy::Action::Recall)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
 
         let workspace_id = authorized.workspace_id();
         let query = recall::RecallQuery {

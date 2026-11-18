@@ -5,7 +5,6 @@
 use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use loco_rs::app::AppContext;
-use uuid::Uuid;
 
 use crate::YorishiroError;
 use crate::controllers::middleware::auth as base_auth;
@@ -36,7 +35,6 @@ pub(crate) async fn authenticate(
 /// Goes through the installed authenticator, the same seam every authenticated path in this process resolves through, so both key kinds work on these routes: a workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with `X-Workspace-Id`.
 /// Resolving it any other way here would make a REST route and an MCP tool disagree about who the caller is.
 ///
-/// [`authenticate_tenant`] is the weaker form for routes that need only the tenant.
 /// Use this one whenever the work touches a workspace's own content, since that is what the RLS-scoped connection has to be opened against.
 pub(crate) async fn authenticate_workspace(
     ctx: &AppContext,
@@ -45,19 +43,4 @@ pub(crate) async fn authenticate_workspace(
     let auth = authenticate(ctx, headers).await?;
     auth.require_workspace()?;
     Ok(auth)
-}
-
-/// Authenticates the bearer API key and returns the tenant it belongs to, with **no role requirement**.
-///
-/// The marketplace is the caller: publishing a version, reviewing and forking are all per-tenant acts that any valid key for that tenant may perform.
-///
-/// Ownership is still enforced downstream: the service scopes every write by this `tenant_id`, and acting on another tenant's template answers `404` rather than `403`.
-///
-/// Returns the attributed `user_id` alongside it, which is `None` for a service-only key.
-pub(crate) async fn authenticate_tenant(
-    ctx: &AppContext,
-    headers: &HeaderMap,
-) -> Result<(Uuid, Option<Uuid>), YorishiroError> {
-    let auth_ctx = authenticate(ctx, headers).await?;
-    Ok((auth_ctx.tenant_id, auth_ctx.user_id))
 }

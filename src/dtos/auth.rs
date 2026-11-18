@@ -1,41 +1,13 @@
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::tenant_memberships::MembershipRole;
 use crate::models::workspace_workspaces::WorkspaceSummary;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct AcceptInviteRequest {
-    pub invite_token: String,
-    pub email: String,
-    pub password: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct AcceptAuthenticatedInviteRequest {
-    pub invite_token: String,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct AcceptInviteResponse {
-    pub user_id: Uuid,
-    pub tenant_id: Uuid,
-    pub role: MembershipRole,
-}
-
-#[derive(Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignupRequest {
-    /// The plaintext token from an `admin create-invite`-issued invitation.
-    /// Omit it to create a fresh tenant and join it as `Owner` instead.
-    pub invite_token: Option<String>,
-    /// Required when `invite_token` is omitted, rejected when it is present.
-    pub email: Option<String>,
+    /// The email the new tenant root signs in with.
+    pub email: String,
     pub password: String,
     pub display_name: Option<String>,
 }
@@ -46,8 +18,7 @@ pub struct SignupResponse {
     pub user_id: Uuid,
     pub email: String,
     pub tenant_id: Uuid,
-    pub role: MembershipRole,
-    /// Workspaces currently accessible to the new member.
+    /// Workspaces currently accessible to the new tenant root.
     pub(crate) workspaces: Vec<WorkspaceSummary>,
 }
 

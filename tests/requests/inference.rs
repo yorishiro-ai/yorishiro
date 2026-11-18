@@ -1,23 +1,12 @@
 use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::db::DbHandle;
-use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 use yorishiro::edition::ee::models::inference_jobs::{self, InferenceJobStatus};
-
-fn require_licence(ctx: &loco_rs::app::AppContext) {
-    assert!(
-        ctx.shared_store
-            .get::<Arc<LicenceState>>()
-            .expect("production boot installs licence state")
-            .is_active(),
-        "licensed inference tests require a valid YORISHIRO_LICENSE_KEY at boot"
-    );
-}
 
 /// Setting, reading and clearing a workspace's LLM credentials over REST.
 /// The key itself never comes back from GET, only what it configured.
@@ -129,7 +118,9 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 async fn infer_fill_without_a_configured_key_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let create_schema = request
@@ -158,6 +149,27 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             StatusCode::UNPROCESSABLE_ENTITY,
             "response: {:?}",
             infer.text()
+        );
+        let session = super::mcp::initialize(&request).await;
+        let mcp = super::mcp::mcp_call(
+            &request,
+            &session,
+            &setup.api_key,
+            2,
+            "tools/call",
+            serde_json::json!({"name":"infer_fill","arguments":{"schema_name":"note"}}),
+        )
+        .await;
+        assert_eq!(mcp["result"]["isError"], true);
+        assert_eq!(
+            mcp["result"]["structuredContent"],
+            infer.json::<serde_json::Value>()
+        );
+        assert!(
+            mcp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("no LLM credentials configured")
         );
     })
     .await;
@@ -237,7 +249,9 @@ pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &TestTen
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
     super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
 
@@ -293,15 +307,55 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             "the proposal must not be written before confirmation: {fetched:?}"
         );
 
+        let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let txn = ctx.db.begin().await.unwrap();
+        // A policy-free member: an admin carries the built-in wildcard policy and would survive the attachment removal.
+        let member = yorishiro::models::tenancy::register_member(&txn, setup.tenant_id,
+            &super::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None).await.unwrap();
+        txn.commit().await.unwrap();
+        let key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, setup.workspace_id,
+            yorishiro::models::api_keys::ApiKeyScope::Schema, Some(member.id), false).await.unwrap();
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_confirm"],
+            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        for deny in [false, true] {
+            let policy = request.post("/api/iam/policies")
+                .add_header("Authorization", format!("Bearer {iam_key}"))
+                .json(&serde_json::json!({"name":format!("confirm-{deny}"),"document":document})).await;
+            policy.assert_status(StatusCode::CREATED);
+            let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+            let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+            request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                .await.assert_status(StatusCode::NO_CONTENT);
+            let queued = request.post(&format!("/api/inference-jobs/{job_id}/confirm"))
+                .add_header("Authorization", format!("Bearer {}", key.plaintext)).await;
+            queued.assert_status(StatusCode::ACCEPTED);
+            let id = queued.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+            if deny {
+                let mut denied = document.clone();
+                denied["statements"][0]["effect"] = serde_json::json!("deny");
+                request.put(&format!("/api/iam/policies/{policy_id}"))
+                    .add_header("Authorization", format!("Bearer {iam_key}"))
+                    .json(&serde_json::json!({"name":format!("confirm-{deny}"),"document":denied})).await.assert_status_ok();
+            } else {
+                request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
+            }
+            super::fill_defaults::fail_via_api(&request, &ctx, id, &setup.api_key,
+                &format!("/api/inference-jobs/confirmations/{id}")).await;
+            let unchanged = request.get(&format!("/api/entities/{entity}"))
+                .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
+            unchanged.assert_status_ok();
+            assert_eq!(unchanged.json::<serde_json::Value>()["data"], fetched["data"]);
+        }
         let revoked = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             setup.workspace_id,
             yorishiro::models::api_keys::ApiKeyScope::Schema,
-            None,
+            Some(setup.owner_id),
             false,
         )
         .await
-        .expect("issue confirmation service key");
+        .expect("issue confirmation automation key");
         let denied = request
             .post(&format!("/api/inference-jobs/{job_id}/confirm"))
             .add_header("Authorization", format!("Bearer {}", revoked.plaintext))
@@ -338,17 +392,10 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             fetched["data"]
         );
 
-        let confirm = request
-            .post(&format!("/api/inference-jobs/{job_id}/confirm"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .await;
-        assert_eq!(
-            confirm.status_code(),
-            StatusCode::ACCEPTED,
-            "response: {:?}",
-            confirm.text()
-        );
-        let accepted: serde_json::Value = confirm.json();
+        let session = super::mcp::initialize(&request).await;
+        let confirm = super::mcp::mcp_call(&request, &session, &setup.api_key, 40, "tools/call",
+            serde_json::json!({"name":"confirm_inference_proposals","arguments":{"job_id":job_id}})).await;
+        let accepted = super::mcp::tool_result_json(&confirm);
         let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
         super::fill_defaults::finish_via_api(
             &request,
@@ -498,7 +545,10 @@ async fn create_completed_proposal(
 #[tokio::test]
 async fn proposals_can_be_listed_rejected_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
+        let session = super::mcp::initialize(&request).await;
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
@@ -520,9 +570,70 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         )
         .await;
 
+        let iam_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let txn = ctx.db.begin().await.unwrap();
+        // A policy-free member: an admin carries the built-in wildcard policy and would pass the implicit-deny checks.
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, setup.tenant_id, &super::fixtures::unique_email("proposal-reviewer"),
+            "hunter2-hunter2", None).await.unwrap();
+        txn.commit().await.unwrap();
+        let key = yorishiro::models::api_keys::Entity::create_api_key(
+            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema,
+            Some(member.id), false,
+        ).await.unwrap();
+        let document = serde_json::json!({"statements":[{"effect":"allow",
+            "actions":["inference_job_get","inference_proposal_list","inference_reject","inference_discard","inference_confirmation_get"],
+            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        let policy = request.post("/api/iam/policies").add_header("Authorization", format!("Bearer {iam_key}"))
+            .json(&serde_json::json!({"name":"proposal-reviewer","document":document})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        for mode in ["implicit", "deny", "detached"] {
+            if mode == "deny" {
+                request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
+                let mut denied = document.clone();
+                denied["statements"][0]["effect"] = serde_json::json!("deny");
+                request.put(&format!("/api/iam/policies/{policy_id}"))
+                    .add_header("Authorization", format!("Bearer {iam_key}"))
+                    .json(&serde_json::json!({"name":"proposal-reviewer","document":denied})).await.assert_status_ok();
+            } else if mode == "detached" {
+                request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+                    .await.assert_status(StatusCode::NO_CONTENT);
+            }
+            for path in [format!("/api/inference-jobs/{rejected_job}"),
+                format!("/api/inference-jobs/{rejected_job}/proposals"),
+                format!("/api/inference-jobs/confirmations/{}", Uuid::new_v4())] {
+                request.get(&path).add_header("Authorization", format!("Bearer {}", key.plaintext))
+                    .await.assert_status(StatusCode::FORBIDDEN);
+            }
+            for action in ["reject", "discard"] {
+                request.post(&format!("/api/inference-jobs/{rejected_job}/{action}"))
+                    .add_header("Authorization", format!("Bearer {}", key.plaintext))
+                    .await.assert_status(StatusCode::FORBIDDEN);
+            }
+            for (index, name) in ["get_inference_job", "list_inference_proposals", "get_inference_confirmation",
+                "reject_inference_proposals", "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
+                let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, index as i64 + 10, "tools/call",
+                    serde_json::json!({"name":name,"arguments":{"job_id":rejected_job}})).await;
+                assert_eq!(mcp["result"]["structuredContent"]["error"]["code"], "scope_insufficient", "{name}: {mcp}");
+            }
+        }
+        request.put(&format!("/api/iam/policies/{policy_id}"))
+            .add_header("Authorization", format!("Bearer {iam_key}"))
+            .json(&serde_json::json!({"name":"proposal-reviewer","document":document})).await.assert_status_ok();
+        request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        request.get(&format!("/api/inference-jobs/{rejected_job}"))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext)).await.assert_status_ok();
+        request.get(&format!("/api/inference-jobs/confirmations/{}", Uuid::new_v4()))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
+            .await.assert_status(StatusCode::NOT_FOUND);
+
         let listed = request
             .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
             listed.status_code(),
@@ -531,13 +642,20 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             listed.text()
         );
         let proposals: serde_json::Value = listed.json();
+        let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, 30, "tools/call",
+            serde_json::json!({"name":"list_inference_proposals","arguments":{"job_id":rejected_job}})).await;
+        assert_eq!(super::mcp::tool_result_json(&mcp), proposals);
         assert_eq!(proposals.as_array().unwrap().len(), 1);
         assert_eq!(proposals[0]["status"], "pending");
         assert_eq!(proposals[0]["proposed"], "reject me");
+        let unchanged = request.get(&format!("/api/inference-jobs/{discarded_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext)).await;
+        unchanged.assert_status_ok();
+        assert_eq!(unchanged.json::<serde_json::Value>()[0]["status"], "pending");
 
         let rejected = request
             .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
             rejected.status_code(),
@@ -549,7 +667,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
 
         let discarded = request
             .post(&format!("/api/inference-jobs/{discarded_job}/discard"))
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
             discarded.status_code(),
@@ -568,7 +686,9 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
@@ -717,7 +837,9 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
 #[tokio::test]
 async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let queued_job = Uuid::new_v4();
@@ -804,7 +926,9 @@ async fn create_pending_proposal(
 #[tokio::test]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // Set up a workspace LLM key so infer-fill passes its validation gate.
@@ -920,7 +1044,9 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
 #[tokio::test]
 async fn infer_fill_dispatch_failure_rolls_back_job() {
     super::boot_request_isolated::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let put_key = request
             .put("/api/workspace/llm-key")
@@ -963,7 +1089,9 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
 #[tokio::test]
 async fn inference_status_polling_preserves_all_wire_values() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let mut jobs = Vec::new();
 
@@ -1033,7 +1161,9 @@ async fn inference_status_polling_preserves_all_wire_values() {
 #[tokio::test]
 async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
     super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
         create_entity(&request, &setup).await;

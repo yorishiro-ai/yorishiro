@@ -2,8 +2,8 @@ mod api_keys;
 mod audit_log;
 pub mod entities;
 mod export;
+mod iam;
 mod import;
-mod invites;
 mod members;
 mod recall;
 pub mod relations;
@@ -40,6 +40,9 @@ use crate::models::api_keys::{ApiKeyScope, AuthContext};
 
 pub trait McpToolPolicy: Send + Sync {
     fn allows(&self, ctx: &AppContext, name: &str) -> bool;
+    fn read_only(&self, name: &str) -> bool {
+        read_only_tool(name)
+    }
 }
 
 /// The policy a deployment gets when it does not choose one: every registered tool is listed and callable.
@@ -166,7 +169,6 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_entities(),
         YorishiroMcpServer::tool_router_export(),
         YorishiroMcpServer::tool_router_import(),
-        YorishiroMcpServer::tool_router_invites(),
         YorishiroMcpServer::tool_router_members(),
         YorishiroMcpServer::tool_router_recall(),
         YorishiroMcpServer::tool_router_relations(),
@@ -174,6 +176,7 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_search(),
         YorishiroMcpServer::tool_router_template_library(),
         YorishiroMcpServer::tool_router_tenants(),
+        YorishiroMcpServer::tool_router_iam(),
         YorishiroMcpServer::tool_router_whoami(),
         YorishiroMcpServer::tool_router_workspaces(),
         YorishiroMcpServer::tool_router_api_keys(),
@@ -212,6 +215,14 @@ impl ServerHandler for YorishiroMcpServer {
     ) -> Result<CallToolResponse, ErrorData> {
         if !self.tool_policy.allows(&self.ctx, request.name.as_ref()) {
             return Err(ErrorData::invalid_params("tool not found", None));
+        }
+        let maintenance = match crate::models::system_maintenance::get(&self.ctx.db).await {
+            Ok(state) => state,
+            Err(error) => return Ok(err_to_tool_result(error).into()),
+        };
+        if let Some(error) = maintenance.refusal(!self.tool_policy.read_only(request.name.as_ref()))
+        {
+            return Ok(err_to_tool_result(error).into());
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
@@ -255,10 +266,63 @@ impl ServerHandler for YorishiroMcpServer {
     }
 }
 
+// Unknown tools fail closed in read-only mode; scope alone cannot distinguish reads from IAM writes.
+pub(crate) fn read_only_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "capabilities"
+            | "whoami"
+            | "discover_workspaces"
+            | "export_jsonl"
+            | "get_active_schema"
+            | "get_current_user"
+            | "get_entity"
+            | "get_entity_drift"
+            | "get_entity_type_json_schema"
+            | "get_iam_group"
+            | "get_iam_policy"
+            | "get_relation"
+            | "get_schema_by_id"
+            | "get_template"
+            | "get_template_library_item"
+            | "get_tenant"
+            | "get_workspace"
+            | "import_job_status"
+            | "migration_job_status"
+            | "migration_dry_run"
+            | "list_api_keys"
+            | "list_audit_log"
+            | "list_entities"
+            | "list_iam_audit"
+            | "list_iam_group_members"
+            | "list_iam_group_policies"
+            | "list_iam_groups"
+            | "list_iam_policies"
+            | "list_iam_roles"
+            | "get_iam_role"
+            | "list_iam_role_policies"
+            | "list_iam_user_policies"
+            | "list_members"
+            | "list_relations"
+            | "list_schemas"
+            | "list_template_library"
+            | "list_templates"
+            | "list_workspace_members"
+            | "list_workspaces"
+            | "preview_member_removal"
+            | "recall_context"
+            | "search_entities"
+            | "tenant_retirement_inventory"
+    )
+}
+
 /// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
 pub(crate) struct Authorized {
     ctx: AuthContext,
     txn: DatabaseTransaction,
+    identity: sea_orm::DatabaseConnection,
+    authorization: Option<DatabaseTransaction>,
+    required: ApiKeyScope,
     workspace_id: uuid::Uuid,
 }
 
@@ -270,7 +334,32 @@ impl Authorized {
     /// Commits the transaction.
     /// Every write handler must call this before returning `Ok`.
     pub(crate) async fn commit(self) -> Result<(), ErrorData> {
-        self.txn.commit().await.map_err(crate::error::mcp_internal)
+        self.txn
+            .commit()
+            .await
+            .map_err(crate::error::mcp_internal)?;
+        if let Some(authorization) = self.authorization {
+            authorization
+                .commit()
+                .await
+                .map_err(crate::error::mcp_internal)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn require_action(
+        &mut self,
+        action: crate::models::iam_policy::Action,
+    ) -> Result<(), YorishiroError> {
+        self.authorization = crate::models::access::authorize_workspace_action(
+            &self.txn,
+            &self.identity,
+            &self.ctx,
+            self.required,
+            action,
+        )
+        .await?;
+        Ok(())
     }
 
     pub(crate) fn auth_context(&self) -> &AuthContext {
@@ -353,6 +442,7 @@ pub(crate) async fn authorize(
         Ok(workspace_id) => workspace_id,
         Err(error) => return Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(error))),
     };
+    let identity = ctx.db.clone();
     match request_auth
         .begin(current, required >= ApiKeyScope::Write)
         .await
@@ -360,6 +450,9 @@ pub(crate) async fn authorize(
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized {
             ctx,
             txn,
+            identity,
+            authorization: None,
+            required,
             workspace_id,
         })),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
@@ -435,36 +528,28 @@ fn scope_denied(
 /// Converts a business-logic error into a tool call result (`is_error: true`).
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
-    let structured = match &err {
-        YorishiroError::ScopeInsufficient { message, hint } => Some(serde_json::json!({
-            "error": { "code": "scope_insufficient", "message": message, "hint": hint }
-        })),
-        _ => None,
-    };
-    let message = match err {
-        YorishiroError::Internal(err) => crate::error::report_internal(&err).to_string(),
-        YorishiroError::ValidationFailed {
-            message,
-            details,
-            hint,
-        } => {
-            let mut msg = message;
-            if !details.is_empty() {
-                let detail_lines: Vec<String> = details
-                    .iter()
-                    .map(|d| format!("{}: {}", d.field, d.problem))
-                    .collect();
-                msg = format!("{msg}\n  {}", detail_lines.join("\n  "));
+    let (_, body) = err.into_http_parts();
+    let mut message = body["error"]["message"]
+        .as_str()
+        .unwrap_or("request failed")
+        .to_owned();
+    if let Some(details) = body["error"]["details"].as_array() {
+        for detail in details {
+            if let (Some(field), Some(problem)) =
+                (detail["field"].as_str(), detail["problem"].as_str())
+            {
+                message.push_str(&format!("\n  {field}: {problem}"));
             }
-            if !hint.is_empty() {
-                msg = format!("{msg}\nhint: {hint}");
-            }
-            msg
         }
-        other => other.to_string(),
-    };
+    }
+    if let Some(hint) = body["error"]["hint"]
+        .as_str()
+        .filter(|hint| !hint.is_empty())
+    {
+        message.push_str(&format!("\nhint: {hint}"));
+    }
     let mut result = CallToolResult::error(vec![ContentBlock::text(message)]);
-    result.structured_content = structured;
+    result.structured_content = Some(body);
     result
 }
 

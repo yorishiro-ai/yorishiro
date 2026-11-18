@@ -47,6 +47,14 @@ impl Task for Maintenance {
             .await
             .internal()?;
 
+        tracing::info!(
+            actor = "operator_cli",
+            mode = state.mode.as_db_str(),
+            retry_after = state.retry_after,
+            reason = state.reason.as_deref(),
+            "deployment maintenance state changed"
+        );
+
         match state.mode {
             MaintenanceMode::Off => println!("maintenance off; serving normally"),
             MaintenanceMode::ReadOnly => println!(

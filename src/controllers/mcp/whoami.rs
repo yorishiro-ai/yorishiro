@@ -12,7 +12,7 @@ use crate::models::api_keys::ApiKeyScope;
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Inspect current grants and visible tools' required scopes and scope satisfaction; this snapshot does not guarantee operation success or authorize later requests (requires read scope)"
+        description = "Inspect credential scope, independent audit grant, tenant root identity and visible tools' scope requirements; IAM is evaluated per operation and this snapshot does not authorize requests (requires read scope)"
     )]
     pub async fn capabilities(
         &self,
@@ -34,8 +34,8 @@ impl YorishiroMcpServer {
                 ok_json(serde_json::json!({
                     "scopes": capabilities.scopes,
                     "audit": capabilities.audit,
-                    "tenant_admin": capabilities.tenant_admin,
-                    "workspace_access": capabilities.workspace_access,
+                    "tenant_root": capabilities.tenant_root,
+                    "credential_scope": capabilities.credential_scope,
                     "tools": tools,
                     "constraints": {
                         "database_backend": capabilities.database_backend,
@@ -43,6 +43,7 @@ impl YorishiroMcpServer {
                         "workspace_key_retargeting": false,
                         "tenant_key_target_header": "X-Workspace-Id",
                         "discovery_authorizes_requests": false,
+                        "authorization_model": "tenant_iam",
                     },
                 }))
             }

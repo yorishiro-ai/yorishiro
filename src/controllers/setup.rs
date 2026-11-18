@@ -1,6 +1,6 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/root/login`.
 //!
-//! Creates the deployment's first tenant, workspace and owner account, then issues a tenant-scoped admin key for that owner.
+//! Creates the deployment's first tenant, workspace and admin account, then issues a tenant-scoped admin key for that account.
 //! The key is not bound to the default workspace: it can act on every workspace of the tenant and names the target per request.
 //! The resolved edition tenant cap controls whether first-run setup is available.
 //! An unlimited cap disables the wizard; the source default is one tenant.
@@ -16,8 +16,7 @@ use loco_rs::controller::Routes;
 use crate::controllers::ApiError;
 use crate::dtos::setup::{SetupRequest, SetupResponse, SetupStatusResponse};
 use crate::error::YorishiroError;
-use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenant_memberships::MembershipRole;
+use crate::models::api_keys::{ApiKeyScope, IdentityApiKeys};
 use crate::models::{tenancy, tenant_tenants};
 
 fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
@@ -56,11 +55,12 @@ async fn setup(
         body.display_name.as_deref(),
     )
     .await?;
-    // Operator bootstrap, not user self-service: this is the one path besides the `create_api_key` CLI task that may create an audit-reading key.
+    // Operator bootstrap issues the first audit-reading key; later grants require an authorized issuer.
+    // The scope is the top of the credential ladder, independent of IAM permissions.
     let created = IdentityApiKeys::create_tenant_api_key(
         &ctx.db,
         account.tenant_id,
-        MembershipRole::Owner.max_scope(),
+        ApiKeyScope::Migration,
         Some(account.user_id),
         true,
         "initial-admin",

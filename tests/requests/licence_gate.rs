@@ -40,15 +40,6 @@ use serial_test::serial;
 use yorishiro::App;
 use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
-fn require_licence(ctx: &loco_rs::app::AppContext) {
-    assert!(
-        ctx.shared_store
-            .get::<std::sync::Arc<LicenceState>>()
-            .is_some_and(|state| state.is_active()),
-        "this case requires a valid YORISHIRO_LICENSE_KEY at application boot"
-    );
-}
-
 /// One representative gated route, with a method that reaches the layer.
 ///
 /// Authentication is deliberately not set up: 404 rather than 401 to an unauthenticated caller is
@@ -127,7 +118,9 @@ async fn gated_routes_are_absent_without_a_licence() {
 #[tokio::test]
 async fn gated_routes_are_served_with_a_licence() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
 
         for path in GATED {
             let response = request.get(path).await;
@@ -157,7 +150,34 @@ async fn gated_routes_are_served_with_a_licence() {
 #[tokio::test]
 async fn missing_licence_state_closes_the_gate_again() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
+        let session = super::mcp::initialize(&request).await;
+        let listed = super::mcp::mcp_call(
+            &request,
+            &session,
+            "",
+            1,
+            "tools/list",
+            serde_json::json!({}),
+        )
+        .await;
+        let licensed_tools: Vec<_> =
+            serde_json::from_str::<serde_json::Value>(include_str!("../blackbox/tools.json"))
+                .unwrap()["licensed"]
+                .as_array()
+                .unwrap()
+                .clone();
+        for name in &licensed_tools {
+            assert!(
+                listed["result"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == *name)
+            );
+        }
         let licensed = request.get(GATED[0]).await.status_code();
         // 401 here rather than 200: the request carries no API key, and the point is only that the
         // *licence* is not what rejects it. Asserting the exact code rather than `!= 404` matters:
@@ -179,6 +199,37 @@ async fn missing_licence_state_closes_the_gate_again() {
             unavailable, 404,
             "missing licence state must close the gate without a restart; got {unavailable}"
         );
+        let listed = super::mcp::mcp_call(
+            &request,
+            &session,
+            "",
+            2,
+            "tools/list",
+            serde_json::json!({}),
+        )
+        .await;
+        for (index, name) in licensed_tools.iter().enumerate() {
+            assert!(
+                !listed["result"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == *name)
+            );
+            let rejected = super::mcp::mcp_call(
+                &request,
+                &session,
+                "",
+                index as i64 + 3,
+                "tools/call",
+                serde_json::json!({"name":name,"arguments":{}}),
+            )
+            .await;
+            assert!(
+                rejected.get("error").is_some(),
+                "hidden tool must not dispatch: {name}"
+            );
+        }
     })
     .await;
 }
@@ -193,7 +244,9 @@ async fn missing_licence_state_closes_the_gate_again() {
 #[tokio::test]
 async fn stripe_webhook_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let licensed = request.post("/api/stripe/webhook").await.status_code();
         assert_eq!(
             licensed, 501,
@@ -225,7 +278,9 @@ async fn stripe_webhook_is_gated() {
 #[tokio::test]
 async fn oauth_login_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        require_licence(&ctx);
+        if super::skip_unlicensed(&ctx) {
+            return;
+        }
         let licensed = request.get("/auth/oauth/status").await.status_code();
         assert_eq!(
             licensed, 200,

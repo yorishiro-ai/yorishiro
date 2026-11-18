@@ -18,6 +18,16 @@ pub(crate) struct SetupAccount {
     pub(crate) workspace_id: Uuid,
 }
 
+/// # Errors
+/// Returns an error if the root is not a member or a root already exists.
+pub async fn assign_initial_root(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), YorishiroError> {
+    crate::models::iam_tenant_roots::Model::create(txn, tenant_id, user_id).await
+}
+
 /// Issues a tenant-scoped login credential after rechecking the account and membership.
 ///
 /// # Errors
@@ -75,18 +85,16 @@ pub async fn issue_login_key(
     {
         return Err(YorishiroError::Unauthenticated);
     }
-    let role = crate::models::tenant_memberships::get_membership_role(&txn, tenant_id, user_id)
-        .await?
-        .ok_or(YorishiroError::Unauthenticated)?;
-    let scope = role.max_scope();
+    if !crate::models::tenant_memberships::is_member(&txn, tenant_id, user_id).await? {
+        return Err(YorishiroError::Unauthenticated);
+    }
+    let scope = crate::models::api_keys::ApiKeyScope::Migration;
     let key =
         crate::models::api_keys::Entity::create_login_key(&txn, tenant_id, user_id, scope).await?;
     txn.commit().await.internal()?;
     Ok((key, tenant_id, scope))
 }
 
-/// Creates an account and its membership in the caller's transaction.
-///
 /// # Errors
 /// Returns an error if account creation or membership insertion fails.
 pub async fn register_member(
@@ -95,11 +103,9 @@ pub async fn register_member(
     email: &str,
     password: &str,
     display_name: Option<&str>,
-    role: crate::models::tenant_memberships::MembershipRole,
 ) -> Result<crate::models::user_users::Model, YorishiroError> {
     let user = crate::models::user_users::create_user(txn, email, password, display_name).await?;
-    crate::models::tenant_memberships::add_member_in_transaction(txn, tenant_id, user.id, role)
-        .await?;
+    crate::models::tenant_memberships::add_member_in_transaction(txn, tenant_id, user.id).await?;
     Ok(user)
 }
 
@@ -117,15 +123,9 @@ pub(crate) async fn signup_account(
         max_tenants,
     )
     .await?;
-    let user = register_member(
-        &txn,
-        tenant.id,
-        email,
-        password,
-        display_name,
-        crate::models::tenant_memberships::MembershipRole::Owner,
-    )
-    .await?;
+    crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
+    let user = register_member(&txn, tenant.id, email, password, display_name).await?;
+    assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
     Ok((user, tenant.id))
 }
@@ -137,7 +137,7 @@ pub(crate) async fn setup_first_account(
     password: &str,
     display_name: Option<&str>,
 ) -> Result<SetupAccount, YorishiroError> {
-    use crate::models::{tenant_memberships, tenant_tenants};
+    use crate::models::tenant_tenants;
 
     if max_tenants.is_none() {
         return Err(YorishiroError::not_found(
@@ -152,16 +152,10 @@ pub(crate) async fn setup_first_account(
         });
     }
     let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
+    crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
     let workspace = create_workspace(&txn, tenant.id, "default", None, None).await?;
-    let user = register_member(
-        &txn,
-        tenant.id,
-        email,
-        password,
-        display_name,
-        tenant_memberships::MembershipRole::Owner,
-    )
-    .await?;
+    let user = register_member(&txn, tenant.id, email, password, display_name).await?;
+    assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
     Ok(SetupAccount {
         user_id: user.id,
@@ -171,7 +165,6 @@ pub(crate) async fn setup_first_account(
     })
 }
 
-/// Every workspace `user_id` can log into through inherited authority or a direct grant.
 /// Used by sign-in to list explicit workspace choices.
 ///
 /// Deliberately unpaginated: sign-in must show every reachable workspace.
@@ -255,7 +248,6 @@ pub async fn discover_workspaces(
 pub struct LoginMembership {
     pub tenant_id: Uuid,
     pub tenant_name: String,
-    pub role: crate::models::tenant_memberships::MembershipRole,
 }
 
 /// Discovers recovery options only after the caller has verified credentials.
@@ -266,8 +258,7 @@ async fn login_options(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
 ) -> Result<(Vec<LoginMembership>, Vec<LoginWorkspace>), YorishiroError> {
-    use crate::models::_entities::{tenant_tenants, workspace_memberships};
-    use crate::models::tenant_memberships::MembershipRole;
+    use crate::models::_entities::tenant_tenants;
     let rows = tenant_memberships::Entity::find()
         .filter(tenant_memberships::Column::UserId.eq(user_id))
         .find_also_related(tenant_tenants::Entity)
@@ -275,19 +266,16 @@ async fn login_options(
         .await
         .internal()?;
     let mut memberships = Vec::with_capacity(rows.len());
-    for (membership, tenant) in rows {
+    for (_, tenant) in rows {
         let tenant = tenant.ok_or_else(|| {
             YorishiroError::Internal(anyhow::anyhow!("membership tenant missing"))
         })?;
         if tenant.disabled_at.is_some() {
             continue;
         }
-        let role = crate::models::tenant_memberships::MembershipRole::from_db_str(&membership.role)
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown membership role")))?;
         memberships.push(LoginMembership {
             tenant_id: tenant.id,
             tenant_name: tenant.name,
-            role,
         });
     }
     memberships.sort_by_key(|membership| membership.tenant_id);
@@ -305,26 +293,46 @@ async fn login_options(
             .iter()
             .map(|membership| (membership.tenant_id, &membership.tenant_name))
             .collect();
-        let inherited: std::collections::BTreeSet<_> = memberships
-            .iter()
-            .filter(|membership| {
-                matches!(
-                    membership.role,
-                    MembershipRole::Owner | MembershipRole::Admin
+        let mut permissions = std::collections::BTreeMap::new();
+        for membership in &memberships {
+            let root = crate::models::iam_tenant_roots::Model::contains(
+                conn,
+                membership.tenant_id,
+                user_id,
+            )
+            .await?;
+            let mut policies = Vec::new();
+            if !root {
+                for record in crate::models::iam_policies::Model::for_user(
+                    conn,
+                    membership.tenant_id,
+                    user_id,
                 )
-            })
-            .map(|membership| membership.tenant_id)
-            .collect();
-        let grants: std::collections::BTreeSet<_> = workspace_memberships::Entity::find()
-            .filter(workspace_memberships::Column::UserId.eq(user_id))
-            .all(conn)
-            .await
-            .internal()?
-            .into_iter()
-            .map(|grant| grant.workspace_id)
-            .collect();
+                .await?
+                {
+                    policies.push(crate::models::iam_policy::Policy::parse(
+                        &serde_json::to_string(&record.document).internal()?,
+                        membership.tenant_id,
+                        |tenant, _| tenant == membership.tenant_id,
+                    )?);
+                }
+            }
+            permissions.insert(membership.tenant_id, (root, policies));
+        }
         for workspace in workspaces {
-            if !inherited.contains(&workspace.tenant_id) && !grants.contains(&workspace.id) {
+            let (root, policies) = &permissions[&workspace.tenant_id];
+            if !root
+                && !crate::models::iam_policy::Policy::allows(
+                    policies,
+                    workspace.tenant_id,
+                    crate::models::iam_policy::Action::WorkspaceGet,
+                    crate::models::iam_policy::Resource::Workspace {
+                        tenant_id: workspace.tenant_id,
+                        workspace_id: workspace.id,
+                    },
+                    |tenant, id| tenant == workspace.tenant_id && id == workspace.id,
+                )
+            {
                 continue;
             }
             let tenant_name = names.get(&workspace.tenant_id).ok_or_else(|| {
@@ -428,7 +436,16 @@ pub(crate) async fn create_workspace_in_context(
     schema_id: Option<Uuid>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::WorkspaceCreate,
+        crate::models::iam_policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
     let quota = crate::quotas(ctx, actor.tenant_id).await?;
     let workspace = create_workspace_with_quota(
         &txn,
@@ -443,30 +460,30 @@ pub(crate) async fn create_workspace_in_context(
     Ok(workspace)
 }
 
-/// Deletes a workspace after revalidating tenant administration and target ownership.
-///
 /// # Errors
-/// Rejects revoked credentials, lost administration, foreign targets or the last workspace.
+/// Rejects revoked credentials, missing permission, foreign targets or the last workspace.
 pub async fn delete_workspace_as(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_current_tenant_admin(&txn, actor).await?;
-    let key = crate::models::api_keys::Entity::find_by_id(actor.api_key_id)
-        .one(&txn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)?;
-    if key.workspace_id.is_some_and(|id| id != workspace_id) {
-        return Err(YorishiroError::not_found("workspace not found"));
-    }
     if crate::models::workspace_workspaces::get_workspace_tenant(&txn, workspace_id).await?
         != actor.tenant_id
     {
         return Err(YorishiroError::not_found("workspace not found"));
     }
+    crate::models::access::require_iam_action(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam_policy::Action::WorkspaceDelete,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id,
+        },
+    )
+    .await?;
     crate::models::workspace_workspaces::delete_workspace(&txn, workspace_id).await?;
     txn.commit().await.internal()?;
     Ok(())

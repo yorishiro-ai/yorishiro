@@ -6,6 +6,8 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
+use crate::models::api_keys::{ApiKeyScope, AuthContext};
+use crate::models::iam_policy::Action;
 use crate::workers::embedding_sync::WorkerClass;
 use crate::workers::target::WorkerTarget;
 use loco_rs::app::AppContext;
@@ -31,7 +33,32 @@ pub async fn set(
     workspace_id: Uuid,
     worker_class: WorkerClass,
 ) -> Result<(), YorishiroError> {
-    let target = WorkerTarget::for_job(&ctx.db, worker_class, workspace_id).await?;
+    set_on(&ctx.db, ctx, workspace_id, worker_class).await
+}
+
+pub(crate) async fn set_as(
+    ctx: &AppContext,
+    actor: &AuthContext,
+    worker_class: WorkerClass,
+) -> Result<(), YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        &ctx.db,
+        actor,
+        ApiKeyScope::Schema,
+        Action::WorkerClassUpdate,
+    )
+    .await?;
+    set_on(&txn, ctx, actor.require_workspace()?, worker_class).await?;
+    txn.commit().await.internal()
+}
+
+async fn set_on(
+    conn: &impl ConnectionTrait,
+    ctx: &AppContext,
+    workspace_id: Uuid,
+    worker_class: WorkerClass,
+) -> Result<(), YorishiroError> {
+    let target = WorkerTarget::for_job(conn, worker_class, workspace_id).await?;
     let settings = crate::data::settings::configured(ctx).internal()?;
     if !settings.worker_targets.contains(&target.tag()) {
         return Err(YorishiroError::ValidationFailed {
@@ -58,10 +85,35 @@ pub async fn set(
                 .update_columns([Column::WorkerClass, Column::UpdatedAt])
                 .to_owned(),
         )
-        .exec(&ctx.db)
+        .exec(conn)
         .await
         .internal()?;
     Ok(())
+}
+
+pub(crate) async fn clear_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+) -> Result<(), YorishiroError> {
+    let txn = super::access::workspace_transaction(
+        db,
+        actor,
+        ApiKeyScope::Schema,
+        Action::WorkerClassDelete,
+    )
+    .await?;
+    clear(&txn, actor.require_workspace()?).await?;
+    txn.commit().await.internal()
+}
+
+pub(crate) async fn describe_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+) -> Result<Option<WorkerClassAssignment>, YorishiroError> {
+    let txn =
+        super::access::workspace_transaction(db, actor, ApiKeyScope::Read, Action::WorkerClassGet)
+            .await?;
+    describe(&txn, actor.require_workspace()?).await
 }
 
 /// Removes a workspace's own assignment.

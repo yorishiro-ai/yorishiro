@@ -458,7 +458,7 @@ pub(crate) async fn begin_workspace_write(
 
 /// Which pools this deployment holds for control-plane vs. tenant-scoped access.
 ///
-/// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`user_users`/`tenant_memberships`/`workspace_invites`) that have no tenant/workspace context yet to scope by.
+/// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`user_users`/`tenant_memberships`) that have no tenant/workspace context yet to scope by.
 #[derive(Clone)]
 pub struct DbHandle {
     pub tenant: TenantDb,
@@ -689,6 +689,15 @@ pub async fn reindex_workspace_with_lock(
     workspace_id: Uuid,
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
+    reindex_workspace_with_actor(ctx, workspace_id, provider, None).await
+}
+
+pub(crate) async fn reindex_workspace_with_actor(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: Uuid,
+    provider: &dyn crate::services::embedding::EmbeddingProvider,
+    actor: Option<&crate::models::api_keys::AuthContext>,
+) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
     let lock = if ctx.is_sqlite() {
         None
     } else {
@@ -707,8 +716,13 @@ pub async fn reindex_workspace_with_lock(
                 })?,
         )
     };
-    let outcome =
-        crate::models::entity_embeddings::reindex_workspace(&ctx.db, workspace_id, provider).await;
+    let outcome = crate::models::entity_embeddings::reindex_workspace_as(
+        &ctx.db,
+        workspace_id,
+        provider,
+        actor,
+    )
+    .await;
     if let Some(lock) = lock {
         let _ = lock.release().await;
     }

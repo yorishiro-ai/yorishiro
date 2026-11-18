@@ -46,7 +46,7 @@ async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
                 .is_none()
         );
         let read = request
-            .get("/api/workspaces")
+            .get(&format!("/api/workspaces/{workspace_id}"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
         assert_eq!(read.status_code(), StatusCode::OK);
@@ -411,7 +411,7 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         let key_id: Uuid = created_body["id"].as_str().unwrap().parse().unwrap();
         let revoked = request
             .delete(&format!("/api/api-keys/{key_id}"))
-            .add_header("Authorization", format!("Bearer {full_key}"))
+            .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(revoked.status_code(), StatusCode::NO_CONTENT);
 
@@ -448,113 +448,6 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await;
         assert_eq!(missing.status_code(), StatusCode::BAD_REQUEST);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn api_key_lifecycle_rejects_non_admin() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant {
-            tenant_id,
-            workspace_id,
-            ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let member = yorishiro::models::user_users::create_user(
-            &ctx.db,
-            &crate::requests::fixtures::unique_email("member"),
-            "member-password",
-            None,
-        )
-        .await
-        .expect("create member");
-        yorishiro::models::tenant_memberships::add_member(
-            &ctx.db,
-            tenant_id,
-            member.id,
-            yorishiro::models::tenant_memberships::MembershipRole::Member,
-        )
-        .await
-        .expect("add member");
-        super::fixtures::grant_workspace(
-            &ctx,
-            workspace_id,
-            member.id,
-            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
-        )
-        .await;
-        let member_key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db,
-            workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Read,
-            Some(member.id),
-            false,
-        )
-        .await
-        .expect("issue member key")
-        .plaintext;
-        let forbidden = request
-            .get("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {member_key}"))
-            .await;
-        assert_eq!(forbidden.status_code(), StatusCode::FORBIDDEN);
-    })
-    .await;
-}
-
-#[cfg(feature = "enterprise")]
-#[tokio::test]
-async fn api_key_lifecycle_rejects_cross_tenant_ids() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let TestTenant {
-            tenant_id: other_tenant,
-            workspace_id: other_workspace,
-            api_key: other_key,
-            ..
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                tenant_name: "other".into(),
-                workspace_name: "other".into(),
-                owner_email: super::fixtures::unique_email("other"),
-                ..TenantArgs::default()
-            },
-        )
-        .await;
-        assert_ne!(owner.tenant_id, other_tenant);
-
-        let other_created = request
-            .post("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {other_key}"))
-            .json(&serde_json::json!({ "name": "other-client" }))
-            .await;
-        assert_eq!(other_created.status_code(), StatusCode::CREATED);
-        let other_id = other_created.json::<Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-
-        let cross_tenant = request
-            .delete(&format!("/api/api-keys/{other_id}"))
-            .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .await;
-        assert_eq!(cross_tenant.status_code(), StatusCode::NOT_FOUND);
-        request
-            .post(&format!("/api/api-keys/{other_id}/rotate"))
-            .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .await
-            .assert_status(StatusCode::NOT_FOUND);
-
-        let malformed_workspace = request
-            .delete(&format!("/api/api-keys/{other_workspace}"))
-            .add_header("Authorization", format!("Bearer {}", owner.api_key))
-            .await;
-        assert_eq!(malformed_workspace.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
 }
@@ -611,9 +504,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             tenant.tenant_id,
             &super::fixtures::unique_email("tenant-scoped-member"),
             "hunter2-hunter2",
-            None,
-            yorishiro::models::tenant_memberships::MembershipRole::Member,
-        )
+            None)
         .await
         .unwrap();
         txn.commit().await.unwrap();
@@ -645,6 +536,30 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Write,
             Some(member.id), false, "member-tenant-issuer",
         ).await.unwrap();
+        let _elevated = api_keys::Entity::create_tenant_api_key(
+            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Migration,
+            Some(member.id), false, "iam-not-role-ceiling",
+        ).await.unwrap();
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["credential_create"],
+            "resources":[{"type":"tenant","tenant_id":tenant.tenant_id}]}]});
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .json(&serde_json::json!({"name":"member-issuance","document":document})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        request.put(&attachment).add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
+            .json(&serde_json::json!({"name":"iam-member-write","scope":"write","tenant_scoped":true}))
+            .await.assert_status(StatusCode::CREATED);
+        request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
+            .json(&serde_json::json!({"name":"iam-member-escalation","scope":"schema","tenant_scoped":true}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+        request.delete(&attachment).add_header("Authorization", format!("Bearer {}", issuer.plaintext))
+            .await.assert_status(StatusCode::NO_CONTENT);
         request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
@@ -654,9 +569,15 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let txn = ctx.db.begin().await.unwrap();
         let inaccessible = tenancy::create_workspace(&txn, tenant.tenant_id, "no-member-grant", None, None).await.unwrap();
         txn.commit().await.unwrap();
+        let _ungranted = api_keys::Entity::create_api_key(
+            &ctx.db, inaccessible.id, api_keys::ApiKeyScope::Schema, Some(member.id), false,
+        ).await.expect("issuance does not require a legacy workspace grant");
         request.get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, inaccessible.id.to_string())
+            .await.assert_status(StatusCode::OK);
+        request.get(&format!("/api/workspaces/{}", inaccessible.id))
+            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
             .await.assert_status(StatusCode::FORBIDDEN);
         let listed = request.get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))

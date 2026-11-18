@@ -8,6 +8,7 @@ use crate::error::{ResultExt, YorishiroError};
 
 const KEY_PREFIX_LENGTH: usize = 12;
 const KEY_SECRET_LENGTH: usize = 48;
+const LOGIN_SESSION_HOURS: i64 = 12;
 
 /// The request header that names which workspace a tenant-scoped key acts on.
 pub const WORKSPACE_HEADER: &str = "x-workspace-id";
@@ -21,8 +22,6 @@ pub struct KeyGrant {
     pub revoked_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub replaced_by_id: Option<Uuid>,
     pub scope: ApiKeyScope,
-    /// For tenant-scoped keys, the tenant-level ceiling, not authority in any selected workspace.
-    /// For workspace-bound keys, the ceiling in that workspace; inactive keys or users without access have no effective scope.
     pub effective_scope: Option<ApiKeyScope>,
     pub audit: bool,
     pub workspace_id: Option<Uuid>,
@@ -84,26 +83,20 @@ impl Model {
         let effective_scope = if !self.is_active() {
             None
         } else {
-            match self.user_id {
-                None => Some(scope),
-                Some(user_id) => match self.workspace_id {
-                    Some(workspace_id) => crate::models::access::workspace_access(
-                        conn,
-                        self.tenant_id,
-                        workspace_id,
-                        user_id,
-                    )
-                    .await?
-                    .map(|access| scope.min(access.max_scope)),
-                    // A tenant-scoped key acts as the attributed user, so its ceiling is the tenant role, not a workspace grant.
-                    None => crate::models::tenant_memberships::get_membership_role(
-                        conn,
-                        self.tenant_id,
-                        user_id,
-                    )
-                    .await?
-                    .map(|role| crate::models::access::effective_scope(scope, role)),
-                },
+            let presented = AuthContext {
+                api_key_id: self.id,
+                workspace_id: self.workspace_id,
+                tenant_id: self.tenant_id,
+                user_id: self.user_id,
+                scope,
+                audit: self.audit,
+            };
+            match Self::current_context(conn, &presented).await {
+                Ok(current) => Some(current.scope),
+                Err(YorishiroError::Unauthenticated | YorishiroError::ScopeInsufficient { .. }) => {
+                    None
+                }
+                Err(error) => return Err(error),
             }
         };
         Ok(KeyGrant {
@@ -179,36 +172,16 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    /// Applies current membership without widening the key's stored grant.
     /// Requests already authenticated may finish; later authentications read the committed membership.
     pub(crate) async fn with_current_membership(
-        mut self,
+        self,
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
         crate::models::tenant_tenants::Model::require_active(conn, self.tenant_id).await?;
-        if let Some(user_id) = self.user_id {
-            let role = crate::models::tenant_memberships::get_membership_role(
-                conn,
-                self.tenant_id,
-                user_id,
-            )
-            .await?
-            .ok_or(YorishiroError::Unauthenticated)?;
-            self.scope = crate::models::access::effective_scope(self.scope, role);
-            if let Some(workspace_id) = self.workspace_id {
-                let access = crate::models::access::workspace_access(
-                    conn,
-                    self.tenant_id,
-                    workspace_id,
-                    user_id,
-                )
-                .await?
-                .ok_or_else(|| YorishiroError::ScopeInsufficient {
-                    message: "this account has no access to the selected workspace".into(),
-                    hint: "ask a tenant administrator for a workspace grant".into(),
-                })?;
-                self.scope = self.scope.min(access.max_scope);
-            }
+        if let Some(user_id) = self.user_id
+            && !crate::models::tenant_memberships::is_member(conn, self.tenant_id, user_id).await?
+        {
+            return Err(YorishiroError::Unauthenticated);
         }
         Ok(self)
     }
@@ -547,7 +520,6 @@ impl Entity {
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
-    /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or any other flow provisioning a key for an ordinary user.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -598,8 +570,7 @@ impl Entity {
                 "tenant '{tenant_id}' does not exist"
             )));
         }
-        crate::models::access::require_attributed_key_grant(&txn, tenant_id, user_id, scope)
-            .await?;
+        crate::models::access::require_key_attribution(&txn, tenant_id, user_id).await?;
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
@@ -628,8 +599,7 @@ impl Entity {
         user_id: uuid::Uuid,
         scope: ApiKeyScope,
     ) -> Result<CreatedTenantApiKey, YorishiroError> {
-        crate::models::access::require_attributed_key_grant(txn, tenant_id, Some(user_id), scope)
-            .await?;
+        crate::models::access::require_key_attribution(txn, tenant_id, Some(user_id)).await?;
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
@@ -640,6 +610,42 @@ impl Entity {
             name: ActiveValue::Set("login".to_string()),
             scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(false),
+            expires_at: ActiveValue::Set(Some(
+                (crate::time::now() + chrono::Duration::hours(LOGIN_SESSION_HOURS)).into(),
+            )),
+            ..Default::default()
+        }
+        .insert(txn)
+        .await
+        .internal()?;
+        Ok(CreatedTenantApiKey {
+            id: inserted.id,
+            plaintext,
+        })
+    }
+
+    pub(crate) async fn create_role_session(
+        txn: &sea_orm::DatabaseTransaction,
+        tenant_id: uuid::Uuid,
+        user_id: Option<uuid::Uuid>,
+        role_id: uuid::Uuid,
+        scope: ApiKeyScope,
+        role_name: &str,
+        expires_at: chrono::DateTime<chrono::FixedOffset>,
+    ) -> Result<CreatedTenantApiKey, YorishiroError> {
+        crate::models::access::require_key_attribution(txn, tenant_id, user_id).await?;
+        let (prefix, plaintext) = generate_key();
+        let inserted = ActiveModel {
+            tenant_id: ActiveValue::Set(tenant_id),
+            workspace_id: ActiveValue::Set(None),
+            user_id: ActiveValue::Set(user_id),
+            role_id: ActiveValue::Set(Some(role_id)),
+            key_hash: ActiveValue::Set(hash_key(&plaintext)),
+            key_prefix: ActiveValue::Set(prefix),
+            name: ActiveValue::Set(validate_key_name(&format!("role:{role_name}"))?),
+            scope: ActiveValue::Set(scope.as_db_str().to_string()),
+            audit: ActiveValue::Set(false),
+            expires_at: ActiveValue::Set(Some(expires_at)),
             ..Default::default()
         }
         .insert(txn)
@@ -695,7 +701,16 @@ impl Entity {
             });
         }
 
-        crate::models::access::require_current_tenant_admin(&txn, issuer).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            issuer,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::CredentialCreate,
+            crate::models::iam_policy::Resource::Tenant {
+                tenant_id: issuer.tenant_id,
+            },
+        )
+        .await?;
         let current = Model::current_context(&txn, issuer).await?;
         crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
         let issuer_key = Entity::find_by_id(issuer.api_key_id)
@@ -718,13 +733,8 @@ impl Entity {
                 hint: "set expires_at no later than the issuing key's expiry".into(),
             });
         }
-        crate::models::access::require_attributed_key_grant(
-            &txn,
-            issuer.tenant_id,
-            issuer.user_id,
-            scope,
-        )
-        .await?;
+        crate::models::access::require_key_attribution(&txn, issuer.tenant_id, issuer.user_id)
+            .await?;
 
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
@@ -787,35 +797,19 @@ impl Entity {
             .internal()?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-        crate::models::access::require_attributed_key_grant(
-            &txn,
-            workspace.tenant_id,
-            user_id,
-            scope,
-        )
-        .await?;
-
-        if let Some(user_id) = user_id {
-            let access = crate::models::access::workspace_access(
-                &txn,
-                workspace.tenant_id,
-                workspace_id,
-                user_id,
-            )
-            .await?
-            .ok_or_else(|| YorishiroError::ScopeInsufficient {
-                message: "this account has no access to the selected workspace".into(),
-                hint: "grant workspace access before issuing a credential".into(),
-            })?;
-            if scope > access.max_scope {
-                return Err(YorishiroError::ScopeInsufficient {
-                    message: "requested scope exceeds this user's workspace authority".into(),
-                    hint: "issue a lower-scoped key or change the workspace grant".into(),
-                });
-            }
-        }
+        crate::models::access::require_key_attribution(&txn, workspace.tenant_id, user_id).await?;
 
         if let Some(issuer) = issuer {
+            crate::models::access::require_iam_action(
+                &txn,
+                issuer,
+                ApiKeyScope::Read,
+                crate::models::iam_policy::Action::CredentialCreate,
+                crate::models::iam_policy::Resource::Tenant {
+                    tenant_id: workspace.tenant_id,
+                },
+            )
+            .await?;
             let current = Model::current_context(&txn, issuer).await?;
             crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
             let issuer_key = Entity::find_by_id(issuer.api_key_id)
@@ -887,6 +881,29 @@ impl Entity {
     }
 
     /// Every key in a tenant, oldest first.
+    pub(crate) async fn list_with_grants_as(
+        db: &DatabaseConnection,
+        actor: &AuthContext,
+    ) -> Result<Vec<(Model, KeyGrant)>, YorishiroError> {
+        let txn = crate::db::begin_write(db).await.internal()?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::CredentialList,
+            crate::models::iam_policy::Resource::Tenant {
+                tenant_id: actor.tenant_id,
+            },
+        )
+        .await?;
+        let mut records = Vec::new();
+        for key in Self::list_for_tenant(&txn, actor.tenant_id).await? {
+            let grant = key.grant_metadata(&txn).await?;
+            records.push((key, grant));
+        }
+        Ok(records)
+    }
+
     pub(crate) async fn list_for_tenant(
         conn: &impl ConnectionTrait,
         tenant_id: uuid::Uuid,
@@ -936,7 +953,16 @@ impl Entity {
         key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::CredentialRevoke,
+            crate::models::iam_policy::Resource::Tenant {
+                tenant_id: actor.tenant_id,
+            },
+        )
+        .await?;
         Self::delete_for_tenant(&txn, actor.tenant_id, key_id).await?;
         txn.commit().await.internal()?;
         Ok(())
@@ -964,7 +990,16 @@ impl Entity {
         key_id: Uuid,
     ) -> Result<CreatedApiKey, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_current_tenant_admin(&txn, actor).await?;
+        crate::models::access::require_iam_action(
+            &txn,
+            actor,
+            ApiKeyScope::Read,
+            crate::models::iam_policy::Action::CredentialRotate,
+            crate::models::iam_policy::Resource::Tenant {
+                tenant_id: actor.tenant_id,
+            },
+        )
+        .await?;
         let old = Entity::find_by_id(key_id)
             .one(&txn)
             .await
@@ -1000,25 +1035,7 @@ impl Entity {
                 hint: "rotate using a credential with sufficient lifetime".into(),
             });
         }
-        crate::models::access::require_attributed_key_grant(
-            &txn,
-            old.tenant_id,
-            old.user_id,
-            scope,
-        )
-        .await?;
-        if let (Some(workspace), Some(user)) = (old.workspace_id, old.user_id) {
-            let access =
-                crate::models::access::workspace_access(&txn, old.tenant_id, workspace, user)
-                    .await?
-                    .ok_or(YorishiroError::Unauthenticated)?;
-            if scope > access.max_scope {
-                return Err(YorishiroError::ScopeInsufficient {
-                    message: "key grant exceeds current workspace authority".into(),
-                    hint: "issue a lower-scoped key instead".into(),
-                });
-            }
-        }
+        crate::models::access::require_key_attribution(&txn, old.tenant_id, old.user_id).await?;
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(old.tenant_id),

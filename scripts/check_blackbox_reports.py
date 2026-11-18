@@ -13,8 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SUITES = ("rest", "mcp", "cli")
-EE_OWNED_COMMON_TOOLS = {"accept_invite", "search_entities"}
-REJECTION_ONLY_TOOLS = {"accept_invite"}
+EE_OWNED_COMMON_TOOLS = {"search_entities"}
+# Every public tool now has a successful attributed call; a tool that can only be rejected would be listed here.
+REJECTION_ONLY_TOOLS: set[str] = set()
 
 
 def require_owned_successes(reviewed: dict, edition: str, calls: list[dict]) -> set[str]:
@@ -36,6 +37,21 @@ def require_owned_successes(reviewed: dict, edition: str, calls: list[dict]) -> 
 def load_reports(directory: Path) -> list[dict]:
     paths = [*directory.glob("results.json"), *directory.glob("*/results.json")]
     return [json.loads(path.read_text()) for path in sorted(paths)]
+
+
+def validate_discovery(reviewed: dict, edition: str, reports: list[dict]) -> None:
+    common = set(reviewed["ce"])
+    additions = set(reviewed["ee_additions"])
+    licensed = set(reviewed["licensed"])
+    if not licensed <= additions:
+        raise ValueError("licensed tools must belong to the enterprise inventory")
+    expected = {"mcp": common}
+    if edition == "ee":
+        expected = {"mcp": common | additions - licensed, "tenant-postgres": common | additions}
+    for suite, names in expected.items():
+        discoveries = [report.get("discovered_tools", []) for report in reports if report["suite"] == suite]
+        if len(discoveries) != 1 or len(discoveries[0]) != len(names) or set(discoveries[0]) != names:
+            raise ValueError(f"{suite}: MCP discovery does not match the reviewed public-tool inventory")
 
 
 def validate_reports(expected: dict[str, list[str]], reports: list[dict], edition: str, binary_sha256: str) -> None:
@@ -87,9 +103,7 @@ def main() -> int:
     inventory = set(reviewed["ce"])
     if args.edition == "ee":
         inventory.update(reviewed["ee_additions"])
-    discovered = [report.get("discovered_tools", []) for report in reports if report["suite"] == "mcp"]
-    if len(discovered) != 1 or set(discovered[0]) != inventory:
-        raise ValueError("MCP discovery does not match the reviewed public-tool inventory")
+    validate_discovery(reviewed, args.edition, reports)
     calls = [call for report in reports for call in report.get("tool_calls", [])]
     for report in reports:
         for call in report.get("tool_calls", []):

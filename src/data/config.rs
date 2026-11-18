@@ -147,11 +147,6 @@ pub fn validate(config: &Config) -> Result<()> {
             "settings.http_timeouts values must be greater than zero".into(),
         ));
     }
-    if settings.limits.invite_ttl_hours <= 0 {
-        return Err(Error::Message(
-            "settings.limits.invite_ttl_hours must be greater than zero".into(),
-        ));
-    }
     if settings.max_tenants < 0 {
         return Err(Error::Message(
             "settings.max_tenants must not be negative".into(),

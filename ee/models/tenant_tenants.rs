@@ -59,12 +59,24 @@ pub(crate) async fn overview_as(
     use crate::edition::ee::dtos::dashboard::TenantOverview;
     use crate::edition::ee::models::{tenant_billing, tenant_tenants};
     use crate::models::tenant_memberships;
-    let current = crate::models::api_keys::Model::current_context(&ctx.db, actor).await?;
-    crate::models::access::require_tenant_admin_as(&ctx.db, &current).await?;
-    let tenant_id = current.tenant_id;
-    let tenant = crate::models::tenant_tenants::Model::find_by_id(&ctx.db, tenant_id).await?;
-    let billing = tenant_billing::get_billing(&ctx.db, tenant_id).await?;
-    let usage = tenant_tenants::compute_tenant_usage(&ctx.db, tenant_id).await?;
+    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+    let evaluation = crate::models::access::IamEvaluation::load(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+    )
+    .await?;
+    let tenant_id = actor.tenant_id;
+    let target = crate::models::iam_policy::Resource::Tenant { tenant_id };
+    evaluation
+        .require(crate::models::iam_policy::Action::TenantGet, target)
+        .await?;
+    evaluation
+        .require(crate::models::iam_policy::Action::TenantUserList, target)
+        .await?;
+    let tenant = crate::models::tenant_tenants::Model::find_by_id(&txn, tenant_id).await?;
+    let billing = tenant_billing::get_billing(&txn, tenant_id).await?;
+    let usage = tenant_tenants::compute_tenant_usage(&txn, tenant_id).await?;
     let active_plan = match crate::edition::ee::data::plan::PlanPolicy::current(ctx)? {
         crate::edition::ee::data::plan::PlanPolicy::Disabled => None,
         crate::edition::ee::data::plan::PlanPolicy::Enabled => {
@@ -78,7 +90,7 @@ pub(crate) async fn overview_as(
     // The dashboard overview shows every member, not a page: it's a fixed-shape summary, not a browsable list with its own query params.
     // A tenant with more than MAX_LIST_LIMIT members sees a truncated list; flagged rather than silently accepted, since nothing here has measured how common that is.
     let members = tenant_memberships::list_members(
-        &ctx.db,
+        &txn,
         tenant_id,
         crate::models::pagination::ListParams {
             limit: crate::models::pagination::MAX_LIST_LIMIT,

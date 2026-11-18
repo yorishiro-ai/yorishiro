@@ -27,8 +27,9 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
+        let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
         let created = request.post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&json!({"name":"retirement-notes", "definition":yorishiro::data::templates::get_template("general-notes").unwrap()})).await;
         assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
         let template_id: uuid::Uuid = created.json::<Value>()["id"].as_str().unwrap().parse().unwrap();
@@ -41,7 +42,7 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
             schemas.push(created.json::<Value>()["schema"]["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap());
         }
         let workspace = request.post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&json!({"name":format!("retirement-fork-{}", uuid::Uuid::new_v4())})).await;
         assert_eq!(workspace.status_code(), StatusCode::CREATED);
         let workspace_id = workspace.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
@@ -113,20 +114,14 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities
         return;
     }
     use tenant_tenants::retirement;
-    use yorishiro::models::tenant_memberships::MembershipRole;
     use yorishiro::models::{tenant_memberships, user_users, workspace_workspaces};
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
-            tenant_memberships::add_member(
-                &ctx.db,
-                other.tenant_id,
-                target.owner_id,
-                MembershipRole::Viewer,
-            )
-            .await
-            .is_err()
+            tenant_memberships::add_member(&ctx.db, other.tenant_id, target.owner_id)
+                .await
+                .is_err()
         );
         assert!(
             retirement::delete_by_operator(&ctx.db, target.tenant_id, other.tenant_id)
@@ -295,7 +290,7 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         return;
     }
     use yorishiro::models::api_keys::ApiKeyScope;
-    use yorishiro::models::tenant_memberships::{self, MembershipRole};
+    use yorishiro::models::tenant_memberships;
     use yorishiro::models::{tenant_tenants::retirement, user_users};
 
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -317,18 +312,13 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
             },
         )
         .await;
+        let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
         let created = request.post("/api/members/users")
-            .add_header("Authorization", format!("Bearer {}", target.api_key))
-            .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password","role":"member"})).await;
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
+            .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password"})).await;
         created.assert_status(axum::http::StatusCode::CREATED);
         let tenant_user_id: uuid::Uuid = created.json::<serde_json::Value>()["user_id"].as_str().unwrap().parse().unwrap();
 
-        // An enabled tenant protects its owner.
-        assert!(
-            user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id)
-                .await
-                .is_err()
-        );
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
             .await
             .unwrap();
@@ -342,10 +332,10 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         )
         .await
         .unwrap();
-        tenant_memberships::add_member(&ctx.db, other.tenant_id, guest.id, MembershipRole::Member)
+        tenant_memberships::add_member(&ctx.db, other.tenant_id, guest.id)
             .await
             .unwrap();
-        assert!(tenant_memberships::add_member(&ctx.db, target.tenant_id, guest.id, MembershipRole::Member)
+        assert!(tenant_memberships::add_member(&ctx.db, target.tenant_id, guest.id)
             .await.is_err());
         assert!(
             user_users::delete_by_operator(&ctx.db, guest.id, guest.id)
@@ -360,7 +350,6 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
                 .is_some()
         );
 
-        assert!(user_users::delete_by_operator(&ctx.db, target.owner_id, target.owner_id).await.is_err());
         retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
             .await
             .unwrap();

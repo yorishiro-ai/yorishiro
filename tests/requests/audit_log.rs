@@ -1,7 +1,7 @@
 use super::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
-use sea_orm::EntityTrait;
+use sea_orm::{EntityTrait, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
@@ -9,9 +9,9 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
 
 struct Setup {
+    owner_id: Uuid,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    /// `Migration` scope, `audit: false`: what triggers the two audited operations, but must not itself be able to read them.
     migration_key: String,
     /// `Read` scope, `audit: true`: the independent grant this suite exists to prove, paired with the lowest scope on purpose to show the grant works with any scope, not only a high one.
     audit_key: String,
@@ -27,6 +27,7 @@ async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) ->
     let audit_key = issue_api_key(ctx, workspace_id, owner_id, ApiKeyScope::Read, true).await;
 
     Setup {
+        owner_id,
         tenant_id,
         workspace_id,
         migration_key,
@@ -34,10 +35,8 @@ async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) ->
     }
 }
 
-/// `set_maintenance` is recorded, and an `audit`-permission key (holding no `Migration` scope at
-/// all) can read the row back; the acting key's own scope never had to be raised for this.
 #[tokio::test]
-async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
+async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
     boot_request_with_timezone::<App, _, _>("Asia/Tokyo", |request, ctx| async move {
         let timezone = ctx
             .config
@@ -52,26 +51,41 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
             "test must boot with a non-default zone"
         );
         let setup = setup(&request, &ctx).await;
+        let txn = ctx.db.begin().await.unwrap();
+        // A policy-free member: an admin carries the built-in wildcard policy and would pass the pre-attachment read.
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, setup.tenant_id, &super::fixtures::unique_email("audit-reader"),
+            "audit-reader-password", None).await.unwrap();
+        txn.commit().await.unwrap();
+        let delegated = issue_api_key(&ctx, setup.workspace_id, member.id, ApiKeyScope::Read, true).await;
+        let root_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["audit_log_list"],
+            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {root_key}"))
+            .json(&serde_json::json!({"name":"audit-reader","document":document})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status(StatusCode::FORBIDDEN);
+        request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status_ok();
+        let mut denied = document.clone();
+        denied["statements"][0]["effect"] = serde_json::json!("deny");
+        request.put(&format!("/api/iam/policies/{policy_id}"))
+            .add_header("Authorization", format!("Bearer {root_key}"))
+            .json(&serde_json::json!({"name":"audit-reader","document":denied})).await.assert_status_ok();
+        request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status(StatusCode::FORBIDDEN);
 
-        let set = request
-            .put("/api/system/maintenance")
-            .add_header("Authorization", format!("Bearer {}", setup.migration_key))
-            .json(&serde_json::json!({ "mode": "read-only", "reason": "audit-log test" }))
-            .await;
-        assert_eq!(
-            set.status_code(),
-            StatusCode::OK,
-            "response: {:?}",
-            set.text()
-        );
-
-        // Restore off so a leaked mode doesn't affect an unrelated test on the same throwaway
-        // database.
         request
-            .put("/api/system/maintenance")
+            .post("/api/migration-jobs/reindex")
             .add_header("Authorization", format!("Bearer {}", setup.migration_key))
-            .json(&serde_json::json!({ "mode": "off" }))
-            .await;
+            .await
+            .assert_status_ok();
 
         let log = request
             .get("/api/audit-log")
@@ -84,13 +98,9 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
             log.text()
         );
         let body: Vec<serde_json::Value> = log.json();
-        // Both the read-only switch and the restore-to-off are set_maintenance calls; the most
-        // recent (restore) is first.
-        assert_eq!(body.len(), 2, "body: {body:?}");
-        assert_eq!(body[0]["action"], "set_maintenance");
-        assert_eq!(body[1]["action"], "set_maintenance");
-        assert_eq!(body[1]["detail"]["mode"], "read_only");
-        assert_eq!(body[1]["detail"]["reason"], "audit-log test");
+        assert_eq!(body.len(), 1, "body: {body:?}");
+        assert_eq!(body[0]["action"], "reindex_embeddings");
+        assert_eq!(body[0]["detail"]["workspace_id"], setup.workspace_id.to_string());
         for event in &body {
             let created_at =
                 chrono::DateTime::parse_from_rfc3339(event["created_at"].as_str().unwrap())
@@ -301,28 +311,14 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
         let tenant_a = setup(&request, &ctx).await;
         let tenant_b = setup(&request, &ctx).await;
 
-        let set = request
-            .put("/api/system/maintenance")
-            .add_header(
-                "Authorization",
-                format!("Bearer {}", tenant_a.migration_key),
-            )
-            .json(&serde_json::json!({ "mode": "read-only", "reason": "tenant a only" }))
-            .await;
-        assert_eq!(
-            set.status_code(),
-            StatusCode::OK,
-            "response: {:?}",
-            set.text()
-        );
         request
-            .put("/api/system/maintenance")
+            .post("/api/migration-jobs/reindex")
             .add_header(
                 "Authorization",
                 format!("Bearer {}", tenant_a.migration_key),
             )
-            .json(&serde_json::json!({ "mode": "off" }))
-            .await;
+            .await
+            .assert_status_ok();
 
         let tenant_a_log = request
             .get("/api/audit-log")
@@ -331,7 +327,7 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
         let tenant_a_body: Vec<serde_json::Value> = tenant_a_log.json();
         assert_eq!(
             tenant_a_body.len(),
-            2,
+            1,
             "tenant a must see its own entries: {tenant_a_body:?}"
         );
 

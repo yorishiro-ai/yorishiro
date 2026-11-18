@@ -30,7 +30,7 @@ impl YorishiroMcpServer {
         description = "Bulk-import schemas/entities/relations from a JSON Lines document in the \
                            export format (requires schema scope, since importing schemas is itself \
                            a schema-scope-only operation). Returns a job_id; poll import_job_status. \
-                           The worker applies every record in one transaction or rolls everything back."
+                           Requires import_create IAM permission at enqueue and execution. The worker applies every record in one transaction or rolls everything back."
     )]
     pub async fn import_jsonl(
         &self,

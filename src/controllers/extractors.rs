@@ -116,6 +116,8 @@ impl RequiredScope for MigrationScope {
 pub struct Authorized<R> {
     pub ctx: api_keys::AuthContext,
     txn: sea_orm::DatabaseTransaction,
+    identity: sea_orm::DatabaseConnection,
+    authorization: Option<sea_orm::DatabaseTransaction>,
     _scope: PhantomData<R>,
 }
 
@@ -133,7 +135,34 @@ impl<R> Authorized<R> {
         self.txn
             .commit()
             .await
-            .map_err(|e| ApiError(YorishiroError::Internal(e.into())))
+            .map_err(|e| ApiError(YorishiroError::Internal(e.into())))?;
+        if let Some(authorization) = self.authorization {
+            authorization
+                .commit()
+                .await
+                .map_err(|e| ApiError(YorishiroError::Internal(e.into())))?;
+        }
+        Ok(())
+    }
+}
+
+impl<R> Authorized<R> {
+    pub(crate) async fn require_action(
+        &mut self,
+        action: crate::models::iam_policy::Action,
+    ) -> Result<(), ApiError>
+    where
+        R: RequiredScope,
+    {
+        self.authorization = crate::models::access::authorize_workspace_action(
+            &self.txn,
+            &self.identity,
+            &self.ctx,
+            R::SCOPE,
+            action,
+        )
+        .await?;
+        Ok(())
     }
 }
 
@@ -159,6 +188,8 @@ where
         Ok(Authorized {
             ctx,
             txn,
+            identity: app_ctx.db.clone(),
+            authorization: None,
             _scope: PhantomData,
         })
     }
@@ -170,6 +201,7 @@ pub(crate) struct AuditAuthorized {
     app_ctx: AppContext,
     pub ctx: api_keys::AuthContext,
     txn: std::sync::Arc<tokio::sync::Mutex<sea_orm::DatabaseTransaction>>,
+    _authorization: Option<sea_orm::DatabaseTransaction>,
 }
 
 impl AuditAuthorized {
@@ -206,11 +238,20 @@ where
             .authorize_audit(presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
+        let authorization = crate::models::access::authorize_workspace_action(
+            &txn,
+            &app_ctx.db,
+            &ctx,
+            api_keys::ApiKeyScope::Read,
+            crate::models::iam_policy::Action::AuditLogList,
+        )
+        .await?;
 
         Ok(AuditAuthorized {
             app_ctx,
             ctx,
             txn: std::sync::Arc::new(tokio::sync::Mutex::new(txn)),
+            _authorization: authorization,
         })
     }
 }

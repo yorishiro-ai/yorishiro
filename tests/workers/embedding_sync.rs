@@ -45,14 +45,13 @@ mod conflict {
     use futures::FutureExt;
     use loco_rs::app::AppContext;
     use loco_rs::bgworker::{self, BackgroundWorker};
-    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
     use tokio::sync::{Notify, Semaphore};
     use uuid::Uuid;
     use yorishiro::App;
     use yorishiro::models::_entities::{api_keys, workspace_workspaces};
     use yorishiro::models::api_keys::ApiKeyScope;
     use yorishiro::models::queue_job_lifecycles::{Entity, LifecycleStatus};
-    use yorishiro::models::tenant_memberships::MembershipRole;
     use yorishiro::models::{entity_entities, schema_schemas};
     use yorishiro::services::embedding::{
         EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
@@ -1521,14 +1520,12 @@ mod conflict {
                 .expect("read update workspace")
                 .expect("update workspace")
                 .tenant_id;
-            yorishiro::models::tenant_memberships::add_member(
-                &ctx.db,
-                tenant_id,
-                owner.id,
-                MembershipRole::Owner,
-            )
-            .await
-            .expect("add update owner");
+            yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant_id, owner.id)
+                .await
+                .expect("add update owner");
+            let txn = ctx.db.begin().await.unwrap();
+            crate::requests::fixtures::grant_iam_administrator(&txn, tenant_id, owner.id).await;
+            txn.commit().await.unwrap();
             let write_key = api_keys::Entity::create_api_key(
                 &ctx.db,
                 workspace_id,

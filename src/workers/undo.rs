@@ -54,6 +54,13 @@ impl UndoWorker {
         let id = args
             .lifecycle_id
             .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("undo lifecycle missing")))?;
+        // Hold control-plane permission stable until snapshot restoration commits.
+        let authorization =
+            if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+                Some(crate::db::begin_write(&self.ctx.db).await.internal()?)
+            } else {
+                None
+            };
         let txn =
             crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id).await?;
         // Concurrent redeliveries serialize with the completion marker and restoration.
@@ -71,16 +78,22 @@ impl UndoWorker {
             txn.commit().await.internal()?;
             return Ok(());
         }
-        crate::models::access::require_job_actor(
-            &txn,
-            &self.ctx.db,
-            &api_key_audit_log::AuditActor {
+        crate::models::access::require_iam_action(
+            authorization.as_ref().unwrap_or(&txn),
+            &AuthContext {
                 tenant_id: args.tenant_id,
-                workspace_id: args.workspace_id,
+                workspace_id: Some(args.workspace_id),
                 api_key_id: args.api_key_id,
                 user_id: args.user_id,
+                scope: crate::models::api_keys::ApiKeyScope::Migration,
+                audit: false,
             },
             crate::models::api_keys::ApiKeyScope::Migration,
+            crate::models::iam_policy::Action::MigrationUndo,
+            crate::models::iam_policy::Resource::Workspace {
+                tenant_id: args.tenant_id,
+                workspace_id: args.workspace_id,
+            },
         )
         .await?;
         let report =
@@ -99,6 +112,9 @@ impl UndoWorker {
         )
         .await?;
         txn.commit().await.internal()?;
+        if let Some(authorization) = authorization {
+            authorization.commit().await.internal()?;
+        }
         Ok(())
     }
 }
@@ -109,6 +125,22 @@ pub(crate) async fn enqueue(
     auth: &AuthContext,
     snapshot_job_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
+    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        Some(crate::db::begin_write(&ctx.db).await.internal()?)
+    } else {
+        None
+    };
+    crate::models::access::require_iam_action(
+        authorization.as_ref().unwrap_or(txn),
+        auth,
+        crate::models::api_keys::ApiKeyScope::Migration,
+        crate::models::iam_policy::Action::MigrationUndo,
+        crate::models::iam_policy::Resource::Workspace {
+            tenant_id: auth.tenant_id,
+            workspace_id: auth.require_workspace()?,
+        },
+    )
+    .await?;
     entity_entities::require_job_snapshots(txn, auth.require_workspace()?, snapshot_job_id).await?;
     let worker_class =
         crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
@@ -137,5 +169,8 @@ pub(crate) async fn enqueue(
     )
     .await
     .internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
     id.parse().internal()
 }

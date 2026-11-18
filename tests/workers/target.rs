@@ -270,6 +270,7 @@ mod concurrency {
                 workspace_id,
                 worker_class: class,
                 startup: false,
+                actor: None,
             },
         )
         .await
@@ -480,6 +481,7 @@ mod concurrency {
                     workspace_id: missing,
                     worker_class: WorkerClass::TenantPrivate,
                     startup: false,
+                    actor: None,
                 },
             )
             .await

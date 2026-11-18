@@ -27,88 +27,75 @@ pub(crate) struct MemberArgs {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct TransferOwnershipArgs {
-    pub successor_user_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SetMemberRoleArgs {
+pub(crate) struct ResetTenantUserPasswordArgs {
     pub user_id: Uuid,
-    pub role: tenant_memberships::MembershipRole,
+    /// At least 12 characters. Revokes every credential issued to the user.
+    pub password: String,
 }
 
 #[tool_router(vis = "pub(crate)", router = tool_router_members)]
 impl YorishiroMcpServer {
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Add an existing user to the current tenant or change their tenant role, returning existing key grant metadata; a tenant user can only join its own tenant and never as Owner (requires read scope and tenant Admin or Owner; Owner changes require Owner)"
+        meta = super::scope_requirement(ApiKeyScope::Read),
+        description = "Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies or groups are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)"
     )]
-    pub(crate) async fn set_member_role(
+    pub(crate) async fn create_tenant_user(
         &self,
-        Parameters(args): Parameters<SetMemberRoleArgs>,
+        Parameters(input): Parameters<crate::dtos::members::CreateTenantUserRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = match super::verify(
             self.app_context(),
             &parts,
-            self.required_scope("set_member_role")?,
+            self.required_scope("create_tenant_user")?,
         )
         .await?
         {
             VerifyOutcome::Verified(auth) => auth,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match tenant_memberships::update_member_access(
-            &self.app_context().db,
-            &auth,
-            args.user_id,
-            args.role,
-        )
-        .await
+        match tenant_memberships::create_tenant_user_as(&self.app_context().db, &auth, &input).await
         {
-            Ok(keys) => ok_json(
-                serde_json::json!({"user_id": args.user_id, "role": args.role, "keys": keys}),
-            ),
+            Ok(member) => ok_json(member),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Preview a tenant member role change and its key/workspace impact without changing data (requires read scope and tenant Admin or Owner)"
+        meta = super::scope_requirement(ApiKeyScope::Read),
+        description = "Reset a tenant user's password and revoke all their credentials; tenant root recovery is CLI-only (requires read scope and tenant_user_password_reset IAM permission with a tenant-scoped credential)"
     )]
-    pub(crate) async fn preview_member_role_change(
+    pub(crate) async fn reset_tenant_user_password(
         &self,
-        Parameters(args): Parameters<SetMemberRoleArgs>,
+        Parameters(input): Parameters<ResetTenantUserPasswordArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = match super::verify(
             self.app_context(),
             &parts,
-            self.required_scope("preview_member_role_change")?,
+            self.required_scope("reset_tenant_user_password")?,
         )
         .await?
         {
             VerifyOutcome::Verified(auth) => auth,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match tenant_memberships::preview_role_change(
+        match tenant_memberships::reset_tenant_user_password(
             &self.app_context().db,
             &auth,
-            args.user_id,
-            args.role,
+            input.user_id,
+            &input.password,
         )
         .await
         {
-            Ok(preview) => ok_json(preview),
+            Ok(()) => ok_json(serde_json::json!({"reset": true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List members of the current tenant (requires read scope and tenant Admin or Owner; service credentials are rejected)"
+        description = "List members of the current tenant (requires read scope and tenant_user_list IAM permission with a tenant-scoped credential; service credentials are rejected)"
     )]
     pub(crate) async fn list_members(
         &self,
@@ -126,11 +113,8 @@ impl YorishiroMcpServer {
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let db = &self.app_context().db;
-        if let Err(error) = crate::models::access::require_tenant_admin_as(db, &auth).await {
-            return Ok(err_to_tool_result(error));
-        }
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        match tenant_memberships::list_members(db, auth.tenant_id, page).await {
+        match tenant_memberships::list_members_as(db, &auth, page).await {
             Ok(members) => ok_json(members),
             Err(error) => Ok(err_to_tool_result(error)),
         }
@@ -138,7 +122,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant Admin or Owner)"
+        description = "Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn preview_member_removal(
         &self,
@@ -164,7 +148,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Remove a current-tenant membership and revoke attributed tenant credentials, retaining a root user's account while a tenant user's account is deleted with its membership (requires read scope and tenant Admin or Owner; last Owner is protected)"
+        description = "Remove a current-tenant membership and revoke attributed tenant credentials; a tenant user's account is deleted with its membership, and tenant root removal is rejected (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn remove_member(
         &self,
@@ -185,37 +169,6 @@ impl YorishiroMcpServer {
             .await
         {
             Ok(()) => ok_json(serde_json::json!({"removed": true})),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
-    }
-
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Atomically transfer tenant ownership to an existing member and demote the caller to Admin (requires read scope and tenant Owner)"
-    )]
-    pub(crate) async fn transfer_ownership(
-        &self,
-        Parameters(args): Parameters<TransferOwnershipArgs>,
-        Extension(parts): Extension<Parts>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("transfer_ownership")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match tenant_memberships::transfer_ownership(
-            &self.app_context().db,
-            &auth,
-            args.successor_user_id,
-        )
-        .await
-        {
-            Ok(()) => ok_json(serde_json::json!({"transferred": true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }

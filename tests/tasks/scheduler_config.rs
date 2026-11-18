@@ -13,5 +13,9 @@ fn deployed_schedulers_run_the_embedding_index_maintenance_task() {
             text.contains("run: \"embedding_index_maintenance\""),
             "{file} must schedule the embedding index maintenance task"
         );
+        assert!(
+            text.contains("run: \"delete_due_tenants\""),
+            "{file} must schedule the due tenant deletion task"
+        );
     }
 }

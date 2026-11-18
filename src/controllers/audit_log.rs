@@ -9,9 +9,24 @@ use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuditAuthorized;
-use crate::controllers::openapi::AuditLogRecord;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/audit-log", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::AuditLogRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-grants" = json!(["audit"]))), tag = "community"))]
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AuditLogRecord {
+    pub id: uuid::Uuid,
+    pub workspace_id: uuid::Uuid,
+    pub tenant_id: uuid::Uuid,
+    #[cfg_attr(feature = "openapi", schema(nullable = true))]
+    pub api_key_id: Option<uuid::Uuid>,
+    #[cfg_attr(feature = "openapi", schema(nullable = true))]
+    pub user_id: Option<uuid::Uuid>,
+    pub action: crate::models::api_key_audit_log::AuditAction,
+    pub detail: serde_json::Value,
+    #[cfg_attr(feature = "openapi", schema(format = DateTime))]
+    pub created_at: String,
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/audit-log", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [AuditLogRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-grants" = json!(["audit"])), ("x-yorishiro-required-actions" = json!(["audit_log_list"]))), tag = "community"))]
 pub(crate) async fn list_audit_log(
     authorized: AuditAuthorized,
     Query(page): Query<crate::dtos::common::PageParams>,

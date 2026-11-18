@@ -13,6 +13,7 @@ pub struct Model {
     pub max_workspaces: Option<i32>,
     pub created_at: DateTimeWithTimeZone,
     pub disabled_at: Option<DateTimeWithTimeZone>,
+    pub delete_scheduled_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -21,6 +22,14 @@ pub enum Relation {
     ApiKeyAuditLog,
     #[sea_orm(has_many = "super::api_keys::Entity")]
     ApiKeys,
+    #[sea_orm(has_many = "super::iam_audit_events::Entity")]
+    IamAuditEvents,
+    #[sea_orm(has_many = "super::iam_groups::Entity")]
+    IamGroups,
+    #[sea_orm(has_many = "super::iam_policies::Entity")]
+    IamPolicies,
+    #[sea_orm(has_many = "super::iam_roles::Entity")]
+    IamRoles,
     #[sea_orm(has_many = "super::schema_schemas::Entity")]
     SchemaSchemas,
     #[sea_orm(has_many = "super::template_reviews::Entity")]
@@ -35,8 +44,6 @@ pub enum Relation {
     TenantReindexSchedules,
     #[sea_orm(has_many = "super::user_users::Entity")]
     UserUsers,
-    #[sea_orm(has_many = "super::workspace_invites::Entity")]
-    WorkspaceInvites,
     #[sea_orm(has_many = "super::workspace_schema_forks::Entity")]
     WorkspaceSchemaForks,
     #[sea_orm(has_many = "super::workspace_workspaces::Entity")]
@@ -52,6 +59,30 @@ impl Related<super::api_key_audit_log::Entity> for Entity {
 impl Related<super::api_keys::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ApiKeys.def()
+    }
+}
+
+impl Related<super::iam_audit_events::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamAuditEvents.def()
+    }
+}
+
+impl Related<super::iam_groups::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamGroups.def()
+    }
+}
+
+impl Related<super::iam_policies::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamPolicies.def()
+    }
+}
+
+impl Related<super::iam_roles::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamRoles.def()
     }
 }
 
@@ -94,12 +125,6 @@ impl Related<super::tenant_reindex_schedules::Entity> for Entity {
 impl Related<super::user_users::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::UserUsers.def()
-    }
-}
-
-impl Related<super::workspace_invites::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::WorkspaceInvites.def()
     }
 }
 

@@ -79,13 +79,14 @@ pub(crate) async fn delete_workspace(
         .await
         .map_err(|err| {
             // Let the foreign key fence concurrent fork creation instead of racing a preflight count.
-            // SQLite RESTRICT uses its trigger code (1811), which SeaORM's foreign-key mapping omits.
+            // SeaORM does not map PostgreSQL restrict_violation or SQLite RESTRICT triggers.
             let restricted_foreign_key = matches!(
                 &err,
                 DbErr::Exec(RuntimeErr::SqlxError(error))
                     if error.as_database_error().is_some_and(|error|
-                        error.code().as_deref() == Some("1811")
-                            && error.message() == "FOREIGN KEY constraint failed")
+                        error.code().as_deref() == Some("23001")
+                            || (error.code().as_deref() == Some("1811")
+                                && error.message() == "FOREIGN KEY constraint failed"))
             );
             if restricted_foreign_key
                 || matches!(err.sql_err(), Some(SqlErr::ForeignKeyConstraintViolation(_)))

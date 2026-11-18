@@ -43,7 +43,7 @@ impl TestTenant {
                 .is_ok_and(|url| url == ctx.config.database.uri)
         {
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-            use yorishiro::models::{tenant_memberships, tenant_tenants};
+            use yorishiro::models::tenant_tenants;
 
             static TENANT: tokio::sync::OnceCell<Uuid> = tokio::sync::OnceCell::const_new();
             let tenant_id = *TENANT
@@ -82,10 +82,10 @@ impl TestTenant {
                 &args.owner_email,
                 &args.owner_password,
                 Some(&args.tenant_name),
-                tenant_memberships::MembershipRole::Owner,
             )
             .await
             .expect("create CE fixture owner");
+            grant_iam_administrator(&txn, tenant_id, owner.id).await;
             let owner_ready = std::time::Instant::now();
             let workspace =
                 tenancy::create_workspace(&txn, tenant_id, &args.workspace_name, None, None)
@@ -151,6 +151,37 @@ impl TestTenant {
             api_key,
         }
     }
+}
+
+pub async fn grant_iam_administrator(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) {
+    use sea_orm::{ActiveModelTrait, Set};
+    let policy = yorishiro::models::iam_policies::ActiveModel {
+        tenant_id: Set(tenant_id),
+        name: Set(format!("fixture-admin-{user_id}")),
+        document: Set(
+            serde_json::json!({"statements":[{"effect":"allow","actions":["*"],
+            "resources":[{"type":"tenant","tenant_id":tenant_id},
+                {"type":"all_workspaces","tenant_id":tenant_id},
+                {"type":"all_roles","tenant_id":tenant_id}]}]}),
+        ),
+        ..Default::default()
+    }
+    .insert(txn)
+    .await
+    .expect("create fixture administrator policy");
+    yorishiro::models::iam_user_policy_attachments::ActiveModel {
+        tenant_id: Set(tenant_id),
+        user_id: Set(user_id),
+        policy_id: Set(policy.id),
+        ..Default::default()
+    }
+    .insert(txn)
+    .await
+    .expect("attach fixture administrator policy");
 }
 
 /// Arguments for shared tenant/workspace/owner setup.

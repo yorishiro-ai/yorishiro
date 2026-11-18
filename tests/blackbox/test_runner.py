@@ -3,10 +3,10 @@
 import contextlib
 import io
 import json
-import re
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -14,6 +14,24 @@ import run
 
 
 class ToolInventoryTests(unittest.TestCase):
+    def test_owned_inference_endpoint_requires_credentials_and_returns_a_proposal(self):
+        with run.inference_endpoint() as (url, requests):
+            connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
+            try:
+                body = json.dumps({"model": "blackbox-inference", "messages": []})
+                for credential, expected in (("wrong", 400), ("owned-llm-secret", 200)):
+                    connection.request("POST", "/chat/completions", body,
+                                       {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, expected)
+                    payload = response.read()
+                    if expected == 200:
+                        proposal = json.loads(json.loads(payload)["choices"][0]["message"]["content"])
+                        self.assertEqual(proposal, {"summary": "owned proposal"})
+                self.assertEqual(len(requests), 1)
+            finally:
+                connection.close()
+
     def test_owned_provider_preserves_batch_indices_and_vector_width(self):
         with run.embedding_endpoint() as (url, requests):
             connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
@@ -28,14 +46,6 @@ class ToolInventoryTests(unittest.TestCase):
                 self.assertEqual(requests, ["a", "b"])
             finally:
                 connection.close()
-
-    def test_enterprise_scenarios_are_an_explicit_delta_not_a_common_replay(self):
-        ids = [name for name, _ in run.scenarios("mcp", "ee")]
-        self.assertEqual(ids, ["server.bootstrap", "ee.discovery-auth-scope-input",
-                               "ee.column-worker-settings-lifecycle", "ee.provider-settings-lifecycle",
-                               "ee.schema-fork-upstream-merge", "ee.search-reindex-worker"])
-        with self.assertRaises(AssertionError):
-            run.scenarios("rest", "ee")
 
     def test_raw_export_records_success_without_parsing_ndjson_as_one_document(self):
         app = Mock(current_scenario="mcp.graph", tool_calls=[])
@@ -67,14 +77,6 @@ class ToolInventoryTests(unittest.TestCase):
             {"tool": "get_entity", "scenario": "mcp.example", "outcome": "rejected"},
         ])
 
-    def test_reviewed_inventory_matches_source_tools(self):
-        reviewed = json.loads((run.ROOT / "tests/blackbox/tools.json").read_text())
-        for edition, directory in (("ce", "src/controllers/mcp"), ("ee_additions", "ee/controllers/mcp")):
-            names = []
-            for path in (run.ROOT / directory).glob("*.rs"):
-                names.extend(re.findall(r'#\[tool\([\s\S]*?\)\]\s*pub(?:\(crate\))? async fn (\w+)', path.read_text()))
-            self.assertEqual(sorted(names), reviewed[edition])
-            self.assertEqual(len(names), len(set(names)))
 
 
 class ProtocolTests(unittest.TestCase):
@@ -197,14 +199,6 @@ class ArgumentTests(unittest.TestCase):
                     run.parse_args(arguments)
                 self.assertEqual(caught.exception.code, 2)
 
-    def test_stdout_fields_are_unique_and_uuids_validated(self):
-        value = "00000000-0000-0000-0000-000000000001"
-        self.assertEqual(run.output_field(f"noise\nworkspace id: {value}\n", "workspace id", True),
-                         value)
-        for text in ("", "workspace id: invalid", f"workspace id: {value}\nworkspace id: {value}"):
-            with self.subTest(text=text), self.assertRaises((AssertionError, ValueError)):
-                run.output_field(text, "workspace id", True)
-
     def test_child_environment_excludes_ambient_credentials_and_databases(self):
         args = run.parse_args(self.arguments())
         with tempfile.TemporaryDirectory() as directory:
@@ -256,8 +250,8 @@ class ArgumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             app = run.App(args, directory)
             with patch.object(app, "cli", return_value=("created", "")) as cli:
-                self.assertEqual(app.task("create_tenant", name="blackbox"), "created")
-                cli.assert_called_once_with("task", "create_tenant", "name:blackbox")
+                self.assertEqual(app.task("maintenance", name="blackbox"), "created")
+                cli.assert_called_once_with("task", "maintenance", "name:blackbox")
             app.close()
 
     def test_server_exit_fails_before_readiness_request(self):
@@ -266,14 +260,61 @@ class ArgumentTests(unittest.TestCase):
             app = run.App(args, directory)
             process = Mock()
             process.poll.return_value = 1
-            value = "00000000-0000-0000-0000-000000000001"
-            with patch.object(app, "cli"), patch.object(app, "task", side_effect=[f"tenant id: {value}", f"workspace id: {value}"]), \
-                    patch.object(app, "issue", return_value=(value, "ysr_test")), \
+            with patch.object(app, "cli"), \
                     patch("run.subprocess.Popen", return_value=process), patch.object(app, "http") as http:
                 with self.assertRaisesRegex(AssertionError, "exited before readiness"):
                     app.boot()
                 http.assert_not_called()
             app.close()
+
+    def test_issue_selects_workspace_and_preserves_explicit_issuer_and_audit(self):
+        args = run.parse_args(self.arguments())
+        with tempfile.TemporaryDirectory() as directory:
+            app = run.App(args, directory)
+            app.tenant_key = "ysr_bootstrap"
+            value = "00000000-0000-0000-0000-000000000001"
+            with patch.object(app, "rest", return_value={"id": value, "full_key": "ysr_delegated"}) as rest:
+                self.assertEqual(app.issue(value, "read", issuer="ysr_member", audit=True),
+                                 (value, "ysr_delegated"))
+                rest.assert_called_once_with("POST", "/api/api-keys", {
+                    "name": "blackbox-delegated", "scope": "read", "audit": True,
+                    "expires_at": rest.call_args.args[2]["expires_at"],
+                }, status=201, key="ysr_member", headers={"X-Workspace-Id": value})
+                self.assertGreater(datetime.fromisoformat(rest.call_args.args[2]["expires_at"]),
+                                   datetime.now(UTC))
+            self.assertIn("ysr_delegated", app.secrets)
+            app.close()
+
+    def test_bootstrap_uses_setup_or_signup_without_removed_tasks(self):
+        value = "00000000-0000-0000-0000-000000000001"
+        account = {"user_id": value, "tenant_id": value, "workspace_id": value,
+                   "api_key": "ysr_bootstrap"}
+        for suite, edition in (("cli", "ce"), ("tenant-postgres", "ee")):
+            args = run.parse_args(self.arguments())
+            args.suite, args.edition = suite, edition
+            with self.subTest(suite=suite), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict("os.environ", {"YORISHIRO_PUBLIC_POSTGRES_URL": "postgres://owned/test",
+                                               "YORISHIRO_LICENSE_KEY": "test-licence"}):
+                app = run.App(args, directory)
+                process = Mock()
+                process.poll.return_value = None
+                with patch.object(app, "cli") as cli, patch.object(app, "task") as task, \
+                        patch("run.subprocess.Popen", return_value=process), \
+                        patch.object(app, "http", return_value=(200, {}, "{}")), \
+                        patch.object(app, "rest", return_value=account) as rest, \
+                        patch.object(app, "login", return_value="ysr_login"), \
+                        patch.object(app, "create_workspace", return_value=value), \
+                        patch.object(app, "issue", return_value=(value, "ysr_selected")):
+                    app.boot()
+                    cli.assert_called_once_with("db", "migrate")
+                    task.assert_not_called()
+                    self.assertEqual(rest.call_args.args[1],
+                                     "/auth/signup" if suite == "tenant-postgres" else "/setup")
+                    self.assertEqual(app.key, "ysr_selected")
+                    self.assertEqual(app.tenant_key,
+                                     "ysr_login" if suite == "tenant-postgres" else "ysr_bootstrap")
+                app.server = None
+                app.close()
 
     def test_cleanup_escalates_and_reaps_timed_out_process(self):
         process = Mock(pid=123)

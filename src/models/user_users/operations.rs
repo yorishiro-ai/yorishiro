@@ -4,42 +4,136 @@ use loco_rs::hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
 };
-use sea_orm::{Condition, QueryOrder, QuerySelect};
+use sea_orm::{Condition, QuerySelect};
 
 use super::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::user_users::Column;
 
-pub(crate) async fn list_by_operator(
-    conn: &impl ConnectionTrait,
-    limit: u64,
-    offset: u64,
-) -> Result<Vec<Model>, YorishiroError> {
-    Entity::find()
-        .order_by_asc(Column::Id)
-        .limit(limit.clamp(1, 100))
-        .offset(offset)
-        .all(conn)
-        .await
-        .internal()
-}
-
-/// Deletes an account with a trusted operator identity.
-/// Every tenant membership must be removed before deleting the account.
-///
 /// # Errors
-/// Rejects a mismatched confirmation or any remaining tenant membership.
-pub async fn delete_by_operator(
+/// Rejects mismatched confirmation, weak passwords, non-root or passwordless accounts and missing, ambiguous or disabled tenant memberships.
+/// Password and key changes roll back together if persistence fails.
+pub async fn reset_root_password_by_operator(
     db: &sea_orm::DatabaseConnection,
     user_id: uuid::Uuid,
     confirmed_user_id: uuid::Uuid,
+    password: &str,
 ) -> Result<(), YorishiroError> {
     if user_id != confirmed_user_id {
         return Err(YorishiroError::Conflict {
             message: "confirmed_user_id must match user_id".into(),
         });
     }
+    if password.chars().count() < MIN_TENANT_PASSWORD_CHARS {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "password must contain at least {MIN_TENANT_PASSWORD_CHARS} characters"
+            ),
+        });
+    }
+    use crate::models::_entities::tenant_memberships as memberships;
     let txn = crate::db::begin_write(db).await.internal()?;
+    let current = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user_id))
+        .all(&txn)
+        .await
+        .internal()?;
+    let [membership] = current.as_slice() else {
+        return Err(YorishiroError::Conflict {
+            message: "the account must belong to exactly one tenant".into(),
+        });
+    };
+    let tenant_id = membership.tenant_id;
+    // Match login key issuance and membership mutation lock ordering, then recheck discovery.
+    crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
+    crate::db::lock_for_update(&txn, &format!("user-membership:{user_id}"))
+        .await
+        .internal()?;
+    let current = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user_id))
+        .all(&txn)
+        .await
+        .internal()?;
+    if current.len() != 1 || current[0].tenant_id != tenant_id {
+        return Err(YorishiroError::Conflict {
+            message: "account membership changed; retry the reset".into(),
+        });
+    }
+    if !crate::models::iam_tenant_roots::Model::contains(&txn, tenant_id, user_id).await? {
+        return Err(YorishiroError::Conflict {
+            message: "password recovery requires the tenant root account".into(),
+        });
+    }
+    crate::models::tenant_tenants::Model::require_active(&txn, tenant_id).await?;
+    let user = Entity::find_by_id(user_id)
+        .one(&txn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("user not found"))?;
+    if user.tenant_id.is_some() || user.password_hash.is_none() {
+        return Err(YorishiroError::Conflict {
+            message: "password recovery requires an existing password-bearing root account".into(),
+        });
+    }
+    let mut active: ActiveModel = user.into();
+    active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
+    active.update(&txn).await.internal()?;
+    crate::models::api_keys::Entity::revoke_matching(
+        &txn,
+        Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+    )
+    .await?;
+    txn.commit().await.internal()?;
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeletionOutcome {
+    Deleted,
+    TenantDeletionScheduled {
+        tenant_id: uuid::Uuid,
+        delete_scheduled_at: chrono::DateTime<chrono::FixedOffset>,
+    },
+    TenantDeleted {
+        tenant_id: uuid::Uuid,
+    },
+}
+
+/// Deletes an account with a trusted operator identity.
+///
+/// # Errors
+/// Rejects a mismatched confirmation or a non-root account with a remaining membership.
+pub async fn delete_by_operator(
+    db: &sea_orm::DatabaseConnection,
+    user_id: uuid::Uuid,
+    confirmed_user_id: uuid::Uuid,
+) -> Result<DeletionOutcome, YorishiroError> {
+    if user_id != confirmed_user_id {
+        return Err(YorishiroError::Conflict {
+            message: "confirmed_user_id must match user_id".into(),
+        });
+    }
+    let txn = crate::db::begin_write(db).await.internal()?;
+    use crate::models::_entities::tenant_memberships as memberships;
+    // Match login key issuance and membership mutation lock ordering: tenant fence, then user fence, before the row lock.
+    let preliminary = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user_id))
+        .one(&txn)
+        .await
+        .internal()?;
+    if let Some(preliminary) = &preliminary {
+        crate::db::lock_for_update(
+            &txn,
+            &format!("tenant-membership:{}", preliminary.tenant_id),
+        )
+        .await
+        .internal()?;
+    }
+    crate::db::lock_for_update(&txn, &format!("user-membership:{user_id}"))
+        .await
+        .internal()?;
     // The row lock also serializes concurrent membership/key inserts through their user foreign key.
     Entity::find_by_id(user_id)
         .lock_exclusive()
@@ -47,20 +141,38 @@ pub async fn delete_by_operator(
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found("user not found"))?;
-    use crate::models::_entities::tenant_memberships as memberships;
-    if let Some(membership) = memberships::Entity::find()
+    let membership = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))
         .one(&txn)
         .await
-        .internal()?
-    {
+        .internal()?;
+    let Some(membership) = membership else {
+        // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
+        crate::models::api_keys::Entity::revoke_matching(
+            &txn,
+            Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+        )
+        .await?;
+        Entity::delete_by_id(user_id).exec(&txn).await.internal()?;
+        txn.commit().await.internal()?;
+        return Ok(DeletionOutcome::Deleted);
+    };
+    let tenant_id = membership.tenant_id;
+    if !crate::models::iam_tenant_roots::Model::contains(&txn, tenant_id, user_id).await? {
         return Err(YorishiroError::Conflict {
             message: format!(
                 "remove the user's membership in tenant {} before deleting the account",
-                membership.tenant_id
+                tenant_id
             ),
         });
     }
+    // The root row references the membership row, so it comes off first; the cascade then removes the membership.
+    crate::models::iam_tenant_roots::Entity::delete_by_id(tenant_id)
+        .exec(&txn)
+        .await
+        .internal()?;
+    let outcome =
+        crate::models::tenant_tenants::retirement::root_deleted(&txn, tenant_id, user_id).await?;
     // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
     crate::models::api_keys::Entity::revoke_matching(
         &txn,
@@ -69,7 +181,7 @@ pub async fn delete_by_operator(
     .await?;
     Entity::delete_by_id(user_id).exec(&txn).await.internal()?;
     txn.commit().await.internal()?;
-    Ok(())
+    Ok(outcome)
 }
 
 pub(crate) async fn current_profile(
@@ -310,16 +422,4 @@ pub(crate) async fn reset_tenant_password(
             .add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
     )
     .await
-}
-
-/// Looks up a user by email, for `POST /api/members` (which attaches an *existing* account by email, never creates one).
-pub(crate) async fn get_user_by_email(
-    conn: &impl ConnectionTrait,
-    email: &str,
-) -> Result<Option<Model>, YorishiroError> {
-    Entity::find()
-        .filter(Column::Email.eq(email))
-        .one(conn)
-        .await
-        .internal()
 }

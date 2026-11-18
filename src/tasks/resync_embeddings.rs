@@ -16,7 +16,7 @@ use crate::workers::embedding_sync::{self, EmbeddingSyncArgs};
 /// The command only enqueues.
 /// It holds no embedding provider, because only a worker process loads a model, so the worker's own guarded write path embeds each entity and the command's output counts queued jobs, not stored vectors.
 /// That path refuses a vector from a model the workspace is not stamped for, which is correct, not a bug to route around: filling NULLs with vectors from another model would create the silent model mix that check exists to prevent.
-/// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
+/// `POST /api/migration-jobs/reindex` changes a workspace's model; this task does not, and must not be adapted into one.
 ///
 /// Uses a LEFT JOIN anti-join against the embedding tables so the query works on both PostgreSQL and SQLite.
 pub(crate) struct ResyncEmbeddings;
