@@ -220,7 +220,7 @@ pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, Yori
         sea_query::{Alias, Func, SimpleExpr},
     };
 
-    let sqlite = db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+    let sqlite = crate::db::is_sqlite(db);
     let retry_at: SimpleExpr = Expr::col((lifecycle::Entity, lifecycle::Column::RetryAt));
     let (retry_at, now, cooldown): (SimpleExpr, SimpleExpr, SimpleExpr) = if sqlite {
         (

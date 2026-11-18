@@ -88,7 +88,7 @@ pub(crate) async fn reviews_as(
 /// The marketplace spans tenants, and SQLite holds one, so its cross-tenant queries are written for PostgreSQL only.
 /// Refusing here answers with `501` instead of a query failure.
 fn require_postgres(conn: &impl ConnectionTrait, what: &str) -> Result<(), YorishiroError> {
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         return Ok(());
     }
     Err(YorishiroError::BackendUnsupported {

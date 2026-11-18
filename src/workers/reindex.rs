@@ -207,11 +207,7 @@ pub(crate) async fn enqueue_requested(
                 .into(),
         });
     }
-    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        Some(crate::db::begin_write(&ctx.db).await.internal()?)
-    } else {
-        None
-    };
+    let authorization = crate::db::begin_authorization(&ctx.db).await.internal()?;
     crate::models::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,

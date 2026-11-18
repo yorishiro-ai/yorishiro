@@ -10,6 +10,16 @@ use sea_orm::{
 use sqlite_vec::sqlite3_vec_init;
 use uuid::Uuid;
 
+/// Which backend a connection talks to.
+/// Every backend decision outside this module asks through these, so there is one place that names the backends.
+pub(crate) fn is_sqlite(conn: &impl ConnectionTrait) -> bool {
+    conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite
+}
+
+pub(crate) fn is_postgres(conn: &impl ConnectionTrait) -> bool {
+    conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres
+}
+
 /// Common backend predicates for request and service code.
 pub trait AppContextBackend {
     fn is_sqlite(&self) -> bool;
@@ -18,11 +28,28 @@ pub trait AppContextBackend {
 
 impl AppContextBackend for loco_rs::app::AppContext {
     fn is_sqlite(&self) -> bool {
-        self.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite
+        is_sqlite(&self.db)
     }
 
     fn is_postgres(&self) -> bool {
-        self.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres
+        is_postgres(&self.db)
+    }
+}
+
+/// The control-plane transaction an IAM check runs in.
+///
+/// PostgreSQL hides the IAM tables from the tenant pool, so the check runs in its own write transaction on the identity pool, which the caller keeps open until the workspace mutation commits.
+/// SQLite has one pool and no row-level security: the caller's own transaction is the one to check in, so there is none to open.
+///
+/// # Errors
+/// Returns an error if the identity transaction cannot be opened.
+pub(crate) async fn begin_authorization(
+    db: &DatabaseConnection,
+) -> Result<Option<DatabaseTransaction>, DbErr> {
+    if is_postgres(db) {
+        Ok(Some(begin_write(db).await?))
+    } else {
+        Ok(None)
     }
 }
 

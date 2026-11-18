@@ -257,7 +257,7 @@ pub async fn list(
         select = select.filter(Column::EntityType.eq(entity_type));
     }
     if let Some(filter) = query.filter {
-        if conn.get_database_backend() == DatabaseBackend::Sqlite {
+        if crate::db::is_sqlite(conn) {
             return Err(YorishiroError::BackendUnsupported {
                 message: "entity filter (JSONB containment) is not supported on SQLite".to_string(),
             });

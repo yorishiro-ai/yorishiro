@@ -168,7 +168,7 @@ pub fn run_step(
 }
 
 async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
-    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+    if crate::db::is_sqlite(&ctx.db) {
         return Ok(0);
     }
 
@@ -188,7 +188,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
 
     loop {
         ticker.tick().await;
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if crate::db::is_sqlite(&ctx.db) {
             return;
         }
 

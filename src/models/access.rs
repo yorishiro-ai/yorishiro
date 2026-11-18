@@ -15,11 +15,7 @@ pub(crate) async fn authorize_workspace_action(
     scope: ApiKeyScope,
     action: crate::models::iam_policy::Action,
 ) -> Result<Option<DatabaseTransaction>, YorishiroError> {
-    let authorization = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        Some(crate::db::begin_write(identity).await.internal()?)
-    } else {
-        None
-    };
+    let authorization = crate::db::begin_authorization(identity).await.internal()?;
     require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,
@@ -311,7 +307,7 @@ pub async fn capabilities(
             sea_orm::DatabaseBackend::MySql => "mysql",
             _ => "unknown",
         },
-        row_level_security: conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres,
+        row_level_security: crate::db::is_postgres(conn),
         scopes,
         audit: require_audit(&current).is_ok(),
         tenant_root: identity.tenant_root,

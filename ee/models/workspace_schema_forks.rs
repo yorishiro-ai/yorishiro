@@ -78,7 +78,7 @@ async fn source_by_id<C: ConnectionTrait>(
     source_schema_id: Uuid,
 ) -> Result<Option<schema_schemas::Model>, YorishiroError> {
     // PostgreSQL uses the scoped SECURITY DEFINER function so fork source reads can cross workspace RLS; SQLite is single-tenant.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         let query = Query::select()
             .column(Asterisk)
             .from_function(
@@ -112,7 +112,7 @@ async fn latest_source_by_name<C: ConnectionTrait>(
     source_schema_name: &str,
 ) -> Result<Option<schema_schemas::Model>, YorishiroError> {
     // Keep the PostgreSQL RLS crossing in its scoped database function; the SQLite query has no RLS boundary.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         let query = Query::select()
             .column(Asterisk)
             .from_function(
@@ -150,7 +150,7 @@ async fn fork_edges<C: ConnectionTrait>(
     workspace_id: Uuid,
 ) -> Result<Vec<Uuid>, YorishiroError> {
     // The PostgreSQL function traverses fork edges across workspace RLS; SQLite can read the table directly.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         let query = Query::select()
             .column(Alias::new("source_workspace_id"))
             .from_function(

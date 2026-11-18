@@ -403,7 +403,7 @@ async fn neighbor_rows(
     use sea_orm::sea_query::{
         Alias, Expr, ExprTrait, Func, JoinType, Order, Query, UnionType, WindowStatement,
     };
-    let sqlite = conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+    let sqlite = crate::db::is_sqlite(conn);
     let branch = |pivot, neighbor, direction: &str| {
         let mut select = Query::select();
         select

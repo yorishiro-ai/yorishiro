@@ -180,7 +180,7 @@ pub(crate) async fn delete(
         .count(conn)
         .await
         .internal()?;
-    let (forks, fork_heads) = if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    let (forks, fork_heads) = if crate::db::is_postgres(conn) {
         // Incoming forks can live outside the selected workspace, so ordinary RLS-scoped counts miss them.
         let row = conn
             .query_one_raw(Statement::from_sql_and_values(

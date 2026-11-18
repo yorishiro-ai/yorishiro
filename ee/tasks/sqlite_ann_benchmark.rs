@@ -54,7 +54,7 @@ impl Task for SqliteAnnBenchmark {
 
     async fn run(&self, ctx: &AppContext, vars: &Vars) -> Result<()> {
         // Only meaningful on SQLite.
-        if ctx.db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
+        if !crate::db::is_sqlite(&ctx.db) {
             return Err(Error::Message(
                 "sqlite_ann_benchmark is only meaningful on SQLite".to_string(),
             ));

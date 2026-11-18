@@ -31,7 +31,7 @@ pub(crate) async fn update_if_unchanged(
         .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Id.eq(existing.id));
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         update = update.filter(Column::UpdatedAt.eq(existing.updated_at));
     }
     let result = update.exec(conn).await.internal()?;
