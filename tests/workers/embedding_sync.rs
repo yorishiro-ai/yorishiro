@@ -64,13 +64,10 @@ mod conflict {
     struct BackendObservation(Arc<bgworker::Queue>);
 
     impl BackendObservation {
-        async fn owned_statuses(
-            &self,
-            ids: &[String],
-        ) -> Vec<(String, loco_rs::bgworker::JobStatus)> {
+        async fn owned_statuses(&self, ids: &[String]) -> Vec<(String, bgworker::JobStatus)> {
             let directory = tempfile::tempdir().unwrap();
             let dump = self.0.dump(directory.path(), None, None).await.unwrap();
-            let jobs: Vec<loco_rs::bgworker::Job> =
+            let jobs: Vec<bgworker::Job> =
                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
             jobs.into_iter()
                 .filter(|job| ids.contains(&job.id))
@@ -81,7 +78,7 @@ mod conflict {
         async fn owned_count(
             &self,
             ids: &[String],
-            status: Option<Vec<loco_rs::bgworker::JobStatus>>,
+            status: Option<Vec<bgworker::JobStatus>>,
         ) -> usize {
             self.owned_statuses(ids)
                 .await
@@ -661,7 +658,7 @@ mod conflict {
                 let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     let lifecycle_id = loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> = serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                        let jobs: Vec<bgworker::Job> = serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let owned: Vec<_> = jobs.iter().filter(|job| job.data["entity_id"] == entity_id.to_string()
                             && job.data["workspace_id"] == workspace_id.to_string()).collect();
                         if owned.iter().any(|job| job.status == JobStatus::Failed) {
@@ -745,7 +742,7 @@ mod conflict {
                         .observation
                         .owned_count(
                             &queue_ids,
-                            Some(vec![loco_rs::bgworker::JobStatus::Processing]),
+                            Some(vec![bgworker::JobStatus::Processing]),
                         )
                         .await;
                     if count == 3 {
@@ -847,7 +844,7 @@ mod conflict {
                 tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if jobs
                             .iter()
@@ -901,7 +898,7 @@ mod conflict {
                             panic!("query caller finished before its delivery was observed processing: {:?}", (&mut query).await);
                         }
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["workspace_id"] == workspace_id.to_string()
@@ -941,7 +938,7 @@ mod conflict {
                 tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let document = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
@@ -1016,7 +1013,7 @@ mod conflict {
             let published = tokio::time::timeout(std::time::Duration::from_secs(10), async {
                 loop {
                     let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                    let jobs: Vec<loco_rs::bgworker::Job> =
+                    let jobs: Vec<bgworker::Job> =
                         serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                     if let Some(job) = jobs.iter().find(|job| {
                         job.data["entity_id"] == entity_id.to_string()
@@ -1063,7 +1060,7 @@ mod conflict {
                     .unwrap();
                     let waiting_id = loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
@@ -1077,7 +1074,7 @@ mod conflict {
                     };
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let processing = jobs
                             .iter()
@@ -1113,7 +1110,7 @@ mod conflict {
                     provider.release.add_permits(1);
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let failed = jobs.iter().any(|job| {
                             job.data["lifecycle_id"] == failed_id.to_string()
@@ -1147,7 +1144,7 @@ mod conflict {
             queue.close().await.unwrap();
             match outcome {
                 Ok(result) => {
-                    result.expect("failed delivery releases the permit to the next actual worker")
+                    result.expect("failed delivery releases the permit to the next actual worker");
                 }
                 Err(panic) => std::panic::resume_unwind(panic),
             }
@@ -1191,10 +1188,7 @@ mod conflict {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while harness
                 .observation
-                .owned_count(
-                    &queue_ids,
-                    Some(vec![loco_rs::bgworker::JobStatus::Processing]),
-                )
+                .owned_count(&queue_ids, Some(vec![bgworker::JobStatus::Processing]))
                 .await
                 < 2
             {
@@ -1450,7 +1444,7 @@ mod conflict {
                     async {
                         loop {
                             let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                            let jobs: Vec<loco_rs::bgworker::Job> =
+                            let jobs: Vec<bgworker::Job> =
                                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
                                     .unwrap();
                             if let Some(job) = jobs.iter().find(|job| {
@@ -1571,7 +1565,7 @@ mod conflict {
                     release.add_permits(1);
                     let stale_id = loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
@@ -1606,7 +1600,7 @@ mod conflict {
                     release.add_permits(1);
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
@@ -1686,7 +1680,7 @@ mod conflict {
             let final_statuses = observation.owned_statuses(&owned).await;
             let directory = tempfile::tempdir().unwrap();
             let dump = queue.dump(directory.path(), None, None).await.unwrap();
-            let jobs: Vec<loco_rs::bgworker::Job> =
+            let jobs: Vec<bgworker::Job> =
                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
             queue.close().await.unwrap();
             match outcome {
@@ -1737,7 +1731,7 @@ mod conflict {
                         async {
                             loop {
                                 let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                                let jobs: Vec<loco_rs::bgworker::Job> =
+                                let jobs: Vec<bgworker::Job> =
                                     serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
                                         .unwrap();
                                 if let Some(job) = jobs.iter().find(|job| {
@@ -1837,7 +1831,7 @@ mod conflict {
                 async {
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()

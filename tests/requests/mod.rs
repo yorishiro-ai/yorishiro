@@ -77,10 +77,7 @@ pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
 }
 
 /// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future.
-pub(crate) async fn with_max_tenants<T>(
-    value: &str,
-    fut: impl std::future::Future<Output = T>,
-) -> T {
+pub(crate) async fn with_max_tenants<T>(value: &str, fut: impl Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
     guard.set("YORISHIRO_MAX_TENANTS", value);
     fut.await
@@ -184,11 +181,10 @@ fn is_sqlite_backend() -> bool {
 /// PostgreSQL gets a throwaway database created from `template1` per test, so tests never share tenants or state.
 /// The callback is wrapped in `catch_unwind` so pools are closed and the database dropped even if it panics.
 /// Its future is boxed: nested boots (two contexts in one test) would otherwise keep every callback state machine on the test thread's small stack.
-#[allow(clippy::future_not_send)]
 pub(crate) async fn boot_request<H: Hooks, F, Fut>(callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
     let _environment = crate::EnvironmentRead::enter();
     if is_sqlite_backend() {
@@ -225,11 +221,10 @@ where
     }
 }
 
-#[allow(clippy::future_not_send)]
 async fn boot_sqlite<H: Hooks, F, Fut>(callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
     // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
     // SQLite must not open a path whose parent can disappear during concurrent test teardown.
@@ -256,13 +251,12 @@ where
 
 /// Boots an isolated request app while temporarily overriding its configured timezone.
 /// Timezone tests may mutate the database-wide timezone and maintenance state.
-#[allow(clippy::future_not_send)]
 pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
     timezone: &'static str,
     callback: F,
 ) where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
     let guard = crate::EnvGuard::capture(&["YORISHIRO_TIMEZONE"]);
     guard.set("YORISHIRO_TIMEZONE", timezone);
@@ -274,17 +268,16 @@ pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
 /// Instead of `CREATE DATABASE` (which SQLite has no equivalent for), this generates a
 /// unique temp file path, overrides the database URI to the generated file, then boots via
 /// `H::boot(StartMode::ServerOnly, ...)`.
-#[allow(clippy::future_not_send)]
 pub(crate) async fn request_with_create_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
     // Load the configured test app, then override only its isolated database and queue files.
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
         .expect("load sqlite config");
-    config.database.uri = format!("sqlite://{}?mode=rwc", db_path);
+    config.database.uri = format!("sqlite://{db_path}?mode=rwc");
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
         let queue_path = std::path::Path::new(&db_path)
             .with_file_name(format!("{}_queue.sqlite3", uuid::Uuid::new_v4()))
@@ -297,7 +290,6 @@ where
 }
 
 /// Boots the app with a free port and wraps its router in a `TestServer`, as loco's own `request_internal` does.
-#[allow(clippy::future_not_send)]
 async fn serve<H: Hooks>(
     mut config: loco_rs::config::Config,
 ) -> (TestServer, loco_rs::app::AppContext) {
@@ -342,4 +334,4 @@ pub(crate) async fn workspace_txn(
         .expect("begin workspace transaction")
 }
 
-pub mod tenants;
+pub(crate) mod tenants;

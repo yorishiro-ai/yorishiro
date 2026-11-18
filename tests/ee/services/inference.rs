@@ -37,7 +37,7 @@ fn response(status: u16, body: &str, extra_headers: &str) -> String {
 #[tokio::test]
 async fn production_transport_parses_completion_and_preserves_request_schema() {
     let (sent, received) = tokio::sync::oneshot::channel();
-    let sent = std::sync::Arc::new(tokio::sync::Mutex::new(Some(sent)));
+    let sent = Arc::new(tokio::sync::Mutex::new(Some(sent)));
     let app = Router::new().route("/v1/chat/completions", post(move |headers: HeaderMap, body: Bytes| async move {
         sent.lock().await.take().unwrap().send((headers, body)).unwrap();
         Json(serde_json::json!({"choices":[{"message":{"content":"{\"category\":\"news\",\"ignored\":true}"}}]}))

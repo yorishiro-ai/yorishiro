@@ -10,11 +10,11 @@ impl Task for DeleteUser {
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
         let user_id = vars
             .cli_arg("user_id")?
-            .parse::<uuid::Uuid>()
+            .parse::<Uuid>()
             .map_err(|_| Error::Message("user_id must be a UUID".into()))?;
         let confirmation = vars
             .cli_arg("confirmed_user_id")?
-            .parse::<uuid::Uuid>()
+            .parse::<Uuid>()
             .map_err(|_| Error::Message("confirmed_user_id must be a UUID".into()))?;
         let outcome =
             crate::models::user_users::delete_by_operator(&ctx.db, user_id, confirmation).await?;

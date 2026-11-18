@@ -12,8 +12,8 @@ impl Task for DisableTenant {
         }
     }
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
-        let parse_target = |name: &str| -> Result<uuid::Uuid> {
-            vars.cli_arg(name)?.parse::<uuid::Uuid>().map_err(|_| {
+        let parse_target = |name: &str| -> Result<Uuid> {
+            vars.cli_arg(name)?.parse::<Uuid>().map_err(|_| {
                 crate::YorishiroError::ValidationFailed {
                     message: format!("{name} is not a valid UUID"),
                     details: vec![],

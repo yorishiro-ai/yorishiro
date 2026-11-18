@@ -108,7 +108,7 @@ pub(crate) async fn reindex_workspace_as(
             Column::EmbeddingRevision,
             Expr::col(Column::EmbeddingRevision).add(1),
         )
-        .filter(crate::models::_entities::workspace_workspaces::Column::Id.eq(workspace_id))
+        .filter(Column::Id.eq(workspace_id))
         .exec(&txn)
         .await
         .internal()?;

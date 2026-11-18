@@ -84,7 +84,7 @@ impl LifecycleStatus {
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -434,7 +434,7 @@ async fn admit(
         // The claimed row now counts toward its own key.
         active_capacity = ?in_flight.map(|count| count + 1),
         capacity_limit = ?row.concurrency_limit,
-        queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(row.enqueue_at).num_seconds(), 0),
+        queue_start_seconds = Ord::max(now.signed_duration_since(row.enqueue_at).num_seconds(), 0),
         "queue job admitted"
     );
     let attempt = row.attempt + 1;

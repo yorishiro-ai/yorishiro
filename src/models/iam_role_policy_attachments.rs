@@ -107,10 +107,7 @@ impl Model {
         .insert(&txn)
         .await
         .map_err(|error| {
-            if matches!(
-                error.sql_err(),
-                Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-            ) {
+            if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
                 YorishiroError::Conflict {
                     message: "role association already exists".into(),
                 }

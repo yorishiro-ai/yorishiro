@@ -68,9 +68,8 @@ async fn log_request(request: Request, next: Next) -> Response {
         .map_or_else(|| "req-id-none".to_string(), |id| id.get().to_string());
     let environment = request
         .extensions()
-        .get::<loco_rs::environment::Environment>()
-        .map(ToString::to_string)
-        .unwrap_or_default();
+        .get::<Environment>()
+        .map_or_default(ToString::to_string);
     let started = Instant::now();
     let span = tracing::error_span!(
         "http-request",

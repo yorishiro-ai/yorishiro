@@ -5,9 +5,10 @@ use serde::Serialize;
 mod operations;
 
 pub(crate) use operations::create_tenant_user_as;
+pub use operations::list_members;
 pub use operations::preview_removal;
 pub use operations::{add_member, remove_member, remove_member_as};
-pub(crate) use operations::{add_member_in_transaction, is_member, list_members, list_members_as};
+pub(crate) use operations::{add_member_in_transaction, is_member, list_members_as};
 pub use operations::{create_tenant_user_member, reset_tenant_user_password};
 
 #[derive(Serialize)]
@@ -32,7 +33,7 @@ pub struct MembershipRemovalPreview {
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {

@@ -34,11 +34,11 @@ macro_rules! db_enum {
 
         impl $name {
             /// Every variant, in declaration order.
-            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+            $vis const ALL: &'static [Self] = &[$(Self::$variant),+];
 
             /// The string stored in the database and sent over the wire.
             #[must_use]
-            pub const fn as_db_str(self) -> &'static str {
+            $vis const fn as_db_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $text),+
                 }
@@ -46,7 +46,7 @@ macro_rules! db_enum {
 
             /// The variant stored as `value`, or `None` for anything this crate does not define.
             #[must_use]
-            pub fn from_db_str(value: &str) -> Option<Self> {
+            $vis fn from_db_str(value: &str) -> Option<Self> {
                 match value {
                     $( $text $(| $alias)* => Some(Self::$variant), )+
                     _ => None,

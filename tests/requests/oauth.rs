@@ -22,7 +22,7 @@ const OAUTH_VARS: [&str; 3] = [
 
 /// The shipped Loco configuration interpolates these values before each app boots.
 /// Callers that change these variables take `serial(process_environment)`.
-async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
+async fn with_oauth_env<T>(fut: impl Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&OAUTH_VARS);
     guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
     guard.set("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
@@ -272,7 +272,7 @@ async fn callback_rejects_an_expired_state() {
 /// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
 #[tokio::test]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         super::fixtures::TestTenant::create(&request, &ctx, super::fixtures::TenantArgs::default())
             .await;
 
@@ -315,7 +315,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 /// The workspace is provisioned with a schema from the built-in `general-notes` template and left `active`.
 #[tokio::test]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
-    super::boot_request::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
@@ -392,7 +392,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
             None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
         }
-        super::boot_request::<App, _, _>(|_request, ctx| async move {
+        boot_request::<App, _, _>(|_request, ctx| async move {
             if super::skip_unlicensed(&ctx) {
                 return;
             }

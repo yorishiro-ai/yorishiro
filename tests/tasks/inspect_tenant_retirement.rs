@@ -17,7 +17,7 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
         tenant_retirement_events, tenant_tenants,
     };
 
-    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let key = api_keys::Entity::create_tenant_api_key(
             &ctx.db, target.tenant_id, api_keys::ApiKeyScope::Read, Some(target.owner_id), false, "retirement-owner",

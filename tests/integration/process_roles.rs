@@ -109,7 +109,7 @@ async fn a_job_consumer_does_not_build_the_embedding_provider() {
         }
         match outcome {
             Ok(result) => {
-                result.expect("CLI job consumer completes a production import without a model")
+                result.expect("CLI job consumer completes a production import without a model");
             }
             Err(panic) => std::panic::resume_unwind(panic),
         }

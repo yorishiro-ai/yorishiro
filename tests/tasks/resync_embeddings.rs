@@ -279,8 +279,8 @@ async fn gated_provider(model: &str) -> GatedProvider {
 
 /// Runs `reindex` and `modify` together and requires the run to be rejected because the workspace changed underneath it.
 async fn rejected_by_concurrent_change<T, E: std::fmt::Display>(
-    reindex: impl std::future::Future<Output = Result<T, E>>,
-    modify: impl std::future::Future<Output = ()>,
+    reindex: impl Future<Output = Result<T, E>>,
+    modify: impl Future<Output = ()>,
 ) {
     let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         tokio::join!(reindex, modify)

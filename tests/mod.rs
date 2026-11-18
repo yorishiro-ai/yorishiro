@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "tests read their inputs, such as DATABASE_URL and the licence key, from the environment"
+)]
+
 mod controllers;
 mod data;
 mod db;
@@ -82,7 +87,11 @@ pub(crate) struct EnvironmentRead {
 impl EnvironmentRead {
     pub(crate) fn enter() -> Self {
         let held = SCOPES.with(|scopes| scopes.get() != (0, 0));
-        let lock = (!held).then(|| ENVIRONMENT.read().unwrap_or_else(|e| e.into_inner()));
+        let lock = (!held).then(|| {
+            ENVIRONMENT
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        });
         SCOPES.with(|scopes| {
             let (readers, writers) = scopes.get();
             scopes.set((readers + 1, writers));
@@ -126,8 +135,11 @@ impl EnvironmentWrite {
             readers == 0 || writers > 0,
             "an EnvGuard was captured inside a booted test's scope: capture it before boot_request"
         );
-        let lock = (readers == 0 && writers == 0)
-            .then(|| ENVIRONMENT.write().unwrap_or_else(|e| e.into_inner()));
+        let lock = (readers == 0 && writers == 0).then(|| {
+            ENVIRONMENT
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        });
         SCOPES.with(|scopes| scopes.set((readers, writers + 1)));
         Self { _lock: lock }
     }

@@ -33,9 +33,8 @@ pub async fn drift(
         .get(&entity.entity_type)
         .map(|def| &def.fields);
 
-    let missing_fields = active_fields
-        .map(|fields| missing_fields_in_value(&entity.data, fields, ""))
-        .unwrap_or_default();
+    let missing_fields =
+        active_fields.map_or_default(|fields| missing_fields_in_value(&entity.data, fields, ""));
 
     Ok(EntityDrift {
         entity_id: entity.id,
@@ -91,8 +90,9 @@ pub async fn migration_dry_run(
                 .definition
                 .entity_types
                 .get(&row.entity_type)
-                .map(|definition| missing_fields_in_value(&row.data, &definition.fields, ""))
-                .unwrap_or_default()
+                .map_or_default(|definition| {
+                    missing_fields_in_value(&row.data, &definition.fields, "")
+                })
                 .into_iter()
                 .filter(|field| field.required)
                 .map(|field| field.name)

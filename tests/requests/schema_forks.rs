@@ -407,7 +407,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             &ctx,
             TenantArgs {
                 tenant_name: "fork-http-tenant-a".into(),
-                owner_email: super::fixtures::unique_email("fork-http-a"),
+                owner_email: fixtures::unique_email("fork-http-a"),
                 key_scope: ApiKeyScope::Schema,
                 ..Default::default()
             },
@@ -451,7 +451,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             TenantArgs {
                 tenant_name: "fork-http-tenant-b".into(),
                 workspace_name: "fork-http-b".into(),
-                owner_email: super::fixtures::unique_email("fork-http-b"),
+                owner_email: fixtures::unique_email("fork-http-b"),
                 key_scope: ApiKeyScope::Read,
                 ..Default::default()
             },
@@ -840,7 +840,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             &ctx,
             TenantArgs {
                 tenant_name: "tenant-a".into(),
-                owner_email: super::fixtures::unique_email("owner-a"),
+                owner_email: fixtures::unique_email("owner-a"),
                 key_scope: ApiKeyScope::Schema,
                 ..Default::default()
             },
@@ -883,7 +883,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             TenantArgs {
                 tenant_name: "tenant-b".into(),
                 workspace_name: "workspace-b".into(),
-                owner_email: super::fixtures::unique_email("owner-b"),
+                owner_email: fixtures::unique_email("owner-b"),
                 key_scope: ApiKeyScope::Schema,
                 ..Default::default()
             },

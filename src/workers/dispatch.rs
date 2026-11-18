@@ -116,7 +116,7 @@ async fn recover_pending_on_while(
         .await;
         match &enqueue_result {
             Err(_) => {
-                tracing::warn!(dispatch_id = %row.id, "publish timed out; provider outcome may be ambiguous")
+                tracing::warn!(dispatch_id = %row.id, "publish timed out; provider outcome may be ambiguous");
             }
             Ok(Ok(provider_job_id)) => {
                 match crate::models::queue_job_dispatch_outbox::acknowledge_dispatch(
@@ -131,10 +131,10 @@ async fn recover_pending_on_while(
                         // The acknowledgement transaction also records lifecycle correlation.
                     }
                     Ok(false) => {
-                        tracing::warn!(dispatch_id = %row.id, "provider accepted dispatch after its claim lease expired; duplicate risk retained")
+                        tracing::warn!(dispatch_id = %row.id, "provider accepted dispatch after its claim lease expired; duplicate risk retained");
                     }
                     Err(error) => {
-                        tracing::warn!(dispatch_id = %row.id, error = %error, "provider accepted dispatch but acknowledgement failed")
+                        tracing::warn!(dispatch_id = %row.id, error = %error, "provider accepted dispatch but acknowledgement failed");
                     }
                 }
             }

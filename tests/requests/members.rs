@@ -13,7 +13,7 @@ async fn competing_tenant_memberships_allow_only_one() {
     if !crate::require_postgres_backend() {
         return;
     }
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         if super::skip_unlicensed(&ctx) {
             return;
         }
@@ -77,7 +77,7 @@ async fn root_removal_conflicts_and_preserves_the_root() {
     use yorishiro::models::_entities::tenant_memberships::Column;
     use yorishiro::models::tenant_memberships;
 
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let removed =
             tenant_memberships::remove_member(&ctx.db, tenant.tenant_id, tenant.owner_id).await;
@@ -250,7 +250,7 @@ async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_admin_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let auth = format!("Bearer {}", tenant_admin_key);
+        let auth = format!("Bearer {tenant_admin_key}");
         request
             .put(&format!("/api/members/users/{}/password", tenant.owner_id))
             .add_header("Authorization", &auth)

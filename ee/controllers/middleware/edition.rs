@@ -169,7 +169,7 @@ pub(crate) async fn licence_gate(
         return next.run(request).await;
     }
 
-    crate::controllers::error::ApiError(crate::error::YorishiroError::not_found(
+    crate::controllers::error::ApiError(YorishiroError::not_found(
         "this feature requires a licence key (set YORISHIRO_LICENSE_KEY)",
     ))
     .into_response()

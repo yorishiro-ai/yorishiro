@@ -76,10 +76,7 @@ fn clean_max_session(value: Option<i64>) -> Result<i32, YorishiroError> {
 }
 
 fn unique_name_conflict(error: DbErr) -> YorishiroError {
-    if matches!(
-        error.sql_err(),
-        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-    ) {
+    if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
         YorishiroError::Conflict {
             message: "an IAM role with this name already exists".into(),
         }

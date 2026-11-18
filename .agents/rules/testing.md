@@ -109,11 +109,16 @@ Test-only seams in production code are not allowed either: a dispatcher is repla
 `tests/` builds without the enterprise feature (`--no-default-features --features community`).
 A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and a test that asserts an enterprise-only behaviour is gated the same way.
 
-## rust-analyzer is authoritative
+## Lints and rust-analyzer
 
-The repository Clippy commands must cover the same targets rust-analyzer checks.
-Run `make clippy-ce` and `make clippy-ee`; both use `--all-targets`, deny warnings, and require `# Errors` and `# Panics` documentation on public APIs.
-Do not dismiss an editor diagnostic because a narrower CI command omits its target or lint.
+Lint levels live in `Cargo.toml` (`[workspace.lints]`) and their settings and banned APIs in `clippy.toml`, so `cargo build`, `cargo clippy` and rust-analyzer report the same findings; `rust-analyzer.toml` makes the editor run Clippy on every target with the `enterprise` feature.
+CI and `make clippy-ce` / `make clippy-ee` add `-D warnings`, so a warning in the editor is an error in CI.
+Do not dismiss an editor diagnostic because a narrower command omits its target.
+
+- Suppress a lint with `#[expect(lint, reason = "...")]`, never a bare `#[allow]`: a stale `expect` is reported.
+- `std::env::var*` is banned outside `src/data/env.rs`; Loco's `get_env` in `config/*.yaml` is the way to read settings.
+- `debug_assert*`, `dbg!`, `todo!` and `unimplemented!` are rejected by the build.
+- New settings belong in these files, not in command-line flags.
 
 ## SQLite gate
 

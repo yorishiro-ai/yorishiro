@@ -808,7 +808,7 @@ pub(crate) async fn insert_fork(
         Err(sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(err)))
             if err
                 .as_database_error()
-                .is_some_and(|db_err| db_err.is_unique_violation()) =>
+                .is_some_and(sea_orm::sqlx::error::DatabaseError::is_unique_violation) =>
         {
             Ok(InsertForkOutcome::NameTaken)
         }

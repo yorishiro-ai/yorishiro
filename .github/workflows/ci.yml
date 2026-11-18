@@ -96,9 +96,6 @@ jobs:
       - name: Check that tests live in tests/
         run: make test-location-check
 
-      - name: Check for debug-only macros
-        run: make debug-macro-check
-
       - name: Check the edition boundary
         run: make edition-boundary-check
 
@@ -114,9 +111,6 @@ jobs:
             fi
           done
 
-      - name: Check for allow(dead_code)
-        run: make dead-code-allow-check
-
       - name: Check doc links
         run: cargo doc --no-deps --workspace --features enterprise
         env:
@@ -128,7 +122,7 @@ jobs:
       - name: Clippy
         # Keep CI aligned with rust-analyzer: every target and public API documentation.
         # Complexity debt is report-only; all other existing strict lints remain errors.
-        run: cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
+        run: cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
 
   schema-generation:
     name: Schema generation (PostgreSQL)

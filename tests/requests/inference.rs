@@ -182,7 +182,7 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
     guard.remove("YORISHIRO_LICENSE_KEY");
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let with_key = request
@@ -248,7 +248,7 @@ pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &TestTen
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         if super::skip_unlicensed(&ctx) {
             return;
         }
@@ -292,7 +292,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         }
 
         let get_entity = request
-            .get(&format!("/api/entities/{}", entity))
+            .get(&format!("/api/entities/{entity}"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -437,7 +437,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         .await;
 
         let get_after_undo = request
-            .get(&format!("/api/entities/{}", entity))
+            .get(&format!("/api/entities/{entity}"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         let fetched_after_undo: serde_json::Value = get_after_undo.json();
@@ -1043,7 +1043,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
 /// A dispatch failure rolls back the job together with its durable dispatch records.
 #[tokio::test]
 async fn infer_fill_dispatch_failure_rolls_back_job() {
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         if super::skip_unlicensed(&ctx) {
             return;
         }
@@ -1160,7 +1160,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
 /// The worker runs outside any request and the queued job names only the workspace, so it finds the tenant itself; the two ids differ here.
 #[tokio::test]
 async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         if super::skip_unlicensed(&ctx) {
             return;
         }

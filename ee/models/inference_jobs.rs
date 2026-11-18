@@ -4,8 +4,8 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::inference_jobs::{ActiveModel, Column, Entity, Model};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
-    QueryFilter, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter,
+    QuerySelect, Set,
 };
 use uuid::Uuid;
 
@@ -126,7 +126,7 @@ pub async fn create(
         status: Set(InferenceJobStatus::Queued.as_db_str().to_string()),
         applied: Set(0),
         skipped: Set(0),
-        error: ActiveValue::Set(None),
+        error: Set(None),
         attempt: Set(0),
         ..Default::default()
     };

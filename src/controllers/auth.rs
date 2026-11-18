@@ -19,8 +19,8 @@ use crate::models::{tenancy, user_users};
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/auth/signup",
-    request_body = crate::dtos::auth::SignupRequest,
-    responses((status = 201, body = crate::dtos::auth::SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
+    request_body = SignupRequest,
+    responses((status = 201, body = SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
     security(()),
     tag = "community"
 ))]
@@ -59,7 +59,7 @@ async fn signup(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/root/login", request_body = crate::dtos::auth::RootLoginRequest, responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/root/login", request_body = RootLoginRequest, responses((status = 200, body = LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 async fn root_login(
     State(ctx): State<AppContext>,
     Json(body): Json<RootLoginRequest>,
@@ -70,7 +70,7 @@ async fn root_login(
     finish_login(&ctx, user, None).await
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/tenant/login", params(("x-tenant-id" = uuid::Uuid, Header)), request_body = crate::dtos::auth::TenantLoginRequest, responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/tenant/login", params(("x-tenant-id" = uuid::Uuid, Header)), request_body = TenantLoginRequest, responses((status = 200, body = LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 async fn tenant_login(
     State(ctx): State<AppContext>,
     headers: HeaderMap,

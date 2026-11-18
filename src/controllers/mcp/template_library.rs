@@ -74,8 +74,8 @@ impl YorishiroMcpServer {
         )
         .await?
         {
-            super::VerifyOutcome::Verified(auth) => auth,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let definition = match serde_json::from_value(args.definition) {
             Ok(value) => value,
@@ -116,8 +116,8 @@ impl YorishiroMcpServer {
         )
         .await?
         {
-            super::VerifyOutcome::Verified(auth) => auth,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let definition = match args.definition.map(serde_json::from_value).transpose() {
             Ok(value) => value,
@@ -158,8 +158,8 @@ impl YorishiroMcpServer {
         )
         .await?
         {
-            super::VerifyOutcome::Verified(auth) => auth,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         match template_templates::delete_as(&self.app_context().db, &auth, args.id).await {
             Ok(()) => ok_json(serde_json::json!({"deleted": true})),
@@ -183,8 +183,8 @@ impl YorishiroMcpServer {
         )
         .await?
         {
-            super::VerifyOutcome::Verified(auth) => auth,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            VerifyOutcome::Verified(auth) => auth,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         match template_templates::fork_as(&self.app_context().db, &auth, args.id, args.name).await {
             Ok(template) => ok_json(template),

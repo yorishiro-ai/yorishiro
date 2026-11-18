@@ -234,7 +234,7 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
     .await;
 }
 
-async fn deliver_lifecycle(ctx: &loco_rs::app::AppContext, lifecycle_id: Uuid) {
+async fn deliver_lifecycle(ctx: &AppContext, lifecycle_id: Uuid) {
     use futures::FutureExt;
     use loco_rs::{app::Hooks, bgworker::JobStatus};
     use yorishiro::workers::target::WorkerTarget;
@@ -632,7 +632,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
         queue.close().await.unwrap();
         match result {
             Ok(result) => {
-                result.expect("competing delivery defers and is redelivered by the real queue")
+                result.expect("competing delivery defers and is redelivered by the real queue");
             }
             Err(panic) => std::panic::resume_unwind(panic),
         }
@@ -841,10 +841,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
     }).await;
 }
 
-async fn actor(
-    ctx: &loco_rs::app::AppContext,
-    key: &str,
-) -> yorishiro::models::api_keys::AuthContext {
+async fn actor(ctx: &AppContext, key: &str) -> yorishiro::models::api_keys::AuthContext {
     use yorishiro::models::api_keys::Entity;
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         Entity::authenticate(&db, key, None).await.unwrap()

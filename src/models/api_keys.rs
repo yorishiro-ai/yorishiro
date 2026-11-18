@@ -240,7 +240,7 @@ pub(crate) type IdentityApiKeys = Entity;
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -269,11 +269,11 @@ impl Entity {
         use sea_orm::sea_query::{Alias, Expr, Func, Query};
         #[derive(sea_orm::FromQueryResult)]
         struct Credential {
-            id: uuid::Uuid,
-            workspace_id: Option<uuid::Uuid>,
-            tenant_id: uuid::Uuid,
+            id: Uuid,
+            workspace_id: Option<Uuid>,
+            tenant_id: Uuid,
             scope: String,
-            user_id: Option<uuid::Uuid>,
+            user_id: Option<Uuid>,
             audit: bool,
         }
         let query = Query::select()
@@ -450,7 +450,7 @@ impl Entity {
     /// This call receives a bare RLS-scoped `PgConnection`, not a SeaORM `ConnectionTrait`, so the write must use `sqlx` on that connection.
     pub(crate) async fn touch_last_used_on_connection(
         conn: &mut sea_orm::sqlx::PgConnection,
-        api_key_id: uuid::Uuid,
+        api_key_id: Uuid,
     ) -> Result<(), YorishiroError> {
         use crate::models::_entities::api_keys::Column;
         use sea_orm::sea_query::{Expr, ExprTrait, Func, PostgresQueryBuilder, Query};
@@ -501,14 +501,11 @@ impl Entity {
         Ok(Some(key))
     }
 
-    pub(crate) async fn touch_last_used(conn: &impl ConnectionTrait, api_key_id: uuid::Uuid) {
+    pub(crate) async fn touch_last_used(conn: &impl ConnectionTrait, api_key_id: Uuid) {
         use crate::models::_entities::api_keys::Column;
 
         if let Err(err) = Entity::update_many()
-            .col_expr(
-                Column::LastUsedAt,
-                sea_orm::sea_query::Expr::value(crate::data::time::now()),
-            )
+            .col_expr(Column::LastUsedAt, Expr::value(crate::data::time::now()))
             .filter(Column::Id.eq(api_key_id))
             .exec(conn)
             .await
@@ -524,10 +521,10 @@ impl Entity {
     /// # Errors
     /// Returns an error if the operation cannot be completed.
     pub async fn create_api_key(
-        db: &sea_orm::DatabaseConnection,
-        workspace_id: uuid::Uuid,
+        db: &DatabaseConnection,
+        workspace_id: Uuid,
         scope: ApiKeyScope,
-        user_id: Option<uuid::Uuid>,
+        user_id: Option<Uuid>,
         audit: bool,
     ) -> Result<CreatedApiKey, YorishiroError> {
         Self::create_named_api_key(
@@ -549,10 +546,10 @@ impl Entity {
     /// # Errors
     /// Returns an error if the operation cannot be completed.
     pub async fn create_tenant_api_key(
-        db: &sea_orm::DatabaseConnection,
-        tenant_id: uuid::Uuid,
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
         scope: ApiKeyScope,
-        user_id: Option<uuid::Uuid>,
+        user_id: Option<Uuid>,
         audit: bool,
         name: &str,
     ) -> Result<CreatedTenantApiKey, YorishiroError> {
@@ -595,8 +592,8 @@ impl Entity {
 
     pub(crate) async fn create_login_key(
         txn: &sea_orm::DatabaseTransaction,
-        tenant_id: uuid::Uuid,
-        user_id: uuid::Uuid,
+        tenant_id: Uuid,
+        user_id: Uuid,
         scope: ApiKeyScope,
     ) -> Result<CreatedTenantApiKey, YorishiroError> {
         crate::models::access::require_key_attribution(txn, tenant_id, Some(user_id)).await?;
@@ -626,9 +623,9 @@ impl Entity {
 
     pub(crate) async fn create_role_session(
         txn: &sea_orm::DatabaseTransaction,
-        tenant_id: uuid::Uuid,
-        user_id: Option<uuid::Uuid>,
-        role_id: uuid::Uuid,
+        tenant_id: Uuid,
+        user_id: Option<Uuid>,
+        role_id: Uuid,
         scope: ApiKeyScope,
         role_name: &str,
         expires_at: chrono::DateTime<chrono::FixedOffset>,
@@ -658,7 +655,7 @@ impl Entity {
     }
 
     pub(crate) async fn create_delegated_api_key(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         issuer: &AuthContext,
         scope: ApiKeyScope,
         audit: bool,
@@ -684,7 +681,7 @@ impl Entity {
     /// # Errors
     /// Returns an error if the operation cannot be completed.
     pub(crate) async fn create_delegated_tenant_api_key(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         issuer: &AuthContext,
         scope: ApiKeyScope,
         audit: bool,
@@ -768,12 +765,15 @@ impl Entity {
     }
 
     /// Issues a key and validates attribution while holding the membership fence.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the table columns written in one statement"
+    )]
     async fn create_named_api_key(
-        db: &sea_orm::DatabaseConnection,
-        workspace_id: uuid::Uuid,
+        db: &DatabaseConnection,
+        workspace_id: Uuid,
         scope: ApiKeyScope,
-        user_id: Option<uuid::Uuid>,
+        user_id: Option<Uuid>,
         audit: bool,
         name: &str,
         issuer: Option<&AuthContext>,
@@ -836,7 +836,7 @@ impl Entity {
             user_id: ActiveValue::Set(user_id),
             key_hash: ActiveValue::Set(key_hash),
             key_prefix: ActiveValue::Set(prefix),
-            name: ActiveValue::Set(name.to_owned()),
+            name: ActiveValue::Set(name.clone()),
             expires_at: ActiveValue::Set(expires_at),
             scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(audit),
@@ -865,7 +865,7 @@ impl Entity {
     /// Returns an error if the operation cannot be completed.
     pub async fn list_for_workspace(
         conn: &impl ConnectionTrait,
-        workspace_id: uuid::Uuid,
+        workspace_id: Uuid,
         page: crate::models::pagination::ListParams,
     ) -> Result<Vec<Model>, YorishiroError> {
         use crate::models::_entities::api_keys::Column;
@@ -906,7 +906,7 @@ impl Entity {
 
     pub(crate) async fn list_for_tenant(
         conn: &impl ConnectionTrait,
-        tenant_id: uuid::Uuid,
+        tenant_id: Uuid,
     ) -> Result<Vec<Model>, YorishiroError> {
         use crate::models::_entities::api_keys::Column;
 
@@ -923,10 +923,7 @@ impl Entity {
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
-    pub async fn revoke(
-        db: &sea_orm::DatabaseConnection,
-        key_id: uuid::Uuid,
-    ) -> Result<(), YorishiroError> {
+    pub async fn revoke(db: &DatabaseConnection, key_id: Uuid) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
         let key = Self::find_by_id(key_id)
             .one(&txn)
@@ -948,9 +945,9 @@ impl Entity {
     /// # Errors
     /// Rejects stale administrator credentials, missing keys and persistence failures.
     pub async fn revoke_for_tenant(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &AuthContext,
-        key_id: uuid::Uuid,
+        key_id: Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
         crate::models::access::require_iam_action(
@@ -1056,7 +1053,7 @@ impl Entity {
         Entity::update_many()
             .col_expr(
                 crate::models::_entities::api_keys::Column::ReplacedById,
-                sea_orm::sea_query::Expr::val(inserted.id),
+                Expr::val(inserted.id),
             )
             .filter(crate::models::_entities::api_keys::Column::Id.eq(key_id))
             .exec(&txn)
@@ -1084,14 +1081,8 @@ impl Entity {
         use crate::models::_entities::api_keys::Column;
 
         let result = Entity::update_many()
-            .col_expr(
-                Column::RevokedAt,
-                sea_orm::sea_query::Expr::val(crate::data::time::now()),
-            )
-            .col_expr(
-                Column::KeyHash,
-                sea_orm::sea_query::Expr::val(hash_key(&generate_key().1)),
-            )
+            .col_expr(Column::RevokedAt, Expr::val(crate::data::time::now()))
+            .col_expr(Column::KeyHash, Expr::val(hash_key(&generate_key().1)))
             .filter(Column::Id.eq(key_id))
             .filter(Column::TenantId.eq(tenant_id))
             .filter(Column::RevokedAt.is_null())

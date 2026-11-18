@@ -19,7 +19,7 @@ coverage test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
 coverage test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
 test-postgres test-sqlite test-valkey: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check coverage test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check coverage test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -34,10 +34,10 @@ check-ee: patch-check
 clippy: clippy-ce
 
 clippy-ce: patch-check
-	cargo clippy --locked --no-default-features --features community --workspace --all-targets -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc
+	cargo clippy --locked --no-default-features --features community --workspace --all-targets -- -D warnings
 
 clippy-ee: patch-check
-	cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings -D clippy::missing_errors_doc -D clippy::missing_panics_doc
+	cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings
 
 fmt: patch-check
 	cargo fmt --all
@@ -47,28 +47,16 @@ fmt-check: patch-check
 
 python-lint:
 	uv run ruff check scripts tests/blackbox tests/ci patches/loco-rs/verify.py
-	uv run scripts/test_env_reads.py
 	uv run scripts/test_env_config.py
-	uv run scripts/check_env_reads.py
 	@for script in .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh; do bash -n "$$script" || exit; done
 
 edition-boundary-check:
 	uv run scripts/test_edition_boundary.py
 	uv run scripts/check_edition_boundary.py
 
-dead-code-allow-check:
-	@if git grep -n -E 'allow[[:space:]]*\([[:space:]]*dead_code' -- src ee edition migration/src tests; then \
-		echo 'ERROR: remove the unused item instead of allowing dead_code' >&2; exit 1; \
-	fi
-
 test-location-check:
 	@if git grep -n -E '#\[[[:space:]]*((tokio|async_std)::)?test([[:space:]]|\]|\()|#\[[[:space:]]*cfg[[:space:]]*\([[:space:]]*test[[:space:]]*\)' -- src ee edition migration/src; then \
 		echo 'ERROR: tests and test-only code belong in tests/' >&2; exit 1; \
-	fi
-
-debug-macro-check:
-	@if git grep -n -E '(^|[^[:alnum:]_])(dbg|debug_assert|debug_assert_eq|debug_assert_ne)[[:space:]]*!' -- src ee edition migration/src tests; then \
-		echo 'ERROR: remove debug-only macros; use tests/ for assertions' >&2; exit 1; \
 	fi
 
 # Nightly is required because LLVM branch coverage is not available on stable.
@@ -130,9 +118,9 @@ entities: build
 patch-check:
 	python3 patches/loco-rs/verify.py --prepare
 
-check-all: patch-check fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ce clippy-ce
+check-all: patch-check fmt-check python-lint edition-boundary-check test-location-check check-ce clippy-ce
 
-check-all-ee: patch-check fmt-check python-lint edition-boundary-check dead-code-allow-check test-location-check debug-macro-check check-ee clippy-ee
+check-all-ee: patch-check fmt-check python-lint edition-boundary-check test-location-check check-ee clippy-ee
 
 package-docker-check:
 	@test -n "$(IMAGE)" || { echo 'IMAGE is required' >&2; exit 2; }

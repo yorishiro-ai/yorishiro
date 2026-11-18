@@ -122,26 +122,14 @@ async fn expired_attempt_recovers_and_stale_completion_is_rejected() {
             Admission::Recovered { attempt: 2 }
         );
         assert!(
-            Entity::finish(
-                &db,
-                id,
-                Some(1),
-                yorishiro::models::queue_job_lifecycles::LifecycleStatus::Completed,
-                None
-            )
-            .await
-            .is_err()
+            Entity::finish(&db, id, Some(1), LifecycleStatus::Completed, None)
+                .await
+                .is_err()
         );
         assert!(
-            Entity::finish(
-                &db,
-                id,
-                Some(2),
-                yorishiro::models::queue_job_lifecycles::LifecycleStatus::Completed,
-                None
-            )
-            .await
-            .is_ok()
+            Entity::finish(&db, id, Some(2), LifecycleStatus::Completed, None)
+                .await
+                .is_ok()
         );
     })
     .await;
@@ -234,25 +222,13 @@ async fn expired_saturation_defers_with_its_attempt_and_recovers_later() {
         assert_eq!(row.status, "retrying");
         assert_eq!(row.attempt, 1);
         assert!(
-            Entity::finish(
-                &db,
-                expired,
-                Some(1),
-                yorishiro::models::queue_job_lifecycles::LifecycleStatus::Completed,
-                None
-            )
-            .await
-            .is_err()
+            Entity::finish(&db, expired, Some(1), LifecycleStatus::Completed, None)
+                .await
+                .is_err()
         );
-        Entity::finish(
-            &db,
-            active,
-            Some(1),
-            yorishiro::models::queue_job_lifecycles::LifecycleStatus::Completed,
-            None,
-        )
-        .await
-        .unwrap();
+        Entity::finish(&db, active, Some(1), LifecycleStatus::Completed, None)
+            .await
+            .unwrap();
         assert_eq!(
             Entity::start_at(&db, expired, expired_at).await.unwrap(),
             Admission::Started { attempt: 2 }

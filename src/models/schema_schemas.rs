@@ -16,7 +16,7 @@ use metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definition};
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -26,7 +26,7 @@ impl ActiveModelBehavior for ActiveModel {
         // SQLite refuses a non-constant default on `ADD COLUMN` for an existing table, so `schema_schemas.updated_at` has `now()` on PostgreSQL and nothing on SQLite, and an insert that relied on the default would be NULL there.
         // A caller that sets it deliberately (a backfill, an import preserving original timestamps) is still not overwritten.
         if !this.updated_at.is_set() {
-            this.updated_at = sea_orm::ActiveValue::Set(Some(crate::data::time::now().into()));
+            this.updated_at = ActiveValue::Set(Some(crate::data::time::now().into()));
         }
         Ok(this)
     }
@@ -277,7 +277,7 @@ impl TryFrom<Model> for SchemaRecord {
                 .map(serde_json::from_value)
                 .transpose()
                 .internal()?,
-            origin_updated_at: row.origin_updated_at.map(|t| t.into()),
+            origin_updated_at: row.origin_updated_at.map(Into::into),
             created_at: row.created_at.into(),
         })
     }
@@ -514,8 +514,7 @@ pub async fn create_schema(
         .one(conn)
         .await
         .internal()?
-        .map(|row| row.version)
-        .unwrap_or(0);
+        .map_or(0, |row| row.version);
 
     let (next_version, diff) = match &previous {
         Some(previous) => {

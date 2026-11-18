@@ -51,8 +51,8 @@ pub(crate) async fn ids_for_workspace(
 ) -> Result<Vec<Uuid>, DbErr> {
     Entity::find()
         .select_only()
-        .column(crate::models::_entities::entity_entities::Column::Id)
-        .filter(crate::models::_entities::entity_entities::Column::WorkspaceId.eq(workspace_id))
+        .column(Column::Id)
+        .filter(Column::WorkspaceId.eq(workspace_id))
         .into_tuple()
         .all(db)
         .await
@@ -149,7 +149,7 @@ pub(crate) async fn missing_embeddings(
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {

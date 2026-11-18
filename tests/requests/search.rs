@@ -257,7 +257,7 @@ async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fall
     ]);
     guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", "300");
     guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", "50");
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(
             &request,
             &ctx,

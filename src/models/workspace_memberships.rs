@@ -23,7 +23,7 @@ impl Model {
     /// # Errors
     /// Rejects unauthorized actors and propagates lookup failures.
     pub async fn list_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         workspace_id: Uuid,
     ) -> Result<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>, YorishiroError> {
@@ -66,7 +66,7 @@ impl Model {
     /// # Errors
     /// Rejects unauthorized actors or users outside the tenant and propagates persistence errors.
     pub async fn grant_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         workspace_id: Uuid,
         user_id: Uuid,
@@ -93,7 +93,7 @@ impl Model {
     /// # Errors
     /// Rejects unauthorized actors and propagates persistence errors.
     pub async fn revoke_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         workspace_id: Uuid,
         user_id: Uuid,

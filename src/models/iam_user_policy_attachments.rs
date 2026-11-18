@@ -52,7 +52,7 @@ impl Model {
     }
 
     pub(crate) async fn add_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         user_id: Uuid,
         policy_id: Uuid,
@@ -157,10 +157,7 @@ impl Model {
         .insert(txn)
         .await
         .map_err(|error| {
-            if matches!(
-                error.sql_err(),
-                Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-            ) {
+            if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
                 YorishiroError::Conflict {
                     message: "policy is already attached to this user".into(),
                 }

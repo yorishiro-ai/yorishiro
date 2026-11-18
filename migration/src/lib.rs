@@ -1,5 +1,3 @@
-#![allow(elided_lifetimes_in_paths)]
-#![allow(clippy::wildcard_imports)]
 pub use sea_orm_migration::prelude::*;
 mod helpers;
 mod m20261020_000000_tenancy;
@@ -28,7 +26,7 @@ impl MigratorTrait for Migrator {
 
     async fn up<'c, C>(db: C, steps: Option<u32>) -> Result<(), DbErr>
     where
-        C: sea_orm_migration::IntoSchemaManagerConnection<'c>,
+        C: IntoSchemaManagerConnection<'c>,
     {
         use sea_orm_migration::sea_orm::{
             SqliteTransactionMode, TransactionOptions, TransactionTrait,
@@ -42,7 +40,7 @@ impl MigratorTrait for Migrator {
                 ..Default::default()
             })
             .await?;
-        if txn.get_database_backend() == sea_orm_migration::sea_orm::DbBackend::Postgres {
+        if txn.get_database_backend() == sea_orm::DbBackend::Postgres {
             txn.execute_unprepared(
                 "SELECT pg_advisory_xact_lock(hashtextextended('yorishiro:boot-migrations', 0))",
             )

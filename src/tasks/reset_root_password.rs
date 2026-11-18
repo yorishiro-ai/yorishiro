@@ -25,11 +25,11 @@ impl Task for ResetRootPassword {
         }
         let user_id = vars
             .cli_arg("user_id")?
-            .parse::<uuid::Uuid>()
+            .parse::<Uuid>()
             .map_err(|_| Error::string("user_id must be a UUID"))?;
         let confirmation = vars
             .cli_arg("confirmed_user_id")?
-            .parse::<uuid::Uuid>()
+            .parse::<Uuid>()
             .map_err(|_| Error::string("confirmed_user_id must be a UUID"))?;
         if user_id != confirmation {
             return Err(Error::string("confirmed_user_id must match user_id"));

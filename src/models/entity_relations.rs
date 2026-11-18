@@ -54,7 +54,7 @@ impl TryFrom<Model> for RelationRecord {
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -407,16 +407,13 @@ async fn neighbor_rows(
     let branch = |pivot, neighbor, direction: &str| {
         let mut select = Query::select();
         select
-            .expr_as(Expr::col((relation::Entity, pivot)), "pivot_id")
-            .expr_as(
-                Expr::col((relation::Entity, relation::Column::Id)),
-                "relation_id",
-            )
-            .column((relation::Entity, relation::Column::RelationType))
+            .expr_as(Expr::col((Entity, pivot)), "pivot_id")
+            .expr_as(Expr::col((Entity, relation::Column::Id)), "relation_id")
+            .column((Entity, relation::Column::RelationType))
             .expr_as(Expr::val(direction), "direction")
-            .column((relation::Entity, relation::Column::Properties))
+            .column((Entity, relation::Column::Properties))
             .expr_as(
-                Expr::col((relation::Entity, relation::Column::CreatedAt)),
+                Expr::col((Entity, relation::Column::CreatedAt)),
                 "relation_created_at",
             );
         for (column, alias) in [
@@ -434,19 +431,19 @@ async fn neighbor_rows(
             select.expr_as(Expr::col((entity::Entity, column)), alias);
         }
         select
-            .from(relation::Entity)
+            .from(Entity)
             .join(
                 JoinType::InnerJoin,
                 entity::Entity,
                 Expr::col((entity::Entity, entity::Column::Id))
-                    .equals((relation::Entity, neighbor))
+                    .equals((Entity, neighbor))
                     .and(
                         Expr::col((entity::Entity, entity::Column::WorkspaceId))
-                            .equals((relation::Entity, relation::Column::WorkspaceId)),
+                            .equals((Entity, relation::Column::WorkspaceId)),
                     ),
             )
             .and_where(
-                Expr::col((relation::Entity, relation::Column::WorkspaceId)).eq(if sqlite {
+                Expr::col((Entity, relation::Column::WorkspaceId)).eq(if sqlite {
                     sea_orm::Value::from(workspace_id.as_bytes().to_vec())
                 } else {
                     workspace_id.into()
@@ -454,15 +451,13 @@ async fn neighbor_rows(
             );
         if sqlite {
             select.and_where(
-                Expr::col((relation::Entity, pivot))
-                    .is_in(pivot_ids.iter().map(|id| id.as_bytes().to_vec())),
+                Expr::col((Entity, pivot)).is_in(pivot_ids.iter().map(|id| id.as_bytes().to_vec())),
             );
         } else {
-            select.and_where(Expr::col((relation::Entity, pivot)).equals(Alias::new("pivot")));
+            select.and_where(Expr::col((Entity, pivot)).equals(Alias::new("pivot")));
         }
         select.and_where(
-            Expr::col((relation::Entity, relation::Column::Status))
-                .eq(RelationStatus::Active.as_db_str()),
+            Expr::col((Entity, relation::Column::Status)).eq(RelationStatus::Active.as_db_str()),
         );
         select
     };

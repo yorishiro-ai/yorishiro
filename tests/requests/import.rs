@@ -9,7 +9,7 @@ use super::fixtures::{self, TenantArgs, TestTenant};
 #[test]
 fn concurrent_import_workers_keep_each_apps_database() {
     let run = || {
-        super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             let setup = TestTenant::create(
                 &request,
                 &ctx,
@@ -80,7 +80,7 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
         )
         .await
         .unwrap();
-        let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+        let txn = TransactionTrait::begin(&ctx.db).await.unwrap();
         let other_workspace = yorishiro::models::tenancy::create_workspace(
             &txn,
             tenant_id,
@@ -142,7 +142,7 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
 /// rather than just checking the import didn't error.
 #[tokio::test]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant { api_key: key, .. } = TestTenant::create(
             &request,
             &ctx,

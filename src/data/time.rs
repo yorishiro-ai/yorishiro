@@ -26,7 +26,7 @@ pub(crate) fn sqlite_timestamp<T: chrono::TimeZone>(instant: DateTime<T>, timezo
     instant
         .with_timezone(&timezone)
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
-        .to_string()
+        .clone()
 }
 
 /// Parses a configured IANA timezone name.

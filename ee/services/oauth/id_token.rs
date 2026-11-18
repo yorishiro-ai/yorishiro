@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 /// The claims this integration needs; unknown fields from the provider are ignored.
 #[derive(Deserialize)]
-pub struct IdTokenClaims {
+pub(super) struct IdTokenClaims {
     pub sub: String,
     pub nonce: Option<String>,
     pub email: Option<String>,
@@ -20,7 +20,7 @@ pub struct IdTokenClaims {
 
 /// Verifies an ID token's signature against the provider's JWKS and validates its standard claims (`iss` must equal `issuer_url`, `aud` must contain `client_id`, `exp` must be in the future).
 /// Every failure mode maps to `YorishiroError::Unauthenticated`, deliberately: distinguishing them would let an attacker fingerprint which check failed.
-pub fn verify(
+pub(super) fn verify(
     id_token: &str,
     jwks: &JwkSet,
     issuer_url: &str,

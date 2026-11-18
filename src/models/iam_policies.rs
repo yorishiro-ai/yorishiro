@@ -171,7 +171,7 @@ impl Model {
     }
 
     pub(crate) async fn create_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         name: String,
         document: serde_json::Value,
@@ -293,10 +293,7 @@ impl Model {
         .insert(txn)
         .await
         .map_err(|error| {
-            if matches!(
-                error.sql_err(),
-                Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-            ) {
+            if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
                 YorishiroError::Conflict {
                     message: "an IAM policy with this name already exists".into(),
                 }
@@ -342,10 +339,7 @@ impl Model {
             .exec(txn)
             .await
             .map_err(|error| {
-                if matches!(
-                    error.sql_err(),
-                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-                ) {
+                if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
                     YorishiroError::Conflict {
                         message: "an IAM policy with this name already exists".into(),
                     }

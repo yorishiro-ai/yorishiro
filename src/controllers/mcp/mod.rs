@@ -197,8 +197,7 @@ pub fn compose_tool_routers(
         for name in router.map.keys() {
             assert!(
                 names.insert(name.to_string()),
-                "duplicate MCP tool name: {}",
-                name
+                "duplicate MCP tool name: {name}"
             );
         }
         composed += router;

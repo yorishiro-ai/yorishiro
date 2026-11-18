@@ -1,10 +1,28 @@
+# Lint levels are in Cargo.toml's [workspace.lints]; this file holds their settings and the project's banned APIs.
+# `cargo build`, `cargo clippy` and rust-analyzer read both, and CI turns every warning into an error.
+
+# Nothing is released yet, so clippy may suggest changes to public signatures.
+avoid-breaking-exported-api = false
+
 # Thresholds for clippy::cognitive_complexity and clippy::too_many_lines.
-# Both lints are warn-only in CI (see .github/workflows/ci.yml's "Clippy complexity report"
-# step): the existing codebase has ~101 functions over these thresholds, so enforcing them
-# with -D warnings would break every open PR. New/changed code is expected to stay under
-# these; shrink the existing count over time rather than suppressing the warning.
+# Both are report-only: CI runs them with --force-warn in its own step, because ~100 existing functions exceed them.
+# New and changed code is expected to stay under them.
 cognitive-complexity-threshold = 7
 too-many-lines-threshold = 50
 
-# Public fallibility and panic documentation is enforced by the Makefile so command-line
-# Clippy, CI, and rust-analyzer inspect the same API surface.
+# Debug-only helpers never ship; assertions live in tests/.
+allow-dbg-in-tests = true
+
+disallowed-macros = [
+    { path = "std::debug_assert", reason = "use assert!, or a test under tests/" },
+    { path = "std::debug_assert_eq", reason = "use assert_eq!, or a test under tests/" },
+    { path = "std::debug_assert_ne", reason = "use assert_ne!, or a test under tests/" },
+]
+
+# Application code reads the environment in one place, src/data/env.rs, or through Loco's `get_env` in config/*.yaml.
+disallowed-methods = [
+    { path = "std::env::var", reason = "read environment keys in src/data/env.rs, or set them in config/*.yaml" },
+    { path = "std::env::var_os", reason = "read environment keys in src/data/env.rs, or set them in config/*.yaml" },
+    { path = "std::env::vars", reason = "read environment keys in src/data/env.rs, or set them in config/*.yaml" },
+    { path = "std::env::vars_os", reason = "read environment keys in src/data/env.rs, or set them in config/*.yaml" },
+]

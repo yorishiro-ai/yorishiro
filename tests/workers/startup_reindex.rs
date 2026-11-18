@@ -380,7 +380,7 @@ async fn parallel_sqlite_boots_keep_their_database_parents_alive() {
     }
 
     let boots = (0..8).map(|_| async {
-        crate::requests::boot_request::<App, _, _>(|_request, ctx| async move {
+        boot_request::<App, _, _>(|_request, ctx| async move {
             ctx.db.ping().await.expect("ping sqlite test database");
         })
         .await;

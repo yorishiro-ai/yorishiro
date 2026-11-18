@@ -152,8 +152,7 @@ impl InferenceClient {
         let content = body
             .choices
             .first()
-            .map(|c| c.message.content.as_str())
-            .unwrap_or("{}");
+            .map_or("{}", |c| c.message.content.as_str());
 
         let parsed: Value = serde_json::from_str(content).unwrap_or(Value::Null);
         let Some(object) = parsed.as_object() else {

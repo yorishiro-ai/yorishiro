@@ -261,12 +261,12 @@ async fn detach_group_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::GroupRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<GroupRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
 async fn list_iam_groups(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
-) -> Result<Json<Vec<crate::dtos::iam::GroupRecord>>, ApiError> {
+) -> Result<Json<Vec<GroupRecord>>, ApiError> {
     let rows = crate::models::iam_groups::Model::list_as(
         &ctx.db,
         &actor,
@@ -276,12 +276,12 @@ async fn list_iam_groups(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::PolicyRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<PolicyRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
 async fn list_iam_policies(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
-) -> Result<Json<Vec<crate::dtos::iam::PolicyRecord>>, ApiError> {
+) -> Result<Json<Vec<PolicyRecord>>, ApiError> {
     let rows = crate::models::iam_policies::Model::list_as(
         &ctx.db,
         &actor,
@@ -342,12 +342,12 @@ async fn list_iam_group_policies(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups/{group_id}", params(("group_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::dtos::iam::GroupRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups/{group_id}", params(("group_id" = uuid::Uuid, Path)), responses((status = 200, body = GroupRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
 async fn get_iam_group(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-) -> Result<Json<crate::dtos::iam::GroupRecord>, ApiError> {
+) -> Result<Json<GroupRecord>, ApiError> {
     Ok(Json(
         crate::models::iam_groups::Model::get_as(&ctx.db, &actor, id)
             .await?
@@ -355,12 +355,12 @@ async fn get_iam_group(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies/{policy_id}", params(("policy_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::dtos::iam::PolicyRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies/{policy_id}", params(("policy_id" = uuid::Uuid, Path)), responses((status = 200, body = PolicyRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
 async fn get_iam_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-) -> Result<Json<crate::dtos::iam::PolicyRecord>, ApiError> {
+) -> Result<Json<PolicyRecord>, ApiError> {
     Ok(Json(
         crate::models::iam_policies::Model::get_as(&ctx.db, &actor, id)
             .await?

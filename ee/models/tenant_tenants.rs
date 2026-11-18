@@ -57,7 +57,7 @@ pub(crate) async fn overview_as(
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<crate::edition::ee::dtos::dashboard::TenantOverview, YorishiroError> {
     use crate::edition::ee::dtos::dashboard::TenantOverview;
-    use crate::edition::ee::models::{tenant_billing, tenant_tenants};
+    use crate::edition::ee::models::tenant_billing;
     use crate::models::tenant_memberships;
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
     let evaluation = crate::models::access::IamEvaluation::load(
@@ -76,7 +76,7 @@ pub(crate) async fn overview_as(
         .await?;
     let tenant = crate::models::tenant_tenants::Model::find_by_id(&txn, tenant_id).await?;
     let billing = tenant_billing::get_billing(&txn, tenant_id).await?;
-    let usage = tenant_tenants::compute_tenant_usage(&txn, tenant_id).await?;
+    let usage = compute_tenant_usage(&txn, tenant_id).await?;
     let active_plan = match crate::edition::ee::data::plan::PlanPolicy::current(ctx)? {
         crate::edition::ee::data::plan::PlanPolicy::Disabled => None,
         crate::edition::ee::data::plan::PlanPolicy::Enabled => {

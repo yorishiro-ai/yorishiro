@@ -134,10 +134,7 @@ async fn latest_source_by_name<C: ConnectionTrait>(
         .filter(SchemaColumn::TenantId.eq(tenant_id))
         .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
         .filter(SchemaColumn::Name.eq(source_schema_name))
-        .filter(
-            SchemaColumn::Status
-                .eq(crate::models::schema_schemas::SchemaStatus::Active.as_db_str()),
-        )
+        .filter(SchemaColumn::Status.eq(schema_schemas::SchemaStatus::Active.as_db_str()))
         .order_by_desc(SchemaColumn::Version)
         .one(conn)
         .await
@@ -193,7 +190,7 @@ async fn current_source<C: ConnectionTrait>(
     let source = source_by_id(conn, tenant_id, source_workspace_id, source_schema_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("source schema was not found"))?;
-    if source.status != crate::models::schema_schemas::SchemaStatus::Active.as_db_str() {
+    if source.status != schema_schemas::SchemaStatus::Active.as_db_str() {
         return Err(YorishiroError::ValidationFailed {
             message: "source_schema_id must name the active source schema".into(),
             details: vec![],
@@ -242,8 +239,7 @@ async fn next_version<C: ConnectionTrait>(
         .one(conn)
         .await
         .internal()?
-        .map(|row| row.version)
-        .unwrap_or(0);
+        .map_or(0, |row| row.version);
     Ok(max + 1)
 }
 
@@ -422,10 +418,7 @@ pub async fn create<C: ConnectionTrait>(
         ..Default::default()
     };
     let row = row.insert(conn).await.map_err(|err| {
-        if matches!(
-            err.sql_err(),
-            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-        ) {
+        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
             YorishiroError::Conflict {
                 message: "this workspace already has a fork for that source schema".into(),
             }

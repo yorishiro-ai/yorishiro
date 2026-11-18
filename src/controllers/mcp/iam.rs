@@ -31,11 +31,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(rows) => ok_json(
-                rows.into_iter()
-                    .map(crate::dtos::iam::GroupRecord::from)
-                    .collect::<Vec<_>>(),
-            ),
+            Ok(rows) => ok_json(rows.into_iter().map(GroupRecord::from).collect::<Vec<_>>()),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
@@ -63,11 +59,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(rows) => ok_json(
-                rows.into_iter()
-                    .map(crate::dtos::iam::PolicyRecord::from)
-                    .collect::<Vec<_>>(),
-            ),
+            Ok(rows) => ok_json(rows.into_iter().map(PolicyRecord::from).collect::<Vec<_>>()),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
@@ -194,7 +186,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(row) => ok_json(crate::dtos::iam::GroupRecord::from(row)),
+            Ok(row) => ok_json(GroupRecord::from(row)),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
@@ -222,7 +214,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(row) => ok_json(crate::dtos::iam::PolicyRecord::from(row)),
+            Ok(row) => ok_json(PolicyRecord::from(row)),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }

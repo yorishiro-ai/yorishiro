@@ -328,7 +328,7 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
         }
         // Inference is CPU-bound and blocks for tens to hundreds of ms, so it's offloaded to the blocking pool to avoid stalling tokio worker threads.
         // Timeout includes admission; a started inference retains its permit until completion.
-        let texts: Vec<String> = texts.iter().map(|text| text.to_string()).collect();
+        let texts: Vec<String> = texts.iter().map(ToString::to_string).collect();
         let inner = Arc::clone(&self.inner);
         let inference = Arc::clone(&self.inference);
         let task = async move {

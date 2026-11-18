@@ -248,7 +248,7 @@ pub mod edition {
         }
         pub(super) fn register_tasks(_tasks: &mut Tasks) {}
 
-        #[allow(clippy::unused_async)]
+        #[expect(clippy::unused_async, reason = "Loco declares this hook async")]
         pub(super) async fn seed(_ctx: &AppContext) -> Result<()> {
             Ok(())
         }

@@ -131,7 +131,6 @@ pub(crate) struct EmbeddingKeyConfig {
 ///
 /// # Errors
 /// Returns an error when credentials, dimensions, or persistence are invalid.
-#[allow(clippy::too_many_arguments)]
 pub async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -155,7 +154,10 @@ pub async fn set(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the table columns written in one statement"
+)]
 async fn set_with_instructions(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

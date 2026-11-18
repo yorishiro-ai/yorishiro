@@ -190,9 +190,7 @@ pub fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        let links = std::fs::metadata(&database)
-            .map(|metadata| metadata.nlink())
-            .unwrap_or(1);
+        let links = std::fs::metadata(&database).map_or(1, |metadata| metadata.nlink());
         if links > 1 {
             return Err(format!(
                 "SQLite scheduler ownership does not support hard-linked database files: {} has {links} links",

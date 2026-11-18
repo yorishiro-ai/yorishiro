@@ -14,7 +14,7 @@ const WEBHOOK_SECRET: &str = "whsec_test";
 
 /// The shipped Loco config interpolates these variables before booting each test app.
 /// `#[serial(process_environment)]` on every test in this suite makes that safe.
-async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
+async fn with_stripe_env<T>(fut: impl Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&[
         "YORISHIRO_STRIPE_WEBHOOK_SECRET",
         "YORISHIRO_STRIPE_PRICE_PRO",

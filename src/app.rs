@@ -285,7 +285,7 @@ pub(crate) fn after_routes(
     };
     Ok(router.layer(axum::middleware::from_fn_with_state(
         ctx.clone(),
-        crate::controllers::middleware::maintenance::maintenance_guard,
+        controllers::middleware::maintenance::maintenance_guard,
     )))
 }
 
@@ -310,7 +310,7 @@ pub(crate) fn middlewares(
     stack.retain(|middleware| middleware.name() != "cors");
     stack.replace(
         "logger",
-        Box::new(crate::controllers::middleware::access_log::Middleware::new(
+        Box::new(controllers::middleware::access_log::Middleware::new(
             &logger_config,
             &ctx.environment,
         )),

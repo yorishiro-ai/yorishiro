@@ -170,10 +170,10 @@ async fn token_rotation_does_not_duplicate_fts_rows_on_sqlite() {
         // Exercise a non-data update independently of the model's data-update operation.
         entity_entities::Entity::update_many()
             .col_expr(
-                yorishiro::models::_entities::entity_entities::Column::UpdatedBy,
+                Column::UpdatedBy,
                 sea_orm::sea_query::Expr::value(Option::<uuid::Uuid>::None),
             )
-            .filter(yorishiro::models::_entities::entity_entities::Column::Id.eq(created.id))
+            .filter(Column::Id.eq(created.id))
             .exec(&db)
             .await
             .expect("update a column other than data");

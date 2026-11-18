@@ -120,7 +120,7 @@ pub(crate) async fn keyword_provider(
 
     let inputs = Arc::new(Mutex::new(Vec::new()));
     let captured = inputs.clone();
-    let server = HttpStub::start(axum::Router::new().route(
+    let server = HttpStub::start(Router::new().route(
         "/embeddings",
         axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
             let captured = captured.clone();
@@ -162,7 +162,7 @@ pub(crate) async fn keyword_provider(
 pub(crate) async fn unavailable_provider() -> (Arc<dyn EmbeddingProvider>, HttpStub) {
     use yorishiro::services::embedding::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
-    let server = HttpStub::start(axum::Router::new().route(
+    let server = HttpStub::start(Router::new().route(
         "/embeddings",
         axum::routing::post(|| async {
             (

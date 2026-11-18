@@ -14,12 +14,12 @@ use crate::models::tenancy;
 use crate::models::workspace_workspaces;
 use crate::models::workspace_workspaces::WorkspaceRecord;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_list", "workspace_get"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_list", "workspace_get"]))), tag = "community"))]
 pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
-    let records = crate::models::workspace_workspaces::list_for_actor(&ctx.db, &actor)
+    let records = workspace_workspaces::list_for_actor(&ctx.db, &actor)
         .await?
         .into_iter()
         .map(|record| WorkspaceRecord {
@@ -30,7 +30,7 @@ pub(crate) async fn list_workspaces(
     Ok(Json(records))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = crate::dtos::workspaces::CreateWorkspaceRequest, responses((status = 201, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_create"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = CreateWorkspaceRequest, responses((status = 201, body = WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_create"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -50,7 +50,7 @@ async fn create_workspace(
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::dtos::workspaces::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -64,7 +64,7 @@ async fn get_workspace(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::workspaces::UpdateWorkspaceRequest, responses((status = 200, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::workspaces::UpdateWorkspaceRequest, responses((status = 200, body = WorkspaceRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
 async fn update_workspace(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,

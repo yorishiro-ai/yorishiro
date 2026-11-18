@@ -28,7 +28,7 @@ use crate::requests::close_app_pools_sqlite;
 async fn with_sqlite_queue<F, Fut>(test: F)
 where
     F: FnOnce(AppContext, sea_orm::sqlx::SqlitePool, Uuid) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
     let dir = tempfile::tempdir().expect("tempdir");
     let queue_path = dir.path().join("queue.sqlite3");
@@ -194,7 +194,7 @@ async fn accepted_enqueue_with_failed_provider_id_record_keeps_the_outbox_row() 
             "the dispatch cooldown temporarily hides the accepted job"
         );
         let mut outbox = outbox.into_active_model();
-        outbox.last_attempt_at = sea_orm::ActiveValue::Set(Some(
+        outbox.last_attempt_at = Set(Some(
             Utc.timestamp_opt(1_000, 0).unwrap().fixed_offset(),
         ));
         outbox.update(&ctx.db).await.expect("age attempt timestamp");
@@ -373,7 +373,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
     let (arrived, mut arrivals) = tokio::sync::mpsc::unbounded_channel();
     let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
         "/embeddings",
-        axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+        post(move |axum::Json(body): axum::Json<serde_json::Value>| {
             let arrived = arrived.clone();
             async move {
                 arrived
@@ -415,7 +415,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
                 tenant.workspace_id,
                 text,
                 60,
-                chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+                Utc::now().fixed_offset() + chrono::Duration::minutes(1),
             )
             .await
             .unwrap();

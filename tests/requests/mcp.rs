@@ -73,7 +73,7 @@ async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
         let overview = tool_result_json(&overview);
         let rest = request
             .get("/api/tenant/overview")
-            .add_header("Authorization", format!("Bearer {}", tenant_admin_key))
+            .add_header("Authorization", format!("Bearer {tenant_admin_key}"))
             .await;
         rest.assert_status_ok();
         assert_eq!(overview, rest.json::<Value>());
@@ -114,7 +114,7 @@ async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
         let source = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"template_id":"task-management"})).await;
         source.assert_status(StatusCode::CREATED);
         let source: Value = source.json();
-        let target = request.post("/api/workspaces").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).json(&json!({"name":"fork target"})).await;
+        let target = request.post("/api/workspaces").add_header("Authorization", format!("Bearer {tenant_admin_key}")).json(&json!({"name":"fork target"})).await;
         target.assert_status(StatusCode::CREATED);
         let target: Value = target.json();
         let workspace_id = target["id"].as_str().unwrap().parse().unwrap();
@@ -812,7 +812,7 @@ async fn tenant_metadata_tools_match_rest_and_keep_updates_atomic() {
         let record = tool_result_json(&updated);
         assert_eq!(record["name"], "managed tenant");
         assert_eq!(record["max_workspaces"], 0);
-        let rest = request.get("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).await;
+        let rest = request.get("/api/tenants/current").add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
         rest.assert_status_ok();
         assert_eq!(record, rest.json::<Value>());
         let blocked = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call", json!({"name":"create_workspace","arguments":{"name":"blocked"}})).await;
@@ -823,7 +823,7 @@ async fn tenant_metadata_tools_match_rest_and_keep_updates_atomic() {
         }
         let detail = mcp_call(&request, &session, &tenant_admin_key, 5, "tools/call", json!({"name":"get_tenant","arguments":{}})).await;
         assert_eq!(tool_result_json(&detail), record);
-        let cleared = request.put("/api/tenants/current").add_header("Authorization", format!("Bearer {}", tenant_admin_key)).json(&json!({"replace_max_workspaces":true,"max_workspaces":null})).await;
+        let cleared = request.put("/api/tenants/current").add_header("Authorization", format!("Bearer {tenant_admin_key}")).json(&json!({"replace_max_workspaces":true,"max_workspaces":null})).await;
         cleared.assert_status_ok();
         assert!(cleared.json::<Value>()["max_workspaces"].is_null());
         let user = yorishiro::models::user_users::create_user(&ctx.db, &super::fixtures::unique_email("tenant-viewer"), "test-password", None).await.unwrap();
@@ -976,7 +976,7 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
         let id = created["id"].as_str().unwrap();
         let updated = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"update_template_library_item","arguments":{"id":id,"description":"updated through MCP"}})).await;
-        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant_admin_key)).await;
+        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
         rest.assert_status_ok();
         assert_eq!(tool_result_json(&updated), rest.json::<Value>());
         let fork = mcp_call(&request, &session, &tenant_admin_key, 4, "tools/call",
@@ -990,9 +990,9 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
         let deleted = mcp_call(&request, &session, &tenant_admin_key, 6, "tools/call",
             json!({"name":"delete_template_library_item","arguments":{"id":id}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
-        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {}",tenant_admin_key)).await;
+        let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
         rest.assert_status(StatusCode::NOT_FOUND);
-        let rest = request.get(&format!("/api/template-library/{}",fork["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {}",tenant_admin_key)).await;
+        let rest = request.get(&format!("/api/template-library/{}",fork["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
         rest.assert_status_ok();
     }).await;
 }
@@ -1203,7 +1203,7 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
         let sibling = request
             .post("/api/workspaces")
             .add_header("Authorization", format!("Bearer {administrator_key}"))
-            .json(&json!({"name":format!("private-{}", uuid::Uuid::new_v4())}))
+            .json(&json!({"name":format!("private-{}", Uuid::new_v4())}))
             .await;
         assert_eq!(sibling.status_code(), StatusCode::CREATED);
         let sibling_id = sibling.json::<Value>()["id"].as_str().unwrap().to_owned();
@@ -1728,7 +1728,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 #[tokio::test]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
     use sea_orm::EntityTrait;
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
             tenant_id,
             workspace_id,
@@ -2016,7 +2016,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
 
 #[tokio::test]
 async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
             tenant_id,
             workspace_id,
@@ -2408,8 +2408,8 @@ async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_admin_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let user_name = format!("mcp-member-{}", uuid::Uuid::new_v4());
-        let auth = format!("Bearer {}", tenant_admin_key);
+        let user_name = format!("mcp-member-{}", Uuid::new_v4());
+        let auth = format!("Bearer {tenant_admin_key}");
         let created = request
             .post("/api/members/users")
             .add_header("Authorization", &auth)
@@ -2495,7 +2495,7 @@ async fn mcp_tenant_users_cannot_join_another_tenant() {
             return;
         }
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let user_name = format!("stay-home-{}", uuid::Uuid::new_v4());
+        let user_name = format!("stay-home-{}", Uuid::new_v4());
         let tenant_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let auth = format!("Bearer {tenant_key}");

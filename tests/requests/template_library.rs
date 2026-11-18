@@ -6,7 +6,7 @@ use yorishiro::models::api_keys::ApiKeyScope;
 use super::fixtures::{self, TenantArgs, TestTenant, issue_api_key};
 
 fn note_definition() -> serde_json::Value {
-    crate::requests::fixtures::note_schema("library-note", false)
+    fixtures::note_schema("library-note", false)
 }
 
 #[tokio::test]
@@ -17,7 +17,7 @@ async fn template_update_rejects_a_revoked_previously_authenticated_actor() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let created = request.post("/api/template-library")
-            .add_header("Authorization", format!("Bearer {}", tenant_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":format!("fenced-{}",uuid::Uuid::new_v4()),"definition":note_definition()})).await;
         created.assert_status(StatusCode::CREATED);
         let id = created.json::<serde_json::Value>()["id"].as_str().unwrap().parse().unwrap();
@@ -51,7 +51,7 @@ async fn member_role_cannot_manage_the_template_library() {
         yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id)
             .await
             .expect("add member");
-        super::fixtures::grant_workspace(
+        fixtures::grant_workspace(
             &ctx,
             tenant.workspace_id,
             member.id,

@@ -46,32 +46,30 @@ impl InferFillArgs {
 pub async fn open_workspace_scope(
     ctx: &AppContext,
     workspace_id: Uuid,
-) -> loco_rs::Result<sea_orm::DatabaseTransaction> {
+) -> Result<sea_orm::DatabaseTransaction> {
     // `ctx.db` is the identity connection, which reads the workspace row without a tenant scope.
     let workspace =
         crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
             .one(&ctx.db)
             .await
             .internal()?
-            .ok_or_else(|| {
-                loco_rs::Error::Message(format!("workspace {workspace_id} not found"))
-            })?;
+            .ok_or_else(|| Error::Message(format!("workspace {workspace_id} not found")))?;
     db::begin_workspace(ctx, workspace.tenant_id, workspace_id)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))
+        .map_err(|error| Error::Message(error.to_string()))
 }
 
 async fn open_workspace_write_scope(
     ctx: &AppContext,
     workspace_id: Uuid,
-) -> loco_rs::Result<sea_orm::DatabaseTransaction> {
+) -> Result<sea_orm::DatabaseTransaction> {
     let tenant_id =
         crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
             .await
             .internal()?;
     db::begin_workspace_write(ctx, tenant_id, workspace_id)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))
+        .map_err(|error| Error::Message(error.to_string()))
 }
 
 /// Shared implementation of the infer-fill worker's perform body.
@@ -80,16 +78,14 @@ async fn perform_infer_fill(
     args: &InferFillArgs,
     job_id: Uuid,
     attempt: i32,
-) -> loco_rs::Result<(i64, i64)> {
+) -> Result<(i64, i64)> {
     check_actor(ctx, args)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(|error| Error::Message(error.to_string()))?;
     let config = workspace_llm_keys::get(&ctx.db, args.workspace_id)
         .await
         .internal()?
-        .ok_or_else(|| {
-            loco_rs::Error::Message("workspace has no LLM credentials configured".into())
-        })?;
+        .ok_or_else(|| Error::Message("workspace has no LLM credentials configured".into()))?;
 
     let schema_txn = open_workspace_scope(ctx, args.workspace_id).await?;
 
@@ -98,7 +94,7 @@ async fn perform_infer_fill(
     // remains the admission fence on both PostgreSQL and SQLite.
     db::lock_for_update(&schema_txn, &format!("infer-fill:{}", args.workspace_id))
         .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        .map_err(|e| Error::Message(e.to_string()))?;
 
     let active =
         schema_schemas::get_active_schema(&schema_txn, args.workspace_id, &args.schema_name)
@@ -116,7 +112,7 @@ async fn perform_infer_fill(
     schema_txn.commit().await.internal()?;
 
     let timeouts = crate::data::settings::configured(ctx)
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .map_err(|error| Error::Message(error.to_string()))?
         .http_timeouts;
     let client = InferenceClient::with_timeouts(config, timeouts);
 
@@ -133,7 +129,7 @@ async fn perform_infer_fill(
             .fields
             .keys()
             .filter(|field| row.data.get(field.as_str()).is_none())
-            .map(|field| field.as_str())
+            .map(String::as_str)
             .collect();
 
         if missing.is_empty() {
@@ -143,11 +139,11 @@ async fn perform_infer_fill(
 
         check_actor(ctx, args)
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+            .map_err(|error| Error::Message(error.to_string()))?;
         let answers = client
             .propose_fields(&row.data, &missing)
             .await
-            .map_err(|e| loco_rs::Error::Message(format!("LLM propose_fields failed: {e}")))?;
+            .map_err(|e| Error::Message(format!("LLM propose_fields failed: {e}")))?;
 
         if answers.is_empty() {
             skipped += 1;
@@ -167,7 +163,7 @@ async fn perform_infer_fill(
             crate::models::iam_policy::Action::InferenceCreate,
         )
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(|error| Error::Message(error.to_string()))?;
         schema_schemas::lock_version(&proposal_txn, args.workspace_id, &args.schema_name)
             .await
             .internal()?;
@@ -175,7 +171,7 @@ async fn perform_infer_fill(
             schema_schemas::get_active_schema(&proposal_txn, args.workspace_id, &args.schema_name)
                 .await?;
         if current.id != active.id || current.version != active.version {
-            return Err(loco_rs::Error::Message(
+            return Err(Error::Message(
                 "active schema changed while infer-fill proposals were being generated".into(),
             ));
         }
@@ -192,7 +188,7 @@ async fn perform_infer_fill(
                     .map(|(field, value)| (entity_id, field, value)),
             )
             .await
-            .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+            .map_err(|e| Error::Message(e.to_string()))?;
 
             if written == 0 {
                 skipped += 1;
@@ -220,7 +216,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
         Self { ctx: ctx.clone() }
     }
 
-    async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
+    async fn perform(&self, args: InferFillArgs) -> Result<()> {
         self.perform_job(args).await
     }
 }
@@ -234,16 +230,16 @@ impl InferFillWorker {
         &self,
         args: &InferFillArgs,
         attempt: Option<i32>,
-    ) -> loco_rs::Result<()> {
+    ) -> Result<()> {
         const DIAGNOSTIC: &str = "workspace has a running infer-fill job";
         if args.lifecycle_id.is_none() {
-            return Err(loco_rs::Error::Message(DIAGNOSTIC.into()));
+            return Err(Error::Message(DIAGNOSTIC.into()));
         }
         defer_and_enqueue(&self.ctx, args, attempt, DIAGNOSTIC, false).await?;
         Ok(())
     }
 
-    async fn perform_job(&self, args: InferFillArgs) -> loco_rs::Result<()> {
+    async fn perform_job(&self, args: InferFillArgs) -> Result<()> {
         let mut already_reconciled = false;
         let has_lifecycle = args.lifecycle_id.is_some();
         let admission = if let Some(id) = args.lifecycle_id {
@@ -276,7 +272,7 @@ impl InferFillWorker {
                     .await?;
                     return Ok(());
                 }
-                Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+                Err(error) => return Err(Error::Message(error.to_string())),
             }
         } else {
             crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
@@ -296,7 +292,7 @@ impl InferFillWorker {
             Ok(true)
         } else if has_lifecycle {
             let attempt = attempt.ok_or_else(|| {
-                loco_rs::Error::Message("lifecycle admission is missing its attempt".into())
+                Error::Message("lifecycle admission is missing its attempt".into())
             })?;
             inference_jobs::reconcile_attempt(&self.ctx.db, job_id, attempt).await
         } else {
@@ -307,7 +303,7 @@ impl InferFillWorker {
             Err(error) if inference_jobs::is_workspace_busy(&error) => {
                 return self.defer_for_busy_workspace(&args, attempt).await;
             }
-            Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+            Err(error) => return Err(Error::Message(error.to_string())),
         };
         if !claimed {
             // A duplicate delivery is harmless after the first worker claims the row.
@@ -322,9 +318,7 @@ impl InferFillWorker {
             .map(|job| job.attempt)
             .or(attempt);
         let Some(attempt) = attempt else {
-            return Err(loco_rs::Error::Message(
-                "claimed infer-fill job disappeared".into(),
-            ));
+            return Err(Error::Message("claimed infer-fill job disappeared".into()));
         };
 
         let heartbeat = args.lifecycle_id.map(|id| {
@@ -403,17 +397,17 @@ async fn defer_and_enqueue(
     attempt: Option<i32>,
     error: &str,
     retry_inference_job: bool,
-) -> loco_rs::Result<()> {
+) -> Result<()> {
     let lifecycle_id = args
         .lifecycle_id
-        .ok_or_else(|| loco_rs::Error::Message("infer-fill retry has no lifecycle id".into()))?;
+        .ok_or_else(|| Error::Message("infer-fill retry has no lifecycle id".into()))?;
     let tenant_id =
         crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, args.workspace_id)
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    let txn = crate::db::begin_workspace(ctx, tenant_id, args.workspace_id)
+            .map_err(|error| Error::Message(error.to_string()))?;
+    let txn = db::begin_workspace(ctx, tenant_id, args.workspace_id)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(|error| Error::Message(error.to_string()))?;
     if let Some(attempt) = attempt {
         if retry_inference_job {
             inference_jobs::retry(&txn, args.job_id, error, attempt)
@@ -427,11 +421,11 @@ async fn defer_and_enqueue(
             error,
         )
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(|error| Error::Message(error.to_string()))?;
     } else {
         crate::models::queue_job_lifecycles::Entity::defer(&txn, lifecycle_id, None, error)
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+            .map_err(|error| Error::Message(error.to_string()))?;
     }
     let target = crate::workers::target::WorkerTarget::for_job(
         &ctx.db,
@@ -439,9 +433,9 @@ async fn defer_and_enqueue(
         args.workspace_id,
     )
     .await
-    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    .map_err(|error| Error::Message(error.to_string()))?;
     let mut payload =
-        serde_json::to_value(args).map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        serde_json::to_value(args).map_err(|error| Error::Message(error.to_string()))?;
     if let serde_json::Value::Object(fields) = &mut payload {
         fields.insert(
             "lifecycle_id".into(),
@@ -457,10 +451,10 @@ async fn defer_and_enqueue(
         Some(vec![target.job_tag()]),
     )
     .await
-    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    .map_err(|error| Error::Message(error.to_string()))?;
     txn.commit()
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))
+        .map_err(|error| Error::Message(error.to_string()))
 }
 
 /// Enqueue an infer-fill job for the given workspace and schema name.
@@ -487,7 +481,7 @@ pub async fn enqueue_infer_fill(
         crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
             .await
             .internal()?;
-    let txn = crate::db::begin_workspace_write(ctx, tenant_id, workspace_id)
+    let txn = db::begin_workspace_write(ctx, tenant_id, workspace_id)
         .await
         .internal()?;
     let authorization = crate::ee::models::access::authorize_job_actor(
@@ -547,8 +541,7 @@ async fn check_actor(ctx: &AppContext, args: &InferFillArgs) -> Result<(), crate
     if args.actor.workspace_id != args.workspace_id {
         return Err(crate::YorishiroError::Unauthenticated);
     }
-    let txn =
-        crate::db::begin_workspace_write(ctx, args.actor.tenant_id, args.workspace_id).await?;
+    let txn = db::begin_workspace_write(ctx, args.actor.tenant_id, args.workspace_id).await?;
     let authorization = crate::ee::models::access::authorize_job_actor(
         &txn,
         &ctx.db,

@@ -116,7 +116,7 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
 }
 
 /// Widens `DB_MAX_CONNECTIONS` past `config/test.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
-async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
+async fn with_db_max_connections<T>(value: &str, fut: impl Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);
     guard.set("DB_MAX_CONNECTIONS", value);
     fut.await
@@ -178,7 +178,7 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
 #[tokio::test]
 async fn login_issues_tenant_key_after_credentials_are_verified() {
     use sea_orm::TransactionTrait;
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let args = super::fixtures::TenantArgs::default();
         let email = args.owner_email.clone();
         let password = args.owner_password.clone();
@@ -217,7 +217,7 @@ async fn login_issues_tenant_key_after_credentials_are_verified() {
 
 #[tokio::test]
 async fn login_without_membership_is_rejected() {
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
             &super::fixtures::unique_email("no-membership"),

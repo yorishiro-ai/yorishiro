@@ -430,9 +430,7 @@ impl YorishiroMcpServer {
 
         match record.definition.entity_types.get(&args.entity_type) {
             Some(entity_type_def) => ok_json(
-                crate::models::schema_schemas::metaschema::entity_type_to_json_schema(
-                    entity_type_def,
-                ),
+                schema_schemas::metaschema::entity_type_to_json_schema(entity_type_def),
             ),
             None => Ok(err_to_tool_result(YorishiroError::not_found(format!(
                 "entity_type '{}' not found in schema '{}'",

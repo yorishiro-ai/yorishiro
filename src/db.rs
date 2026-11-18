@@ -316,7 +316,10 @@ pub fn register_sqlite_extensions() {
     // type with opaque internals so we suppress the lint instead of duplicating
     // libsqlite3-sys's bindgen output.
     static REGISTER: std::sync::Once = std::sync::Once::new();
-    #[allow(clippy::missing_transmute_annotations)]
+    #[expect(
+        clippy::missing_transmute_annotations,
+        reason = "SQLite registers the destructor through a C function pointer type"
+    )]
     REGISTER.call_once(|| unsafe {
         // `sqlite3_vec_init` is declared in `sqlite-vec` as a bare C function
         // pointer; `sqlite3_auto_extension` expects a function pointer matching

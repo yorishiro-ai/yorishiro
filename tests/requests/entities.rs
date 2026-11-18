@@ -16,7 +16,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
     let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
     let guard = crate::EnvGuard::capture(&[variable]);
     guard.set(variable, "true");
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::from_value(serde_json::json!({
             "name":"quota-note", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}
@@ -63,7 +63,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
 /// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let definition = serde_json::from_value(serde_json::json!({
