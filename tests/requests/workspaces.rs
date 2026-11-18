@@ -411,7 +411,6 @@ async fn workspaces_endpoints_require_authentication() {
 
 #[tokio::test]
 async fn workspace_grant_management_requires_iam_and_respects_credential_binding() {
-    use sea_orm::TransactionTrait;
     use yorishiro::models::workspace_memberships::WorkspaceRole;
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -592,16 +591,13 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await
             .assert_status(StatusCode::FORBIDDEN);
-        let txn = ctx.db.begin().await.unwrap();
-        yorishiro::models::workspace_memberships::Model::grant(
-            &txn,
+        super::fixtures::grant_workspace(
+            &ctx,
             sibling_id.parse().unwrap(),
             local.id,
             WorkspaceRole::Admin,
         )
-        .await
-        .unwrap();
-        txn.commit().await.unwrap();
+        .await;
         request
             .put(&format!(
                 "/api/workspaces/{sibling_id}/members/{}",

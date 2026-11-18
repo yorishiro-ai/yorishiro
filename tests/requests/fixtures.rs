@@ -15,7 +15,15 @@ pub(crate) async fn grant_workspace(
     user_id: Uuid,
     role: yorishiro::models::workspace_memberships::WorkspaceRole,
 ) {
-    let txn = ctx.db.begin().await.expect("begin workspace grant");
+    // SQLite fails a deferred transaction that upgrades to a write after another connection has written; take the writer slot up front.
+    let txn = ctx
+        .db
+        .begin_with_options(sea_orm::TransactionOptions {
+            sqlite_transaction_mode: Some(sea_orm::SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .expect("begin workspace grant");
     yorishiro::models::workspace_memberships::Model::grant(&txn, workspace_id, user_id, role)
         .await
         .expect("grant explicit workspace access");
