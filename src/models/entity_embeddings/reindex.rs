@@ -210,10 +210,13 @@ pub(crate) async fn reindex_workspace_as(
             reindexed += 1;
         }
         let dimensions = i32::try_from(provider.dimensions()).map_err(|_| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "provider dimensions {} do not fit in an i32 column",
-                provider.dimensions()
-            ))
+            YorishiroError::Internal(
+                format!(
+                    "provider dimensions {} do not fit in an i32 column",
+                    provider.dimensions()
+                )
+                .into(),
+            )
         })?;
         super::stamp::restamp_workspace_embedding(
             &txn,

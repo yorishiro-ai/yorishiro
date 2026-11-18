@@ -379,7 +379,7 @@ impl Model {
         }
 
         let caller_scope = ApiKeyScope::from_db_str(&caller_key.scope)
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown api key scope")))?;
+            .ok_or_else(|| YorishiroError::Internal("unknown api key scope".into()))?;
         let scope = scope.unwrap_or(caller_scope);
         if scope > caller_scope {
             return Err(YorishiroError::ScopeInsufficient {

@@ -262,15 +262,14 @@ impl TryFrom<Model> for SchemaRecord {
             version: row.version,
             definition: serde_json::from_value(row.definition).internal()?,
             status: SchemaStatus::from_db_str(&row.status).ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!("unknown schema status: {}", row.status))
+                YorishiroError::Internal(format!("unknown schema status: {}", row.status).into())
             })?,
             origin_template_id: row.origin_template_id,
             origin_status: SchemaOriginStatus::from_db_str(&row.origin_status).ok_or_else(
                 || {
-                    YorishiroError::Internal(anyhow::anyhow!(
-                        "unknown schema origin status: {}",
-                        row.origin_status
-                    ))
+                    YorishiroError::Internal(
+                        format!("unknown schema origin status: {}", row.origin_status).into(),
+                    )
                 },
             )?,
             origin_snapshot: row

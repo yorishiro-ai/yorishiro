@@ -247,5 +247,5 @@ pub(crate) async fn enqueue_after_write(
     crate::workers::dispatch::dispatch_embedding(ctx, args, Some(txn))
         .await
         .map(|_| ())
-        .map_err(|error| YorishiroError::Internal(anyhow::anyhow!(error.to_string())))
+        .map_err(|error| YorishiroError::Internal((error.to_string()).into()))
 }

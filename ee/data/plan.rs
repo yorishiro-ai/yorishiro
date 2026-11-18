@@ -25,9 +25,7 @@ impl PlanPolicy {
         let setting = ctx
             .shared_store
             .get::<Arc<PlanPolicySetting>>()
-            .ok_or_else(|| {
-                crate::YorishiroError::Internal(anyhow::anyhow!("plan policy missing"))
-            })?;
+            .ok_or_else(|| crate::YorishiroError::Internal("plan policy missing".into()))?;
         let licence = ctx.shared_store.get::<Arc<LicenceState>>();
         Ok(Self::resolve(
             setting.enabled,
@@ -104,7 +102,7 @@ impl Plan {
         match billing {
             None => Ok(Self::Free),
             Some(billing) => Self::from_db_str(billing.plan.as_deref().ok_or_else(|| {
-                crate::YorishiroError::Internal(anyhow::anyhow!("billing plan is missing"))
+                crate::YorishiroError::Internal("billing plan is missing".into())
             })?),
         }
     }
@@ -171,9 +169,9 @@ impl Plan {
             "pro" => Ok(Self::Pro),
             "team" => Ok(Self::Team),
             "enterprise" => Ok(Self::Team),
-            other => Err(crate::YorishiroError::Internal(anyhow::anyhow!(
-                "unknown plan value: {other:?}"
-            ))),
+            other => Err(crate::YorishiroError::Internal(
+                format!("unknown plan value: {other:?}").into(),
+            )),
         }
     }
 }
@@ -208,9 +206,9 @@ pub fn plan_policy_enabled(
         Some(serde_json::Value::String(value)) if value.eq_ignore_ascii_case("true") => Ok(true),
         Some(_) => {
             tracing::error!("invalid YORISHIRO_PLAN_POLICY_ENABLED; specify true or false");
-            Err(crate::YorishiroError::Internal(anyhow::anyhow!(
-                "YORISHIRO_PLAN_POLICY_ENABLED must be true or false"
-            )))
+            Err(crate::YorishiroError::Internal(
+                "YORISHIRO_PLAN_POLICY_ENABLED must be true or false".into(),
+            ))
         }
     }
 }

@@ -51,9 +51,9 @@ pub(crate) fn search_token_limiter(
     ctx.shared_store
         .get::<Arc<crate::controllers::middleware::rate_limit::RateLimiter>>()
         .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "search token RateLimiter missing"
-            )))
+            ApiError(YorishiroError::Internal(
+                "search token RateLimiter missing".into(),
+            ))
         })
 }
 

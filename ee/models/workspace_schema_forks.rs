@@ -289,7 +289,7 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("fork head is missing")))?;
+        .ok_or_else(|| YorishiroError::Internal("fork head is missing".into()))?;
     let source_active = latest_source_by_name(
         conn,
         row.tenant_id,

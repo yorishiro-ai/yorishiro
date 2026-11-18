@@ -145,11 +145,10 @@ impl InferenceClient {
         }
 
         let body = response.bytes().await.map_err(|err| {
-            YorishiroError::Internal(anyhow::anyhow!(redact(&err.to_string(), &self.api_key)))
+            YorishiroError::Internal((redact(&err.to_string(), &self.api_key)).into())
         })?;
-        let body: ChatResponse = serde_json::from_slice(&body).map_err(|_| {
-            YorishiroError::Internal(anyhow::anyhow!("error decoding response body"))
-        })?;
+        let body: ChatResponse = serde_json::from_slice(&body)
+            .map_err(|_| YorishiroError::Internal("error decoding response body".into()))?;
         let content = body
             .choices
             .first()

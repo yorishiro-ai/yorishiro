@@ -37,7 +37,7 @@ async fn signup(
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("tenant cap policy missing")))?
+        .ok_or_else(|| YorishiroError::Internal("tenant cap policy missing".into()))?
         .resolve();
     let (user, tenant_id) = tenancy::signup_account(
         &ctx.db,

@@ -417,7 +417,7 @@ impl Entity {
         let db = app
             .shared_store
             .get::<DbHandle>()
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+            .ok_or_else(|| YorishiroError::Internal("DbHandle missing".into()))?;
         let connection = match auth.workspace_id {
             Some(workspace_id) => {
                 db.tenant
@@ -1131,8 +1131,6 @@ fn validate_key_name(name: &str) -> Result<String, YorishiroError> {
 /// A stored scope this crate does not define is a corrupt row, not a missing scope.
 fn stored_scope(value: &str) -> Result<ApiKeyScope, YorishiroError> {
     ApiKeyScope::from_db_str(value).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "unknown api key scope in database: {value}"
-        ))
+        YorishiroError::Internal(format!("unknown api key scope in database: {value}").into())
     })
 }

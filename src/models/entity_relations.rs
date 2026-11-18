@@ -36,7 +36,7 @@ impl TryFrom<Model> for RelationRecord {
 
     fn try_from(model: Model) -> Result<Self, Self::Error> {
         let status = RelationStatus::from_db_str(&model.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("unknown relation status: {}", model.status))
+            YorishiroError::Internal(format!("unknown relation status: {}", model.status).into())
         })?;
         Ok(Self {
             id: model.id,

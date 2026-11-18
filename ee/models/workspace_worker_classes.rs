@@ -158,9 +158,8 @@ pub(crate) async fn get(
     WorkerClass::from_db_str(&row.worker_class)
         .map(Some)
         .ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown worker class in database: {}",
-                row.worker_class
-            ))
+            YorishiroError::Internal(
+                format!("unknown worker class in database: {}", row.worker_class).into(),
+            )
         })
 }

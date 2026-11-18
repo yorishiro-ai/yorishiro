@@ -85,9 +85,8 @@ impl<'a> IamEvaluation<'a> {
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
         let mut credential = current.clone();
-        credential.scope = ApiKeyScope::from_db_str(&key.scope).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("unknown api key scope in database"))
-        })?;
+        credential.scope = ApiKeyScope::from_db_str(&key.scope)
+            .ok_or_else(|| YorishiroError::Internal("unknown api key scope in database".into()))?;
         require_scope(&credential, required)?;
         if assumption && key.role_id.is_some() {
             return Err(YorishiroError::ScopeInsufficient {
@@ -253,9 +252,8 @@ pub async fn identity(
         .await
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
-    let stored_scope = ApiKeyScope::from_db_str(&key.scope).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!("unknown api key scope in database"))
-    })?;
+    let stored_scope = ApiKeyScope::from_db_str(&key.scope)
+        .ok_or_else(|| YorishiroError::Internal("unknown api key scope in database".into()))?;
     let tenant_root = match current.user_id {
         Some(user_id) => {
             crate::models::iam_tenant_roots::Model::contains(conn, current.tenant_id, user_id)

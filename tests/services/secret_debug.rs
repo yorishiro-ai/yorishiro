@@ -106,7 +106,7 @@ fn tracing_and_error_debug_paths_redact_generated_models() {
         .with_writer(SharedWriter(output.clone()))
         .finish();
 
-    let error = YorishiroError::Internal(anyhow::anyhow!("provider context: {:?}", llm_model()));
+    let error = YorishiroError::Internal(format!("provider context: {:?}", llm_model()).into());
     let error_output = format!("{error:?} {error}");
     assert_safe(&error_output, LLM_SECRET);
 

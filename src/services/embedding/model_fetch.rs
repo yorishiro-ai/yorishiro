@@ -129,7 +129,7 @@ pub(crate) fn configured_client(
 pub(super) async fn ensure_model_files(
     def: &LocalModelDef,
     timeouts: &crate::data::settings::HttpTimeouts,
-) -> anyhow::Result<(PathBuf, PathBuf)> {
+) -> crate::error::BoxResult<(PathBuf, PathBuf)> {
     let dir = cache_dir(def);
 
     let client = configured_client(timeouts)?;
@@ -143,7 +143,7 @@ async fn ensure_file(
     def: &LocalModelDef,
     artifact: &Artifact,
     client: &reqwest::Client,
-) -> anyhow::Result<PathBuf> {
+) -> crate::error::BoxResult<PathBuf> {
     let url = format!(
         "https://huggingface.co/{}/resolve/{}/{}",
         def.id, def.revision, artifact.remote_path
@@ -159,7 +159,7 @@ pub async fn ensure_file_with_client(
     url: &str,
     artifact: &Artifact,
     client: &reqwest::Client,
-) -> anyhow::Result<PathBuf> {
+) -> crate::error::BoxResult<PathBuf> {
     let destination = dir.join(artifact.local_name);
     if destination.exists() {
         // The size is checked, and deliberately not the digest. Do not "fix" this into a re-verification: the reasons it is not one are the whole point.
@@ -183,21 +183,23 @@ pub async fn ensure_file_with_client(
                     "cached {} is the wrong size; removing it and fetching again",
                     artifact.description
                 );
-                std::fs::remove_file(&destination).map_err(|err| {
-                    anyhow::anyhow!(
+                std::fs::remove_file(&destination).map_err(|err| -> crate::error::BoxError {
+                    format!(
                         "failed to remove the corrupt cached file {}: {err}",
                         destination.display()
                     )
+                    .into()
                 })?;
             }
             Err(err) => {
-                anyhow::bail!("failed to read {}: {err}", destination.display());
+                return Err(format!("failed to read {}: {err}", destination.display()).into());
             }
         }
     }
 
-    std::fs::create_dir_all(dir)
-        .map_err(|err| anyhow::anyhow!("failed to create {}: {err}", dir.display()))?;
+    std::fs::create_dir_all(dir).map_err(|err| -> crate::error::BoxError {
+        crate::error::BoxError::from(format!("failed to create {}: {err}", dir.display()))
+    })?;
 
     let mebibytes = artifact.size / (1024 * 1024);
     tracing::info!(
@@ -220,9 +222,9 @@ pub async fn ensure_file_with_client(
     }
     result?;
 
-    std::fs::rename(&temp, &destination).map_err(|err| {
+    std::fs::rename(&temp, &destination).map_err(|err| -> crate::error::BoxError {
         let _ = std::fs::remove_file(&temp);
-        anyhow::anyhow!("failed to move {} into place: {err}", destination.display())
+        format!("failed to move {} into place: {err}", destination.display()).into()
     })?;
 
     tracing::info!(destination = %destination.display(), "fetched the {}", artifact.description);
@@ -284,61 +286,71 @@ async fn download_verified(
     temp: &Path,
     artifact: &Artifact,
     client: &reqwest::Client,
-) -> anyhow::Result<()> {
+) -> crate::error::BoxResult<()> {
     use tokio::io::AsyncWriteExt as _;
 
-    let mut response = client.get(url).send().await.map_err(|err| {
-        let kind = if err.is_timeout() {
-            "request timed out"
-        } else {
-            "request failed"
-        };
-        anyhow::anyhow!("failed to fetch {url}: {kind}: {err}")
-    })?;
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| -> crate::error::BoxError {
+            let kind = if err.is_timeout() {
+                "request timed out"
+            } else {
+                "request failed"
+            };
+            format!("failed to fetch {url}: {kind}: {err}").into()
+        })?;
     if !response.status().is_success() {
         // Do not read or include an error body. It can contain upstream credentials or request data.
-        anyhow::bail!("failed to fetch {url}: HTTP {}", response.status());
+        return Err(format!("failed to fetch {url}: HTTP {}", response.status()).into());
     }
 
-    let mut file = tokio::fs::File::create(temp)
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to create {}: {err}", temp.display()))?;
+    let mut file =
+        tokio::fs::File::create(temp)
+            .await
+            .map_err(|err| -> crate::error::BoxError {
+                crate::error::BoxError::from(format!("failed to create {}: {err}", temp.display()))
+            })?;
 
     // Streamed chunk by chunk rather than collected with `bytes()`: buffering hundreds of megabytes in memory only to write it straight back out costs the whole model's size in resident memory for no benefit.
     let mut hasher = Sha256::new();
     let mut written: u64 = 0;
-    while let Some(chunk) = response.chunk().await.map_err(|err| {
-        let kind = if err.is_timeout() {
-            "request timed out"
-        } else {
-            "response stream failed"
-        };
-        anyhow::anyhow!("failed while downloading {url}: {kind}: {err}")
-    })? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| -> crate::error::BoxError {
+            let kind = if err.is_timeout() {
+                "request timed out"
+            } else {
+                "response stream failed"
+            };
+            format!("failed while downloading {url}: {kind}: {err}").into()
+        })?
+    {
         hasher.update(&chunk);
         written += chunk.len() as u64;
-        file.write_all(&chunk)
-            .await
-            .map_err(|err| anyhow::anyhow!("failed writing {}: {err}", temp.display()))?;
+        file.write_all(&chunk).await.map_err(|err| {
+            crate::error::BoxError::from(format!("failed writing {}: {err}", temp.display()))
+        })?;
     }
-    file.flush()
-        .await
-        .map_err(|err| anyhow::anyhow!("failed writing {}: {err}", temp.display()))?;
+    file.flush().await.map_err(|err| {
+        crate::error::BoxError::from(format!("failed writing {}: {err}", temp.display()))
+    })?;
 
     // Length first: it rejects the common truncated-download case without hashing the whole file, and its message says something more useful than a digest mismatch would.
     if written != artifact.size {
-        anyhow::bail!(
+        return Err(format!(
             "{url} downloaded {written} bytes, expected {}: the download did not complete",
             artifact.size
-        );
+        )
+        .into());
     }
 
     let digest = crate::data::encoding::hex(hasher.finalize());
     if digest != artifact.sha256 {
-        anyhow::bail!(
-            "{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",
-            artifact.sha256
-        );
+        return Err(format!("{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",
+            artifact.sha256).into());
     }
 
     Ok(())

@@ -57,7 +57,7 @@ impl ImportWorker {
     async fn import(&self, args: &ImportArgs) -> Result<(), YorishiroError> {
         let id = args
             .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("import lifecycle missing")))?;
+            .ok_or_else(|| YorishiroError::Internal("import lifecycle missing".into()))?;
         // Hold control-plane permission stable until the workspace write commits.
         let authorization = crate::db::begin_authorization(&self.ctx.db)
             .await

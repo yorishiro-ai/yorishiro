@@ -477,9 +477,8 @@ pub fn postgres_rrf_query(
             .replace('_', "\\_")
     );
     // Script properties cover extended Latin without treating Greek/Cyrillic as Latin.
-    let latin = tokenizers::utils::SysRegex::new(r"(?:\p{Latin}\p{M}*)+").map_err(|error| {
-        YorishiroError::Internal(anyhow::anyhow!("Latin term pattern: {error}"))
-    })?;
+    let latin = tokenizers::utils::SysRegex::new(r"(?:\p{Latin}\p{M}*)+")
+        .map_err(|error| YorishiroError::Internal(format!("Latin term pattern: {error}").into()))?;
     let latin_terms: Vec<_> = latin
         .find_iter(text)
         .map(|(start, end)| &text[start..end])

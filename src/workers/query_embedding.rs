@@ -105,9 +105,7 @@ async fn embed(
     let concurrency = ctx
         .shared_store
         .get::<std::sync::Arc<tokio::sync::Semaphore>>()
-        .ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("embedding concurrency missing"))
-        })?;
+        .ok_or_else(|| YorishiroError::Internal("embedding concurrency missing".into()))?;
     let _permit = concurrency
         .acquire_owned()
         .await
@@ -145,7 +143,7 @@ pub async fn embed_query(
     let settings = ctx
         .shared_store
         .get::<Settings>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?
+        .ok_or_else(|| YorishiroError::Internal("application settings missing".into()))?
         .query_embedding;
     let scope = Scope {
         ctx,

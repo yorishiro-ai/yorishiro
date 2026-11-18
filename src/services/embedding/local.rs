@@ -68,7 +68,7 @@ struct Inner {
 }
 
 fn internal(message: impl std::fmt::Display) -> YorishiroError {
-    YorishiroError::Internal(anyhow::anyhow!("{message}"))
+    YorishiroError::Internal(format!("{message}").into())
 }
 
 impl LocalEmbeddingProvider {

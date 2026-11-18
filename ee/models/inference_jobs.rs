@@ -92,10 +92,7 @@ impl TryFrom<Model> for InferenceJobRecord {
 
     fn try_from(row: Model) -> Result<Self, Self::Error> {
         let status = InferenceJobStatus::from_db_str(&row.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown inference job status: {}",
-                row.status
-            ))
+            YorishiroError::Internal(format!("unknown inference job status: {}", row.status).into())
         })?;
         Ok(Self {
             id: row.id,

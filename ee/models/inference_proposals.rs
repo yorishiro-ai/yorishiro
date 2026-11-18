@@ -113,7 +113,7 @@ impl TryFrom<Model> for ProposalRecord {
             status: row
                 .status
                 .parse()
-                .map_err(|message: String| YorishiroError::Internal(anyhow::anyhow!(message)))?,
+                .map_err(|message: String| YorishiroError::Internal((message).into()))?,
         })
     }
 }

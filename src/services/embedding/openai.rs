@@ -154,14 +154,14 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
                     retry_after: after,
                 });
             }
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "embedding provider returned HTTP {status}"
-            )));
+            return Err(YorishiroError::Internal(
+                format!("embedding provider returned HTTP {status}").into(),
+            ));
         }
 
         // Keep body consumption after status handling so provider error responses remain unread.
         let body = response.bytes().await.map_err(|err| {
-            YorishiroError::Internal(anyhow::anyhow!(redact(&err.to_string(), &self.api_key)))
+            YorishiroError::Internal((redact(&err.to_string(), &self.api_key)).into())
         })?;
         let mut parsed: EmbeddingsResponse = serde_json::from_slice(&body).internal()?;
 
@@ -172,28 +172,34 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
             .enumerate()
             .any(|(index, datum)| datum.index != index)
         {
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "embedding provider returned invalid vector indices"
-            )));
+            return Err(YorishiroError::Internal(
+                "embedding provider returned invalid vector indices".into(),
+            ));
         }
 
         let vectors: Vec<Vec<f32>> = parsed.data.into_iter().map(|d| d.embedding).collect();
 
         if vectors.len() != texts.len() {
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "embedding provider returned {} vectors for {} inputs",
-                vectors.len(),
-                texts.len()
-            )));
+            return Err(YorishiroError::Internal(
+                format!(
+                    "embedding provider returned {} vectors for {} inputs",
+                    vectors.len(),
+                    texts.len()
+                )
+                .into(),
+            ));
         }
 
         for vector in &vectors {
             if vector.len() != self.dimensions {
-                return Err(YorishiroError::Internal(anyhow::anyhow!(
-                    "embedding provider returned a vector of length {} but expected {}",
-                    vector.len(),
-                    self.dimensions
-                )));
+                return Err(YorishiroError::Internal(
+                    format!(
+                        "embedding provider returned a vector of length {} but expected {}",
+                        vector.len(),
+                        self.dimensions
+                    )
+                    .into(),
+                ));
             }
         }
 

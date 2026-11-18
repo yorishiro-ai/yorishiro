@@ -326,9 +326,10 @@ async fn benchmark_phase(
             .map(SearchRow::into_hit)
             .collect();
         if hits.is_empty() {
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
+            return Err(YorishiroError::Internal(
                 "benchmark query returned no entities for a workspace with a sample embedding"
-            )));
+                    .into(),
+            ));
         }
         latencies.push(start.elapsed().as_secs_f64() * 1000.0);
     }

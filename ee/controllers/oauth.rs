@@ -116,11 +116,7 @@ async fn callback(
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
-        .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "tenant cap policy missing"
-            )))
-        })?
+        .ok_or_else(|| ApiError(YorishiroError::Internal("tenant cap policy missing".into())))?
         .resolve();
 
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;

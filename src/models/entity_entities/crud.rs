@@ -1,7 +1,7 @@
+use sea_orm::ConnectionTrait;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
-use sea_orm::{ConnectionTrait, DatabaseBackend};
 use uuid::Uuid;
 
 use super::validation::{resolve_entity_type, validate_data};

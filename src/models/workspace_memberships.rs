@@ -49,7 +49,7 @@ impl Model {
             .into_iter()
             .map(|record| {
                 let role = WorkspaceRole::from_db_str(&record.role).ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!("unknown workspace membership role"))
+                    YorishiroError::Internal("unknown workspace membership role".into())
                 })?;
                 Ok(crate::dtos::workspaces::WorkspaceMemberRecord {
                     user_id: record.user_id,
@@ -207,7 +207,7 @@ impl Model {
         membership
             .map(|membership| {
                 WorkspaceRole::from_db_str(&membership.role).ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!("unknown workspace membership role"))
+                    YorishiroError::Internal("unknown workspace membership role".into())
                 })
             })
             .transpose()

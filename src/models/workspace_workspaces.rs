@@ -518,10 +518,7 @@ impl TryFrom<Model> for WorkspaceRecord {
 
     fn try_from(model: Model) -> Result<Self, Self::Error> {
         let status = WorkspaceStatus::from_db_str(&model.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown workspace status: {}",
-                model.status
-            ))
+            YorishiroError::Internal(format!("unknown workspace status: {}", model.status).into())
         })?;
         Ok(Self {
             id: model.id,

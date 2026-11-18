@@ -45,9 +45,7 @@ impl OAuthConfig {
             .map(serde_json::from_value)
             .transpose()
             .map_err(|_| {
-                YorishiroError::Internal(anyhow::anyhow!(
-                    "invalid initializers.oauth configuration"
-                ))
+                YorishiroError::Internal("invalid initializers.oauth configuration".into())
             })?
             .unwrap_or_default();
         let Some(issuer_url) = settings.issuer_url.filter(|value| !value.is_empty()) else {
@@ -89,9 +87,10 @@ impl OAuthConfig {
 pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, YorishiroError> {
     match raw.filter(|s| !s.is_empty()) {
         Some(value) => Ok(value.to_string()),
-        None => Err(YorishiroError::Internal(anyhow::anyhow!(
-            "{key} must be set to a non-empty value when YORISHIRO_OAUTH_ISSUER_URL is"
-        ))),
+        None => Err(YorishiroError::Internal(
+            format!("{key} must be set to a non-empty value when YORISHIRO_OAUTH_ISSUER_URL is")
+                .into(),
+        )),
     }
 }
 

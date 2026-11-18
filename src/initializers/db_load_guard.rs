@@ -173,9 +173,7 @@ async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
     }
 
     let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "db_load_guard: DbHandle not found in shared_store"
-        ))
+        YorishiroError::Internal("db_load_guard: DbHandle not found in shared_store".into())
     })?;
     let active = db::active_connections(&handle.identity).await?;
     Ok(active)

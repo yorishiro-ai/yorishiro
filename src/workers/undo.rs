@@ -53,7 +53,7 @@ impl UndoWorker {
     async fn restore(&self, args: &UndoArgs) -> Result<(), YorishiroError> {
         let id = args
             .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("undo lifecycle missing")))?;
+            .ok_or_else(|| YorishiroError::Internal("undo lifecycle missing".into()))?;
         // Hold control-plane permission stable until snapshot restoration commits.
         let authorization = crate::db::begin_authorization(&self.ctx.db)
             .await

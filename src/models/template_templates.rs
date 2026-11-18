@@ -69,10 +69,9 @@ impl TryFrom<Model> for TemplateRecord {
 
     fn try_from(model: Model) -> Result<Self, Self::Error> {
         let visibility = TemplateVisibility::from_db_str(&model.visibility).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template visibility: {}",
-                model.visibility
-            ))
+            YorishiroError::Internal(
+                format!("unknown template visibility: {}", model.visibility).into(),
+            )
         })?;
         Ok(Self {
             id: model.id,

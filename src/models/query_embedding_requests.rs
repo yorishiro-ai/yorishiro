@@ -247,10 +247,7 @@ impl Entity {
 
 fn outcome(row: Model) -> Result<QueryOutcome, YorishiroError> {
     let status = QueryEmbeddingStatus::from_db_str(&row.status).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "unknown query embedding status {:?}",
-            row.status
-        ))
+        YorishiroError::Internal(format!("unknown query embedding status {:?}", row.status).into())
     })?;
     match status {
         QueryEmbeddingStatus::Succeeded => {
@@ -262,9 +259,7 @@ fn outcome(row: Model) -> Result<QueryOutcome, YorishiroError> {
                         .is_some_and(|width| usize::try_from(width) == Ok(vector.len()))
                 })
                 .ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!(
-                        "the stored query embedding is malformed"
-                    ))
+                    YorishiroError::Internal("the stored query embedding is malformed".into())
                 })?;
             Ok(QueryOutcome::Ready {
                 vector,

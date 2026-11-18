@@ -70,10 +70,13 @@ impl Task for ResyncEmbeddings {
             candidates.len(),
         );
         if failed > 0 {
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "{failed} of {} entities could not be queued",
-                candidates.len()
-            ))
+            return Err(YorishiroError::Internal(
+                format!(
+                    "{failed} of {} entities could not be queued",
+                    candidates.len()
+                )
+                .into(),
+            )
             .into());
         }
         Ok(())

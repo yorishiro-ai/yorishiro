@@ -169,5 +169,5 @@ pub(crate) async fn enqueue(
         authorization.commit().await.internal()?;
     }
     id.parse()
-        .map_err(|error| crate::YorishiroError::Internal(anyhow::Error::new(error)))
+        .map_err(|error| crate::YorishiroError::Internal(Box::new(error)))
 }

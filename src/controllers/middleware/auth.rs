@@ -115,7 +115,7 @@ impl Authenticator for DefaultAuthenticator {
             let db = app
                 .shared_store
                 .get::<DbHandle>()
-                .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+                .ok_or_else(|| YorishiroError::Internal("DbHandle missing".into()))?;
             Entity::authenticate(&db, presented_key, requested).await
         }
     }
@@ -147,7 +147,7 @@ impl<'a> RequestAuth<'a> {
             .app
             .shared_store
             .get::<Arc<dyn Authenticator>>()
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("Authenticator missing")))?;
+            .ok_or_else(|| YorishiroError::Internal("Authenticator missing".into()))?;
         let ctx = authenticator.authenticate(self.app, key, headers).await?;
         for (_, value) in headers.iter().filter(|(name, _)| name == "x-tenant-id") {
             let tenant_id =

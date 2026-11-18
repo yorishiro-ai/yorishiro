@@ -118,10 +118,13 @@ async fn sync_embedding(
 
     if chain.workspace_model.is_none() && written {
         let dimensions = i32::try_from(provider.dimensions()).map_err(|_| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "provider dimensions {} do not fit in an i32 column",
-                provider.dimensions()
-            ))
+            YorishiroError::Internal(
+                format!(
+                    "provider dimensions {} do not fit in an i32 column",
+                    provider.dimensions()
+                )
+                .into(),
+            )
         })?;
         super::stamp::stamp_workspace_embedding(
             conn,

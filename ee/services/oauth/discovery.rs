@@ -52,10 +52,13 @@ fn require_https_or_loopback(url: &str) -> Result<(), YorishiroError> {
     if is_https_or_loopback(&parsed) {
         return Ok(());
     }
-    Err(YorishiroError::Internal(anyhow::anyhow!(
-        "refusing a plaintext request to '{url}': OIDC endpoints must use https:// (loopback \
+    Err(YorishiroError::Internal(
+        format!(
+            "refusing a plaintext request to '{url}': OIDC endpoints must use https:// (loopback \
          hosts are exempt for local development)"
-    )))
+        )
+        .into(),
+    ))
 }
 
 /// The subset of an OIDC discovery document (`{issuer}/.well-known/openid-configuration`) this crate reads.
@@ -171,11 +174,14 @@ async fn response_body<T: serde::de::DeserializeOwned>(
     secret: Option<&str>,
 ) -> Result<T, YorishiroError> {
     if !response.status().is_success() {
-        return Err(YorishiroError::Internal(anyhow::anyhow!(
-            "request to '{}' failed with status {}",
-            request_url,
-            response.status()
-        )));
+        return Err(YorishiroError::Internal(
+            format!(
+                "request to '{}' failed with status {}",
+                request_url,
+                response.status()
+            )
+            .into(),
+        ));
     }
     response
         .json::<T>()
@@ -191,7 +197,7 @@ fn request_error(error: reqwest::Error, secret: Option<&str>) -> YorishiroError 
     if !message.contains(secret) {
         return internal_reqwest(error);
     }
-    YorishiroError::Internal(anyhow::anyhow!(message.replace(secret, "[redacted]")))
+    YorishiroError::Internal((message.replace(secret, "[redacted]")).into())
 }
 
 fn internal_reqwest(error: reqwest::Error) -> YorishiroError {

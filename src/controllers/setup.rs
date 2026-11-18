@@ -23,7 +23,7 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     ctx.shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
         .map(|cap| cap.resolve())
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("tenant cap policy missing")))
+        .ok_or_else(|| YorishiroError::Internal("tenant cap policy missing".into()))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = crate::dtos::setup::SetupStatusResponse)), security(()), tag = "community"))]

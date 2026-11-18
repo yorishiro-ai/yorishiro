@@ -44,9 +44,9 @@ pub struct LicenceClaims {
 /// Returns an error if the operation cannot be completed.
 pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, YorishiroError> {
     let key = DecodingKey::from_rsa_pem(public_key_pem).map_err(|err| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "licence public key is not a usable RSA PEM: {err}"
-        ))
+        YorishiroError::Internal(
+            format!("licence public key is not a usable RSA PEM: {err}").into(),
+        )
     })?;
 
     // RS256 only.

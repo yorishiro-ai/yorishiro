@@ -284,9 +284,7 @@ pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::Yori
     db.query_one_raw(db.get_database_backend().build(&query))
         .await
         .internal()?
-        .ok_or_else(|| {
-            crate::YorishiroError::Internal(anyhow::anyhow!("activity count returned no row"))
-        })?
+        .ok_or_else(|| crate::YorishiroError::Internal("activity count returned no row".into()))?
         .try_get_by_index(0)
         .internal()
 }
@@ -450,7 +448,7 @@ pub async fn begin_workspace(
     let handle = ctx
         .shared_store
         .get::<DbHandle>()
-        .ok_or_else(|| crate::YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+        .ok_or_else(|| crate::YorishiroError::Internal("DbHandle missing".into()))?;
     handle
         .tenant
         .begin_for_workspace(tenant_id, workspace_id)
@@ -729,17 +727,17 @@ pub(crate) async fn reindex_workspace_with_actor(
         None
     } else {
         let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-            crate::YorishiroError::Internal(anyhow::anyhow!(
-                "reindex requires the tenant pool, which this deployment did not build"
-            ))
+            crate::YorishiroError::Internal(
+                "reindex requires the tenant pool, which this deployment did not build".into(),
+            )
         })?;
         Some(
             acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
                 .await
                 .map_err(|err| {
-                    crate::YorishiroError::Internal(anyhow::anyhow!(
-                        "failed to acquire workspace lock: {err}"
-                    ))
+                    crate::YorishiroError::Internal(
+                        format!("failed to acquire workspace lock: {err}").into(),
+                    )
                 })?,
         )
     };

@@ -97,10 +97,13 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
     };
 
     let mode = MaintenanceMode::from_db_str(&row.mode).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "system_maintenance.mode holds '{}', which is not a maintenance mode",
-            row.mode
-        ))
+        YorishiroError::Internal(
+            format!(
+                "system_maintenance.mode holds '{}', which is not a maintenance mode",
+                row.mode
+            )
+            .into(),
+        )
     })?;
 
     Ok(MaintenanceState {
