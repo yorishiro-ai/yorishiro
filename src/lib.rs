@@ -2,10 +2,7 @@ pub mod app;
 pub mod controllers;
 pub mod data;
 pub mod db;
-pub mod db_enum;
 pub mod dtos;
-
-// `time` owns the cross-cutting timezone policy used by application, DB, and queue boundaries.
 
 #[cfg(feature = "enterprise")]
 #[path = "../ee/mod.rs"]
@@ -262,8 +259,6 @@ pub mod initializers;
 pub mod models;
 pub mod services;
 pub mod tasks;
-/// Shared application time policy, configured IANA zone, and wall-clock helpers.
-pub mod time;
 pub mod workers;
 
 pub use edition::App;

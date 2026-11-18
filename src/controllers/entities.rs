@@ -230,16 +230,16 @@ pub fn migration_routes() -> Routes {
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_create_entity),
-        super::route_inventory::path_doc(__path_get_entity),
-        super::route_inventory::path_doc(__path_update_entity),
-        super::route_inventory::path_doc(__path_delete_entity),
-        super::route_inventory::path_doc(__path_list_entities),
-        super::route_inventory::path_doc(__path_undo_migration_job),
-        super::route_inventory::path_doc(__path_migration_job_status),
-        super::route_inventory::path_doc(__path_reindex_workspace),
-        super::route_inventory::path_doc(__path_fill_defaults),
+        super::openapi::route_inventory::path_doc(__path_create_entity),
+        super::openapi::route_inventory::path_doc(__path_get_entity),
+        super::openapi::route_inventory::path_doc(__path_update_entity),
+        super::openapi::route_inventory::path_doc(__path_delete_entity),
+        super::openapi::route_inventory::path_doc(__path_list_entities),
+        super::openapi::route_inventory::path_doc(__path_undo_migration_job),
+        super::openapi::route_inventory::path_doc(__path_migration_job_status),
+        super::openapi::route_inventory::path_doc(__path_reindex_workspace),
+        super::openapi::route_inventory::path_doc(__path_fill_defaults),
     ]
 }

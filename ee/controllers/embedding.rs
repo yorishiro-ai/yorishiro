@@ -69,10 +69,10 @@ pub fn routes() -> Routes {
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_set_embedding_key),
-        crate::controllers::route_inventory::path_doc(__path_get_embedding_key),
-        crate::controllers::route_inventory::path_doc(__path_delete_embedding_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_set_embedding_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_get_embedding_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_delete_embedding_key),
     ]
 }

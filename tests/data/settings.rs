@@ -59,7 +59,7 @@ fn timezone_defaults_to_utc_and_accepts_strict_iana_names() {
     let mut invalid = settings();
     invalid["timezone"] = "Not/A_Zone".into();
     let invalid: Settings = serde_json::from_value(invalid).unwrap();
-    assert!(yorishiro::time::parse_timezone(&invalid.timezone).is_err());
+    assert!(yorishiro::data::time::parse_timezone(&invalid.timezone).is_err());
 }
 
 #[test]

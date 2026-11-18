@@ -28,7 +28,7 @@ async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
 fn sign(secret: &str, timestamp: i64, payload: &[u8]) -> String {
     let mut signed_payload = format!("{timestamp}.").into_bytes();
     signed_payload.extend_from_slice(payload);
-    yorishiro::edition::ee::controllers::hmac_sign::sign(secret.as_bytes(), &signed_payload)
+    yorishiro::edition::ee::data::hmac_sign::sign(secret.as_bytes(), &signed_payload)
 }
 
 fn subscription_updated_body(event_id: &str, created: i64, customer_id: &str) -> Vec<u8> {

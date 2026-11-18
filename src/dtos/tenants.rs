@@ -26,7 +26,7 @@ pub(crate) struct TenantRecord {
     pub(crate) id: Uuid,
     pub(crate) name: String,
     pub(crate) max_workspaces: Option<i32>,
-    pub(crate) created_at: chrono::DateTime<crate::time::Timezone>,
+    pub(crate) created_at: chrono::DateTime<crate::data::time::Timezone>,
 }
 
 impl TenantRecord {
@@ -38,7 +38,7 @@ impl TenantRecord {
             id: tenant.id,
             name: tenant.name,
             max_workspaces: tenant.max_workspaces,
-            created_at: crate::time::render(ctx, tenant.created_at),
+            created_at: crate::data::time::render(ctx, tenant.created_at),
         }
     }
 }

@@ -15,8 +15,8 @@ use sea_orm::{ConnectionTrait, QueryFilter, QuerySelect, QueryTrait};
 
 pub use crate::models::_entities::query_embedding_requests::{ActiveModel, Column, Entity, Model};
 
-use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
+use crate::models::db_enum::db_enum;
 
 db_enum! {
     /// Where a query embedding request stands.
@@ -78,7 +78,9 @@ impl Entity {
             workspace_id: Set(workspace_id),
             query_text: Set(query_text.to_owned()),
             status: Set(QueryEmbeddingStatus::Pending.as_db_str().to_owned()),
-            expires_at: Set(crate::time::database_instant(crate::time::now() + ttl)),
+            expires_at: Set(crate::data::time::database_instant(
+                crate::data::time::now() + ttl,
+            )),
             deadline_at: Set(deadline_at),
             ..Default::default()
         }
@@ -99,8 +101,8 @@ impl Entity {
         Entity::find_by_id(id)
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.eq(QueryEmbeddingStatus::Pending.as_db_str()))
-            .filter(Column::ExpiresAt.gt(crate::time::now()))
-            .filter(Column::DeadlineAt.gt(crate::time::now()))
+            .filter(Column::ExpiresAt.gt(crate::data::time::now()))
+            .filter(Column::DeadlineAt.gt(crate::data::time::now()))
             .one(db)
             .await
     }
@@ -130,7 +132,7 @@ impl Entity {
             .filter(
                 workspace_workspaces::Column::TenantId.in_subquery(active_tenants.into_query()),
             );
-        let now = crate::time::now();
+        let now = crate::data::time::now();
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -161,7 +163,7 @@ impl Entity {
         id: Uuid,
         error: &str,
     ) -> Result<bool, DbErr> {
-        let now = crate::time::now();
+        let now = crate::data::time::now();
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -193,7 +195,7 @@ impl Entity {
                 Column::Status,
                 Expr::value(QueryEmbeddingStatus::Expired.as_db_str()),
             )
-            .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+            .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
             .filter(Column::Id.eq(id))
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.eq(QueryEmbeddingStatus::Pending.as_db_str()))
@@ -238,7 +240,7 @@ impl Entity {
     /// Returns an error if the delete fails.
     pub async fn purge_expired(db: &impl ConnectionTrait) -> Result<u64, DbErr> {
         let result = Entity::delete_many()
-            .filter(Column::ExpiresAt.lt(crate::time::now()))
+            .filter(Column::ExpiresAt.lt(crate::data::time::now()))
             .exec(db)
             .await?;
         Ok(result.rows_affected)

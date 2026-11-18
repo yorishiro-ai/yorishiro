@@ -127,15 +127,15 @@ async fn set_visibility(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_list_marketplace),
-        crate::controllers::route_inventory::path_doc(__path_list_versions),
-        crate::controllers::route_inventory::path_doc(__path_publish_version),
-        crate::controllers::route_inventory::path_doc(__path_list_reviews),
-        crate::controllers::route_inventory::path_doc(__path_submit_review),
-        crate::controllers::route_inventory::path_doc(__path_fork_template),
-        crate::controllers::route_inventory::path_doc(__path_set_visibility),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list_marketplace),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list_versions),
+        crate::controllers::openapi::route_inventory::path_doc(__path_publish_version),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list_reviews),
+        crate::controllers::openapi::route_inventory::path_doc(__path_submit_review),
+        crate::controllers::openapi::route_inventory::path_doc(__path_fork_template),
+        crate::controllers::openapi::route_inventory::path_doc(__path_set_visibility),
     ]
 }
 

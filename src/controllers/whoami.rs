@@ -22,8 +22,8 @@ async fn whoami(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
-    vec![super::route_inventory::path_doc(__path_whoami)]
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
+    vec![super::openapi::route_inventory::path_doc(__path_whoami)]
 }
 
 pub(crate) fn routes() -> Routes {

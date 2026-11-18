@@ -26,10 +26,10 @@ pub(crate) async fn import_jsonl(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_import_jsonl),
-        super::route_inventory::path_doc(__path_import_job_status),
+        super::openapi::route_inventory::path_doc(__path_import_jsonl),
+        super::openapi::route_inventory::path_doc(__path_import_job_status),
     ]
 }
 

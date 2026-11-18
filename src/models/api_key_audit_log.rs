@@ -9,9 +9,9 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
 use uuid::Uuid;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::api_key_audit_log::{ActiveModel, Entity, Model};
+use crate::models::db_enum::db_enum;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {

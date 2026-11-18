@@ -82,10 +82,10 @@ pub fn routes() -> Routes {
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_list_columns),
-        crate::controllers::route_inventory::path_doc(__path_set_columns),
-        crate::controllers::route_inventory::path_doc(__path_reset_columns),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list_columns),
+        crate::controllers::openapi::route_inventory::path_doc(__path_set_columns),
+        crate::controllers::openapi::route_inventory::path_doc(__path_reset_columns),
     ]
 }

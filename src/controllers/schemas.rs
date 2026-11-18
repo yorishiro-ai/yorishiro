@@ -211,22 +211,22 @@ pub(crate) fn template_routes() -> Routes {
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_list_schemas),
-        super::route_inventory::path_doc(__path_create_schema),
-        super::route_inventory::path_doc(__path_archive_schema),
-        super::route_inventory::path_doc(__path_delete_schema),
-        super::route_inventory::path_doc(__path_get_active_schema),
-        super::route_inventory::path_doc(__path_get_schema_by_id),
-        super::route_inventory::path_doc(__path_get_entity_type_json_schema),
+        super::openapi::route_inventory::path_doc(__path_list_schemas),
+        super::openapi::route_inventory::path_doc(__path_create_schema),
+        super::openapi::route_inventory::path_doc(__path_archive_schema),
+        super::openapi::route_inventory::path_doc(__path_delete_schema),
+        super::openapi::route_inventory::path_doc(__path_get_active_schema),
+        super::openapi::route_inventory::path_doc(__path_get_schema_by_id),
+        super::openapi::route_inventory::path_doc(__path_get_entity_type_json_schema),
     ]
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn template_openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn template_openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_list_templates),
-        super::route_inventory::path_doc(__path_get_template),
+        super::openapi::route_inventory::path_doc(__path_list_templates),
+        super::openapi::route_inventory::path_doc(__path_get_template),
     ]
 }

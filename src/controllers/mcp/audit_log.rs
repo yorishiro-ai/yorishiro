@@ -68,7 +68,7 @@ impl YorishiroMcpServer {
         match crate::models::api_key_audit_log::list_for_workspace(&txn, workspace_id, page).await {
             Ok(records) => ok_json(crate::controllers::audit_log::render_records(
                 records,
-                crate::time::configured(self.app_context()),
+                crate::data::time::configured(self.app_context()),
             )),
             Err(error) => Ok(err_to_tool_result(error)),
         }

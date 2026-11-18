@@ -1,5 +1,5 @@
 use axum::http::Method;
-use yorishiro::controllers::route_inventory::{RouteInventory, operation_id};
+use yorishiro::controllers::openapi::route_inventory::{RouteInventory, operation_id};
 
 #[test]
 fn operation_ids_are_stable_and_path_safe() {

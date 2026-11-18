@@ -84,10 +84,12 @@ pub async fn set(
     }
 
     if let Some(tz) = timezone {
-        crate::time::parse_timezone(tz.trim()).map_err(|_| YorishiroError::ValidationFailed {
-            message: format!("timezone {tz:?} is not a recognized IANA time zone"),
-            details: vec![],
-            hint: "Use an IANA time zone name recognized by the application.".into(),
+        crate::data::time::parse_timezone(tz.trim()).map_err(|_| {
+            YorishiroError::ValidationFailed {
+                message: format!("timezone {tz:?} is not a recognized IANA time zone"),
+                details: vec![],
+                hint: "Use an IANA time zone name recognized by the application.".into(),
+            }
         })?;
     }
 
@@ -107,7 +109,7 @@ pub async fn set(
     }
 
     // The first run is one interval from now, and each tick schedules the next one interval after itself.
-    let expected: chrono::DateTime<chrono::FixedOffset> = crate::time::now()
+    let expected: chrono::DateTime<chrono::FixedOffset> = crate::data::time::now()
         .checked_add_signed(every)
         .ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("interval {interval:?} is too long"),
@@ -121,7 +123,7 @@ pub async fn set(
         interval: ActiveValue::Set(interval.to_string()),
         timezone: ActiveValue::Set(timezone.map(|s| s.trim().to_string())),
         scheduled_for: ActiveValue::Set(Some(expected)),
-        updated_at: ActiveValue::Set(crate::time::now().into()),
+        updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

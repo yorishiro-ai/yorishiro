@@ -53,14 +53,16 @@ pub(crate) fn render_records(
                 .parse()
                 .expect("audit action matches the DB constraint"),
             detail: record.detail,
-            created_at: crate::time::in_timezone(record.created_at, timezone).to_rfc3339(),
+            created_at: crate::data::time::in_timezone(record.created_at, timezone).to_rfc3339(),
         })
         .collect()
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
-    vec![super::route_inventory::path_doc(__path_list_audit_log)]
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
+    vec![super::openapi::route_inventory::path_doc(
+        __path_list_audit_log,
+    )]
 }
 
 pub fn routes() -> Routes {

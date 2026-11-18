@@ -1,5 +1,5 @@
 use chrono::{Offset, TimeZone, Utc};
-use yorishiro::time::{in_timezone, parse_timezone};
+use yorishiro::data::time::{in_timezone, parse_timezone};
 
 #[test]
 fn timezone_rendering_preserves_epoch_and_applies_dst_offset() {

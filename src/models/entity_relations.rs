@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model};
+use crate::models::db_enum::db_enum;
 use crate::models::entity_entities::{self, EntityRecord};
 
 db_enum! {

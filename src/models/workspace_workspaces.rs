@@ -2,9 +2,9 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ExprTrait, QuerySelect};
 use serde::Serialize;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
+use crate::models::db_enum::db_enum;
 
 mod tenancy;
 
@@ -461,7 +461,7 @@ pub(crate) async fn detail_for_actor(
             quotas.entities,
         ),
         schema_id: workspace.schema_id,
-        created_at: crate::time::render(ctx, workspace.created_at),
+        created_at: crate::data::time::render(ctx, workspace.created_at),
         entity_count,
         relation_count,
         schema_count,

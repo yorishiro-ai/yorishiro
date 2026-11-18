@@ -94,13 +94,13 @@ pub(crate) async fn set_relation_status(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_create_relation),
-        super::route_inventory::path_doc(__path_get_relation),
-        super::route_inventory::path_doc(__path_delete_relation),
-        super::route_inventory::path_doc(__path_list_relations),
-        super::route_inventory::path_doc(__path_set_relation_status),
+        super::openapi::route_inventory::path_doc(__path_create_relation),
+        super::openapi::route_inventory::path_doc(__path_get_relation),
+        super::openapi::route_inventory::path_doc(__path_delete_relation),
+        super::openapi::route_inventory::path_doc(__path_list_relations),
+        super::openapi::route_inventory::path_doc(__path_set_relation_status),
     ]
 }
 

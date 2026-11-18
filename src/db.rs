@@ -72,7 +72,7 @@ fn connection_options(config: &loco_rs::config::Database) -> sea_orm::ConnectOpt
 /// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI).
 /// Both pools install the configured PostgreSQL session timezone per connection and reset it on release.
 pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Result<()> {
-    let timezone = crate::time::configured(ctx).to_string();
+    let timezone = crate::data::time::configured(ctx).to_string();
     let tenant = TenantDb::connect(&ctx.config.database, timezone)
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
@@ -88,7 +88,7 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
 pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco_rs::Result<()> {
     let config = &ctx.config.database;
     let mut options = connection_options(config);
-    let zone = crate::time::configured(ctx);
+    let zone = crate::data::time::configured(ctx);
     if ctx.is_sqlite() {
         require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
         // Keep Loco's per-connection PRAGMAs and its busy_timeout-aware acquire budget.
@@ -179,7 +179,7 @@ unsafe extern "C" fn sqlite_current_timestamp(
         }
         .copied()
         .unwrap_or(chrono_tz::UTC);
-        crate::time::sqlite_timestamp(crate::time::now(), timezone)
+        crate::data::time::sqlite_timestamp(crate::data::time::now(), timezone)
     });
     match result {
         // SAFETY: `timestamp` remains live for the call and SQLITE_TRANSIENT copies it immediately.
@@ -525,7 +525,7 @@ pub fn stamped_updated_at(
     current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,
 ) -> sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>> {
     if !insert && !current.is_set() {
-        sea_orm::ActiveValue::Set(crate::time::now().into())
+        sea_orm::ActiveValue::Set(crate::data::time::now().into())
     } else {
         current
     }

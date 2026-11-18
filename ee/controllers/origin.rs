@@ -92,11 +92,11 @@ async fn merge_apply(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_list_upstream_changes),
-        crate::controllers::route_inventory::path_doc(__path_merge_preview),
-        crate::controllers::route_inventory::path_doc(__path_merge_apply),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list_upstream_changes),
+        crate::controllers::openapi::route_inventory::path_doc(__path_merge_preview),
+        crate::controllers::openapi::route_inventory::path_doc(__path_merge_apply),
     ]
 }
 

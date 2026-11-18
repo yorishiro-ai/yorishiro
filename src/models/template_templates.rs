@@ -8,8 +8,8 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
 use serde::Serialize;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::db_enum::db_enum;
 use crate::models::schema_schemas;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 

@@ -23,7 +23,7 @@ pub(crate) async fn list_workspaces(
         .await?
         .into_iter()
         .map(|record| WorkspaceRecord {
-            created_at: crate::time::render(&ctx, record.created_at).fixed_offset(),
+            created_at: crate::data::time::render(&ctx, record.created_at).fixed_offset(),
             ..record
         })
         .collect();
@@ -87,16 +87,16 @@ pub(crate) async fn delete_workspace(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_list_workspaces),
-        super::route_inventory::path_doc(__path_create_workspace),
-        super::route_inventory::path_doc(__path_get_workspace),
-        super::route_inventory::path_doc(__path_update_workspace),
-        super::route_inventory::path_doc(__path_delete_workspace),
-        super::route_inventory::path_doc(__path_grant_member),
-        super::route_inventory::path_doc(__path_list_members),
-        super::route_inventory::path_doc(__path_revoke_member),
+        super::openapi::route_inventory::path_doc(__path_list_workspaces),
+        super::openapi::route_inventory::path_doc(__path_create_workspace),
+        super::openapi::route_inventory::path_doc(__path_get_workspace),
+        super::openapi::route_inventory::path_doc(__path_update_workspace),
+        super::openapi::route_inventory::path_doc(__path_delete_workspace),
+        super::openapi::route_inventory::path_doc(__path_grant_member),
+        super::openapi::route_inventory::path_doc(__path_list_members),
+        super::openapi::route_inventory::path_doc(__path_revoke_member),
     ]
 }
 

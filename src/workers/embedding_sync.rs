@@ -16,8 +16,8 @@ use sea_orm::DbErr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
+use crate::models::db_enum::db_enum;
 use crate::models::entity_embeddings;
 use crate::models::entity_entities;
 

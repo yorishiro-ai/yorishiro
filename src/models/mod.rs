@@ -8,6 +8,7 @@ pub mod access;
 pub mod api_key_audit_log;
 pub mod api_keys;
 pub mod compute_credit_ledger;
+pub mod db_enum;
 pub mod entity_column_preferences;
 pub mod entity_embeddings;
 pub mod entity_entities;

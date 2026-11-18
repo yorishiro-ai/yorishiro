@@ -1,4 +1,4 @@
-use crate::time::Timezone;
+use crate::data::time::Timezone;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

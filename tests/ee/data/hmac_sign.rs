@@ -1,4 +1,4 @@
-use yorishiro::edition::ee::controllers::hmac_sign::*;
+use yorishiro::edition::ee::data::hmac_sign::*;
 
 #[test]
 fn sign_and_verify_round_trip() {

@@ -102,7 +102,7 @@ async fn recover_pending_on_while(
             return;
         }
         if let Some(deadline) = row.deadline_at
-            && deadline <= crate::time::now().fixed_offset()
+            && deadline <= crate::data::time::now().fixed_offset()
         {
             if let Err(error) = crate::models::queue_job_dispatch_outbox::expire(db, row.id).await {
                 tracing::warn!(dispatch_id = %row.id, error = %error, "could not expire deadline-bound dispatch");

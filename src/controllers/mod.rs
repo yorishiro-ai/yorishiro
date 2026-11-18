@@ -10,14 +10,11 @@ pub mod import;
 pub mod mcp;
 pub mod members;
 pub mod middleware;
-#[cfg(feature = "openapi")]
 pub mod openapi;
 pub mod relations;
-pub mod route_inventory;
 pub mod schemas;
 pub mod search;
 pub(crate) mod setup;
-pub mod swagger;
 pub mod template_library;
 pub(crate) mod users;
 pub(crate) mod whoami;

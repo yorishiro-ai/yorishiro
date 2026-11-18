@@ -4,7 +4,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect};
 use tokio::task::JoinHandle;
 
-use crate::db_enum::db_enum;
+use crate::models::db_enum::db_enum;
 
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
 const LEASE_DURATION_MINUTES: i64 = 5;
@@ -110,7 +110,7 @@ impl Entity {
             workspace_id: Set(enqueue.workspace_id),
             plan: Set(enqueue.plan.map(str::to_owned)),
             status: Set(LifecycleStatus::Queued.as_db_str().to_owned()),
-            enqueue_at: Set(crate::time::database_instant(crate::time::now())),
+            enqueue_at: Set(crate::data::time::database_instant(crate::data::time::now())),
             claim_at: Set(None),
             start_at: Set(None),
             retry_at: Set(None),
@@ -182,7 +182,7 @@ impl Entity {
         attempt: Option<i32>,
         error: &str,
     ) -> Result<(), DbErr> {
-        let now = crate::time::database_instant(crate::time::now());
+        let now = crate::data::time::database_instant(crate::data::time::now());
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -282,7 +282,7 @@ impl Entity {
                     &db,
                     id,
                     attempt,
-                    crate::time::database_instant(crate::time::now()),
+                    crate::data::time::database_instant(crate::data::time::now()),
                 )
                 .await
                 {
@@ -299,7 +299,12 @@ impl Entity {
     }
 
     pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<Admission, DbErr> {
-        Self::start_at(db, id, crate::time::database_instant(crate::time::now())).await
+        Self::start_at(
+            db,
+            id,
+            crate::data::time::database_instant(crate::data::time::now()),
+        )
+        .await
     }
 
     ///
@@ -330,7 +335,7 @@ impl Entity {
         status: LifecycleStatus,
         error: Option<&str>,
     ) -> Result<(), DbErr> {
-        let now = crate::time::now();
+        let now = crate::data::time::now();
         let mut update = Entity::update_many()
             .col_expr(Column::Status, Expr::value(status.as_db_str()))
             .col_expr(

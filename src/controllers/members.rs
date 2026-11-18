@@ -75,13 +75,13 @@ async fn remove_member(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_list_members),
-        super::route_inventory::path_doc(__path_remove_member),
-        super::route_inventory::path_doc(__path_create_tenant_user),
-        super::route_inventory::path_doc(__path_reset_tenant_user_password),
-        super::route_inventory::path_doc(__path_preview_removal),
+        super::openapi::route_inventory::path_doc(__path_list_members),
+        super::openapi::route_inventory::path_doc(__path_remove_member),
+        super::openapi::route_inventory::path_doc(__path_create_tenant_user),
+        super::openapi::route_inventory::path_doc(__path_reset_tenant_user_password),
+        super::openapi::route_inventory::path_doc(__path_preview_removal),
     ]
 }
 

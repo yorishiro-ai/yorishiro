@@ -100,7 +100,7 @@ pub fn validate(config: &Config) -> Result<()> {
     let settings = config.settings::<crate::data::settings::Settings>()?;
     crate::workers::target::targets_for_start(&settings.worker_targets)
         .map_err(|error| Error::Message(format!("settings.worker_targets: {error}")))?;
-    crate::time::parse_timezone(&settings.timezone).map_err(|_| {
+    crate::data::time::parse_timezone(&settings.timezone).map_err(|_| {
         Error::Message(format!(
             "settings.timezone must be a valid IANA timezone, got {:?}",
             settings.timezone

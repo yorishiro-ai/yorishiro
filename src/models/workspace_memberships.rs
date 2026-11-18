@@ -2,9 +2,9 @@ pub use crate::models::_entities::workspace_memberships::{ActiveModel, Column, E
 use sea_orm::DatabaseTransaction;
 use sea_orm::entity::prelude::*;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::ApiKeyScope;
+use crate::models::db_enum::db_enum;
 
 db_enum! {
     /// Workspace-local authority never grants tenant administration.

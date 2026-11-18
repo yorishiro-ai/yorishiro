@@ -21,10 +21,10 @@ pub(crate) fn render_grant(
 ) -> crate::models::api_keys::KeyGrant {
     grant.expires_at = grant
         .expires_at
-        .map(|date| crate::time::render(ctx, date).fixed_offset());
+        .map(|date| crate::data::time::render(ctx, date).fixed_offset());
     grant.revoked_at = grant
         .revoked_at
-        .map(|date| crate::time::render(ctx, date).fixed_offset());
+        .map(|date| crate::data::time::render(ctx, date).fixed_offset());
     grant
 }
 
@@ -64,7 +64,7 @@ pub(crate) async fn create(
             prefix: created.key_prefix,
             full_key: created.plaintext,
             name: created.name,
-            created_at: crate::time::render(&ctx, created.created_at),
+            created_at: crate::data::time::render(&ctx, created.created_at),
             grant: render_grant(&ctx, created.grant),
         }),
     ))
@@ -82,8 +82,10 @@ pub(crate) async fn list(
             id: key.id,
             prefix: key.key_prefix,
             name: key.name,
-            created_at: crate::time::render(&ctx, key.created_at),
-            last_used_at: key.last_used_at.map(|time| crate::time::render(&ctx, time)),
+            created_at: crate::data::time::render(&ctx, key.created_at),
+            last_used_at: key
+                .last_used_at
+                .map(|time| crate::data::time::render(&ctx, time)),
             grant: render_grant(&ctx, grant),
         });
     }
@@ -101,12 +103,12 @@ pub(crate) async fn revoke(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_create),
-        super::route_inventory::path_doc(__path_list),
-        super::route_inventory::path_doc(__path_revoke),
-        super::route_inventory::path_doc(__path_rotate),
+        super::openapi::route_inventory::path_doc(__path_create),
+        super::openapi::route_inventory::path_doc(__path_list),
+        super::openapi::route_inventory::path_doc(__path_revoke),
+        super::openapi::route_inventory::path_doc(__path_rotate),
     ]
 }
 
@@ -133,7 +135,7 @@ async fn rotate(
             prefix: created.key_prefix,
             full_key: created.plaintext,
             name: created.name,
-            created_at: crate::time::render(&ctx, created.created_at),
+            created_at: crate::data::time::render(&ctx, created.created_at),
             grant: render_grant(&ctx, created.grant),
         }),
     ))

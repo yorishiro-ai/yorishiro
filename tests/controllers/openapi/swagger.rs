@@ -1,9 +1,9 @@
 use axum::http::Method;
 use utoipa::openapi::{Components, RefOr, Schema};
-use yorishiro::controllers::route_inventory::{RouteEntry, RouteInventory};
+use yorishiro::controllers::openapi::route_inventory::{RouteEntry, RouteInventory};
 
-use yorishiro::controllers::route_inventory::RouteClass;
-use yorishiro::controllers::swagger::implementation::*;
+use yorishiro::controllers::openapi::route_inventory::RouteClass;
+use yorishiro::controllers::openapi::swagger::implementation::*;
 
 #[test]
 fn openapi_method_covers_mounted_http_methods() {

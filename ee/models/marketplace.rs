@@ -128,7 +128,7 @@ pub struct TemplateVersionRecord {
     pub created_at: DateTime<Utc>,
 }
 
-crate::db_enum::db_enum! {
+crate::models::db_enum::db_enum! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum TemplateVersionStatus {
         Draft = "draft",
@@ -665,7 +665,7 @@ pub(crate) async fn upsert_review(
         rating: sea_orm::ActiveValue::Set(request.rating),
         comment: sea_orm::ActiveValue::Set(request.comment.clone()),
         created_by: sea_orm::ActiveValue::Set(user_id),
-        updated_at: sea_orm::ActiveValue::Set(crate::time::now().into()),
+        updated_at: sea_orm::ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
     let row = Entity::insert(active)

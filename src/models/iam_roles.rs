@@ -396,7 +396,7 @@ impl Model {
             ));
         }
         let mut expires_at: chrono::DateTime<chrono::FixedOffset> =
-            (crate::time::now() + chrono::Duration::seconds(duration)).into();
+            (crate::data::time::now() + chrono::Duration::seconds(duration)).into();
         if let Some(limit) = caller_key.expires_at {
             expires_at = expires_at.min(limit);
         }

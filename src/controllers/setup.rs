@@ -80,10 +80,10 @@ async fn setup(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_status),
-        super::route_inventory::path_doc(__path_setup),
+        super::openapi::route_inventory::path_doc(__path_status),
+        super::openapi::route_inventory::path_doc(__path_setup),
     ]
 }
 

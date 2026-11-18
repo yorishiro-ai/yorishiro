@@ -30,7 +30,7 @@ impl PlanPolicy {
         Ok(Self::resolve(
             setting.enabled,
             licence.as_deref(),
-            crate::time::now().timestamp(),
+            crate::data::time::now().timestamp(),
         ))
     }
 
@@ -93,7 +93,7 @@ impl Plan {
 
         let licence = ctx.shared_store.get::<Arc<LicenceState>>();
         if let Some(plan) =
-            licence.and_then(|state| state.active_plan_at(crate::time::now().timestamp()))
+            licence.and_then(|state| state.active_plan_at(crate::data::time::now().timestamp()))
         {
             return Ok(plan);
         }

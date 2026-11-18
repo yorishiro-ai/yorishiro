@@ -338,7 +338,7 @@ pub async fn claim_dispatch(
     claim_token: Uuid,
     lease_seconds: i64,
 ) -> Result<bool, DbErr> {
-    let lease_until = crate::time::now() + chrono::Duration::seconds(lease_seconds);
+    let lease_until = crate::data::time::now() + chrono::Duration::seconds(lease_seconds);
     let result = outbox::Entity::update_many()
         .col_expr(outbox::Column::LastAttemptAt, Expr::current_timestamp())
         .col_expr(

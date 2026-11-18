@@ -120,10 +120,10 @@ pub fn routes() -> Routes {
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_signup),
-        super::route_inventory::path_doc(__path_root_login),
-        super::route_inventory::path_doc(__path_tenant_login),
+        super::openapi::route_inventory::path_doc(__path_signup),
+        super::openapi::route_inventory::path_doc(__path_root_login),
+        super::openapi::route_inventory::path_doc(__path_tenant_login),
     ]
 }

@@ -118,14 +118,14 @@ async fn fork_template(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_list_templates),
-        super::route_inventory::path_doc(__path_get_template),
-        super::route_inventory::path_doc(__path_create_template),
-        super::route_inventory::path_doc(__path_update_template),
-        super::route_inventory::path_doc(__path_delete_template),
-        super::route_inventory::path_doc(__path_fork_template),
+        super::openapi::route_inventory::path_doc(__path_list_templates),
+        super::openapi::route_inventory::path_doc(__path_get_template),
+        super::openapi::route_inventory::path_doc(__path_create_template),
+        super::openapi::route_inventory::path_doc(__path_update_template),
+        super::openapi::route_inventory::path_doc(__path_delete_template),
+        super::openapi::route_inventory::path_doc(__path_fork_template),
     ]
 }
 

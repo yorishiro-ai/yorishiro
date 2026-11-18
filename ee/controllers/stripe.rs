@@ -15,7 +15,7 @@ pub mod inbound {
     use super::SIGNATURE_TOLERANCE_SECS;
     use axum::http::HeaderMap;
 
-    use crate::edition::ee::controllers::hmac_sign;
+    use crate::edition::ee::data::hmac_sign;
 
     pub enum Error {
         MissingSignatureHeader,
@@ -30,7 +30,12 @@ pub mod inbound {
         payload: &[u8],
         secret: &str,
     ) -> Result<VerifiedStripeEvent, Error> {
-        verify_at(headers, payload, secret, crate::time::now().timestamp())
+        verify_at(
+            headers,
+            payload,
+            secret,
+            crate::data::time::now().timestamp(),
+        )
     }
 
     ///
@@ -177,8 +182,8 @@ async fn stripe_webhook(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
-    vec![crate::controllers::route_inventory::path_doc(
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
+    vec![crate::controllers::openapi::route_inventory::path_doc(
         __path_stripe_webhook,
     )]
 }

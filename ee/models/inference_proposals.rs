@@ -70,7 +70,7 @@ pub(crate) async fn discard_as(
     Ok(report)
 }
 
-crate::db_enum::db_enum! {
+crate::models::db_enum::db_enum! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum ProposalStatus {
         Pending = "pending",
@@ -257,7 +257,7 @@ async fn transition_pending(
 ) -> Result<i64, YorishiroError> {
     let result = Entity::update_many()
         .col_expr(Column::Status, Expr::value(status.as_db_str()))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
         .filter(Column::Status.eq(ProposalStatus::Pending.as_db_str()))
@@ -505,7 +505,7 @@ async fn ensure_entity_marked(
 ) -> Result<(), YorishiroError> {
     let result = Entity::update_many()
         .col_expr(Column::Status, Expr::value(status))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
         .filter(Column::EntityId.eq(entity_id))

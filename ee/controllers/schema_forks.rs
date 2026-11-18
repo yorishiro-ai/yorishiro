@@ -106,13 +106,13 @@ async fn delete(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_list),
-        crate::controllers::route_inventory::path_doc(__path_create),
-        crate::controllers::route_inventory::path_doc(__path_get),
-        crate::controllers::route_inventory::path_doc(__path_update),
-        crate::controllers::route_inventory::path_doc(__path_delete),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list),
+        crate::controllers::openapi::route_inventory::path_doc(__path_create),
+        crate::controllers::openapi::route_inventory::path_doc(__path_get),
+        crate::controllers::openapi::route_inventory::path_doc(__path_update),
+        crate::controllers::openapi::route_inventory::path_doc(__path_delete),
     ]
 }
 

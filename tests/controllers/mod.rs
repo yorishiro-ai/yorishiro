@@ -1,7 +1,5 @@
 mod mcp;
-mod route_inventory;
-#[cfg(feature = "openapi")]
-mod swagger;
+mod openapi;
 
 use rmcp::model::Tool;
 

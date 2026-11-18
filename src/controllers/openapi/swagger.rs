@@ -1,7 +1,7 @@
 //! OpenAPI documentation assembled from the routes and handler-local metadata.
 
 #[cfg(not(feature = "openapi"))]
-use super::route_inventory::RouteInventory;
+use super::openapi::route_inventory::RouteInventory;
 #[cfg(not(feature = "openapi"))]
 use axum::Router;
 #[cfg(not(feature = "openapi"))]
@@ -144,7 +144,7 @@ pub mod implementation {
         }
 
         let mut error_schemas = Vec::new();
-        <super::super::openapi::ApiErrorBody as utoipa::ToSchema>::schemas(&mut error_schemas);
+        <super::super::ApiErrorBody as utoipa::ToSchema>::schemas(&mut error_schemas);
         for (name, schema) in error_schemas {
             add_schema(&mut components, name, schema);
         }

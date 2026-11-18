@@ -3,8 +3,8 @@ use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect};
 use sha2::{Digest, Sha256};
 
 use crate::db::{AppContextBackend, DbHandle};
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::db_enum::db_enum;
 
 const KEY_PREFIX_LENGTH: usize = 12;
 const KEY_SECRET_LENGTH: usize = 48;
@@ -35,7 +35,7 @@ impl Model {
         self.revoked_at.is_none()
             && self
                 .expires_at
-                .is_none_or(|expires| expires > crate::time::now())
+                .is_none_or(|expires| expires > crate::data::time::now())
     }
 
     pub(crate) async fn current_context(
@@ -507,7 +507,7 @@ impl Entity {
         if let Err(err) = Entity::update_many()
             .col_expr(
                 Column::LastUsedAt,
-                sea_orm::sea_query::Expr::value(crate::time::now()),
+                sea_orm::sea_query::Expr::value(crate::data::time::now()),
             )
             .filter(Column::Id.eq(api_key_id))
             .exec(conn)
@@ -611,7 +611,7 @@ impl Entity {
             scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(false),
             expires_at: ActiveValue::Set(Some(
-                (crate::time::now() + chrono::Duration::hours(LOGIN_SESSION_HOURS)).into(),
+                (crate::data::time::now() + chrono::Duration::hours(LOGIN_SESSION_HOURS)).into(),
             )),
             ..Default::default()
         }
@@ -693,7 +693,7 @@ impl Entity {
     ) -> Result<CreatedApiKey, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
         let name = validate_key_name(name)?;
-        if expires_at.is_some_and(|expires| expires <= crate::time::now()) {
+        if expires_at.is_some_and(|expires| expires <= crate::data::time::now()) {
             return Err(YorishiroError::ValidationFailed {
                 message: "key expiry must be in the future".into(),
                 details: vec![],
@@ -783,7 +783,7 @@ impl Entity {
 
         let txn = crate::db::begin_write(db).await.internal()?;
         let name = validate_key_name(name)?;
-        if expires_at.is_some_and(|expires| expires <= crate::time::now()) {
+        if expires_at.is_some_and(|expires| expires <= crate::data::time::now()) {
             return Err(YorishiroError::ValidationFailed {
                 message: "key expiry must be in the future".into(),
                 details: vec![],
@@ -1086,7 +1086,7 @@ impl Entity {
         let result = Entity::update_many()
             .col_expr(
                 Column::RevokedAt,
-                sea_orm::sea_query::Expr::val(crate::time::now()),
+                sea_orm::sea_query::Expr::val(crate::data::time::now()),
             )
             .col_expr(
                 Column::KeyHash,

@@ -151,7 +151,7 @@ pub(crate) async fn merge_apply(
     use crate::models::_entities::schema_schemas::{Column, Entity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
     Entity::update_many()
-        .col_expr(Column::OriginUpdatedAt, Expr::val(crate::time::now()))
+        .col_expr(Column::OriginUpdatedAt, Expr::val(crate::data::time::now()))
         .filter(Column::Id.eq(schema.id))
         .exec(schema_conn)
         .await

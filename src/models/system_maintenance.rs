@@ -7,8 +7,8 @@ pub use crate::models::_entities::system_maintenance::{ActiveModel, Column, Enti
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::db_enum::db_enum;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {

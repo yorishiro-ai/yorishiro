@@ -217,7 +217,7 @@ impl AuditAuthorized {
     }
 
     pub(crate) fn timezone(&self) -> chrono_tz::Tz {
-        crate::time::configured(&self.app_ctx)
+        crate::data::time::configured(&self.app_ctx)
     }
 }
 

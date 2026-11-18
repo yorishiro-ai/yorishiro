@@ -245,29 +245,30 @@ async fn delete_llm_key(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_set_llm_key),
-        crate::controllers::route_inventory::path_doc(__path_get_llm_key),
-        crate::controllers::route_inventory::path_doc(__path_delete_llm_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_set_llm_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_get_llm_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_delete_llm_key),
     ]
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn gated_openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
-    vec![crate::controllers::route_inventory::path_doc(
+pub(crate) fn gated_openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
+    vec![crate::controllers::openapi::route_inventory::path_doc(
         __path_infer_fill,
     )]
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn job_status_openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn job_status_openapi_docs()
+-> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_infer_job_status),
-        crate::controllers::route_inventory::path_doc(__path_list_proposals),
-        crate::controllers::route_inventory::path_doc(__path_confirm_proposals),
-        crate::controllers::route_inventory::path_doc(__path_confirmation_status),
-        crate::controllers::route_inventory::path_doc(__path_reject_proposals),
-        crate::controllers::route_inventory::path_doc(__path_discard_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_infer_job_status),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_confirm_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_confirmation_status),
+        crate::controllers::openapi::route_inventory::path_doc(__path_reject_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_discard_proposals),
     ]
 }
