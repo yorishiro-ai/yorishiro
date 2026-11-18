@@ -104,8 +104,7 @@ pub enum DeletionOutcome {
 /// Deletes an account with a trusted operator identity.
 ///
 /// # Errors
-/// Rejects a mismatched confirmation, the infrastructure tenant's root, or a
-/// non-root account with a remaining membership.
+/// Rejects a mismatched confirmation or a non-root account with a remaining membership.
 pub async fn delete_by_operator(
     db: &sea_orm::DatabaseConnection,
     user_id: uuid::Uuid,

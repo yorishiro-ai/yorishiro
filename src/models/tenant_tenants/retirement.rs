@@ -223,13 +223,6 @@ pub(crate) async fn root_deleted(
     deleted_user_id: Uuid,
 ) -> Result<crate::models::user_users::DeletionOutcome, YorishiroError> {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-    if tenant_id == super::INFRASTRUCTURE_TENANT_ID {
-        return Err(YorishiroError::ValidationFailed {
-            message: "the infrastructure tenant cannot be retired".into(),
-            details: vec![],
-            hint: "select a non-infrastructure tenant".into(),
-        });
-    }
     let tenant = super::Model::find_by_id(txn, tenant_id).await?;
     if tenant.disabled_at.is_some() {
         delete_disabled_in(txn, tenant_id).await?;
@@ -268,7 +261,6 @@ pub async fn reap_due(
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<u64, YorishiroError> {
     use crate::models::_entities::tenant_tenants::Column;
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     let scheduled = super::Entity::find()
         .filter(Column::DeleteScheduledAt.is_not_null())
         .filter(Column::Id.ne(super::INFRASTRUCTURE_TENANT_ID))
@@ -291,45 +283,35 @@ pub async fn reap_due(
         crate::db::lock_for_update(&txn, &format!("tenant-membership:{tenant_id}"))
             .await
             .internal()?;
-        let Some(tenant) = super::Entity::find_by_id(tenant_id)
-            .one(&txn)
-            .await
-            .internal()?
-        else {
-            txn.rollback().await.internal()?;
-            continue;
-        };
         let outcome = async {
-            if tenant.disabled_at.is_none() {
-                super::ActiveModel {
-                    id: Set(tenant_id),
-                    disabled_at: Set(Some(crate::time::database_instant(now))),
-                    ..Default::default()
-                }
-                .update(&txn)
+            if super::Entity::find_by_id(tenant_id)
+                .one(&txn)
                 .await
-                .internal()?;
-                api_keys::Entity::revoke_matching(
-                    &txn,
-                    sea_orm::Condition::all().add(api_keys::Column::TenantId.eq(tenant_id)),
-                )
-                .await?;
-                cancel_work(&txn, tenant_id).await?;
+                .internal()?
+                .is_none()
+            {
+                return Ok(false);
             }
-            delete_disabled_in(&txn, tenant_id).await
+            disable_in_transaction(&txn, tenant_id, None).await?;
+            delete_disabled_in(&txn, tenant_id).await?;
+            Ok::<bool, YorishiroError>(true)
         }
         .await;
-        if let Err(err) = outcome {
-            txn.rollback().await.internal()?;
-            tracing::warn!(
-                tenant_id = %tenant_id,
-                error = %err,
-                "scheduled tenant deletion blocked; retrying on the next run"
-            );
-            continue;
+        match outcome {
+            Ok(true) => {
+                txn.commit().await.internal()?;
+                deleted += 1;
+            }
+            Ok(false) => txn.rollback().await.internal()?,
+            Err(err) => {
+                txn.rollback().await.internal()?;
+                tracing::warn!(
+                    tenant_id = %tenant_id,
+                    error = %err,
+                    "scheduled tenant deletion blocked; retrying on the next run"
+                );
+            }
         }
-        txn.commit().await.internal()?;
-        deleted += 1;
     }
     Ok(deleted)
 }
