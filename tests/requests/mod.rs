@@ -67,8 +67,9 @@ pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
         return false;
     }
     assert!(
-        std::env::var("YORISHIRO_LICENSE_KEY").is_ok_and(|key| key.is_empty())
-            || std::env::var_os("YORISHIRO_LICENSE_KEY").is_none(),
+        std::env::var("YORISHIRO_LICENSE_KEY")
+            .unwrap_or_default()
+            .is_empty(),
         "YORISHIRO_LICENSE_KEY is set but the licence is not valid at boot"
     );
     eprintln!("skipping licensed test: set YORISHIRO_LICENSE_KEY to run it");
