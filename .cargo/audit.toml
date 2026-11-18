@@ -10,7 +10,10 @@
 # enabled deps; rkyv appears in Cargo.lock (which lists every optional dep
 # regardless of activation) but not in the compiled graph. Re-check this if
 # rust_decimal's requested features ever change.
-ignore = ["RUSTSEC-2026-0235"]
+#
+# libsqlite3-sys 0.37 (RUSTSEC-2026-0459): sqlx-sqlite 0.9.1 pins 0.37 and the
+# patched 0.39 needs a newer sqlx. Remove this once sqlx follows.
+ignore = ["RUSTSEC-2026-0235", "RUSTSEC-2026-0459"]
 
 [yanked]
 # spin 0.9.8 is yanked but pulled by a transitive dependency. No replacement

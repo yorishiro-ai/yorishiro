@@ -24,7 +24,7 @@ class PackageVersionTests(unittest.TestCase):
     def test_cli_reads_the_application_version_not_workspace_package_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, "Cargo.toml").write_text(
-                '[workspace.package]\nrust-version = "1.99.1"\n[package]\nversion = "1.2.9"\n'
+                '[workspace.package]\nrust-version = "1.100.0"\n[package]\nversion = "1.2.9"\n'
             )
             result = subprocess.run(
                 [sys.executable, VERSION_SPEC.origin, "20261104-10"],
