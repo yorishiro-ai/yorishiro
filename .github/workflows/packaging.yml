@@ -21,7 +21,6 @@ on:
       - config/production.yaml
       - scripts/release_version.py
       - scripts/release_images.py
-      - Makefile
   push:
     branches: [develop]
   workflow_dispatch:

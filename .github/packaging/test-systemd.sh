@@ -61,8 +61,8 @@ docker run -d --name "$PG" --network "$NET" \
 # tmpfs mounts plus a cgroup namespace it can write.
 docker run -d --name "$APP" --network "$NET" --privileged --cgroupns=host \
   --tmpfs /run --tmpfs /run/lock -v "$PKG_DIR":/pkg:ro ubuntu:26.04 \
-  bash -c 'apt-get update -qq >/dev/null 2>&1
-           apt-get install -y -qq systemd systemd-sysv curl >/dev/null 2>&1
+  bash -c 'apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
+           apt-get -o Acquire::Retries=5 install -y -qq systemd systemd-sysv curl >/dev/null 2>&1
            exec /lib/systemd/systemd' >/dev/null
 
 booted=
@@ -73,6 +73,7 @@ for _ in $(seq 1 60); do
   sleep 3
 done
 if [ -z "$booted" ]; then
+  docker logs "$APP" >&2 || true
   echo "systemd never finished booting in the container" >&2
   exit 1
 fi
@@ -80,7 +81,7 @@ fi
 # --------------------------------------------------------------------------------------------
 note "a packaged SQLite start succeeds (default database)"
 # --------------------------------------------------------------------------------------------
-docker exec "$APP" bash -c "apt-get install -y -qq /pkg/$DEB >/dev/null 2>&1" || {
+docker exec "$APP" bash -c "apt-get -o Acquire::Retries=5 install -y -qq /pkg/$DEB >/dev/null 2>&1" || {
   echo "installing the package failed" >&2; exit 1
 }
 

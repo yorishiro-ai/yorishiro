@@ -3,7 +3,7 @@ name: Security
 # Split out of ci.yml: this only needs to re-run when the dependency graph or the audit's own
 # ignore list changes, and folding it into ci.yml's union of paths would mean either it never
 # gets its own filter or every other ci.yml job inherits its narrower one.
-# dep-audit.yml's weekly schedule covers the case this can't: an advisory published against a
+# Dependabot security alerts cover the case this can't: an advisory published against a
 # dependency this repo already carries, with no local change to trigger a re-check.
 
 on:
@@ -36,7 +36,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-setup
-      - name: Install cargo-audit
-        run: cargo install --locked cargo-audit
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - name: Run security audit
         run: cargo audit --file Cargo.lock

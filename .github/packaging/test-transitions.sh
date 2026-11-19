@@ -48,8 +48,8 @@ run_deb_transition() {
   local old_package="$from_package"
   local base="/pkg/${from_package}-${VERSION}-amd64.deb"
   docker run --rm -e OLD_PACKAGE="$old_package" -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:26.04 bash -eu -c "
-    apt-get update -qq
-    apt-get install -y -qq systemd-sysv $base
+    apt-get -o Acquire::Retries=5 update -qq
+    apt-get -o Acquire::Retries=5 install -y -qq systemd-sysv $base
     test ! -e /etc/yorishiro/production.yaml
     cp /etc/yorishiro/production.yaml.example /etc/yorishiro/production.yaml
     chown root:root /etc/yorishiro/production.yaml
@@ -63,7 +63,7 @@ run_deb_transition() {
     systemctl --root=/ enable yorishiro-worker.service
     systemctl --root=/ enable yorishiro-jobs.service
     systemctl --root=/ enable yorishiro-scheduler.service
-    apt-get install -y -qq /pkg/${to_package}-${VERSION}-amd64.deb
+    apt-get -o Acquire::Retries=5 install -y -qq /pkg/${to_package}-${VERSION}-amd64.deb
     test \"\$(dpkg-query -W -f='\${Status}' ${to_package})\" = 'install ok installed'
     set +e
     old_status=\"\$(dpkg-query -W -f='\${Status}' \"\$OLD_PACKAGE\" 2>/dev/null)\"
@@ -92,8 +92,8 @@ run_deb_transition() {
 
 run_deb_colocation_refusal() {
   docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -eu -c "
-    apt-get update -qq
-    apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
+    apt-get -o Acquire::Retries=5 update -qq
+    apt-get -o Acquire::Retries=5 install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
     dpkg --unpack /pkg/yorishiro-ee-${VERSION}-amd64.deb || true
     dpkg --configure -a
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-ce 2>/dev/null || true)\" != 'install ok installed'
@@ -103,8 +103,8 @@ run_deb_colocation_refusal() {
 
 run_deb_current_remove_preserves_admin_config() {
   docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -eu -c "
-    apt-get update -qq
-    apt-get install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
+    apt-get -o Acquire::Retries=5 update -qq
+    apt-get -o Acquire::Retries=5 install -y -qq /pkg/yorishiro-ce-${VERSION}-amd64.deb
     test -f /etc/yorishiro/production.yaml.example
     cp /etc/yorishiro/production.yaml.example /etc/yorishiro/production.yaml
     printf '\n# administrator-owned\n' >> /etc/yorishiro/production.yaml
@@ -121,8 +121,8 @@ run_deb_current_remove_preserves_admin_config() {
 
 run_deb_fresh_install_without_admin_config() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-production.yaml:ro ubuntu:26.04 bash -eu -c "
-    apt-get update -qq
-    apt-get install -y -qq systemd-sysv /pkg/yorishiro-ce-${VERSION}-amd64.deb
+    apt-get -o Acquire::Retries=5 update -qq
+    apt-get -o Acquire::Retries=5 install -y -qq systemd-sysv /pkg/yorishiro-ce-${VERSION}-amd64.deb
     test ! -e /etc/yorishiro/production.yaml
     cmp /etc/yorishiro/production.yaml.example /canonical-production.yaml
   "
