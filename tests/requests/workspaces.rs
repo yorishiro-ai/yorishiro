@@ -32,14 +32,14 @@ async fn member_key(
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
-#[serial_test::serial(process_environment)]
 async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "true");
+    let _config = crate::requests::ConfigOverride::set(&[(
+        "initializers.plan_policy_enabled",
+        "true".into(),
+    )]);
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
@@ -86,14 +86,14 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
-#[serial_test::serial(process_environment)]
 async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "false");
+    let _config = crate::requests::ConfigOverride::set(&[(
+        "initializers.plan_policy_enabled",
+        "false".into(),
+    )]);
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =

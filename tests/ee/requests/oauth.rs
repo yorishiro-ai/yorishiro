@@ -5,7 +5,6 @@ use crate::requests::boot_request;
 use axum::http::StatusCode;
 use axum::http::header;
 use sea_orm::{EntityTrait, TransactionTrait};
-use serial_test::serial;
 use yorishiro::App;
 use yorishiro::db::AppContextBackend;
 
@@ -14,30 +13,28 @@ use yorishiro::db::AppContextBackend;
 const ISSUER_URL: &str = "http://127.0.0.1:1";
 const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
-const OAUTH_VARS: [&str; 3] = [
-    "YORISHIRO_OAUTH_ISSUER_URL",
-    "YORISHIRO_OAUTH_CLIENT_ID",
-    "YORISHIRO_OAUTH_CLIENT_SECRET",
-];
+const ISSUER_PATH: &str = "initializers.oauth.issuer_url";
+const CLIENT_ID_PATH: &str = "initializers.oauth.client_id";
+const CLIENT_SECRET_PATH: &str = "initializers.oauth.client_secret";
 
-/// The shipped Loco configuration interpolates these values before each app boots.
-/// Callers that change these variables take `serial(process_environment)`.
+/// Boots every app inside the future with the OAuth provider configured.
 async fn with_oauth_env<T>(fut: impl Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
-    guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
-    guard.set("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
-    guard.set("YORISHIRO_OAUTH_CLIENT_SECRET", CLIENT_SECRET);
+    let _config = crate::requests::ConfigOverride::set(&[
+        (ISSUER_PATH, ISSUER_URL.into()),
+        (CLIENT_ID_PATH, CLIENT_ID.into()),
+        (CLIENT_SECRET_PATH, CLIENT_SECRET.into()),
+    ]);
     fut.await
 }
 /// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
 /// The third state, an issuer set with no `client_id`/`client_secret`, answers 500 instead and belongs to `status_errors_loudly_when_partially_configured` below.
 #[tokio::test]
-#[serial(process_environment)]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
-    let ambient = crate::EnvGuard::capture(&OAUTH_VARS);
-    for variable in OAUTH_VARS {
-        ambient.remove(variable);
-    }
+    let _config = crate::requests::ConfigOverride::set(&[
+        (ISSUER_PATH, "".into()),
+        (CLIENT_ID_PATH, "".into()),
+        (CLIENT_SECRET_PATH, "".into()),
+    ]);
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
@@ -75,12 +72,12 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 
 /// Partial resolved OAuth configuration must report 500 rather than panic or silently disable login.
 #[tokio::test]
-#[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {
-    let guard = crate::EnvGuard::capture(&OAUTH_VARS);
-    guard.remove("YORISHIRO_OAUTH_CLIENT_ID");
-    guard.remove("YORISHIRO_OAUTH_CLIENT_SECRET");
-    guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
+    let _config = crate::requests::ConfigOverride::set(&[
+        (ISSUER_PATH, "https://idp.example.com".into()),
+        (CLIENT_ID_PATH, "".into()),
+        (CLIENT_SECRET_PATH, "".into()),
+    ]);
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
@@ -100,7 +97,6 @@ async fn status_errors_loudly_when_partially_configured() {
 
 /// With no `YORISHIRO_OAUTH_ISSUER_URL` set, `authorize` and `callback` must answer exactly the same `404` a route that does not exist would: a prober must not be able to tell "unconfigured" apart from "absent".
 #[tokio::test]
-#[serial(process_environment)]
 async fn authorize_and_callback_404_when_unconfigured() {
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -128,7 +124,6 @@ async fn authorize_and_callback_404_when_unconfigured() {
 /// `authorize` reaches the identity provider to fetch its discovery document before it can redirect anywhere, so a configured but unreachable issuer fails loudly with an internal error rather than a redirect to nowhere.
 /// Exercising the redirect itself, and the CSRF cookie it sets, needs a live IdP and is out of scope here (see the module doc comment).
 #[tokio::test]
-#[serial(process_environment)]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -150,7 +145,6 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 
 /// The provider itself reporting an error (the user declined consent, an app misconfiguration, ...) redirects to the login page's failure state rather than surfacing raw JSON to a browser mid-redirect, and clears the CSRF cookie so it is never reusable across two attempts.
 #[tokio::test]
-#[serial(process_environment)]
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -187,7 +181,6 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 
 /// A callback missing `code` or `state` (hit directly, without ever having visited `authorize`) redirects to the same login-failure state rather than a raw validation error.
 #[tokio::test]
-#[serial(process_environment)]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -215,7 +208,6 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 
 /// A forged `state` (never issued by this process, so its HMAC signature cannot verify) is rejected with `401` before any provider is contacted: `handle_callback` checks `state` first.
 #[tokio::test]
-#[serial(process_environment)]
 async fn callback_rejects_a_state_with_a_bad_signature() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -236,7 +228,6 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 
 /// A `state` value signed correctly (under the deployment's own client secret, so the HMAC check that `callback_rejects_a_state_with_a_bad_signature` covers passes) but too old (older than `STATE_TTL_SECS`) is rejected the same `401` way: `state_token::verify`'s expiry check runs before the CSRF cookie is ever consulted.
 #[tokio::test]
-#[serial(process_environment)]
 async fn callback_rejects_an_expired_state() {
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -386,16 +377,14 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn oauth_provisioning_policy_controls_new_caps() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
     for (index, value, expected_tenant, expected_entities) in
         [(0, None, None, None), (1, Some("true"), None, None)]
     {
-        match value {
-            Some(v) => guard.set("YORISHIRO_PLAN_POLICY_ENABLED", v),
-            None => guard.remove("YORISHIRO_PLAN_POLICY_ENABLED"),
-        }
+        let _policy = crate::requests::ConfigOverride::set(&[(
+            "initializers.plan_policy_enabled",
+            value.unwrap_or("false").into(),
+        )]);
         boot_request::<App, _, _>(|_request, ctx| async move {
             if crate::requests::skip_unlicensed(&ctx) {
                 return;

@@ -294,14 +294,11 @@ mod concurrency {
     }
 
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn same_tenant_private_jobs_keep_their_key_without_a_default_cap() {
-        let guard = crate::EnvGuard::capture(&[
-            "YORISHIRO_PLAN_POLICY_ENABLED",
-            "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
+        let _config = crate::requests::ConfigOverride::set(&[
+            ("initializers.plan_policy_enabled", "false".into()),
+            ("initializers.worker_admission.tenant_private", "1".into()),
         ]);
-        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-        guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
             let a_second = workspace_of(&ctx, tenant_a).await;
@@ -332,17 +329,14 @@ mod concurrency {
 
     #[cfg(feature = "enterprise")]
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn cross_tenant_private_jobs_keep_distinct_keys_without_default_caps() {
         if !crate::require_postgres_backend() {
             return;
         }
-        let guard = crate::EnvGuard::capture(&[
-            "YORISHIRO_PLAN_POLICY_ENABLED",
-            "YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT",
+        let _config = crate::requests::ConfigOverride::set(&[
+            ("initializers.plan_policy_enabled", "false".into()),
+            ("initializers.worker_admission.tenant_private", "1".into()),
         ]);
-        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-        guard.set("YORISHIRO_WORKER_CLASS_TENANT_PRIVATE_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             if crate::requests::skip_unlicensed(&ctx) {
                 return;
@@ -376,16 +370,12 @@ mod concurrency {
     }
 
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn same_tenant_shared_and_official_jobs_keep_their_keys_without_default_caps() {
-        let guard = crate::EnvGuard::capture(&[
-            "YORISHIRO_PLAN_POLICY_ENABLED",
-            "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
-            "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+        let _config = crate::requests::ConfigOverride::set(&[
+            ("initializers.plan_policy_enabled", "false".into()),
+            ("initializers.worker_admission.shared", "1".into()),
+            ("initializers.worker_admission.official", "1".into()),
         ]);
-        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-        guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "1");
-        guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
             for (class, key) in [
@@ -413,19 +403,15 @@ mod concurrency {
 
     #[cfg(feature = "enterprise")]
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn cross_tenant_shared_and_official_jobs_keep_deployment_keys_without_default_caps() {
         if !crate::require_postgres_backend() {
             return;
         }
-        let guard = crate::EnvGuard::capture(&[
-            "YORISHIRO_PLAN_POLICY_ENABLED",
-            "YORISHIRO_WORKER_CLASS_SHARED_LIMIT",
-            "YORISHIRO_WORKER_OFFICIAL_LIMIT",
+        let _config = crate::requests::ConfigOverride::set(&[
+            ("initializers.plan_policy_enabled", "false".into()),
+            ("initializers.worker_admission.shared", "1".into()),
+            ("initializers.worker_admission.official", "1".into()),
         ]);
-        guard.remove("YORISHIRO_PLAN_POLICY_ENABLED");
-        guard.set("YORISHIRO_WORKER_CLASS_SHARED_LIMIT", "1");
-        guard.set("YORISHIRO_WORKER_OFFICIAL_LIMIT", "1");
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
             if crate::requests::skip_unlicensed(&ctx) {
                 return;

@@ -44,11 +44,74 @@ pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
     true
 }
 
-/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future.
-pub(crate) async fn with_max_tenants<T>(value: &str, fut: impl Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
-    guard.set("YORISHIRO_MAX_TENANTS", value);
-    fut.await
+thread_local! {
+    static CONFIG_OVERRIDES: std::cell::RefCell<Vec<(&'static str, serde_json::Value)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Overrides the booted apps' configuration at dotted paths such as `settings.max_tenants` until the guard drops.
+///
+/// Request tests poll their whole future on the test thread, so a thread-local scope is private to the test; the process environment is never touched.
+pub(crate) struct ConfigOverride(usize);
+
+impl ConfigOverride {
+    pub(crate) fn set(overrides: &[(&'static str, serde_json::Value)]) -> Self {
+        CONFIG_OVERRIDES.with_borrow_mut(|stack| {
+            let depth = stack.len();
+            stack.extend_from_slice(overrides);
+            Self(depth)
+        })
+    }
+
+    /// Caps the tenants a booted app accepts.
+    pub(crate) fn max_tenants(limit: u64) -> Self {
+        Self::set(&[("settings.max_tenants", limit.into())])
+    }
+
+    /// Boots apps without a licence key, whatever the ambient environment holds.
+    pub(crate) fn unlicensed() -> Self {
+        Self::set(&[("initializers.licence_key", "".into())])
+    }
+}
+
+impl Drop for ConfigOverride {
+    fn drop(&mut self) {
+        CONFIG_OVERRIDES.with_borrow_mut(|stack| stack.truncate(self.0));
+    }
+}
+
+/// Sets how many consumers the context's queue runs, whatever its backend.
+pub(crate) fn set_queue_workers(ctx: &mut loco_rs::app::AppContext, workers: u32) {
+    use loco_rs::config::QueueConfig;
+    match ctx.config.queue.as_mut().expect("configured queue") {
+        QueueConfig::Sqlite(config) => config.num_workers = workers,
+        QueueConfig::Postgres(config) => config.num_workers = workers,
+        QueueConfig::Redis(config) => config.num_workers = workers,
+        _ => unreachable!("supported queue backends"),
+    }
+}
+
+/// Applies the scoped overrides to a freshly loaded configuration.
+fn apply_config_overrides(config: loco_rs::config::Config) -> loco_rs::config::Config {
+    let overrides = CONFIG_OVERRIDES.with_borrow(Clone::clone);
+    if overrides.is_empty() {
+        return config;
+    }
+    let mut document = serde_json::to_value(&config).expect("serialise config");
+    for (path, value) in overrides {
+        let mut node = &mut document;
+        for key in path.split('.') {
+            node = node
+                .as_object_mut()
+                .expect("config path crosses a non-object")
+                .entry(key)
+                .or_insert(serde_json::Value::Null);
+            if node.is_null() {
+                *node = serde_json::json!({});
+            }
+        }
+        *node = value;
+    }
+    serde_json::from_value(document).expect("overridden config stays valid")
 }
 
 use futures::FutureExt;
@@ -161,6 +224,7 @@ where
     }
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
+        .map(apply_config_overrides)
         .expect("load postgres config");
     let database = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
         .expect("prepare test database");
@@ -217,7 +281,7 @@ where
     drop(directory);
 }
 
-/// Boots an isolated request app while temporarily overriding its configured timezone.
+/// Boots an isolated request app with its configured timezone overridden.
 /// Timezone tests may mutate the database-wide timezone and maintenance state.
 pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
     timezone: &'static str,
@@ -226,8 +290,7 @@ pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: Future<Output = ()>,
 {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_TIMEZONE"]);
-    guard.set("YORISHIRO_TIMEZONE", timezone);
+    let _timezone = ConfigOverride::set(&[("settings.timezone", timezone.into())]);
     boot_request::<H, _, _>(callback).await;
 }
 
@@ -244,6 +307,7 @@ where
     // Load the configured test app, then override only its isolated database and queue files.
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
+        .map(apply_config_overrides)
         .expect("load sqlite config");
     config.database.uri = format!("sqlite://{db_path}?mode=rwc");
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {

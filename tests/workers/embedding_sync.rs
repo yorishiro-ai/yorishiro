@@ -97,12 +97,7 @@ mod conflict {
 
     impl QueueHarness {
         async fn lane(mut ctx: AppContext, workers: u32) -> Self {
-            match ctx.config.queue.as_mut().expect("configured queue") {
-                loco_rs::config::QueueConfig::Sqlite(config) => config.num_workers = workers,
-                loco_rs::config::QueueConfig::Postgres(config) => config.num_workers = workers,
-                loco_rs::config::QueueConfig::Redis(config) => config.num_workers = workers,
-                _ => unreachable!(),
-            }
+            crate::requests::set_queue_workers(&mut ctx, workers);
             let queue = crate::requests::query_worker::shared_target_queue(&mut ctx).await;
             let running = queue.clone();
             let runner =
@@ -821,12 +816,7 @@ mod conflict {
             let (provider, transport, _server) = MixedProvider::start().await;
             ctx.shared_store.insert(transport);
             let mut worker_ctx = ctx.clone();
-            match worker_ctx.config.queue.as_mut().unwrap() {
-                loco_rs::config::QueueConfig::Sqlite(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Postgres(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Redis(config) => config.num_workers = 2,
-                _ => unreachable!(),
-            }
+            crate::requests::set_queue_workers(&mut worker_ctx, 2);
             let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
@@ -991,12 +981,7 @@ mod conflict {
             let (provider, transport, _server) = ErrorThenSuccessProvider::start().await;
             ctx.shared_store.insert(transport);
             let mut worker_ctx = ctx.clone();
-            match worker_ctx.config.queue.as_mut().unwrap() {
-                loco_rs::config::QueueConfig::Sqlite(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Postgres(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Redis(config) => config.num_workers = 2,
-                _ => unreachable!(),
-            }
+            crate::requests::set_queue_workers(&mut worker_ctx, 2);
             let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,

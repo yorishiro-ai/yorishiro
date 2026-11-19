@@ -401,12 +401,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
         ctx.shared_store.insert(provider);
         let mut worker_ctx = ctx.clone();
         // Ordering is observable with one consumer, as with a single-worker deployment.
-        match worker_ctx.config.queue.as_mut().unwrap() {
-            QueueConfig::Sqlite(config) => config.num_workers = 1,
-            QueueConfig::Postgres(config) => config.num_workers = 1,
-            QueueConfig::Redis(config) => config.num_workers = 1,
-            _ => panic!("unsupported queue"),
-        }
+        crate::requests::set_queue_workers(&mut worker_ctx, 1);
         let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
         let mut ids = Vec::new();
         // Fault-inject competing provider deliveries with explicit priorities; request creation and execution use production models and workers.

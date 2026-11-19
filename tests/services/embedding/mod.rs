@@ -1,8 +1,8 @@
 mod local;
 mod model_fetch;
 mod openai;
-use serial_test::serial;
 
+use serial_test::serial;
 use yorishiro::data::settings::Settings;
 use yorishiro::services::embedding::build_embedding_provider;
 

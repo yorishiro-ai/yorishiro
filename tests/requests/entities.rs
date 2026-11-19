@@ -7,15 +7,15 @@ use super::fixtures::{TenantArgs, TestTenant};
 
 #[cfg(feature = "enterprise")]
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 async fn entity_plan_quota_expires_but_manual_limit_remains() {
     use axum::http::StatusCode;
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "true");
+    let _config = crate::requests::ConfigOverride::set(&[(
+        "initializers.plan_policy_enabled",
+        "true".into(),
+    )]);
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::from_value(serde_json::json!({

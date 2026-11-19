@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use yorishiro::App;
 #[tokio::test]
 async fn signup_without_invite_creates_its_own_tenant() {
@@ -48,89 +47,81 @@ async fn signup_without_invite_creates_its_own_tenant() {
 }
 /// `YORISHIRO_MAX_TENANTS` bounds invite-less signup the same way it bounds `/setup`: once the cap is reached, further signups are refused rather than growing the tenant count unbounded.
 #[tokio::test]
-#[serial(process_environment)]
 async fn signup_without_invite_respects_the_tenant_cap() {
-    super::with_max_tenants("1", async move {
-        boot_request::<App, _, _>(|request, _ctx| async move {
-            let first = request
-                .post("/auth/signup")
-                .json(&serde_json::json!({
-                    "email": "first@example.com",
-                    "password": "correct-horse-battery-staple",
-                }))
-                .await;
-            assert_eq!(
-                first.status_code(),
-                StatusCode::CREATED,
-                "response: {:?}",
-                first.text()
-            );
+    let _cap = crate::requests::ConfigOverride::max_tenants(1);
+    boot_request::<App, _, _>(|request, _ctx| async move {
+        let first = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({
+                "email": "first@example.com",
+                "password": "correct-horse-battery-staple",
+            }))
+            .await;
+        assert_eq!(
+            first.status_code(),
+            StatusCode::CREATED,
+            "response: {:?}",
+            first.text()
+        );
 
-            let second = request
-                .post("/auth/signup")
-                .json(&serde_json::json!({
-                    "email": "second@example.com",
-                    "password": "correct-horse-battery-staple",
-                }))
-                .await;
-            assert_eq!(
-                second.status_code(),
-                StatusCode::CONFLICT,
-                "response: {:?}",
-                second.text()
-            );
-        })
-        .await;
+        let second = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({
+                "email": "second@example.com",
+                "password": "correct-horse-battery-staple",
+            }))
+            .await;
+        assert_eq!(
+            second.status_code(),
+            StatusCode::CONFLICT,
+            "response: {:?}",
+            second.text()
+        );
     })
     .await;
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
     if !crate::require_postgres_backend() {
         return;
     }
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
-    super::with_max_tenants("100", async move {
-        boot_request::<App, _, _>(|request, _ctx| async move {
-            for email in ["first@example.com", "second@example.com"] {
-                let response = request
-                    .post("/auth/signup")
-                    .json(&serde_json::json!({
-                        "email": email,
-                        "password": "correct-horse-battery-staple",
-                    }))
-                    .await;
-                if email.starts_with("first") {
-                    assert_eq!(response.status_code(), StatusCode::CREATED);
-                } else {
-                    assert_eq!(response.status_code(), StatusCode::CONFLICT);
-                }
+    let _licence = crate::requests::ConfigOverride::unlicensed();
+    let _cap = crate::requests::ConfigOverride::max_tenants(100);
+    boot_request::<App, _, _>(|request, _ctx| async move {
+        for email in ["first@example.com", "second@example.com"] {
+            let response = request
+                .post("/auth/signup")
+                .json(&serde_json::json!({
+                    "email": email,
+                    "password": "correct-horse-battery-staple",
+                }))
+                .await;
+            if email.starts_with("first") {
+                assert_eq!(response.status_code(), StatusCode::CREATED);
+            } else {
+                assert_eq!(response.status_code(), StatusCode::CONFLICT);
             }
-        })
-        .await;
+        }
     })
     .await;
 }
 
-/// Widens `DB_MAX_CONNECTIONS` past `config/test.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
-async fn with_db_max_connections<T>(value: &str, fut: impl Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);
-    guard.set("DB_MAX_CONNECTIONS", value);
+/// Widens the connection pool past `config/test.yaml`'s default, which would starve the second connection before it ever reaches the advisory lock.
+async fn with_db_max_connections<T>(value: u64, fut: impl Future<Output = T>) -> T {
+    let _config =
+        crate::requests::ConfigOverride::set(&[("database.max_connections", value.into())]);
     fut.await
 }
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.
 /// This test is PostgreSQL-only: `lock_for_update` is a no-op on SQLite,
 /// so the serialisation guarantee does not hold.
 #[tokio::test]
-#[serial(process_environment)]
 async fn create_tenant_serializes_on_its_advisory_lock() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    with_db_max_connections("4", async move {
+    with_db_max_connections(4, async move {
         boot_request::<App, _, _>(|_request, ctx| async move {
             let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
             yorishiro::db::lock_for_update(&holder, "create_tenant")

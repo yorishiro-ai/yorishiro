@@ -3,7 +3,6 @@ use super::fixtures::{TenantArgs, TestTenant};
 use super::query_worker::{boot_with_query_worker, boot_with_query_worker_and_drain};
 use crate::http_stub::{keyword_provider, unavailable_provider};
 use axum::http::StatusCode;
-use serial_test::serial;
 use std::sync::Arc;
 use std::time::Duration;
 use yorishiro::App;
@@ -249,14 +248,11 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
 
 /// With no worker running the search must fail, loudly and boundedly: a lexical fallback would return results the caller did not ask for.
 #[tokio::test]
-#[serial(process_environment)]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
-    let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS",
-        "YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS",
+    let _config = crate::requests::ConfigOverride::set(&[
+        ("settings.query_embedding.timeout_ms", 300.into()),
+        ("settings.query_embedding.poll_interval_ms", 50.into()),
     ]);
-    guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", "300");
-    guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", "50");
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(
             &request,

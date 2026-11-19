@@ -12,17 +12,13 @@ use yorishiro::models::_entities::tenant_tenants;
 
 const WEBHOOK_SECRET: &str = "whsec_test";
 
-/// The shipped Loco config interpolates these variables before booting each test app.
-/// `#[serial(process_environment)]` on every test in this suite makes that safe.
+/// Boots every app inside the future with Stripe configured.
 async fn with_stripe_env<T>(fut: impl Future<Output = T>) -> T {
-    let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_STRIPE_WEBHOOK_SECRET",
-        "YORISHIRO_STRIPE_PRICE_PRO",
-        "YORISHIRO_STRIPE_PRICE_TEAM",
+    let _config = crate::requests::ConfigOverride::set(&[
+        ("initializers.stripe.webhook_secret", WEBHOOK_SECRET.into()),
+        ("initializers.stripe.price_pro", "price_pro".into()),
+        ("initializers.stripe.price_team", "price_team".into()),
     ]);
-    guard.set("YORISHIRO_STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET);
-    guard.set("YORISHIRO_STRIPE_PRICE_PRO", "price_pro");
-    guard.set("YORISHIRO_STRIPE_PRICE_TEAM", "price_team");
     fut.await
 }
 fn sign(secret: &str, timestamp: i64, payload: &[u8]) -> String {
@@ -162,10 +158,11 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 
 /// Cancelling a subscription changes billing without overwriting operational caps.
 #[tokio::test]
-#[serial(process_environment)]
 async fn a_cancellation_returns_the_tenant_to_free() {
-    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    policy.set("YORISHIRO_PLAN_POLICY_ENABLED", "true");
+    let _policy = crate::requests::ConfigOverride::set(&[(
+        "initializers.plan_policy_enabled",
+        "true".into(),
+    )]);
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             if crate::requests::skip_unlicensed(&ctx) {
@@ -238,10 +235,11 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
-    let policy = crate::EnvGuard::capture(&["YORISHIRO_PLAN_POLICY_ENABLED"]);
-    policy.remove("YORISHIRO_PLAN_POLICY_ENABLED");
+    let _policy = crate::requests::ConfigOverride::set(&[(
+        "initializers.plan_policy_enabled",
+        "false".into(),
+    )]);
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             if crate::requests::skip_unlicensed(&ctx) {
@@ -303,7 +301,6 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
 
 /// With no webhook secret configured there is no way to tell a genuine Stripe delivery from anything else, so the endpoint refuses rather than accepting unverifiable requests.
 #[tokio::test]
-#[serial(process_environment)]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -327,7 +324,6 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 
 /// A tampered payload (signature computed over a different body) must be rejected.
 #[tokio::test]
-#[serial(process_environment)]
 async fn a_tampered_payload_is_rejected() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -359,7 +355,6 @@ async fn a_tampered_payload_is_rejected() {
 
 /// Structural signature failures keep the webhook's plain-text 400 contract.
 #[tokio::test]
-#[serial(process_environment)]
 async fn malformed_signature_headers_have_exact_plain_text_rejections() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -416,7 +411,6 @@ async fn malformed_signature_headers_have_exact_plain_text_rejections() {
 
 /// A valid signature is checked before malformed JSON is reported.
 #[tokio::test]
-#[serial(process_environment)]
 async fn malformed_json_is_rejected_after_signature_verification() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -453,7 +447,6 @@ async fn malformed_json_is_rejected_after_signature_verification() {
 
 /// A delayed subscription event is accepted but cannot undo a newer applied event.
 #[tokio::test]
-#[serial(process_environment)]
 async fn a_stale_subscription_event_is_not_reapplied() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
@@ -505,7 +498,6 @@ async fn a_stale_subscription_event_is_not_reapplied() {
 
 /// Checkout completion links the Stripe customer so a later subscription event can resolve its tenant.
 #[tokio::test]
-#[serial(process_environment)]
 async fn checkout_completion_links_the_stripe_customer() {
     with_stripe_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {

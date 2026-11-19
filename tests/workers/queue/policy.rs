@@ -70,14 +70,14 @@ async fn unlicensed_policy_bypasses_plan_and_workspace_resolution() {
 
 #[cfg(feature = "enterprise")]
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 async fn disabled_policy_bypasses_resolution_even_with_valid_licence() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "false");
+    let _config = crate::requests::ConfigOverride::set(&[(
+        "initializers.plan_policy_enabled",
+        "false".into(),
+    )]);
     crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         ctx.shared_store
             .insert(Arc::new(LicenceState::licensed(LicenceClaims {
@@ -96,14 +96,14 @@ async fn disabled_policy_bypasses_resolution_even_with_valid_licence() {
 
 #[cfg(feature = "enterprise")]
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 async fn enabled_policy_rechecks_licence_before_each_admission() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "true");
+    let _config = crate::requests::ConfigOverride::set(&[(
+        "initializers.plan_policy_enabled",
+        "true".into(),
+    )]);
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;

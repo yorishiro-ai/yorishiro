@@ -570,12 +570,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
         let jobs = [jobs[0], jobs[1]];
         // Two real consumers must contend while the first external call is held.
         let mut worker_ctx = ctx.clone();
-        match worker_ctx.config.queue.as_mut().unwrap() {
-            loco_rs::config::QueueConfig::Sqlite(queue) => queue.num_workers = 2,
-            loco_rs::config::QueueConfig::Postgres(queue) => queue.num_workers = 2,
-            loco_rs::config::QueueConfig::Redis(queue) => queue.num_workers = 2,
-            _ => unreachable!("supported queue topology"),
-        }
+        crate::requests::set_queue_workers(&mut worker_ctx, 2);
         let queue =
             crate::requests::query_worker::job_target_queue(&mut worker_ctx, WorkerTarget::Shared)
                 .await;

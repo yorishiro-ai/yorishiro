@@ -178,10 +178,8 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 /// An unlicensed deployment answers the same 404 whether or not a valid key is presented, so an anonymous prober cannot tell "does not exist" from "exists but locked".
 /// Matches `marketplace`'s and `dashboard`'s own tests for the same gate.
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY"]);
-    guard.remove("YORISHIRO_LICENSE_KEY");
+    let _licence = crate::requests::ConfigOverride::unlicensed();
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
