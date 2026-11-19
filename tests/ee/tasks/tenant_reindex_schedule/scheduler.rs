@@ -404,7 +404,7 @@ async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
             .unwrap();
     }
     transaction.commit().await.unwrap();
-    // A failed outbox insert must roll back both schedule advancement and all jobs.
+    // Direct write (c): a failed outbox insert, injected deterministically, must roll back both schedule advancement and all jobs.
     ctx.db.execute_unprepared(
         "CREATE TRIGGER refuse_test_dispatch BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'test outbox unavailable'); END"
     ).await.unwrap();
@@ -601,7 +601,7 @@ async fn invalid_stored_intervals_are_rejected_without_advancement() {
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         for interval in ["PT1S", "P1D1D", "PT9223372036854775S"] {
             set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
-            // Bypass input validation to exercise detection of corrupt stored data.
+            // Direct write (c): bypasses input validation to exercise detection of corrupt stored data.
             yorishiro::models::_entities::tenant_reindex_schedules::Entity::update_many()
                 .col_expr(
                     yorishiro::models::_entities::tenant_reindex_schedules::Column::Interval,

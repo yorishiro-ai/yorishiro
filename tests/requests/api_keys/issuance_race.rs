@@ -46,6 +46,7 @@ async fn tenant_key_issuance_rechecks_authority_after_waiting_for_policy_detachm
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
             }).await.expect("issuance must wait on the membership fence");
+            // Direct write (c): the demotion runs inside the transaction holding the fence, which a handler cannot be paused on.
             yorishiro::models::_entities::iam_user_policy_attachments::Entity::delete_many()
                 .filter(yorishiro::models::_entities::iam_user_policy_attachments::Column::UserId.eq(admin.id))
                 .exec(&txn).await.unwrap();

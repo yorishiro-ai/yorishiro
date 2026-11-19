@@ -43,6 +43,7 @@ async fn persisted_row_with_unknown_status_returns_internal_error() {
         inference_jobs::create(&db, id, fixture.workspace_id, "notes")
             .await
             .expect("create job");
+        // Direct write (c): corrupt-row injection, since no operation stores an unknown status.
         let row = generated::ActiveModel {
             id: Set(id),
             status: Set("paused".into()),
@@ -149,6 +150,7 @@ async fn claim_rejects_stale_and_invalid_rows() {
         inference_jobs::create(&db, invalid_id, fixture.workspace_id, "notes")
             .await
             .expect("create job to corrupt");
+        // Direct write (c): corrupt-row injection, since no operation stores an unknown status.
         generated::ActiveModel {
             id: Set(invalid_id),
             status: Set("paused".into()),

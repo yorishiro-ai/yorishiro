@@ -27,6 +27,7 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
             serde_json::from_value(definition.clone()).unwrap(), None, None).await.unwrap().0;
         let target = schema_schemas::create_schema(&txn, tenant.tenant_id, destination.id,
             serde_json::from_value(definition).unwrap(), None, None).await.unwrap().0;
+        // No operation creates a fork onto a schema the test names: the fork operation makes its own, and fails on PostgreSQL inside this transaction.
         let fork = workspace_schema_forks::ActiveModel {
             id: Set(Uuid::now_v7()), tenant_id: Set(tenant.tenant_id), workspace_id: Set(destination.id),
             source_workspace_id: Set(tenant.workspace_id), source_schema_id: Set(source.id),

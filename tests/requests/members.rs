@@ -55,6 +55,7 @@ async fn competing_tenant_memberships_allow_only_one() {
                 .unwrap(),
             1
         );
+        // Direct write (b): the test proves the database unique constraint, which `add_member` would reject first.
         let duplicate = tenant_memberships::Entity::insert(tenant_memberships::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(other_tenant),
             user_id: sea_orm::ActiveValue::Set(user.id),

@@ -28,6 +28,7 @@ async fn create_workspace(
 
 // Fork heads are archived, so normal entity creation cannot reference them.
 // Inject an existing historical reference to exercise deletion's integrity guard.
+// Direct write (a): no operation creates an entity on an archived schema version.
 async fn insert_reference(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
@@ -118,6 +119,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let fork_id = fork["id"].as_str().unwrap().to_owned();
         let original_head_id: Uuid = fork["fork_schema_id"].as_str().unwrap().parse().unwrap();
         let original_head_version = fork["fork_schema_version"].as_i64().unwrap() as i32;
+        // Direct write (b): proves the fork-head history trigger rejects updates.
         let history_update = workspace_schema_fork_heads::Entity::update_many()
             .col_expr(
                 workspace_schema_fork_heads::Column::SchemaId,
@@ -910,6 +912,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             .begin_for_workspace(tenant_a, target.id)
             .await
             .unwrap();
+        // Direct write (b): proves RLS rejects a cross-tenant update.
         let update = workspace_schema_forks::Entity::update_many()
             .col_expr(
                 workspace_schema_forks::Column::TenantId,
@@ -931,6 +934,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             .begin_for_workspace(tenant_a, target.id)
             .await
             .unwrap();
+        // Direct write (b): proves RLS rejects a cross-tenant insert.
         let insert = workspace_schema_forks::ActiveModel {
             tenant_id: ActiveValue::Set(tenant_b),
             workspace_id: ActiveValue::Set(target.id),
@@ -1002,7 +1006,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             .unwrap()
             .unwrap();
 
-        // Deliberately bypass the one-tenant policy to exercise the database's cross-tenant integrity trigger.
+        // Direct writes below (b): bypass the one-tenant policy to exercise the database's cross-tenant integrity trigger.
         let tenant_b = tenant_tenants::ActiveModel {
             name: ActiveValue::Set("sqlite-tenant-b".into()),
             ..Default::default()

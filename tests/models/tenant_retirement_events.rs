@@ -6,6 +6,7 @@ async fn retirement_evidence_survives_without_live_tenant_or_actor_rows() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let tenant_id = uuid::Uuid::new_v4();
         let actor_user_id = uuid::Uuid::new_v4();
+        // Direct writes (b): the test is about the table's constraints, with a tenant and actor that never existed.
         let event = tenant_retirement_events::ActiveModel {
             tenant_id: Set(tenant_id),
             actor_user_id: Set(Some(actor_user_id)),
