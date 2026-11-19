@@ -33,7 +33,6 @@ async fn member_key(
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
-    use sea_orm::ActiveModelTrait;
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     let _config = crate::requests::ConfigOverride::set(&[(
@@ -80,7 +79,6 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
-    use sea_orm::ActiveModelTrait;
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     let _config = crate::requests::ConfigOverride::set(&[(

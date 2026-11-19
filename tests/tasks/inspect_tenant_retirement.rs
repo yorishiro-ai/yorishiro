@@ -174,7 +174,6 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::ActiveModelTrait;
     use yorishiro::models::{api_keys, tenancy};
 
     boot_request::<App, _, _>(|request, ctx| async move {

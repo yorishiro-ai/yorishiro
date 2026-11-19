@@ -4,7 +4,6 @@ use yorishiro::App;
 
 #[tokio::test]
 async fn overview_distinguishes_billing_manual_and_active_limits() {
-    use sea_orm::ActiveModelTrait;
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     let _config = crate::requests::ConfigOverride::set(&[(

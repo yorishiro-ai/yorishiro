@@ -2,7 +2,6 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
-use sea_orm::ActiveModelTrait;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;

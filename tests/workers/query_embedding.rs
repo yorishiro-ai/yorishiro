@@ -137,8 +137,6 @@ fn the_job_payload_carries_ids_only() {
 
 #[tokio::test]
 async fn tenant_disabled_while_query_waits_for_capacity_makes_no_provider_call() {
-    use sea_orm::ActiveModelTrait;
-
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;

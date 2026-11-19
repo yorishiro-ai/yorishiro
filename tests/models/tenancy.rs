@@ -1,7 +1,6 @@
 mod sqlite;
 
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use sea_orm::ActiveModelTrait;
 use sea_orm::TransactionTrait;
 use std::sync::Arc;
 use tokio::sync::Barrier;
