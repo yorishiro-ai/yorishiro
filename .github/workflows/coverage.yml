@@ -21,14 +21,10 @@ jobs:
       CARGO_TERM_COLOR: always
       CARGO_HOME: ${{ github.workspace }}/.cargo-cache
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target
-      RUSTUP_TOOLCHAIN: nightly
       YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
       DB_MAX_CONNECTIONS: "100"
       DB_CONNECT_TIMEOUT: "5000"
       RUST_BACKTRACE: "1"
-      EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
-      EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -43,13 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/rust-setup
-      - name: Set up nightly branch instrumentation
-        uses: dtolnay/rust-toolchain@nightly
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
-          key: coverage-nightly
+          key: coverage
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
@@ -71,13 +65,10 @@ jobs:
           QUEUE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
         run: |
           ignore='(^|/)src/models/_entities/|(^|/)migration/src/|(^|/)src/bin/'
-          cargo +nightly llvm-cov --locked --workspace --features enterprise --branch --ignore-filename-regex "$ignore" --lcov --output-path coverage/lcov.info
-          cargo +nightly llvm-cov report --ignore-filename-regex "$ignore" | tee coverage/summary.txt
-      - name: Upload the report
-        uses: actions/upload-artifact@v7
+          cargo llvm-cov --locked --workspace --features enterprise --ignore-filename-regex "$ignore" --lcov --output-path lcov.info
+          cargo llvm-cov report --ignore-filename-regex "$ignore" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: codecov/codecov-action@v5
         with:
-          name: coverage
-          path: |
-            coverage/lcov.info
-            coverage/summary.txt
-          if-no-files-found: error
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
