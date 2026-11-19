@@ -192,6 +192,7 @@ async fn enqueue_rejection_is_workspace_scoped_and_scan_continues() {
             ),
             backend => panic!("unsupported test backend {backend:?}"),
         };
+        // Direct write (c): deterministic fault injection rejecting one workspace's dispatch.
         ctx.db.execute_unprepared(&sql).await.unwrap();
 
         let error = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
@@ -246,6 +247,7 @@ async fn all_enqueue_failures_are_aggregated_with_each_workspace_id() {
             DbBackend::Sqlite => "CREATE TRIGGER reject_all_dispatches BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'reject all dispatches'); END",
             backend => panic!("unsupported test backend {backend:?}"),
         };
+        // Direct write (c): deterministic fault injection rejecting every dispatch.
         ctx.db.execute_unprepared(fault).await.unwrap();
         let error = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
             .run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
@@ -282,6 +284,7 @@ async fn missing_lifecycle_table_returns_workspace_lookup_error() {
             metadata.dimensions,
         )
         .await;
+        // Direct write (c): deterministic fault injection hiding the lifecycle table.
         ctx.db
             .execute_unprepared(
                 "ALTER TABLE queue_job_lifecycles RENAME TO queue_job_lifecycles_hidden",
@@ -315,6 +318,7 @@ async fn stamp_workspace(
     dimensions: usize,
 ) {
     use sea_orm::ActiveValue::Set;
+    // Direct write (a): a stamp from an earlier deployment model, which no operation produces (the stamp operation only fills a missing one).
     let workspace = yorishiro::models::workspace_workspaces::Entity::find_by_id(workspace_id)
         .one(&ctx.db)
         .await

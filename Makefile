@@ -13,13 +13,13 @@ export CARGO_HOME := $(abspath .cargo-cache)
 export CARGO_TARGET_DIR := $(abspath target)
 export PATH := $(CARGO_HOME)/bin:$(PATH)
 
-coverage test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
+test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
 task doctor migrate entities: export LOCO_ENV = test
-coverage test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
-coverage test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
+test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
+test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
 test-postgres test-sqlite test-valkey: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check coverage test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
 
 check: check-ce
 
@@ -58,11 +58,6 @@ test-location-check:
 	@if git grep -n -E '#\[[[:space:]]*((tokio|async_std)::)?test([[:space:]]|\]|\()|#\[[[:space:]]*cfg[[:space:]]*\([[:space:]]*test[[:space:]]*\)' -- src ee edition migration/src; then \
 		echo 'ERROR: tests and test-only code belong in tests/' >&2; exit 1; \
 	fi
-
-# Nightly is required because LLVM branch coverage is not available on stable.
-# Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
-coverage: patch-check
-	uv run scripts/coverage_report.py
 
 # Every PostgreSQL test creates and drops its own database, so no setup beyond a reachable server is needed.
 test-postgres: patch-check

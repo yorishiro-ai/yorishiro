@@ -259,6 +259,7 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
         assert!(!listed.to_string().contains(original["full_key"].as_str().unwrap()));
         assert!(!listed.to_string().contains("key_hash"));
         use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+        // Direct write (c): issuance rejects a past expiry, so time passing is injected by moving the stored expiry.
         yorishiro::models::api_keys::ActiveModel {
             id: Set(replacement["id"].as_str().unwrap().parse().unwrap()),
             expires_at: Set(Some((chrono::Utc::now()-chrono::Duration::seconds(1)).fixed_offset())),
@@ -599,6 +600,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
 
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
+        // Direct write (a): the model issuer operation takes no expiry, and this key must stay the same issuer principal.
         api_keys::Entity::update_many()
             .col_expr(yorishiro::models::_entities::api_keys::Column::ExpiresAt, sea_orm::sea_query::Expr::value(expiry.fixed_offset()))
             .filter(yorishiro::models::_entities::api_keys::Column::Id.eq(read_issuer.id))

@@ -24,6 +24,7 @@ async fn archived_schema_deletion_names_every_history_reference() {
         for _ in 0..7 {
             versions.push(create_schema_version(&request, &tenant.api_key, &definition).await.parse::<Uuid>().unwrap());
         }
+        // Direct writes below (a): snapshots, proposals and forks need an inference job or the enterprise fork operation, and each must reference a chosen archived version.
         entity_snapshots::ActiveModel {
             id: Set(Uuid::now_v7()), job_id: Set(Uuid::now_v7()), workspace_id: Set(tenant.workspace_id),
             entity_id: Set(Uuid::now_v7()), schema_id: Set(versions[1]), schema_version: Set(2), data: Set(json!({"title":"retained"})),
@@ -99,6 +100,7 @@ async fn schema_deletion_sees_incoming_forks_outside_the_selected_workspace() {
         let destination = tenancy::create_workspace(&txn, tenant.tenant_id, &destination_name, None, None).await.unwrap();
         let target = schema_schemas::create_schema(&txn, tenant.tenant_id, destination.id,
             serde_json::from_value(definition).unwrap(), None, None).await.unwrap();
+        // Direct write (a): the fork operation is enterprise-only and creates its own head schema, while this community test needs a fork pointing at `target`.
         workspace_schema_forks::ActiveModel {
             id: Set(Uuid::now_v7()), tenant_id: Set(tenant.tenant_id), workspace_id: Set(destination.id),
             source_workspace_id: Set(tenant.workspace_id), source_schema_id: Set(source),

@@ -19,7 +19,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
             "name":"quota-note", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}
         })).unwrap();
         let (schema, _) = schema_schemas::create_schema(&ctx.db, tenant.tenant_id, tenant.workspace_id, definition, None, None).await.unwrap();
-        // Seed exactly at Free's boundary without hundreds of embedding jobs.
+        // Direct write (a): seeds exactly Free's boundary without hundreds of embedding jobs, which no operation does in bulk.
         entity_entities::Entity::insert_many((0..500).map(|index| entity_entities::ActiveModel {
             id: Set(Uuid::now_v7()), workspace_id: Set(tenant.workspace_id), schema_id: Set(schema.id),
             schema_version: Set(schema.version), entity_type: Set("note".into()),
@@ -49,6 +49,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
         let _ = ctx.shared_store.remove::<Arc<LicenceState>>();
         request.post("/api/entities").add_header("Authorization", format!("Bearer {}",tenant.api_key))
             .json(&body).await.assert_status(StatusCode::CREATED);
+        // Direct write (a): no operation sets a manual entity limit.
         yorishiro::models::workspace_workspaces::ActiveModel {
             id:Set(tenant.workspace_id), max_entities:Set(Some(0)), ..Default::default()
         }.update(&ctx.db).await.unwrap();

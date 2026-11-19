@@ -161,6 +161,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert!(events.iter().any(|event| event.action == "policy_create"));
 
             use sea_orm::ConnectionTrait;
+            // Direct write (c): deterministic fault injection making the audit insert fail.
             ctx.db
                 .execute_unprepared(
                     "ALTER TABLE iam_audit_events RENAME TO unavailable_iam_audit_events",
@@ -532,16 +533,16 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert!(next.as_array().unwrap().is_empty());
             use sea_orm::{ActiveModelTrait, ActiveValue::Set, TransactionTrait};
             let txn = ctx.db.begin().await.unwrap();
+            // Direct write (a): `create_tenant` enforces the one-tenant cap, and the IAM group operations are crate-private.
             let foreign_tenant = yorishiro::models::tenant_tenants::ActiveModel {
                 name: Set("foreign".into()), ..Default::default()
             }.insert(&txn).await.unwrap();
             let foreign_group = yorishiro::models::iam_groups::ActiveModel {
                 tenant_id: Set(foreign_tenant.id), name: Set("foreign".into()), ..Default::default()
             }.insert(&txn).await.unwrap();
-            let foreign_workspace = yorishiro::models::workspace_workspaces::ActiveModel {
-                tenant_id: Set(foreign_tenant.id), name: Set("foreign".into()),
-                status: Set("schema_pending".into()), ..Default::default()
-            }.insert(&txn).await.unwrap();
+            let foreign_workspace = yorishiro::models::tenancy::create_workspace(
+                &txn, foreign_tenant.id, "foreign", None, None,
+            ).await.unwrap();
             txn.commit().await.unwrap();
             request.get(&format!("/api/workspaces/{}", foreign_workspace.id))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))

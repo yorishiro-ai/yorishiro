@@ -34,7 +34,7 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
         let query_id = queries::Entity::open(&ctx.db, target.workspace_id, "retirement rollback", 60,
             chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(1)).await.unwrap();
         let before = retirement::inventory(&ctx.db, target.tenant_id).await.unwrap();
-        // Isolated DDL makes the final audit write fail after the earlier mutations execute.
+        // Direct write (c): isolated DDL makes the final audit write fail after the earlier mutations execute.
         ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events ADD CONSTRAINT reject_retirement_audit CHECK (false)")
             .await.unwrap();
         let error = retirement::disable_as(&ctx.db, &actor, target.tenant_id).await.unwrap_err();
@@ -108,6 +108,7 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
         );
         txn.rollback().await.unwrap();
         let txn = ctx.db.begin().await.unwrap();
+        // Direct write (c): the disabled flag without the work cleanup a real disable performs, so `cancel_work` itself is what runs.
         yorishiro::models::tenant_tenants::ActiveModel {
             id: Set(target.tenant_id),
             disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
@@ -304,7 +305,7 @@ async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
         )
         .await
         .unwrap();
-        // Exercise the database guard independently of the API's tenant check.
+        // Direct write (b): exercises the database guard independently of the API's tenant check.
         let error = workspace_schema_forks::ActiveModel {
             tenant_id: Set(target.tenant_id),
             workspace_id: Set(target.workspace_id),

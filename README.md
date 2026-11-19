@@ -2,6 +2,8 @@
 
 **English** | [日本語](README.jp.md)
 
+[![codecov](https://codecov.io/gh/yorishiro-ai/yorishiro/graph/badge.svg)](https://codecov.io/gh/yorishiro-ai/yorishiro) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/yorishiro-ai/yorishiro)
+
 [Install](#get-started) · [Quick start](https://yorishiro-ai.github.io/wiki/installation/first-run/) · [Documentation](https://yorishiro-ai.github.io/wiki/) · [Releases](https://github.com/yorishiro-ai/yorishiro/releases)
 
 **A knowledge store with schemas you define, read and written by AI agents.**

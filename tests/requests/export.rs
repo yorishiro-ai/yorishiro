@@ -24,7 +24,7 @@ async fn export_orders_schema_history_by_name_and_version_across_pages() {
             .chain((1..=65).map(|version| ("history", version)))
             .chain(std::iter::once(("z-last", 1)))
             .collect();
-        // Deliberately reverse ID order so UUID ordering cannot stand in for version ordering.
+        // Direct write (a): the test chooses the IDs, which no operation allows, to reverse UUID order against version order.
         schema_schemas::Entity::insert_many(expected.iter().zip(ids).map(|(&(name, version), id)| {
             schema_schemas::ActiveModel {
                 id: Set(id), tenant_id: Set(tenant.tenant_id), workspace_id: Set(tenant.workspace_id),
@@ -55,6 +55,7 @@ async fn export_pages_all_rows_and_rejects_byte_and_record_overflow() {
             .json(&json!({"name":"bounded-export","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}})).await;
         response.assert_status(StatusCode::CREATED);
         let schema_id: Uuid = serde_json::from_value(response.json::<Value>()["schema"]["id"].clone()).unwrap();
+        // Direct writes below (a): bulk rows with chosen IDs, and an oversized payload that the API would refuse.
         let make_row = |id| entity_entities::ActiveModel {
             id: Set(id), workspace_id: Set(tenant.workspace_id), schema_id: Set(schema_id),
             schema_version: Set(1), entity_type: Set("note".into()), data: Set(json!({"title":"small"})),

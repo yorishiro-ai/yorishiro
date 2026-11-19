@@ -183,6 +183,7 @@ async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider
                 .await
                 .unwrap()
                 .unwrap();
+        // Direct write (a): a stamp from an earlier model, which no operation produces (the stamp operation only fills a missing one).
         let mut workspace = workspace.into_active_model();
         workspace.embedding_model = sea_orm::ActiveValue::Set(Some("previous-model".into()));
         workspace.embedding_dimensions = sea_orm::ActiveValue::Set(Some(768));

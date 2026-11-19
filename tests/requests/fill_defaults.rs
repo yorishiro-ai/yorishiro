@@ -475,6 +475,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
             .unwrap();
         if expired {
             use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+            // Direct write (c): the key must expire between the request and the job finishing, which issuance cannot produce.
             api_keys::ActiveModel {
                 id: Set(key.id),
                 expires_at: Set(Some(

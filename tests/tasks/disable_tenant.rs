@@ -85,7 +85,7 @@ async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
         let before = retirement::inventory(&ctx.db, target.tenant_id).await.unwrap();
-        // Fail the last write without interfering with the already-committed disable event.
+        // Direct write (c): fails the last write without interfering with the already-committed disable event.
         ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events ADD CONSTRAINT reject_deleted_event CHECK (action <> 'deleted')")
             .await.unwrap();
         let error = retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap_err();

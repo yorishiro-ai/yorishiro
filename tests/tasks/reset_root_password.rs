@@ -257,6 +257,7 @@ async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
             .await
             .is_err()
         );
+        // Direct writes below (a): no operation turns the root into an OAuth-only or a local account, or back.
         let mut passwordless: user_users::ActiveModel = original.clone().into();
         passwordless.password_hash = ActiveValue::Set(None);
         passwordless.oauth_provider = ActiveValue::Set(Some("github".into()));
@@ -296,6 +297,7 @@ async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
         restored.password_hash = ActiveValue::Set(original.password_hash.clone());
         restored.email = ActiveValue::Set(original.email.clone());
         restored.update(&ctx.db).await.unwrap();
+        // Direct write (c): a real disable also revokes the tenant's keys, and the final assertion needs the key left unrevoked.
         let mut disabled: tenant_tenants::ActiveModel =
             tenant_tenants::Entity::find_by_id(tenant.tenant_id)
                 .one(&ctx.db)
@@ -382,6 +384,7 @@ async fn root_reset_rolls_back_password_when_key_revocation_fails() {
         let key = api_keys::Entity::create_api_key(
             &ctx.db, tenant.workspace_id, api_keys::ApiKeyScope::Read, Some(tenant.owner_id), false,
         ).await.unwrap();
+        // Direct write (c): deterministic fault injection failing key revocation.
         ctx.db.execute_unprepared(
             "CREATE TRIGGER fail_reset_revocation BEFORE UPDATE OF revoked_at ON api_keys BEGIN SELECT RAISE(ABORT, 'injected revocation failure'); END",
         ).await.unwrap();
