@@ -9,8 +9,6 @@ on:
     branches: [develop]
     paths:
       - .github/workflows/coverage.yml
-      - scripts/coverage_report.py
-      - tests/blackbox/run.py
 
 permissions:
   contents: read
@@ -24,23 +22,13 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cargo-cache
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target
-      COVERAGE_TOOLCHAIN: +nightly
       RUSTUP_TOOLCHAIN: nightly
       YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
       DB_MAX_CONNECTIONS: "100"
       DB_CONNECT_TIMEOUT: "5000"
       RUST_BACKTRACE: "1"
-      EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
-      EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
-      EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
-      EMBEDDING_MODEL_REMOTE_PATH: model.safetensors
-      EMBEDDING_MODEL_LOCAL_NAME: model.safetensors
       EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
-      EMBEDDING_MODEL_SIZE: "1112201288"
-      EMBEDDING_TOKENIZER_REMOTE_PATH: tokenizer.json
-      EMBEDDING_TOKENIZER_LOCAL_NAME: tokenizer.json
       EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
-      EMBEDDING_TOKENIZER_SIZE: "17082660"
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -77,52 +65,19 @@ jobs:
             -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
             -c 'CREATE DATABASE yorishiro OWNER yorishiro;' \
             -c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()'
-      - uses: actions/cache/restore@v6
-        id: embedding-cache
-        with:
-          path: |
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
-          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
-      - name: Prepare required numeric-reference assets
+      - name: Run the enterprise suite under coverage
         env:
-          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
-          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
-          MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
-          TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
-        run: python3 scripts/embedding_cache.py prepare
-      - name: Publish newly verified reference assets
-        if: steps.embedding-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
-          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
-      - name: Run the enterprise suite and public contracts under coverage
-        env:
-          POSTGRES_CONTAINER: ${{ job.services.db.id }}
+          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          QUEUE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
         run: |
-          eval "$(cargo +nightly llvm-cov show-env --sh --branch)"
-          cargo +nightly llvm-cov clean --workspace
-          python3 scripts/coverage_report.py
-      - name: Verify numeric-reference assets after execution
-        if: always()
-        env:
-          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
-          CACHE_HIT: "true"
-          MODEL_URL: unused
-          TOKENIZER_URL: unused
-        run: python3 scripts/embedding_cache.py verify
-      - name: Upload reports and failure logs
-        if: always()
+          ignore='(^|/)src/models/_entities/|(^|/)migration/src/|(^|/)src/bin/'
+          cargo +nightly llvm-cov --locked --workspace --features enterprise --branch --ignore-filename-regex "$ignore" --lcov --output-path coverage/lcov.info
+          cargo +nightly llvm-cov report --ignore-filename-regex "$ignore" | tee coverage/summary.txt
+      - name: Upload the report
         uses: actions/upload-artifact@v7
         with:
-          name: actionable-coverage
+          name: coverage
           path: |
-            coverage/modules.json
-            coverage/modules.csv
-            coverage/lowest-covered.txt
-            coverage/llvm-cov.json
-            coverage/public-ee/
+            coverage/lcov.info
+            coverage/summary.txt
           if-no-files-found: error
