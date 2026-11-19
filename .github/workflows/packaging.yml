@@ -1,0 +1,103 @@
+name: Packaging
+
+# Installability checks for the deb/rpm packages and the Docker image.
+# They take far longer than the code checks and only depend on how the package is assembled,
+# so a pull request runs them when one of those inputs changes; `develop` always runs them.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop]
+    paths:
+      - .github/packaging/**
+      - .github/docker/**
+      - .github/actions/build-and-package/**
+      - .github/actions/build-docker/**
+      - .github/actions/install-nfpm/**
+      - .github/actions/package-tests/**
+      - .github/workflows/packaging.yml
+      - Cargo.toml
+      - Cargo.lock
+      - config/production.yaml
+      - scripts/release_version.py
+      - scripts/release_images.py
+      - Makefile
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  package-validation:
+    name: Package validation
+    needs: package-build
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/package-tests
+        with:
+          version: 0.0.1~pre.${{ github.run_number }}
+          image-tag: ${{ github.sha }}
+          docker-validation: 'false'
+
+  docker-validation:
+    name: Docker configuration validation
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Test Docker configuration ownership and fallback
+        run: |
+          IMAGE=yorishiro-package-test TAG=${{ github.sha }} EDITION=ce docker buildx bake -f .github/docker/docker-bake.hcl --load app
+          make package-docker-check IMAGE=yorishiro-package-test:${{ github.sha }}
+
+  package-build:
+    name: Package build (${{ matrix.edition }}, ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: ce
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-26.04
+          - edition: ce
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-26.04-arm
+          - edition: ee
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-26.04
+          - edition: ee
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-26.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/build-and-package
+        with:
+          edition: ${{ matrix.edition }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
+          version: 0.0.1~pre.${{ github.run_number }}
+          build-tag: ${{ github.sha }}

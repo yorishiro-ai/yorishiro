@@ -83,6 +83,7 @@ CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus a li
 Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
 The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
+The package and Docker installability checks (about 90 minutes) are their own workflow, `packaging.yml`: a pull request runs it only when packaging inputs change, and `develop` always runs it.
 
 The integration tests are one binary rooted at `tests/mod.rs`.
 A test file sits at the same path as the source file it covers; not every source file has tests.
