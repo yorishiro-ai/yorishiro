@@ -50,12 +50,7 @@ impl FillDefaultsWorker {
             .lifecycle_id
             .ok_or_else(|| loco_rs::Error::Message("fill-defaults lifecycle missing".into()))?;
         // Keep control-plane authorization fenced until the workspace mutation commits.
-        let authorization =
-            if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-                Some(crate::db::begin_write(&self.ctx.db).await?)
-            } else {
-                None
-            };
+        let authorization = crate::db::begin_authorization(&self.ctx.db).await?;
         let txn = crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id)
             .await
             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
@@ -127,11 +122,7 @@ pub(crate) async fn enqueue(
     schema_name: String,
 ) -> Result<Uuid, crate::YorishiroError> {
     use crate::error::ResultExt;
-    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        Some(crate::db::begin_write(&ctx.db).await.internal()?)
-    } else {
-        None
-    };
+    let authorization = crate::db::begin_authorization(&ctx.db).await.internal()?;
     crate::models::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
@@ -178,5 +169,5 @@ pub(crate) async fn enqueue(
         authorization.commit().await.internal()?;
     }
     id.parse()
-        .map_err(|error| crate::YorishiroError::Internal(anyhow::Error::new(error)))
+        .map_err(|error| crate::YorishiroError::Internal(Box::new(error)))
 }

@@ -33,7 +33,6 @@ mod advisory_lock_tests {
     use crate::requests::boot_request;
 
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn sqlite_named_locks_are_noops() {
         if !crate::require_sqlite_backend() {
             return;
@@ -58,7 +57,6 @@ mod advisory_lock_tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial(process_environment)]
     async fn postgres_named_locks_exclude_until_transaction_end() {
         if !crate::require_postgres_backend() {
             return;

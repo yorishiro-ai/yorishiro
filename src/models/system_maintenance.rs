@@ -7,13 +7,13 @@ pub use crate::models::_entities::system_maintenance::{ActiveModel, Column, Enti
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::db_enum::db_enum;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
-    async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -97,10 +97,13 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
     };
 
     let mode = MaintenanceMode::from_db_str(&row.mode).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "system_maintenance.mode holds '{}', which is not a maintenance mode",
-            row.mode
-        ))
+        YorishiroError::Internal(
+            format!(
+                "system_maintenance.mode holds '{}', which is not a maintenance mode",
+                row.mode
+            )
+            .into(),
+        )
     })?;
 
     Ok(MaintenanceState {

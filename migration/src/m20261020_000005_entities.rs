@@ -3,7 +3,7 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::DbBackend;
 
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(crate) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -83,7 +83,7 @@ async fn up_entities(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         )
         .await?;
 
-    if manager.get_database_backend() == sea_orm::DbBackend::Sqlite {
+    if manager.get_database_backend() == DbBackend::Sqlite {
         manager
             .get_connection()
             .execute_unprepared(

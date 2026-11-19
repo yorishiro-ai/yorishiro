@@ -11,7 +11,7 @@ use crate::controllers::ApiError;
 use crate::edition::ee::dtos::dashboard::TenantOverview;
 use crate::edition::ee::models::tenant_tenants;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = crate::edition::ee::controllers::openapi::TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_get", "tenant_user_list"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_get", "tenant_user_list"]))), tag = "enterprise"))]
 async fn tenant_overview(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -29,8 +29,8 @@ pub fn routes() -> Routes {
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
-    vec![crate::controllers::route_inventory::path_doc(
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
+    vec![crate::controllers::openapi::route_inventory::path_doc(
         __path_tenant_overview,
     )]
 }

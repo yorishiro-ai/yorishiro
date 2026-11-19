@@ -1,3 +1,3 @@
 mod db_load_guard;
+mod logger;
 mod shutdown;
-mod timezone_logger;

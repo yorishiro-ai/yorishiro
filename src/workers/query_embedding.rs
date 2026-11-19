@@ -105,14 +105,12 @@ async fn embed(
     let concurrency = ctx
         .shared_store
         .get::<std::sync::Arc<tokio::sync::Semaphore>>()
-        .ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("embedding concurrency missing"))
-        })?;
+        .ok_or_else(|| YorishiroError::Internal("embedding concurrency missing".into()))?;
     let _permit = concurrency
         .acquire_owned()
         .await
         .map_err(|error| YorishiroError::Internal(error.into()))?;
-    if deadline_at <= crate::time::now().fixed_offset() {
+    if deadline_at <= crate::data::time::now().fixed_offset() {
         return Err(YorishiroError::ProviderBusy {
             message: "query embedding caller deadline elapsed before provider start".into(),
             retry_after: RETRY_AFTER,
@@ -145,7 +143,7 @@ pub async fn embed_query(
     let settings = ctx
         .shared_store
         .get::<Settings>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?
+        .ok_or_else(|| YorishiroError::Internal("application settings missing".into()))?
         .query_embedding;
     let scope = Scope {
         ctx,
@@ -154,7 +152,7 @@ pub async fn embed_query(
     };
 
     let caller_started = Instant::now();
-    let deadline_at = crate::time::now()
+    let deadline_at = crate::data::time::now()
         + chrono::Duration::milliseconds(i64::try_from(settings.timeout_ms).unwrap_or(i64::MAX));
     let request_id = scope
         .open(

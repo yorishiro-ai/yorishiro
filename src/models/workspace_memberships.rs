@@ -1,10 +1,12 @@
+//! Workspace membership model: roles, and listing, granting and revoking workspace members.
+
 pub use crate::models::_entities::workspace_memberships::{ActiveModel, Column, Entity, Model};
 use sea_orm::DatabaseTransaction;
 use sea_orm::entity::prelude::*;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::ApiKeyScope;
+use crate::models::db_enum::db_enum;
 
 db_enum! {
     /// Workspace-local authority never grants tenant administration.
@@ -23,7 +25,7 @@ impl Model {
     /// # Errors
     /// Rejects unauthorized actors and propagates lookup failures.
     pub async fn list_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         workspace_id: Uuid,
     ) -> Result<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>, YorishiroError> {
@@ -49,7 +51,7 @@ impl Model {
             .into_iter()
             .map(|record| {
                 let role = WorkspaceRole::from_db_str(&record.role).ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!("unknown workspace membership role"))
+                    YorishiroError::Internal("unknown workspace membership role".into())
                 })?;
                 Ok(crate::dtos::workspaces::WorkspaceMemberRecord {
                     user_id: record.user_id,
@@ -66,7 +68,7 @@ impl Model {
     /// # Errors
     /// Rejects unauthorized actors or users outside the tenant and propagates persistence errors.
     pub async fn grant_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         workspace_id: Uuid,
         user_id: Uuid,
@@ -93,7 +95,7 @@ impl Model {
     /// # Errors
     /// Rejects unauthorized actors and propagates persistence errors.
     pub async fn revoke_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         workspace_id: Uuid,
         user_id: Uuid,
@@ -207,7 +209,7 @@ impl Model {
         membership
             .map(|membership| {
                 WorkspaceRole::from_db_str(&membership.role).ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!("unknown workspace membership role"))
+                    YorishiroError::Internal("unknown workspace membership role".into())
                 })
             })
             .transpose()

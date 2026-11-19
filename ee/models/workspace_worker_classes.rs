@@ -76,7 +76,7 @@ async fn set_on(
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
         worker_class: ActiveValue::Set(worker_class.as_db_str().to_string()),
-        updated_at: ActiveValue::Set(crate::time::now().into()),
+        updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)
@@ -158,9 +158,8 @@ pub(crate) async fn get(
     WorkerClass::from_db_str(&row.worker_class)
         .map(Some)
         .ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown worker class in database: {}",
-                row.worker_class
-            ))
+            YorishiroError::Internal(
+                format!("unknown worker class in database: {}", row.worker_class).into(),
+            )
         })
 }

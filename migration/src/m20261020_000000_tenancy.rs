@@ -2,7 +2,7 @@ use super::helpers;
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(crate) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -205,7 +205,7 @@ async fn up_tenant_memberships(manager: &SchemaManager<'_>) -> Result<(), DbErr>
 
     manager
         .create_index(
-            sea_orm_migration::sea_query::Index::create()
+            Index::create()
                 .name("uq_tenant_memberships_user_id")
                 .table(Alias::new("tenant_memberships"))
                 .col(Alias::new("user_id"))

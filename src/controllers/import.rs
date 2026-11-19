@@ -13,7 +13,7 @@ use crate::dtos::jobs::QueuedJobResponse;
 /// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.
 ///
 /// Accepted imports run all-or-nothing on a worker; poll `/api/import-jobs/{job_id}` for completion.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/import.jsonl", request_body(content = String, content_type = "application/x-ndjson"), responses((status = 202, body = crate::dtos::jobs::QueuedJobResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["import_create"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/import.jsonl", request_body(content = String, content_type = "application/x-ndjson"), responses((status = 202, body = QueuedJobResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["import_create"]))), tag = "community"))]
 pub(crate) async fn import_jsonl(
     State(ctx): State<AppContext>,
     authorized: Authorized<SchemaScope>,
@@ -26,10 +26,10 @@ pub(crate) async fn import_jsonl(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_import_jsonl),
-        super::route_inventory::path_doc(__path_import_job_status),
+        super::openapi::route_inventory::path_doc(__path_import_jsonl),
+        super::openapi::route_inventory::path_doc(__path_import_job_status),
     ]
 }
 

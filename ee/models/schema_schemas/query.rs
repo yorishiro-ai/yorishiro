@@ -87,9 +87,7 @@ pub(crate) async fn list_with_upstream_changes(
                     .map_err(|err| YorishiroError::Internal(err.into()))?;
             let base: MetaSchemaDefinition = row
                 .origin_snapshot
-                .ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!("linked schema has no merge base"))
-                })
+                .ok_or_else(|| YorishiroError::Internal("linked schema has no merge base".into()))
                 .and_then(|value| {
                     serde_json::from_value(value)
                         .map_err(|err| YorishiroError::Internal(err.into()))

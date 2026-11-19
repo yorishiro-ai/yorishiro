@@ -1,10 +1,10 @@
+mod sqlite;
+
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use sea_orm::ActiveModelTrait;
 use sea_orm::TransactionTrait;
 use std::sync::Arc;
 use tokio::sync::Barrier;
 use yorishiro::App;
-use yorishiro::models::_entities::tenant_tenants;
 use yorishiro::models::tenancy;
 
 /// Eight concurrent `create_workspace` calls against a tenant with one workspace slot left must produce exactly one workspace, not eight.
@@ -15,7 +15,7 @@ use yorishiro::models::tenancy;
 /// This is the gate `testing.md` requires: a deliberate violation, not a happy-path assertion. Reverting the `lock_for_update` call in `create_workspace` fails this test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn concurrent_create_workspace_cannot_exceed_the_cap() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
@@ -24,14 +24,7 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
         // A cap of 2 with one workspace already present leaves exactly one slot for eight racers to fight over.
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         // No public operation changes workspace caps; inject the finite cap this race must enforce.
-        tenant_tenants::ActiveModel {
-            id: sea_orm::ActiveValue::Set(tenant.tenant_id),
-            max_workspaces: sea_orm::ActiveValue::Set(Some(2)),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .expect("set workspace cap");
+        crate::requests::fixtures::set_workspace_cap(&ctx, tenant.tenant_id, 2).await;
 
         let barrier = Arc::new(Barrier::new(RACERS));
         let mut handles = Vec::with_capacity(RACERS);

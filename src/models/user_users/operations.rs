@@ -161,8 +161,7 @@ pub async fn delete_by_operator(
     if !crate::models::iam_tenant_roots::Model::contains(&txn, tenant_id, user_id).await? {
         return Err(YorishiroError::Conflict {
             message: format!(
-                "remove the user's membership in tenant {} before deleting the account",
-                tenant_id
+                "remove the user's membership in tenant {tenant_id} before deleting the account"
             ),
         });
     }

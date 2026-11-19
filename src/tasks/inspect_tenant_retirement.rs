@@ -10,14 +10,13 @@ impl Task for InspectTenantRetirement {
         }
     }
     async fn run(&self, app_context: &AppContext, vars: &task::Vars) -> Result<()> {
-        let tenant_id = vars
-            .cli_arg("tenant_id")?
-            .parse::<uuid::Uuid>()
-            .map_err(|_| crate::YorishiroError::ValidationFailed {
+        let tenant_id = vars.cli_arg("tenant_id")?.parse::<Uuid>().map_err(|_| {
+            crate::YorishiroError::ValidationFailed {
                 message: "tenant_id is not a valid UUID".into(),
                 details: vec![],
                 hint: "provide the target tenant UUID".into(),
-            })?;
+            }
+        })?;
         let inventory =
             crate::models::tenant_tenants::retirement::inventory(&app_context.db, tenant_id)
                 .await?;

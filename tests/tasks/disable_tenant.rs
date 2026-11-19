@@ -81,7 +81,7 @@ async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
     use tenant_tenants::retirement;
     use yorishiro::models::workspace_workspaces;
 
-    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
         let before = retirement::inventory(&ctx.db, target.tenant_id).await.unwrap();

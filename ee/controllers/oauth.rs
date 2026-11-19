@@ -61,7 +61,7 @@ fn csrf_clear_cookie() -> String {
 
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
 /// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = crate::edition::ee::controllers::openapi::OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
 async fn status(State(ctx): State<AppContext>) -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_config(&ctx.config)?.is_some(),
@@ -116,11 +116,7 @@ async fn callback(
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
-        .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "tenant cap policy missing"
-            )))
-        })?
+        .ok_or_else(|| ApiError(YorishiroError::Internal("tenant cap policy missing".into())))?
         .resolve();
 
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
@@ -141,11 +137,11 @@ async fn callback(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_status),
-        crate::controllers::route_inventory::path_doc(__path_authorize),
-        crate::controllers::route_inventory::path_doc(__path_callback),
+        crate::controllers::openapi::route_inventory::path_doc(__path_status),
+        crate::controllers::openapi::route_inventory::path_doc(__path_authorize),
+        crate::controllers::openapi::route_inventory::path_doc(__path_callback),
     ]
 }
 

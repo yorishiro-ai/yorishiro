@@ -1,3 +1,5 @@
+//! Admits jobs to the queue under their concurrency policy and recovers dispatches the outbox still holds.
+
 use futures::{StreamExt, stream};
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
 use uuid::Uuid;
@@ -102,7 +104,7 @@ async fn recover_pending_on_while(
             return;
         }
         if let Some(deadline) = row.deadline_at
-            && deadline <= crate::time::now().fixed_offset()
+            && deadline <= crate::data::time::now().fixed_offset()
         {
             if let Err(error) = crate::models::queue_job_dispatch_outbox::expire(db, row.id).await {
                 tracing::warn!(dispatch_id = %row.id, error = %error, "could not expire deadline-bound dispatch");
@@ -116,7 +118,7 @@ async fn recover_pending_on_while(
         .await;
         match &enqueue_result {
             Err(_) => {
-                tracing::warn!(dispatch_id = %row.id, "publish timed out; provider outcome may be ambiguous")
+                tracing::warn!(dispatch_id = %row.id, "publish timed out; provider outcome may be ambiguous");
             }
             Ok(Ok(provider_job_id)) => {
                 match crate::models::queue_job_dispatch_outbox::acknowledge_dispatch(
@@ -131,10 +133,10 @@ async fn recover_pending_on_while(
                         // The acknowledgement transaction also records lifecycle correlation.
                     }
                     Ok(false) => {
-                        tracing::warn!(dispatch_id = %row.id, "provider accepted dispatch after its claim lease expired; duplicate risk retained")
+                        tracing::warn!(dispatch_id = %row.id, "provider accepted dispatch after its claim lease expired; duplicate risk retained");
                     }
                     Err(error) => {
-                        tracing::warn!(dispatch_id = %row.id, error = %error, "provider accepted dispatch but acknowledgement failed")
+                        tracing::warn!(dispatch_id = %row.id, error = %error, "provider accepted dispatch but acknowledgement failed");
                     }
                 }
             }

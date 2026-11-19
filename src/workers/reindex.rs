@@ -105,7 +105,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .acquire_owned()
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    let outcome = crate::db::reindex_workspace_with_actor(
+    let outcome = crate::models::entity_embeddings::reindex_workspace_with_actor(
         ctx,
         args.workspace_id,
         provider.as_ref(),
@@ -207,11 +207,7 @@ pub(crate) async fn enqueue_requested(
                 .into(),
         });
     }
-    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        Some(crate::db::begin_write(&ctx.db).await.internal()?)
-    } else {
-        None
-    };
+    let authorization = crate::db::begin_authorization(&ctx.db).await.internal()?;
     crate::models::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,

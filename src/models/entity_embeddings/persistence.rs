@@ -1,3 +1,5 @@
+//! The guarded write of one embedding vector: it lands only while the entity still carries the token it was computed from.
+
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, ExprTrait, QueryFilter, SelectExt,
 };

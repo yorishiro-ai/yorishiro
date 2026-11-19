@@ -61,11 +61,11 @@ async fn delete_worker_class(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_set_worker_class),
-        crate::controllers::route_inventory::path_doc(__path_get_worker_class),
-        crate::controllers::route_inventory::path_doc(__path_delete_worker_class),
+        crate::controllers::openapi::route_inventory::path_doc(__path_set_worker_class),
+        crate::controllers::openapi::route_inventory::path_doc(__path_get_worker_class),
+        crate::controllers::openapi::route_inventory::path_doc(__path_delete_worker_class),
     ]
 }
 

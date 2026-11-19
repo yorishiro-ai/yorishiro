@@ -1,3 +1,5 @@
+//! REST routes for IAM: policies, groups, roles, their attachments and the audit log.
+
 use axum::{Json, extract::State, http::StatusCode, routing::post};
 use loco_rs::{app::AppContext, controller::Routes};
 
@@ -120,37 +122,37 @@ async fn create_policy(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_get_iam_policy),
-        super::route_inventory::path_doc(__path_get_iam_group),
-        super::route_inventory::path_doc(__path_list_iam_group_policies),
-        super::route_inventory::path_doc(__path_list_iam_user_policies),
-        super::route_inventory::path_doc(__path_list_iam_group_members),
-        super::route_inventory::path_doc(__path_list_iam_policies),
-        super::route_inventory::path_doc(__path_list_iam_groups),
-        super::route_inventory::path_doc(__path_update_policy),
-        super::route_inventory::path_doc(__path_delete_policy),
-        super::route_inventory::path_doc(__path_detach_group_policy),
-        super::route_inventory::path_doc(__path_attach_group_policy),
-        super::route_inventory::path_doc(__path_remove_group_member),
-        super::route_inventory::path_doc(__path_add_group_member),
-        super::route_inventory::path_doc(__path_attach_user_policy),
-        super::route_inventory::path_doc(__path_detach_user_policy),
-        super::route_inventory::path_doc(__path_rename_group),
-        super::route_inventory::path_doc(__path_delete_group),
-        super::route_inventory::path_doc(__path_list_audit),
-        super::route_inventory::path_doc(__path_create_group),
-        super::route_inventory::path_doc(__path_create_policy),
-        super::route_inventory::path_doc(__path_create_role),
-        super::route_inventory::path_doc(__path_list_iam_roles),
-        super::route_inventory::path_doc(__path_get_iam_role),
-        super::route_inventory::path_doc(__path_update_role),
-        super::route_inventory::path_doc(__path_delete_role),
-        super::route_inventory::path_doc(__path_list_iam_role_policies),
-        super::route_inventory::path_doc(__path_attach_role_policy),
-        super::route_inventory::path_doc(__path_detach_role_policy),
-        super::route_inventory::path_doc(__path_assume_role),
+        super::openapi::route_inventory::path_doc(__path_get_iam_policy),
+        super::openapi::route_inventory::path_doc(__path_get_iam_group),
+        super::openapi::route_inventory::path_doc(__path_list_iam_group_policies),
+        super::openapi::route_inventory::path_doc(__path_list_iam_user_policies),
+        super::openapi::route_inventory::path_doc(__path_list_iam_group_members),
+        super::openapi::route_inventory::path_doc(__path_list_iam_policies),
+        super::openapi::route_inventory::path_doc(__path_list_iam_groups),
+        super::openapi::route_inventory::path_doc(__path_update_policy),
+        super::openapi::route_inventory::path_doc(__path_delete_policy),
+        super::openapi::route_inventory::path_doc(__path_detach_group_policy),
+        super::openapi::route_inventory::path_doc(__path_attach_group_policy),
+        super::openapi::route_inventory::path_doc(__path_remove_group_member),
+        super::openapi::route_inventory::path_doc(__path_add_group_member),
+        super::openapi::route_inventory::path_doc(__path_attach_user_policy),
+        super::openapi::route_inventory::path_doc(__path_detach_user_policy),
+        super::openapi::route_inventory::path_doc(__path_rename_group),
+        super::openapi::route_inventory::path_doc(__path_delete_group),
+        super::openapi::route_inventory::path_doc(__path_list_audit),
+        super::openapi::route_inventory::path_doc(__path_create_group),
+        super::openapi::route_inventory::path_doc(__path_create_policy),
+        super::openapi::route_inventory::path_doc(__path_create_role),
+        super::openapi::route_inventory::path_doc(__path_list_iam_roles),
+        super::openapi::route_inventory::path_doc(__path_get_iam_role),
+        super::openapi::route_inventory::path_doc(__path_update_role),
+        super::openapi::route_inventory::path_doc(__path_delete_role),
+        super::openapi::route_inventory::path_doc(__path_list_iam_role_policies),
+        super::openapi::route_inventory::path_doc(__path_attach_role_policy),
+        super::openapi::route_inventory::path_doc(__path_detach_role_policy),
+        super::openapi::route_inventory::path_doc(__path_assume_role),
     ]
 }
 
@@ -261,12 +263,12 @@ async fn detach_group_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::GroupRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<GroupRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
 async fn list_iam_groups(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
-) -> Result<Json<Vec<crate::dtos::iam::GroupRecord>>, ApiError> {
+) -> Result<Json<Vec<GroupRecord>>, ApiError> {
     let rows = crate::models::iam_groups::Model::list_as(
         &ctx.db,
         &actor,
@@ -276,12 +278,12 @@ async fn list_iam_groups(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::PolicyRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<PolicyRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
 async fn list_iam_policies(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
-) -> Result<Json<Vec<crate::dtos::iam::PolicyRecord>>, ApiError> {
+) -> Result<Json<Vec<PolicyRecord>>, ApiError> {
     let rows = crate::models::iam_policies::Model::list_as(
         &ctx.db,
         &actor,
@@ -342,12 +344,12 @@ async fn list_iam_group_policies(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups/{group_id}", params(("group_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::dtos::iam::GroupRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups/{group_id}", params(("group_id" = uuid::Uuid, Path)), responses((status = 200, body = GroupRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
 async fn get_iam_group(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-) -> Result<Json<crate::dtos::iam::GroupRecord>, ApiError> {
+) -> Result<Json<GroupRecord>, ApiError> {
     Ok(Json(
         crate::models::iam_groups::Model::get_as(&ctx.db, &actor, id)
             .await?
@@ -355,12 +357,12 @@ async fn get_iam_group(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies/{policy_id}", params(("policy_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::dtos::iam::PolicyRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies/{policy_id}", params(("policy_id" = uuid::Uuid, Path)), responses((status = 200, body = PolicyRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
 async fn get_iam_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-) -> Result<Json<crate::dtos::iam::PolicyRecord>, ApiError> {
+) -> Result<Json<PolicyRecord>, ApiError> {
     Ok(Json(
         crate::models::iam_policies::Model::get_as(&ctx.db, &actor, id)
             .await?

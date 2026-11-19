@@ -1,52 +1,20 @@
 mod api_keys;
 mod audit_log;
 mod auth;
-#[cfg(feature = "enterprise")]
-mod dashboard;
 mod ee_setup;
-#[cfg(feature = "enterprise")]
-mod embedding;
 mod entities;
-#[cfg(feature = "enterprise")]
-mod entity_columns;
 mod export;
 pub(crate) mod fill_defaults;
 pub(crate) mod fixtures;
 mod iam;
 mod import;
-#[cfg(feature = "enterprise")]
-pub(crate) mod inference;
-#[cfg(feature = "enterprise")]
-mod licence_gate;
-#[cfg(feature = "enterprise")]
-mod marketplace;
-#[cfg(feature = "enterprise")]
-mod mcp;
 mod members;
-#[cfg(feature = "enterprise")]
-mod oauth;
-#[cfg(feature = "enterprise")]
-mod official_templates;
-#[cfg(feature = "enterprise")]
-mod openapi;
-#[cfg(feature = "enterprise")]
-mod origin;
 pub(crate) mod query_worker;
-#[cfg(feature = "enterprise")]
-mod queue;
-#[cfg(feature = "enterprise")]
-mod schema_forks;
 mod schemas;
 mod search;
 mod setup;
-#[cfg(feature = "enterprise")]
-mod stripe;
 mod system;
 mod template_library;
-#[cfg(feature = "enterprise")]
-mod tenant_auth;
-#[cfg(feature = "enterprise")]
-mod worker_class;
 mod workspaces;
 
 #[cfg(feature = "enterprise")]
@@ -76,14 +44,59 @@ pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
     true
 }
 
-/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future.
-pub(crate) async fn with_max_tenants<T>(
-    value: &str,
-    fut: impl std::future::Future<Output = T>,
-) -> T {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
-    guard.set("YORISHIRO_MAX_TENANTS", value);
-    fut.await
+/// Whether the booted app's queue provider is Redis (Valkey).
+pub(crate) fn uses_redis_queue(ctx: &loco_rs::app::AppContext) -> bool {
+    matches!(
+        ctx.config.queue,
+        Some(loco_rs::config::QueueConfig::Redis(_))
+    )
+}
+
+/// Whether the booted app's queue provider is SQLite.
+pub(crate) fn uses_sqlite_queue(ctx: &loco_rs::app::AppContext) -> bool {
+    matches!(
+        ctx.config.queue,
+        Some(loco_rs::config::QueueConfig::Sqlite(_))
+    )
+}
+
+/// One configuration change for a booted app: a dotted path into `Config` such as `settings.max_tenants`, and its value.
+pub(crate) type Override = (&'static str, serde_json::Value);
+
+/// Caps the tenants a booted app accepts.
+pub(crate) fn max_tenants(limit: u64) -> Override {
+    ("settings.max_tenants", limit.into())
+}
+
+/// Boots the app without a licence key, whatever the ambient environment holds.
+pub(crate) fn unlicensed() -> Override {
+    ("initializers.licence_key", "".into())
+}
+
+/// Applies the overrides to a freshly loaded configuration; the process environment is never touched.
+fn apply_config_overrides(
+    config: loco_rs::config::Config,
+    overrides: &[Override],
+) -> loco_rs::config::Config {
+    if overrides.is_empty() {
+        return config;
+    }
+    let mut document = serde_json::to_value(&config).expect("serialise config");
+    for (path, value) in overrides {
+        let mut node = &mut document;
+        for key in path.split('.') {
+            node = node
+                .as_object_mut()
+                .expect("config path crosses a non-object")
+                .entry(key)
+                .or_insert(serde_json::Value::Null);
+            if node.is_null() {
+                *node = serde_json::json!({});
+            }
+        }
+        *node = value.clone();
+    }
+    serde_json::from_value(document).expect("overridden config stays valid")
 }
 
 use futures::FutureExt;
@@ -98,7 +111,7 @@ use std::str::FromStr;
 /// `after_context` adds a tenant pool and shares the application pool with identity operations.
 /// Leaving a pool open means a session survives on the throwaway test database,
 /// and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
-/// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
+/// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
     yorishiro::App::on_shutdown(ctx).await;
@@ -184,19 +197,28 @@ fn is_sqlite_backend() -> bool {
 /// PostgreSQL gets a throwaway database created from `template1` per test, so tests never share tenants or state.
 /// The callback is wrapped in `catch_unwind` so pools are closed and the database dropped even if it panics.
 /// Its future is boxed: nested boots (two contexts in one test) would otherwise keep every callback state machine on the test thread's small stack.
-#[allow(clippy::future_not_send)]
 pub(crate) async fn boot_request<H: Hooks, F, Fut>(callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
+{
+    boot_request_with::<H, _, _>(&[], callback).await;
+}
+
+/// `boot_request` with the configuration changed by `overrides`.
+pub(crate) async fn boot_request_with<H: Hooks, F, Fut>(overrides: &[Override], callback: F)
+where
+    F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
+    Fut: Future<Output = ()>,
 {
     let _environment = crate::EnvironmentRead::enter();
     if is_sqlite_backend() {
-        boot_sqlite::<H, _, _>(callback).await;
+        boot_sqlite::<H, _, _>(overrides, callback).await;
         return;
     }
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
+        .map(|config| apply_config_overrides(config, overrides))
         .expect("load postgres config");
     let database = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
         .expect("prepare test database");
@@ -225,11 +247,10 @@ where
     }
 }
 
-#[allow(clippy::future_not_send)]
-async fn boot_sqlite<H: Hooks, F, Fut>(callback: F)
+async fn boot_sqlite<H: Hooks, F, Fut>(overrides: &[Override], callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
     // Own the parent directory until boot, callback, pool shutdown, and cleanup all finish.
     // SQLite must not open a path whose parent can disappear during concurrent test teardown.
@@ -239,7 +260,7 @@ where
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()))
         .to_string_lossy()
         .into_owned();
-    request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
+    request_with_create_sqlite::<H, _, _>(db_path.clone(), overrides, |request, ctx| {
         let result =
             std::panic::AssertUnwindSafe(Box::pin(callback(request, ctx.clone()))).catch_unwind();
         async move {
@@ -254,19 +275,16 @@ where
     drop(directory);
 }
 
-/// Boots an isolated request app while temporarily overriding its configured timezone.
+/// Boots an isolated request app with its configured timezone overridden.
 /// Timezone tests may mutate the database-wide timezone and maintenance state.
-#[allow(clippy::future_not_send)]
 pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
     timezone: &'static str,
     callback: F,
 ) where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
-    let guard = crate::EnvGuard::capture(&["YORISHIRO_TIMEZONE"]);
-    guard.set("YORISHIRO_TIMEZONE", timezone);
-    boot_request::<H, _, _>(callback).await;
+    boot_request_with::<H, _, _>(&[("settings.timezone", timezone.into())], callback).await;
 }
 
 /// SQLite variant of loco's `request_with_create_db`.
@@ -274,17 +292,20 @@ pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
 /// Instead of `CREATE DATABASE` (which SQLite has no equivalent for), this generates a
 /// unique temp file path, overrides the database URI to the generated file, then boots via
 /// `H::boot(StartMode::ServerOnly, ...)`.
-#[allow(clippy::future_not_send)]
-pub(crate) async fn request_with_create_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
-where
+async fn request_with_create_sqlite<H: Hooks, F, Fut>(
+    db_path: String,
+    overrides: &[Override],
+    callback: F,
+) where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: Future<Output = ()>,
 {
     // Load the configured test app, then override only its isolated database and queue files.
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
+        .map(|config| apply_config_overrides(config, overrides))
         .expect("load sqlite config");
-    config.database.uri = format!("sqlite://{}?mode=rwc", db_path);
+    config.database.uri = format!("sqlite://{db_path}?mode=rwc");
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
         let queue_path = std::path::Path::new(&db_path)
             .with_file_name(format!("{}_queue.sqlite3", uuid::Uuid::new_v4()))
@@ -297,17 +318,19 @@ where
 }
 
 /// Boots the app with a free port and wraps its router in a `TestServer`, as loco's own `request_internal` does.
-#[allow(clippy::future_not_send)]
 async fn serve<H: Hooks>(
     mut config: loco_rs::config::Config,
 ) -> (TestServer, loco_rs::app::AppContext) {
+    static NEXT_DATABASE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
     if let Some(loco_rs::config::QueueConfig::Redis(queue)) = config.queue.as_mut() {
-        static NEXT_DATABASE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-        let service = std::env::var("YORISHIRO_TEST_REDIS_BASE_URL")
-            .expect("Redis app fixtures require the matrix service URL");
+        // Each app gets its own logical Redis database on the configured server.
         let database = NEXT_DATABASE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         assert!(database < 65536, "matrix Redis logical databases exhausted");
-        let (base, _) = service.rsplit_once('/').expect("Redis database URL");
+        let uri = queue.uri.trim_end_matches('/');
+        let base = match uri.rsplit_once('/') {
+            Some((head, db)) if !db.is_empty() && db.bytes().all(|b| b.is_ascii_digit()) => head,
+            _ => uri,
+        };
         queue.uri = format!("{base}/{database}");
     }
     config.server.port = loco_rs::testing::prelude::get_available_port().await;
@@ -339,4 +362,4 @@ pub(crate) async fn workspace_txn(
         .expect("begin workspace transaction")
 }
 
-pub mod tenants;
+pub(crate) mod tenants;

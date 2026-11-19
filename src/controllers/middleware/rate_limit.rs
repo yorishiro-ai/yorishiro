@@ -128,8 +128,10 @@ pub async fn enforce(
     let key = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|ConnectInfo(addr)| addr.ip().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map_or_else(
+            || "unknown".to_string(),
+            |ConnectInfo(addr)| addr.ip().to_string(),
+        );
 
     if !limiter.allow(&key) {
         // Logged so an operator can see abuse (credential brute-forcing) that the access log would otherwise show only as anonymous 429s.

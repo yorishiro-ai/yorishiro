@@ -1,3 +1,5 @@
+//! Schema model: versioned schemas per workspace, with the version lock, archiving and deleting of versions.
+
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
@@ -5,9 +7,9 @@ use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr, Statement};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::schema_schemas::{ActiveModel, Entity, Model};
+use crate::models::db_enum::db_enum;
 
 pub mod metaschema;
 
@@ -16,7 +18,7 @@ use metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definition};
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -26,7 +28,7 @@ impl ActiveModelBehavior for ActiveModel {
         // SQLite refuses a non-constant default on `ADD COLUMN` for an existing table, so `schema_schemas.updated_at` has `now()` on PostgreSQL and nothing on SQLite, and an insert that relied on the default would be NULL there.
         // A caller that sets it deliberately (a backfill, an import preserving original timestamps) is still not overwritten.
         if !this.updated_at.is_set() {
-            this.updated_at = sea_orm::ActiveValue::Set(Some(crate::time::now().into()));
+            this.updated_at = ActiveValue::Set(Some(crate::data::time::now().into()));
         }
         Ok(this)
     }
@@ -82,7 +84,7 @@ pub(crate) async fn archive(
             Column::Status,
             Expr::value(SchemaStatus::Archived.as_db_str()),
         )
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Id.eq(schema_id))
         .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
@@ -180,7 +182,7 @@ pub(crate) async fn delete(
         .count(conn)
         .await
         .internal()?;
-    let (forks, fork_heads) = if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    let (forks, fork_heads) = if crate::db::is_postgres(conn) {
         // Incoming forks can live outside the selected workspace, so ordinary RLS-scoped counts miss them.
         let row = conn
             .query_one_raw(Statement::from_sql_and_values(
@@ -262,15 +264,14 @@ impl TryFrom<Model> for SchemaRecord {
             version: row.version,
             definition: serde_json::from_value(row.definition).internal()?,
             status: SchemaStatus::from_db_str(&row.status).ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!("unknown schema status: {}", row.status))
+                YorishiroError::Internal(format!("unknown schema status: {}", row.status).into())
             })?,
             origin_template_id: row.origin_template_id,
             origin_status: SchemaOriginStatus::from_db_str(&row.origin_status).ok_or_else(
                 || {
-                    YorishiroError::Internal(anyhow::anyhow!(
-                        "unknown schema origin status: {}",
-                        row.origin_status
-                    ))
+                    YorishiroError::Internal(
+                        format!("unknown schema origin status: {}", row.origin_status).into(),
+                    )
                 },
             )?,
             origin_snapshot: row
@@ -278,7 +279,7 @@ impl TryFrom<Model> for SchemaRecord {
                 .map(serde_json::from_value)
                 .transpose()
                 .internal()?,
-            origin_updated_at: row.origin_updated_at.map(|t| t.into()),
+            origin_updated_at: row.origin_updated_at.map(Into::into),
             created_at: row.created_at.into(),
         })
     }
@@ -501,7 +502,7 @@ pub async fn create_schema(
             origin_template_id,
             origin_snapshot,
             if origin_template_id.is_some() {
-                Some(crate::time::now())
+                Some(crate::data::time::now())
             } else {
                 None
             },
@@ -515,8 +516,7 @@ pub async fn create_schema(
         .one(conn)
         .await
         .internal()?
-        .map(|row| row.version)
-        .unwrap_or(0);
+        .map_or(0, |row| row.version);
 
     let (next_version, diff) = match &previous {
         Some(previous) => {
@@ -539,7 +539,7 @@ pub async fn create_schema(
                 Column::Status,
                 Expr::value(SchemaStatus::Archived.as_db_str()),
             )
-            .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+            .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Name.eq(&name))
             .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))

@@ -71,10 +71,9 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
                     &latest.status,
                 )
                 .ok_or_else(|| {
-                    YorishiroError::Internal(anyhow::anyhow!(
-                        "unknown template version status: {}",
-                        latest.status
-                    ))
+                    YorishiroError::Internal(
+                        format!("unknown template version status: {}", latest.status).into(),
+                    )
                 })?;
                 if latest.definition == definition_json {
                     outcome.unchanged.push(summary.id.clone());
@@ -155,7 +154,7 @@ async fn upsert_template(
                 .to_string(),
         ),
         author: ActiveValue::Set(Some(OFFICIAL_AUTHOR.to_string())),
-        updated_at: ActiveValue::Set(crate::time::now().into()),
+        updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
     let row = Entity::insert(active)

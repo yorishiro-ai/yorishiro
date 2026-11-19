@@ -1,3 +1,5 @@
+//! Tenant model: detail and metadata updates, the infrastructure tenant, and the creation and retirement operations in its submodules.
+
 pub use crate::models::_entities::tenant_tenants::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
@@ -10,7 +12,7 @@ pub use operations::create_tenant;
 /// # Errors
 /// Rejects unauthorized credentials or propagates database errors.
 pub(crate) async fn detail_as(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Model, crate::error::YorishiroError> {
     use crate::error::ResultExt;
@@ -35,7 +37,7 @@ pub(crate) async fn detail_as(
 /// # Errors
 /// Rejects unauthorized credentials, invalid names or caps and propagates persistence errors.
 pub(crate) async fn update_as(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
     input: crate::dtos::tenants::UpdateTenantRequest,
 ) -> Result<Model, crate::error::YorishiroError> {
@@ -85,7 +87,7 @@ pub(crate) const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {

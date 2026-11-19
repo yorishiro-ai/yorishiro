@@ -6546,7 +6546,6 @@ dependencies = [
 name = "yorishiro"
 version = "0.100.0"
 dependencies = [
- "anyhow",
  "axum",
  "base64 0.23.1",
  "candle-core",

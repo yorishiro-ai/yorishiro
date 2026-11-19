@@ -18,7 +18,7 @@ use std::path::Path;
 
 use crate::controllers;
 use crate::controllers::mcp::McpToolSet;
-use crate::controllers::route_inventory::{RouteClass, RouteInventory};
+use crate::controllers::openapi::route_inventory::{RouteClass, RouteInventory};
 use crate::initializers;
 use crate::tasks;
 use crate::workers::registry::WorkerRegistry;
@@ -221,7 +221,7 @@ impl RouteMounts {
     #[cfg(feature = "openapi")]
     pub(crate) fn document(
         &mut self,
-        docs: impl IntoIterator<Item = controllers::route_inventory::RouteDoc>,
+        docs: impl IntoIterator<Item = controllers::openapi::route_inventory::RouteDoc>,
     ) -> &mut Self {
         self.inventory.add_docs(docs);
         self
@@ -264,7 +264,7 @@ pub(crate) fn after_routes(
         .shared_store
         .get::<RouteInventory>()
         .ok_or_else(|| loco_rs::Error::Message("route inventory missing".into()))?;
-    let router = controllers::swagger::mount(router, &inventory);
+    let router = controllers::openapi::swagger::mount(router, &inventory);
     let router = controllers::mcp::mount(router, ctx, move |ctx| tools.server(ctx));
     let credential_paths = ctx
         .shared_store
@@ -285,7 +285,7 @@ pub(crate) fn after_routes(
     };
     Ok(router.layer(axum::middleware::from_fn_with_state(
         ctx.clone(),
-        crate::controllers::middleware::maintenance::maintenance_guard,
+        controllers::middleware::maintenance::maintenance_guard,
     )))
 }
 
@@ -310,7 +310,7 @@ pub(crate) fn middlewares(
     stack.retain(|middleware| middleware.name() != "cors");
     stack.replace(
         "logger",
-        Box::new(crate::controllers::middleware::access_log::Middleware::new(
+        Box::new(controllers::middleware::access_log::Middleware::new(
             &logger_config,
             &ctx.environment,
         )),
@@ -396,7 +396,7 @@ pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
 async fn install_services(ctx: AppContext) -> Result<AppContext> {
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
     // The pools install before this hook and already parse the zone; `config::validate` accepted it at load.
-    let zone = crate::time::parse_timezone(&settings.timezone).map_err(|error| {
+    let zone = crate::data::time::parse_timezone(&settings.timezone).map_err(|error| {
         loco_rs::Error::Message(format!(
             "settings.timezone '{}': {error}",
             settings.timezone

@@ -2,7 +2,7 @@
 
 ## Repository overview
 
-This repository is a [Loco](https://loco.rs) 1.2.0 application with a Laravel-like design: thin entry points, fat models, transport DTOs, jobs, and providers.
+This repository is a [Loco](https://loco.rs) 1.3.1 application with a Laravel-like design: thin entry points, fat models, transport DTOs, jobs, and providers.
 
 ## Repository layout
 
@@ -16,7 +16,7 @@ CE therefore follows Loco's generator layout exactly; a directory Loco does not 
 | `src/tasks/` | Entry point: the CLI | Console commands |
 | `src/dtos/` | Request and response transport types (`dtos/<plural>.rs`) | Resources, Form requests |
 | `src/models/` | Tables (`<table>.rs`), `_entities/` (generated), cross-table facades | Eloquent models |
-| `src/workers/` | Background jobs | Jobs |
+| `src/workers/` | Background jobs, and the runtime (targets, dispatch, queue policy) that routes them; `workers/mod.rs` separates the two | Jobs |
 | `src/initializers/` | Process-lifetime wiring | Service providers |
 | `src/data/` | Typed settings and static data | Config |
 | `src/fixtures/` | Seed data | Seeders |
@@ -44,6 +44,7 @@ A trait is for a behaviour that really varies at runtime, such as `QueuePolicy` 
 
 ### Model ownership
 
+`src/models/mod.rs` groups the table modules by domain (tenants, IAM, schemas, entities, queue, billing); look a table up there first.
 `src/models/access.rs` owns cross-table authorization decisions shared by REST, MCP, CLI and other model callers.
 Credential verification and table persistence remain in their table-owned models; access is not a repository or external service layer.
 
@@ -73,13 +74,14 @@ SeaORM is the default. Raw SQL requires an explicit reason:
 
 Examples:
 - `src/db.rs`: connection primitives (`SET ROLE`, `RESET`, advisory locks)
-- `src/models/api_keys.rs`: `authenticate_api_key($1)` — the SECURITY DEFINER function that bypasses RLS
+- `src/models/api_keys/authenticate.rs`: `authenticate_api_key($1)` — the SECURITY DEFINER function that bypasses RLS
 - `src/models/entity_embeddings/` and `src/tasks/resync_embeddings.rs`: pgvector `embedding` column operations
 - `ee/controllers/middleware/auth.rs`: `authenticate_api_key($1, $2)` two-argument overload
 
 ### MCP placement
 
-MCP is an entry point, so it is a controller: `src/controllers/mcp/` holds `YorishiroMcpServer`, the `#[tool_router]` implementations, and the transport mount.
+MCP is an entry point, so it is a controller: `src/controllers/mcp/` holds one file per tool group (the `#[tool_router]` implementations), `server.rs` (`YorishiroMcpServer`), `policy.rs` (which tools a request may see), `authorize.rs` (bearer key and scope checks) and, in `mod.rs`, the router composition and transport mount.
+Adding a tool group touches `mod.rs` and its own file.
 Each tool authenticates, parses its arguments, calls a model operation, and renders a tool result, exactly like a REST handler.
 
 ## Architecture

@@ -19,7 +19,8 @@ impl ConfiguredTimer {
 
 impl FormatTime for ConfiguredTimer {
     fn format_time(&self, writer: &mut Writer<'_>) -> fmt::Result {
-        let timestamp = crate::time::in_timezone(crate::time::now(), self.0).to_rfc3339();
+        let timestamp =
+            crate::data::time::in_timezone(crate::data::time::now(), self.0).to_rfc3339();
         write!(writer, "{timestamp} ")
     }
 }
@@ -37,7 +38,7 @@ pub(crate) fn init<H: loco_rs::app::Hooks>(
             .with(layer(
                 &config.format,
                 std::io::stdout,
-                crate::time::configured(ctx),
+                crate::data::time::configured(ctx),
             ))
             .with(filter)
             .try_init()

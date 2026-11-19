@@ -50,7 +50,7 @@ struct CandidateRow {
 /// Returns an error on catalog, connection, or concurrent index DDL failure.
 pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), YorishiroError> {
     use sea_orm::sqlx::AssertSqlSafe;
-    if db.get_database_backend() != DatabaseBackend::Postgres {
+    if !crate::db::is_postgres(db) {
         return Ok(());
     }
     // Concurrent index DDL cannot run in a transaction; close the detached session on every exit.

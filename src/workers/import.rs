@@ -57,14 +57,11 @@ impl ImportWorker {
     async fn import(&self, args: &ImportArgs) -> Result<(), YorishiroError> {
         let id = args
             .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("import lifecycle missing")))?;
+            .ok_or_else(|| YorishiroError::Internal("import lifecycle missing".into()))?;
         // Hold control-plane permission stable until the workspace write commits.
-        let authorization =
-            if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-                Some(crate::db::begin_write(&self.ctx.db).await.internal()?)
-            } else {
-                None
-            };
+        let authorization = crate::db::begin_authorization(&self.ctx.db)
+            .await
+            .internal()?;
         let txn =
             crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id).await?;
         crate::db::lock_for_update(&txn, &format!("import:{id}"))
@@ -134,11 +131,7 @@ pub(crate) async fn enqueue(
     auth: &AuthContext,
     jsonl: String,
 ) -> Result<Uuid, YorishiroError> {
-    let authorization = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        Some(crate::db::begin_write(&ctx.db).await.internal()?)
-    } else {
-        None
-    };
+    let authorization = crate::db::begin_authorization(&ctx.db).await.internal()?;
     crate::models::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,

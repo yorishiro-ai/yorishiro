@@ -134,7 +134,7 @@ async fn disable_in_transaction(
     if newly_disabled {
         super::ActiveModel {
             id: Set(tenant_id),
-            disabled_at: Set(Some(crate::time::now().fixed_offset())),
+            disabled_at: Set(Some(crate::data::time::now().fixed_offset())),
             ..Default::default()
         }
         .update(txn)
@@ -228,7 +228,7 @@ pub(crate) async fn root_deleted(
         delete_disabled_in(txn, tenant_id).await?;
         return Ok(crate::models::user_users::DeletionOutcome::TenantDeleted { tenant_id });
     }
-    let due = crate::time::database_instant(crate::time::now() + DELETE_GRACE_PERIOD);
+    let due = crate::data::time::database_instant(crate::data::time::now() + DELETE_GRACE_PERIOD);
     super::ActiveModel {
         id: Set(tenant_id),
         delete_scheduled_at: Set(Some(due)),
@@ -433,7 +433,7 @@ pub async fn cancel_work(
         .into_iter()
         .map(|row| row.id)
         .collect::<Vec<_>>();
-    let now = crate::time::now();
+    let now = crate::data::time::now();
     queue_job_lifecycles::Entity::update_many()
         .col_expr(
             queue_job_lifecycles::Column::Status,

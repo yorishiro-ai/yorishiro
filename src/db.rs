@@ -3,12 +3,22 @@
 //! session state cannot cross control-plane and tenant operations.
 //!
 //! Requests reach the database through `TenantDb::begin_for_workspace`, whose returned `DatabaseTransaction` carries both the entity API and raw SQL the entity layer can't express (JSONB containment, pgvector search, advisory locks).
-use sea_orm::sqlx::{Connection, PgPool};
+use sea_orm::sqlx::PgPool;
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
 use sqlite_vec::sqlite3_vec_init;
 use uuid::Uuid;
+
+/// Which backend a connection talks to.
+/// Every backend decision outside this module asks through these, so there is one place that names the backends.
+pub(crate) fn is_sqlite(conn: &impl ConnectionTrait) -> bool {
+    conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite
+}
+
+pub(crate) fn is_postgres(conn: &impl ConnectionTrait) -> bool {
+    conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres
+}
 
 /// Common backend predicates for request and service code.
 pub trait AppContextBackend {
@@ -18,11 +28,28 @@ pub trait AppContextBackend {
 
 impl AppContextBackend for loco_rs::app::AppContext {
     fn is_sqlite(&self) -> bool {
-        self.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite
+        is_sqlite(&self.db)
     }
 
     fn is_postgres(&self) -> bool {
-        self.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres
+        is_postgres(&self.db)
+    }
+}
+
+/// The control-plane transaction an IAM check runs in.
+///
+/// PostgreSQL hides the IAM tables from the tenant pool, so the check runs in its own write transaction on the identity pool, which the caller keeps open until the workspace mutation commits.
+/// SQLite has one pool and no row-level security: the caller's own transaction is the one to check in, so there is none to open.
+///
+/// # Errors
+/// Returns an error if the identity transaction cannot be opened.
+pub(crate) async fn begin_authorization(
+    db: &DatabaseConnection,
+) -> Result<Option<DatabaseTransaction>, DbErr> {
+    if is_postgres(db) {
+        Ok(Some(begin_write(db).await?))
+    } else {
+        Ok(None)
     }
 }
 
@@ -45,7 +72,7 @@ fn connection_options(config: &loco_rs::config::Database) -> sea_orm::ConnectOpt
 /// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI).
 /// Both pools install the configured PostgreSQL session timezone per connection and reset it on release.
 pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Result<()> {
-    let timezone = crate::time::configured(ctx).to_string();
+    let timezone = crate::data::time::configured(ctx).to_string();
     let tenant = TenantDb::connect(&ctx.config.database, timezone)
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
@@ -61,7 +88,7 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
 pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco_rs::Result<()> {
     let config = &ctx.config.database;
     let mut options = connection_options(config);
-    let zone = crate::time::configured(ctx);
+    let zone = crate::data::time::configured(ctx);
     if ctx.is_sqlite() {
         require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
         // Keep Loco's per-connection PRAGMAs and its busy_timeout-aware acquire budget.
@@ -152,7 +179,7 @@ unsafe extern "C" fn sqlite_current_timestamp(
         }
         .copied()
         .unwrap_or(chrono_tz::UTC);
-        crate::time::sqlite_timestamp(crate::time::now(), timezone)
+        crate::data::time::sqlite_timestamp(crate::data::time::now(), timezone)
     });
     match result {
         // SAFETY: `timestamp` remains live for the call and SQLITE_TRANSIENT copies it immediately.
@@ -257,9 +284,7 @@ pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::Yori
     db.query_one_raw(db.get_database_backend().build(&query))
         .await
         .internal()?
-        .ok_or_else(|| {
-            crate::YorishiroError::Internal(anyhow::anyhow!("activity count returned no row"))
-        })?
+        .ok_or_else(|| crate::YorishiroError::Internal("activity count returned no row".into()))?
         .try_get_by_index(0)
         .internal()
 }
@@ -291,7 +316,10 @@ pub fn register_sqlite_extensions() {
     // type with opaque internals so we suppress the lint instead of duplicating
     // libsqlite3-sys's bindgen output.
     static REGISTER: std::sync::Once = std::sync::Once::new();
-    #[allow(clippy::missing_transmute_annotations)]
+    #[expect(
+        clippy::missing_transmute_annotations,
+        reason = "SQLite registers the destructor through a C function pointer type"
+    )]
     REGISTER.call_once(|| unsafe {
         // `sqlite3_vec_init` is declared in `sqlite-vec` as a bare C function
         // pointer; `sqlite3_auto_extension` expects a function pointer matching
@@ -423,7 +451,7 @@ pub async fn begin_workspace(
     let handle = ctx
         .shared_store
         .get::<DbHandle>()
-        .ok_or_else(|| crate::YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+        .ok_or_else(|| crate::YorishiroError::Internal("DbHandle missing".into()))?;
     handle
         .tenant
         .begin_for_workspace(tenant_id, workspace_id)
@@ -500,7 +528,7 @@ pub fn stamped_updated_at(
     current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,
 ) -> sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>> {
     if !insert && !current.is_set() {
-        sea_orm::ActiveValue::Set(crate::time::now().into())
+        sea_orm::ActiveValue::Set(crate::data::time::now().into())
     } else {
         current
     }
@@ -579,152 +607,4 @@ pub async fn try_lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Resu
         .await?
         .ok_or_else(|| DbErr::Custom("advisory lock query returned no row".into()))?;
     row.try_get("", "locked")
-}
-
-/// A guard that holds a session-scoped advisory lock on a workspace for reindex serialization.
-///
-/// `conn` is detached so returning it to the pool does not release the lock.
-/// `release().await` closes the connection asynchronously, sends PostgreSQL the `Terminate`
-/// message, ends the session, and releases the lock.
-///
-/// `Drop` is only a panic-unwind backstop: it tries to spawn `conn.close()` on the current
-/// runtime, which may or may not succeed depending on the runtime state, but is better
-/// than leaving the connection open with no cleanup attempt at all.
-pub struct WorkspaceReindexLockGuard {
-    conn: Option<sea_orm::sqlx::PgConnection>,
-}
-
-impl WorkspaceReindexLockGuard {
-    /// Closes the detached connection and releases the advisory lock.
-    ///
-    /// Returns `Ok(())` on success. If the connection was already released
-    /// (double-`release` is a no-op), returns `Ok(())` without error.
-    /// Also logs any close failure for diagnostics.
-    ///
-    /// # Errors
-    /// Returns an error if the operation cannot be completed.
-    pub async fn release(mut self) -> Result<(), sea_orm::sqlx::Error> {
-        if let Some(conn) = self.conn.take() {
-            let result = conn.close().await;
-            if let Err(ref e) = result {
-                tracing::error!(error = %e, "failed to close reindex lock connection");
-            }
-            result
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Drop for WorkspaceReindexLockGuard {
-    fn drop(&mut self) {
-        // This path runs only if the caller forgot to call `release()` — a
-        // logic error.  Try to close the connection asynchronously; the
-        // explicit `release().await` is the intended path.
-        if let Some(conn) = self.conn.take()
-            && let Ok(handle) = tokio::runtime::Handle::try_current()
-        {
-            handle.spawn(async move {
-                let _ = conn.close().await;
-            });
-        }
-        // If we cannot get a runtime handle (no current runtime, or a
-        // different runtime), we have no way to close the connection
-        // asynchronously. The client socket closes when the process exits.
-    }
-}
-
-/// The advisory lock namespace for reindexes, separate from entity quota locks.
-#[must_use]
-pub fn workspace_reindex_lock_key(workspace_id: Uuid) -> String {
-    format!("embedding-reindex:{workspace_id}")
-}
-
-/// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
-///
-/// Acquires `pg_advisory_lock` on a bare pooled connection and detaches it. The lock is held
-/// until `WorkspaceReindexLockGuard::release()` is called, which closes the connection and
-/// ends the session. Pool return keeps the session alive, so the lock would persist and cause
-/// the next reindex to re-enter (advisory locks are per-session, not per-connection).
-///
-/// Does not time out: a legitimate reindex over a large workspace can block for a long time,
-/// and imposing a bound would risk killing a run that is just busy. The `tracing::info!`
-/// before and after acquisition makes a wait visible rather than a silent hang.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn acquire_workspace_reindex_lock(
-    pool: PgPool,
-    workspace_id: Uuid,
-) -> Result<WorkspaceReindexLockGuard, sea_orm::sqlx::Error> {
-    let mut conn = pool.acquire().await?;
-
-    // Reindexes serialize with each other, not with entity quota locks during provider calls.
-    let key = workspace_reindex_lock_key(workspace_id);
-    tracing::info!(%key, "waiting for workspace reindex lock");
-
-    sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
-        .bind(&key)
-        .execute(conn.as_mut())
-        .await?;
-
-    tracing::info!(%key, "acquired workspace reindex lock");
-
-    // Detach the connection: returning it to the pool would keep the session (and the lock)
-    // alive. `release()` on the guard closes the connection, ending the session.
-    let detached = conn.detach();
-
-    Ok(WorkspaceReindexLockGuard {
-        conn: Some(detached),
-    })
-}
-
-/// Runs a reindex with the backend's workspace serialization policy.
-/// PostgreSQL holds a detached session lock; SQLite retains the model's transactional writes without a session lock.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn reindex_workspace_with_lock(
-    ctx: &loco_rs::app::AppContext,
-    workspace_id: Uuid,
-    provider: &dyn crate::services::embedding::EmbeddingProvider,
-) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    reindex_workspace_with_actor(ctx, workspace_id, provider, None).await
-}
-
-pub(crate) async fn reindex_workspace_with_actor(
-    ctx: &loco_rs::app::AppContext,
-    workspace_id: Uuid,
-    provider: &dyn crate::services::embedding::EmbeddingProvider,
-    actor: Option<&crate::models::api_keys::AuthContext>,
-) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    let lock = if ctx.is_sqlite() {
-        None
-    } else {
-        let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-            crate::YorishiroError::Internal(anyhow::anyhow!(
-                "reindex requires the tenant pool, which this deployment did not build"
-            ))
-        })?;
-        Some(
-            acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
-                .await
-                .map_err(|err| {
-                    crate::YorishiroError::Internal(anyhow::anyhow!(
-                        "failed to acquire workspace lock: {err}"
-                    ))
-                })?,
-        )
-    };
-    let outcome = crate::models::entity_embeddings::reindex_workspace_as(
-        &ctx.db,
-        workspace_id,
-        provider,
-        actor,
-    )
-    .await;
-    if let Some(lock) = lock {
-        let _ = lock.release().await;
-    }
-    outcome
 }

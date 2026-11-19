@@ -1,3 +1,5 @@
+//! Entity model: records, the embedding-sync token reads, and the operations in its submodules (CRUD, migration, snapshots, validation).
+
 use chrono::{DateTime, Utc};
 use sea_orm::ExprTrait;
 use sea_orm::QuerySelect;
@@ -7,8 +9,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 mod backend;
-mod crud;
 mod migration;
+mod operations;
 mod snapshots;
 pub(crate) use snapshots::require_job_snapshots;
 mod validation;
@@ -37,10 +39,10 @@ impl std::fmt::Debug for Model {
     }
 }
 
-pub(crate) use crud::create_with_quota;
-pub use crud::{count, create, delete, get, list, update};
 pub(crate) use migration::fill_defaults;
 pub use migration::{drift, migration_dry_run};
+pub(crate) use operations::create_with_quota;
+pub use operations::{count, create, delete, get, list, update};
 pub use snapshots::undo_job;
 pub use snapshots::{delete_snapshot, snapshot};
 pub use validation::validate_data;
@@ -51,8 +53,8 @@ pub(crate) async fn ids_for_workspace(
 ) -> Result<Vec<Uuid>, DbErr> {
     Entity::find()
         .select_only()
-        .column(crate::models::_entities::entity_entities::Column::Id)
-        .filter(crate::models::_entities::entity_entities::Column::WorkspaceId.eq(workspace_id))
+        .column(Column::Id)
+        .filter(Column::WorkspaceId.eq(workspace_id))
         .into_tuple()
         .all(db)
         .await
@@ -149,7 +151,7 @@ pub(crate) async fn missing_embeddings(
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {

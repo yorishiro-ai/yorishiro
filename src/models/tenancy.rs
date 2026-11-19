@@ -267,9 +267,8 @@ async fn login_options(
         .internal()?;
     let mut memberships = Vec::with_capacity(rows.len());
     for (_, tenant) in rows {
-        let tenant = tenant.ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("membership tenant missing"))
-        })?;
+        let tenant =
+            tenant.ok_or_else(|| YorishiroError::Internal("membership tenant missing".into()))?;
         if tenant.disabled_at.is_some() {
             continue;
         }
@@ -335,9 +334,9 @@ async fn login_options(
             {
                 continue;
             }
-            let tenant_name = names.get(&workspace.tenant_id).ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!("workspace membership missing"))
-            })?;
+            let tenant_name = names
+                .get(&workspace.tenant_id)
+                .ok_or_else(|| YorishiroError::Internal("workspace membership missing".into()))?;
             candidates.push(LoginWorkspace {
                 workspace_id: workspace.id,
                 workspace_name: workspace.name,

@@ -1,3 +1,5 @@
+//! IAM group membership model: listing, adding and removing group members.
+
 pub use crate::models::_entities::iam_group_memberships::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 
@@ -83,11 +85,8 @@ impl Model {
             .await
             .map_err(|error| match error {
                 YorishiroError::Internal(ref source)
-                    if source.downcast_ref::<sea_orm::DbErr>().is_some_and(|e| {
-                        matches!(
-                            e.sql_err(),
-                            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-                        )
+                    if source.downcast_ref::<DbErr>().is_some_and(|e| {
+                        matches!(e.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
                     }) =>
                 {
                     YorishiroError::Conflict {

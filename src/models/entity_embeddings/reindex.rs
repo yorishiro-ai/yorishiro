@@ -1,3 +1,5 @@
+//! Full reindex of a workspace: recomputes every vector with the current provider and publishes them atomically.
+
 use sea_orm::{ConnectionTrait, DatabaseConnection, ExprTrait};
 use uuid::Uuid;
 
@@ -108,7 +110,7 @@ pub(crate) async fn reindex_workspace_as(
             Column::EmbeddingRevision,
             Expr::col(Column::EmbeddingRevision).add(1),
         )
-        .filter(crate::models::_entities::workspace_workspaces::Column::Id.eq(workspace_id))
+        .filter(Column::Id.eq(workspace_id))
         .exec(&txn)
         .await
         .internal()?;
@@ -210,10 +212,13 @@ pub(crate) async fn reindex_workspace_as(
             reindexed += 1;
         }
         let dimensions = i32::try_from(provider.dimensions()).map_err(|_| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "provider dimensions {} do not fit in an i32 column",
-                provider.dimensions()
-            ))
+            YorishiroError::Internal(
+                format!(
+                    "provider dimensions {} do not fit in an i32 column",
+                    provider.dimensions()
+                )
+                .into(),
+            )
         })?;
         super::stamp::restamp_workspace_embedding(
             &txn,

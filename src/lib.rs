@@ -1,11 +1,11 @@
+//! The Yorishiro application: a Loco app with thin entry points, model-owned logic and background workers.
+//! This file is the only place that assembles the enterprise overlay and implements `Hooks`.
+
 pub mod app;
 pub mod controllers;
 pub mod data;
 pub mod db;
-pub mod db_enum;
 pub mod dtos;
-
-// `time` owns the cross-cutting timezone policy used by application, DB, and queue boundaries.
 
 #[cfg(feature = "enterprise")]
 #[path = "../ee/mod.rs"]
@@ -251,7 +251,7 @@ pub mod edition {
         }
         pub(super) fn register_tasks(_tasks: &mut Tasks) {}
 
-        #[allow(clippy::unused_async)]
+        #[expect(clippy::unused_async, reason = "Loco declares this hook async")]
         pub(super) async fn seed(_ctx: &AppContext) -> Result<()> {
             Ok(())
         }
@@ -262,8 +262,6 @@ pub mod initializers;
 pub mod models;
 pub mod services;
 pub mod tasks;
-/// Shared application time policy, configured IANA zone, and wall-clock helpers.
-pub mod time;
 pub mod workers;
 
 pub use edition::App;

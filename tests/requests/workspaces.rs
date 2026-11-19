@@ -9,11 +9,11 @@ use yorishiro::models::user_users;
 
 async fn member_key(
     ctx: &loco_rs::app::AppContext,
-    tenant_id: uuid::Uuid,
-    workspace_id: uuid::Uuid,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
     key_scope: yorishiro::models::api_keys::ApiKeyScope,
 ) -> String {
-    let email = format!("member-{}@example.com", uuid::Uuid::new_v4().simple());
+    let email = format!("member-{}@example.com", Uuid::new_v4().simple());
     let member = user_users::create_user(&ctx.db, &email, "hunter2-hunter2", None)
         .await
         .expect("create member");
@@ -32,15 +32,11 @@ async fn member_key(
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
-#[serial_test::serial(process_environment)]
 async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "true");
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [("initializers.plan_policy_enabled", "true".into())];
+    crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
@@ -50,33 +46,26 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
                     sub: "quota-test".into(),
                     plan: "free".into(),
                     exp,
-                })))
+                })));
         };
         set_licence(chrono::Utc::now().timestamp() + 3600);
         request
             .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":format!("blocked-{}", Uuid::new_v4())}))
             .await
             .assert_status(StatusCode::CONFLICT);
         set_licence(chrono::Utc::now().timestamp() - 1);
         request
             .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":format!("allowed-{}", Uuid::new_v4())}))
             .await
             .assert_status(StatusCode::CREATED);
-        yorishiro::models::tenant_tenants::ActiveModel {
-            id: Set(tenant.tenant_id),
-            max_workspaces: Set(Some(0)),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::set_workspace_cap(&ctx, tenant.tenant_id, 0).await;
         request
             .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":format!("manual-{}", Uuid::new_v4())}))
             .await
             .assert_status(StatusCode::CONFLICT);
@@ -86,15 +75,11 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
-#[serial_test::serial(process_environment)]
 async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "false");
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [("initializers.plan_policy_enabled", "false".into())];
+    crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
@@ -106,21 +91,14 @@ async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
             })));
         request
             .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":format!("off-{}", Uuid::new_v4())}))
             .await
             .assert_status(StatusCode::CREATED);
-        yorishiro::models::tenant_tenants::ActiveModel {
-            id: Set(tenant.tenant_id),
-            max_workspaces: Set(Some(0)),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::set_workspace_cap(&ctx, tenant.tenant_id, 0).await;
         request
             .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant_key))
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":format!("manual-off-{}", Uuid::new_v4())}))
             .await
             .assert_status(StatusCode::CONFLICT);
@@ -188,7 +166,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             assert_eq!(created_at.offset().local_minus_utc(), expected_offset);
         }
 
-        let staging_key = super::fixtures::issue_api_key(
+        let staging_key = issue_api_key(
             &ctx,
             staging_id.parse().unwrap(),
             owner_id,
@@ -347,7 +325,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
 
 #[tokio::test]
 async fn cannot_delete_a_tenants_only_workspace() {
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let main_id = tenant.workspace_id;
         let owner_key =
@@ -411,14 +389,13 @@ async fn workspaces_endpoints_require_authentication() {
 
 #[tokio::test]
 async fn workspace_grant_management_requires_iam_and_respects_credential_binding() {
-    use sea_orm::TransactionTrait;
     use yorishiro::models::workspace_memberships::WorkspaceRole;
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let local = user_users::create_user(
             &ctx.db,
-            &format!("local-{}@example.com", uuid::Uuid::new_v4()),
+            &format!("local-{}@example.com", Uuid::new_v4()),
             "hunter2-hunter2",
             None,
         )
@@ -426,7 +403,7 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
         .unwrap();
         let target = user_users::create_user(
             &ctx.db,
-            &format!("target-{}@example.com", uuid::Uuid::new_v4()),
+            &format!("target-{}@example.com", Uuid::new_v4()),
             "hunter2-hunter2",
             None,
         )
@@ -592,16 +569,13 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await
             .assert_status(StatusCode::FORBIDDEN);
-        let txn = ctx.db.begin().await.unwrap();
-        yorishiro::models::workspace_memberships::Model::grant(
-            &txn,
+        super::fixtures::grant_workspace(
+            &ctx,
             sibling_id.parse().unwrap(),
             local.id,
             WorkspaceRole::Admin,
         )
-        .await
-        .unwrap();
-        txn.commit().await.unwrap();
+        .await;
         request
             .put(&format!(
                 "/api/workspaces/{sibling_id}/members/{}",

@@ -1,0 +1,25 @@
+# Project settings for rust-analyzer, read from the repository root by every editor.
+# Lint levels come from Cargo.toml's [workspace.lints] and clippy.toml, so the editor, `cargo clippy` and CI report the same findings.
+
+[cargo]
+# The enterprise overlay is compiled behind this feature; analyse it so ee/ gets full diagnostics.
+features = ["enterprise"]
+# Tests live in tests/ and are part of the code the lints cover.
+allTargets = true
+
+[check]
+# Run Clippy on save instead of `cargo check`.
+command = "clippy"
+allTargets = true
+features = ["enterprise"]
+
+[imports]
+# Group auto-imported paths the way AGENTS.md orders them: std, external crates, then this crate.
+group.enable = true
+granularity.group = "module"
+prefix = "crate"
+enforceGranularity = true
+
+[diagnostics]
+# Report rust-analyzer's own style lints (for example needless returns) in the editor.
+styleLints.enable = true

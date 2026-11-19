@@ -9,16 +9,7 @@ use yorishiro::models::_entities::template_templates;
 use yorishiro::models::template_templates::{self as templates, TemplateVisibility};
 
 fn note_definition(name: &str) -> serde_json::Value {
-    serde_json::json!({
-        "name": name,
-        "entity_types": {
-            "note": {
-                "fields": {
-                    "title": { "type": "string", "required": true }
-                }
-            }
-        }
-    })
+    crate::requests::fixtures::note_schema(name, false)
 }
 
 #[test]
@@ -84,7 +75,7 @@ fn unknown_persisted_visibility_is_internal_and_input_is_validation_failed() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn list_and_get_respect_tenant_and_community_visibility() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

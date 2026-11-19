@@ -43,7 +43,7 @@ impl WorkerClassLimits {
                 .filter(|value| *value > 0)
                 .map(Some)
                 .ok_or_else(|| {
-                    loco_rs::Error::Message(format!("{} must be a positive integer", key))
+                    loco_rs::Error::Message(format!("{key} must be a positive integer"))
                 }),
             }
         }

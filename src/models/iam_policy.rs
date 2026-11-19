@@ -1,3 +1,5 @@
+//! The IAM policy document: its actions, resources and effects, parsing with size limits, and the evaluation of whether it allows a request.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -561,16 +563,5 @@ impl Policy {
             }
         }
         allowed
-    }
-
-    pub fn allows_any_applicable_action(
-        policies: &[Self],
-        tenant_id: Uuid,
-        target: Resource,
-        owns_workspace: impl Fn(Uuid, Uuid) -> bool,
-    ) -> bool {
-        Action::ALL
-            .iter()
-            .any(|action| Self::allows(policies, tenant_id, *action, target, &owns_workspace))
     }
 }

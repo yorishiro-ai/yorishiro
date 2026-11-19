@@ -5,6 +5,30 @@ exclude = ["patches/loco-rs/source"]
 [workspace.package]
 rust-version = "1.100.0"
 
+# Lint levels live here so `cargo build`, `cargo clippy` and rust-analyzer all report the same findings as warnings.
+# CI and the Makefile turn every warning into an error with `-D warnings`.
+[workspace.lints.rust]
+unused_qualifications = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# Every `allow` needs a reason, and `expect` is preferred so a stale suppression is itself reported.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+# Public fallibility and panics are documented on every public API.
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+# Consistent, readable style that `cargo clippy --fix` applies mechanically.
+uninlined_format_args = "warn"
+redundant_closure_for_method_calls = "warn"
+semicolon_if_nothing_returned = "warn"
+map_unwrap_or = "warn"
+cloned_instead_of_copied = "warn"
+implicit_clone = "warn"
+
 # Temporary upstream bug fixes, with rationale and removal criteria in patches/.
 [patch.crates-io]
 loco-rs = { path = "patches/loco-rs/source" }
@@ -18,6 +42,9 @@ publish = false
 default-run = "yorishiro"
 # `tests/` is one integration binary rooted at `tests/mod.rs`; without this Cargo also builds `tests/db.rs`, `tests/db_enum.rs` and `tests/licence.rs` as separate binaries that repeat tests the root already includes.
 autotests = false
+
+[lints]
+workspace = true
 
 [[test]]
 name = "mod"
@@ -50,7 +77,6 @@ sea-orm-migration = { version = "2.0.4", features = [
 # Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
 # It is not loco-rs's own default and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust).
 loco-rs = { version = "=1.3.1", default-features = false, features = ["cli", "with-db", "auth", "db-sqlite", "db-postgres", "worker_redis"] }
-anyhow = { version = "1.0.104" }
 axum = { version = "0.8.9" }
 chrono = { version = "0.4.45", features = ["serde"] }
 chrono-tz = "0.10.4"
@@ -86,7 +112,6 @@ sea-orm.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
-anyhow.workspace = true
 sha2.workspace = true
 jsonschema = { version = "=0.60.2" }
 rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }

@@ -1,10 +1,12 @@
+//! The job lifecycle table: enqueue, dispatch, lease heartbeat, deferral and completion state for every background job.
+
 pub use crate::models::_entities::queue_job_lifecycles::{ActiveModel, Column, Entity, Model};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect};
 use tokio::task::JoinHandle;
 
-use crate::db_enum::db_enum;
+use crate::models::db_enum::db_enum;
 
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
 const LEASE_DURATION_MINUTES: i64 = 5;
@@ -84,7 +86,7 @@ impl LifecycleStatus {
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -110,7 +112,7 @@ impl Entity {
             workspace_id: Set(enqueue.workspace_id),
             plan: Set(enqueue.plan.map(str::to_owned)),
             status: Set(LifecycleStatus::Queued.as_db_str().to_owned()),
-            enqueue_at: Set(crate::time::database_instant(crate::time::now())),
+            enqueue_at: Set(crate::data::time::database_instant(crate::data::time::now())),
             claim_at: Set(None),
             start_at: Set(None),
             retry_at: Set(None),
@@ -182,7 +184,7 @@ impl Entity {
         attempt: Option<i32>,
         error: &str,
     ) -> Result<(), DbErr> {
-        let now = crate::time::database_instant(crate::time::now());
+        let now = crate::data::time::database_instant(crate::data::time::now());
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -282,7 +284,7 @@ impl Entity {
                     &db,
                     id,
                     attempt,
-                    crate::time::database_instant(crate::time::now()),
+                    crate::data::time::database_instant(crate::data::time::now()),
                 )
                 .await
                 {
@@ -299,7 +301,12 @@ impl Entity {
     }
 
     pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<Admission, DbErr> {
-        Self::start_at(db, id, crate::time::database_instant(crate::time::now())).await
+        Self::start_at(
+            db,
+            id,
+            crate::data::time::database_instant(crate::data::time::now()),
+        )
+        .await
     }
 
     ///
@@ -330,7 +337,7 @@ impl Entity {
         status: LifecycleStatus,
         error: Option<&str>,
     ) -> Result<(), DbErr> {
-        let now = crate::time::now();
+        let now = crate::data::time::now();
         let mut update = Entity::update_many()
             .col_expr(Column::Status, Expr::value(status.as_db_str()))
             .col_expr(
@@ -429,7 +436,7 @@ async fn admit(
         // The claimed row now counts toward its own key.
         active_capacity = ?in_flight.map(|count| count + 1),
         capacity_limit = ?row.concurrency_limit,
-        queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(row.enqueue_at).num_seconds(), 0),
+        queue_start_seconds = Ord::max(now.signed_duration_since(row.enqueue_at).num_seconds(), 0),
         "queue job admitted"
     );
     let attempt = row.attempt + 1;

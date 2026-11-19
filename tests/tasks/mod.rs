@@ -1,13 +1,11 @@
-mod queue_tasks;
-mod reindex_embeddings;
-mod scheduler_config;
+mod resync_embeddings;
 mod tenant_reindex_scheduler;
 
-pub mod inspect_tenant_retirement;
+pub(crate) mod inspect_tenant_retirement;
 
-pub mod disable_tenant;
+pub(crate) mod disable_tenant;
 
-pub mod delete_tenant;
-mod users;
+pub(crate) mod delete_tenant;
+mod delete_user;
 
-mod root_password;
+mod reset_root_password;

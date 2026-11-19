@@ -1,3 +1,5 @@
+//! Operation-time quota limits supplied by the active edition, and how they combine with operator-set limits.
+
 /// Additional operation-time quotas, independent of persisted operator limits.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Quotas {

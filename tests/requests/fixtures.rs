@@ -9,20 +9,51 @@ use yorishiro::models::_entities::api_keys;
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy;
 
-pub async fn grant_workspace(
+pub(crate) async fn grant_workspace(
     ctx: &AppContext,
     workspace_id: Uuid,
     user_id: Uuid,
     role: yorishiro::models::workspace_memberships::WorkspaceRole,
 ) {
-    let txn = ctx.db.begin().await.expect("begin workspace grant");
+    // SQLite fails a deferred transaction that upgrades to a write after another connection has written; take the writer slot up front.
+    let txn = ctx
+        .db
+        .begin_with_options(sea_orm::TransactionOptions {
+            sqlite_transaction_mode: Some(sea_orm::SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .expect("begin workspace grant");
     yorishiro::models::workspace_memberships::Model::grant(&txn, workspace_id, user_id, role)
         .await
         .expect("grant explicit workspace access");
     txn.commit().await.expect("commit workspace grant");
 }
 
-pub struct TestTenant {
+/// Caps the tenant's workspaces.
+/// No public operation changes this cap (only a plan does), so this is the one place a test writes it directly.
+pub(crate) async fn set_workspace_cap(ctx: &AppContext, tenant_id: Uuid, cap: i32) {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    yorishiro::models::tenant_tenants::ActiveModel {
+        id: Set(tenant_id),
+        max_workspaces: Set(Some(cap)),
+        ..Default::default()
+    }
+    .update(&ctx.db)
+    .await
+    .expect("set the workspace cap");
+}
+
+/// Disables the tenant through the operator operation the `disable_tenant` task runs.
+pub(crate) async fn disable_tenant(ctx: &AppContext, tenant_id: Uuid) {
+    yorishiro::models::tenant_tenants::retirement::disable_by_operator(
+        &ctx.db, tenant_id, tenant_id,
+    )
+    .await
+    .expect("disable the tenant");
+}
+
+pub(crate) struct TestTenant {
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
     pub owner_id: Uuid,
@@ -30,7 +61,11 @@ pub struct TestTenant {
 }
 
 impl TestTenant {
-    pub async fn create(request: &loco_rs::TestServer, ctx: &AppContext, args: TenantArgs) -> Self {
+    pub(crate) async fn create(
+        request: &loco_rs::TestServer,
+        ctx: &AppContext,
+        args: TenantArgs,
+    ) -> Self {
         let response = request
             .post("/auth/signup")
             .json(&serde_json::json!({
@@ -61,7 +96,7 @@ impl TestTenant {
     }
 }
 
-pub async fn grant_iam_administrator(
+pub(crate) async fn grant_iam_administrator(
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
@@ -93,7 +128,7 @@ pub async fn grant_iam_administrator(
 }
 
 /// Arguments for shared tenant/workspace/owner setup.
-pub struct TenantArgs {
+pub(crate) struct TenantArgs {
     /// Tenant name. Defaults to a unique name.
     pub tenant_name: String,
     /// Workspace name. Defaults to a unique name.
@@ -124,7 +159,7 @@ impl Default for TenantArgs {
 /// Issue an API key for an existing user.
 ///
 /// Create a `TestTenant` first, then use its owner ID for additional scoped keys.
-pub async fn issue_api_key(
+pub(crate) async fn issue_api_key(
     ctx: &AppContext,
     workspace_id: Uuid,
     user_id: Uuid,
@@ -137,7 +172,7 @@ pub async fn issue_api_key(
         .plaintext
 }
 
-pub async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id: Uuid) -> String {
+pub(crate) async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id: Uuid) -> String {
     api_keys::Entity::create_tenant_api_key(
         &ctx.db,
         tenant_id,
@@ -152,6 +187,18 @@ pub async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id: Uuid) 
 }
 
 /// An email address no other test in the same database uses.
-pub fn unique_email(prefix: &str) -> String {
+pub(crate) fn unique_email(prefix: &str) -> String {
     format!("{prefix}-{}@example.com", Uuid::new_v4().simple())
+}
+
+/// A one-field `note` schema definition named `name`; `embedded` marks its title for embedding.
+pub(crate) fn note_schema(name: &str, embedded: bool) -> serde_json::Value {
+    let mut title = serde_json::json!({"type": "string", "required": true});
+    if embedded {
+        title["x-embed"] = true.into();
+    }
+    serde_json::json!({
+        "name": name,
+        "entity_types": {"note": {"fields": {"title": title}}}
+    })
 }

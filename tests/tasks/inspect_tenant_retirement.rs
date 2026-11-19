@@ -17,7 +17,7 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
         tenant_retirement_events, tenant_tenants,
     };
 
-    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let key = api_keys::Entity::create_tenant_api_key(
             &ctx.db, target.tenant_id, api_keys::ApiKeyScope::Read, Some(target.owner_id), false, "retirement-owner",
@@ -174,8 +174,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-    use yorishiro::models::{api_keys, tenancy, tenant_tenants};
+    use yorishiro::models::{api_keys, tenancy};
 
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -193,14 +192,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
         .await
         .unwrap();
         // Set persisted state directly until a fully fenced disable operation is available.
-        tenant_tenants::ActiveModel {
-            id: Set(target.tenant_id),
-            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::disable_tenant(&ctx, target.tenant_id).await;
         for key in [&target.api_key, &service.plaintext] {
             request
                 .get("/api/whoami")

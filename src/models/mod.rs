@@ -3,17 +3,30 @@
 //! Every generated entity needs an `ActiveModelBehavior` implementation in every build, and the ones that hold a secret need a redacting `Debug` (`scripts/harden_generated_entities.py` removes the derived one).
 //! So a table gets its module here even when only an overlay's code reads and writes it: the schema is one set of migrations, one set of entities, and the behaviour that overlay owns stays in that overlay's own module for the table.
 
+// Shared plumbing: the generated entities, the `db_enum!` conversions and pagination.
 pub mod _entities;
-pub mod access;
+pub mod db_enum;
+pub mod pagination;
+
+// Tenants, users, workspaces and their memberships and keys.
+pub mod tenancy;
+pub mod tenant_memberships;
+pub mod tenant_reindex_schedules;
+pub mod tenant_retirement_events;
+pub mod tenant_tenants;
+pub mod user_users;
+pub mod workspace_embedding_keys;
+pub mod workspace_llm_keys;
+pub mod workspace_memberships;
+pub mod workspace_worker_classes;
+pub mod workspace_workspaces;
+
+// API keys.
 pub mod api_key_audit_log;
 pub mod api_keys;
-pub mod compute_credit_ledger;
-pub mod entity_column_preferences;
-pub mod entity_embeddings;
-pub mod entity_entities;
-pub mod entity_relations;
-pub mod entity_snapshots;
-pub mod export;
+
+// IAM: policies, groups, roles and the checks that evaluate them.
+pub mod access;
 pub mod iam_audit_events;
 pub mod iam_builtin;
 pub mod iam_group_memberships;
@@ -26,32 +39,35 @@ pub mod iam_roles;
 pub mod iam_tenant_roots;
 pub mod iam_trust_policy;
 pub mod iam_user_policy_attachments;
-pub mod import;
-pub mod inference_jobs;
-pub(crate) mod inference_proposals;
-pub mod pagination;
-pub mod query_embedding_requests;
-pub mod queue_job_dispatch_outbox;
-pub mod queue_job_lifecycles;
-pub mod recall;
+
+// Schemas, forks and the template library.
 pub mod schema_schemas;
-pub mod search;
-pub mod stripe_events;
-pub mod system_maintenance;
 pub mod template_reviews;
 pub mod template_templates;
 pub mod template_versions;
-pub mod tenancy;
-pub mod tenant_billing;
-pub mod tenant_memberships;
-pub mod tenant_reindex_schedules;
-pub mod tenant_retirement_events;
-pub mod tenant_tenants;
-pub mod user_users;
-pub mod workspace_embedding_keys;
-pub mod workspace_llm_keys;
-pub mod workspace_memberships;
 pub mod workspace_schema_fork_heads;
 pub mod workspace_schema_forks;
-pub mod workspace_worker_classes;
-pub mod workspace_workspaces;
+
+// Entities, relations, search and the embeddings behind it.
+pub mod entity_column_preferences;
+pub mod entity_embeddings;
+pub mod entity_entities;
+pub mod entity_relations;
+pub mod entity_snapshots;
+pub mod export;
+pub mod import;
+pub mod inference_jobs;
+pub(crate) mod inference_proposals;
+pub mod query_embedding_requests;
+pub mod recall;
+pub mod search;
+
+// Queue bookkeeping and system state.
+pub mod queue_job_dispatch_outbox;
+pub mod queue_job_lifecycles;
+pub mod system_maintenance;
+
+// Billing.
+pub mod compute_credit_ledger;
+pub mod stripe_events;
+pub mod tenant_billing;

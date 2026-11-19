@@ -49,7 +49,7 @@ pub(crate) async fn configure(
             )
             .col_expr(
                 Column::UpdatedAt,
-                sea_orm::sea_query::Expr::value(crate::time::now()),
+                sea_orm::sea_query::Expr::value(crate::data::time::now()),
             )
             .filter(Column::WorkspaceId.eq(workspace_id))
             .exec(&txn)
@@ -131,7 +131,6 @@ pub(crate) struct EmbeddingKeyConfig {
 ///
 /// # Errors
 /// Returns an error when credentials, dimensions, or persistence are invalid.
-#[allow(clippy::too_many_arguments)]
 pub async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -155,7 +154,10 @@ pub async fn set(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the table columns written in one statement"
+)]
 async fn set_with_instructions(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -185,7 +187,7 @@ async fn set_with_instructions(
         send_dimensions_param: ActiveValue::Set(send_dimensions_param),
         query_instruction: ActiveValue::Set(query_instruction.to_owned()),
         document_prefix: ActiveValue::Set(document_prefix.to_owned()),
-        updated_at: ActiveValue::Set(crate::time::now().into()),
+        updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)

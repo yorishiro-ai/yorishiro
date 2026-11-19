@@ -20,12 +20,11 @@ pub struct EmbeddingMetadata {
 /// Returns an error when the configured provider metadata is incomplete or invalid.
 pub fn deployment_embedding_metadata(
     settings: &crate::data::settings::Settings,
-) -> anyhow::Result<Option<EmbeddingMetadata>> {
+) -> crate::error::BoxResult<Option<EmbeddingMetadata>> {
     let config = &settings.embedding;
-    anyhow::ensure!(
-        (1..=4096).contains(&config.dimensions),
-        "embedding dimensions must be between 1 and 4096"
-    );
+    if !((1..=4096).contains(&config.dimensions)) {
+        return Err("embedding dimensions must be between 1 and 4096".into());
+    };
     if let (Some(_), Some(model)) = (&config.base_url, &config.model) {
         return Ok(Some(EmbeddingMetadata {
             model: model.clone(),
@@ -36,18 +35,20 @@ pub fn deployment_embedding_metadata(
     match config.provider {
         crate::data::settings::EmbeddingProvider::None => Ok(None),
         crate::data::settings::EmbeddingProvider::Openai => {
-            anyhow::bail!("embedding provider openai requires base_url and model")
+            Err("embedding provider openai requires base_url and model".into())
         }
         crate::data::settings::EmbeddingProvider::Local => {
             let def = if config.local_model == model_fetch::DEFAULT_MODEL.short_id {
                 model_fetch::DEFAULT_MODEL
             } else {
-                anyhow::bail!("unknown local embedding model {:?}", config.local_model)
+                return Err(
+                    format!("unknown local embedding model {:?}", config.local_model).into(),
+                );
             };
             if config.dimensions != def.dimensions {
-                anyhow::bail!(
-                    "configured embedding dimensions do not match local model output width"
-                )
+                return Err(
+                    "configured embedding dimensions do not match local model output width".into(),
+                );
             }
             Ok(Some(EmbeddingMetadata {
                 model: def.id.to_owned(),
@@ -134,9 +135,9 @@ pub trait EmbeddingProvider: Send + Sync {
     async fn embed(&self, text: &str) -> Result<Vec<f32>, YorishiroError> {
         let batch = self.embed_batch(&[text]).await?;
         batch.into_iter().next().ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "embedding provider returned no vectors for a single input"
-            ))
+            YorishiroError::Internal(
+                "embedding provider returned no vectors for a single input".into(),
+            )
         })
     }
 }
@@ -193,13 +194,12 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 /// Returns an error when the selected provider cannot be built, for example an unknown local model or model files that cannot be fetched.
 pub async fn build_embedding_provider(
     settings: &crate::data::settings::Settings,
-) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
+) -> crate::error::BoxResult<std::sync::Arc<dyn EmbeddingProvider>> {
     let config = &settings.embedding;
     let dimensions = config.dimensions;
-    anyhow::ensure!(
-        (1..=4096).contains(&dimensions),
-        "embedding dimensions must be between 1 and 4096"
-    );
+    if !((1..=4096).contains(&dimensions)) {
+        return Err("embedding dimensions must be between 1 and 4096".into());
+    };
 
     // Check base_url/model presence before PROVIDER so that the documented
     // shape (PROVIDER unset, base_url+model set) reaches the OpenAI-compatible
@@ -241,21 +241,24 @@ pub async fn build_embedding_provider(
             tracing::info!(
                 "no explicit embedding configuration (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL/YORISHIRO_EMBEDDING_PROVIDER unset); defaulting to local provider with recommended model"
             );
-            anyhow::bail!("embedding provider openai requires base_url and model")
+            Err("embedding provider openai requires base_url and model".into())
         }
     }
 }
 
 /// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value, or [`model_fetch::DEFAULT_MODEL`] when unset.
 /// An unrecognized value fails startup rather than silently falling back to the default: a typo in this variable is exactly the kind of "this deployment thinks it configured one model but got another" mistake the whole write-time model check exists to catch, and catching the typo at boot is strictly better than catching the resulting stamp mismatch on the first write.
-fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::LocalModelDef> {
+fn resolve_local_model(
+    requested: &str,
+) -> crate::error::BoxResult<&'static model_fetch::LocalModelDef> {
     if requested == model_fetch::DEFAULT_MODEL.short_id {
         Ok(model_fetch::DEFAULT_MODEL)
     } else {
-        anyhow::bail!(
+        Err(format!(
             "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
             model_fetch::DEFAULT_MODEL.short_id
         )
+        .into())
     }
 }
 
@@ -269,17 +272,17 @@ fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::
 async fn build_local_provider(
     config: &crate::data::settings::Embedding,
     timeouts: &crate::data::settings::HttpTimeouts,
-) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
+) -> crate::error::BoxResult<std::sync::Arc<dyn EmbeddingProvider>> {
     let dimensions = config.dimensions;
     let def = resolve_local_model(&config.local_model)?;
     if dimensions != def.dimensions {
-        anyhow::bail!(
+        return Err(format!(
             "YORISHIRO_EMBEDDING_DIMENSIONS={dimensions} does not match {}'s own output width \
              ({}); unset YORISHIRO_EMBEDDING_DIMENSIONS to use the selected model's own width, \
              or point YORISHIRO_LOCAL_MODEL at a model that actually produces {dimensions}",
-            def.id,
-            def.dimensions
-        );
+            def.id, def.dimensions
+        )
+        .into());
     }
     let max_sequence_length = config.local_max_sequence_length;
     let (model_path, tokenizer_path) = model_fetch::ensure_model_files(def, timeouts).await?;
@@ -295,13 +298,18 @@ async fn build_local_provider(
     let provider =
         tokio::task::spawn_blocking(move || local::LocalEmbeddingProvider::load(local_config))
             .await
-            .map_err(|err| anyhow::anyhow!("local embedding model loader task failed: {err}"))?
-            .map_err(|err| {
-                anyhow::anyhow!(
+            .map_err(|err| -> crate::error::BoxError {
+                crate::error::BoxError::from(format!(
+                    "local embedding model loader task failed: {err}"
+                ))
+            })?
+            .map_err(|err| -> crate::error::BoxError {
+                format!(
                     "{err}\n\nthe local embedding provider needs '{model_path}' and \
              '{tokenizer_path}', or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an \
              OpenAI-compatible endpoint instead"
                 )
+                .into()
             })?
             .with_timeouts(*timeouts);
     tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");

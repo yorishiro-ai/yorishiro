@@ -1,3 +1,5 @@
+//! The built-in tenant policies (Administrator, Writer, Reader) and their bootstrap for a tenant.
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
     QueryFilter,
@@ -110,14 +112,14 @@ pub(crate) fn policy_documents(tenant_id: Uuid) -> Vec<(String, serde_json::Valu
         .filter(|action| {
             action.applies_to(crate::models::iam_policy::Resource::Tenant { tenant_id })
         })
-        .cloned()
+        .copied()
         .collect::<Vec<Action>>();
     let workspace_reads = reads
         .iter()
         .filter(|action| {
             action.applies_to(crate::models::iam_policy::Resource::AllWorkspaces { tenant_id })
         })
-        .cloned()
+        .copied()
         .collect::<Vec<Action>>();
     let admin_only = Action::ALL
         .iter()

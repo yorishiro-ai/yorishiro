@@ -1,3 +1,6 @@
+//! MCP tools for LLM-assisted fill: starting an inference job and reviewing, confirming or rejecting its proposals.
+//! These tools are licence-gated like their REST routes.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

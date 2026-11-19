@@ -92,7 +92,7 @@ async fn lifecycle_transitions_from_queued_to_completed_or_failed() {
                     );
                     crate::ee::inference_fixtures::complete(&db, job_id, 3, 1)
                         .await
-                        .unwrap()
+                        .unwrap();
                 }
                 InferenceJobStatus::Failed => {
                     assert!(inference_jobs::claim(&db, job_id).await.unwrap());

@@ -59,18 +59,15 @@ mod conflict {
     use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
     use yorishiro::workers::target::WorkerTarget;
 
-    use crate::requests::boot_request;
+    use crate::requests::{boot_request, boot_request_with};
 
     struct BackendObservation(Arc<bgworker::Queue>);
 
     impl BackendObservation {
-        async fn owned_statuses(
-            &self,
-            ids: &[String],
-        ) -> Vec<(String, loco_rs::bgworker::JobStatus)> {
+        async fn owned_statuses(&self, ids: &[String]) -> Vec<(String, bgworker::JobStatus)> {
             let directory = tempfile::tempdir().unwrap();
             let dump = self.0.dump(directory.path(), None, None).await.unwrap();
-            let jobs: Vec<loco_rs::bgworker::Job> =
+            let jobs: Vec<bgworker::Job> =
                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
             jobs.into_iter()
                 .filter(|job| ids.contains(&job.id))
@@ -81,7 +78,7 @@ mod conflict {
         async fn owned_count(
             &self,
             ids: &[String],
-            status: Option<Vec<loco_rs::bgworker::JobStatus>>,
+            status: Option<Vec<bgworker::JobStatus>>,
         ) -> usize {
             self.owned_statuses(ids)
                 .await
@@ -99,13 +96,7 @@ mod conflict {
     }
 
     impl QueueHarness {
-        async fn lane(mut ctx: AppContext, workers: u32) -> Self {
-            match ctx.config.queue.as_mut().expect("configured queue") {
-                loco_rs::config::QueueConfig::Sqlite(config) => config.num_workers = workers,
-                loco_rs::config::QueueConfig::Postgres(config) => config.num_workers = workers,
-                loco_rs::config::QueueConfig::Redis(config) => config.num_workers = workers,
-                _ => unreachable!(),
-            }
+        async fn lane(mut ctx: AppContext) -> Self {
             let queue = crate::requests::query_worker::shared_target_queue(&mut ctx).await;
             let running = queue.clone();
             let runner =
@@ -661,7 +652,7 @@ mod conflict {
                 let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     let lifecycle_id = loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> = serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                        let jobs: Vec<bgworker::Job> = serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let owned: Vec<_> = jobs.iter().filter(|job| job.data["entity_id"] == entity_id.to_string()
                             && job.data["workspace_id"] == workspace_id.to_string()).collect();
                         if owned.iter().any(|job| job.status == JobStatus::Failed) {
@@ -692,7 +683,7 @@ mod conflict {
 
     #[tokio::test]
     async fn three_document_worker_entries_share_the_installed_limiter() {
-        boot_request::<App, _, _>(|request, ctx| async move {
+        boot_request_with::<App, _, _>(&[("queue.num_workers", 3.into())], |request, ctx| async move {
             let (workspace_id, first) = seed(&request, &ctx).await;
             let second = entity_entities::create(
                 &ctx.db,
@@ -722,7 +713,7 @@ mod conflict {
             .id;
             let (provider, transport, _server) = GatedProvider::start(0).await;
             ctx.shared_store.insert(transport.clone());
-            let harness = QueueHarness::lane(ctx, 3).await;
+            let harness = QueueHarness::lane(ctx).await;
             let ctx = harness.ctx.clone();
             let ids = [first, second, third];
             let mut lifecycle_ids = Vec::new();
@@ -745,7 +736,7 @@ mod conflict {
                         .observation
                         .owned_count(
                             &queue_ids,
-                            Some(vec![loco_rs::bgworker::JobStatus::Processing]),
+                            Some(vec![bgworker::JobStatus::Processing]),
                         )
                         .await;
                     if count == 3 {
@@ -819,17 +810,11 @@ mod conflict {
     #[tokio::test]
     async fn document_and_query_workers_share_fifo_embedding_admission() {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
-        boot_request::<App, _, _>(|request, ctx| async move {
+        boot_request_with::<App, _, _>(&[("queue.num_workers", 2.into())], |request, ctx| async move {
             let (workspace_id, entity_id) = seed(&request, &ctx).await;
             let (provider, transport, _server) = MixedProvider::start().await;
             ctx.shared_store.insert(transport);
             let mut worker_ctx = ctx.clone();
-            match worker_ctx.config.queue.as_mut().unwrap() {
-                loco_rs::config::QueueConfig::Sqlite(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Postgres(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Redis(config) => config.num_workers = 2,
-                _ => unreachable!(),
-            }
             let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
@@ -847,7 +832,7 @@ mod conflict {
                 tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if jobs
                             .iter()
@@ -901,7 +886,7 @@ mod conflict {
                             panic!("query caller finished before its delivery was observed processing: {:?}", (&mut query).await);
                         }
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["workspace_id"] == workspace_id.to_string()
@@ -941,7 +926,7 @@ mod conflict {
                 tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let document = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
@@ -989,170 +974,178 @@ mod conflict {
     #[tokio::test]
     async fn provider_error_releases_real_worker_permit_without_replacement() {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
-        boot_request::<App, _, _>(|request, ctx| async move {
-            let (workspace_id, entity_id) = seed(&request, &ctx).await;
-            let (provider, transport, _server) = ErrorThenSuccessProvider::start().await;
-            ctx.shared_store.insert(transport);
-            let mut worker_ctx = ctx.clone();
-            match worker_ctx.config.queue.as_mut().unwrap() {
-                loco_rs::config::QueueConfig::Sqlite(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Postgres(config) => config.num_workers = 2,
-                loco_rs::config::QueueConfig::Redis(config) => config.num_workers = 2,
-                _ => unreachable!(),
-            }
-            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
-            yorishiro::workers::embedding_sync::enqueue_for_class(
-                &ctx,
-                EmbeddingSyncArgs {
-                    lifecycle_id: None,
-                    workspace_id,
-                    entity_id,
-                    worker_class: WorkerClass::Shared,
-                },
-            )
-            .await
-            .unwrap();
-            let directory = tempfile::tempdir().unwrap();
-            let published = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                loop {
-                    let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                    let jobs: Vec<loco_rs::bgworker::Job> =
-                        serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                    if let Some(job) = jobs.iter().find(|job| {
-                        job.data["entity_id"] == entity_id.to_string()
-                            && job.data["workspace_id"] == workspace_id.to_string()
-                    }) {
-                        break serde_json::from_value::<Uuid>(job.data["lifecycle_id"].clone())
-                            .unwrap();
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
-            })
-            .await;
-            let failed_id = match published {
-                Ok(id) => id,
-                Err(_) => {
-                    App::on_shutdown(&worker_ctx).await;
-                    queue.close().await.unwrap();
-                    panic!("production relay did not publish the first delivery");
-                }
-            };
-            let running = queue.clone();
-            let worker =
-                tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
-            let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                async {
-                    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                        while provider.active.load(Ordering::SeqCst) != 1 {
-                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                        }
-                    })
-                    .await
-                    .expect("first delivery acquired the embedding permit");
-                    yorishiro::workers::embedding_sync::enqueue_for_class(
-                        &ctx,
-                        EmbeddingSyncArgs {
-                            lifecycle_id: None,
-                            workspace_id,
-                            entity_id,
-                            worker_class: WorkerClass::Shared,
-                        },
-                    )
-                    .await
-                    .unwrap();
-                    let waiting_id = loop {
+        boot_request_with::<App, _, _>(
+            &[("queue.num_workers", 2.into())],
+            |request, ctx| async move {
+                let (workspace_id, entity_id) = seed(&request, &ctx).await;
+                let (provider, transport, _server) = ErrorThenSuccessProvider::start().await;
+                ctx.shared_store.insert(transport);
+                let mut worker_ctx = ctx.clone();
+                let queue =
+                    crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
+                yorishiro::workers::embedding_sync::enqueue_for_class(
+                    &ctx,
+                    EmbeddingSyncArgs {
+                        lifecycle_id: None,
+                        workspace_id,
+                        entity_id,
+                        worker_class: WorkerClass::Shared,
+                    },
+                )
+                .await
+                .unwrap();
+                let directory = tempfile::tempdir().unwrap();
+                let published = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
                                 && job.data["workspace_id"] == workspace_id.to_string()
-                                && job.data["lifecycle_id"] != failed_id.to_string()
                         }) {
                             break serde_json::from_value::<Uuid>(job.data["lifecycle_id"].clone())
                                 .unwrap();
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    };
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        let processing = jobs
-                            .iter()
-                            .filter(|job| {
-                                [failed_id.to_string(), waiting_id.to_string()].contains(
-                                    &job.data["lifecycle_id"]
-                                        .as_str()
-                                        .unwrap_or_default()
-                                        .to_owned(),
-                                ) && job.status == JobStatus::Processing
-                            })
-                            .count();
-                        if processing == 2 && provider.active.load(Ordering::SeqCst) == 1 {
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
-                    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
-                    provider.release.add_permits(1);
-                    loop {
-                        let row = Entity::find_by_id(failed_id)
+                })
+                .await;
+                let failed_id = match published {
+                    Ok(id) => id,
+                    Err(_) => {
+                        App::on_shutdown(&worker_ctx).await;
+                        queue.close().await.unwrap();
+                        panic!("production relay did not publish the first delivery");
+                    }
+                };
+                let running = queue.clone();
+                let worker =
+                    tokio::spawn(
+                        async move { running.run(vec![WorkerTarget::Shared.tag()]).await },
+                    );
+                let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    async {
+                        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                            while provider.active.load(Ordering::SeqCst) != 1 {
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                            }
+                        })
+                        .await
+                        .expect("first delivery acquired the embedding permit");
+                        yorishiro::workers::embedding_sync::enqueue_for_class(
+                            &ctx,
+                            EmbeddingSyncArgs {
+                                lifecycle_id: None,
+                                workspace_id,
+                                entity_id,
+                                worker_class: WorkerClass::Shared,
+                            },
+                        )
+                        .await
+                        .unwrap();
+                        let waiting_id = loop {
+                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                            let jobs: Vec<bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            if let Some(job) = jobs.iter().find(|job| {
+                                job.data["entity_id"] == entity_id.to_string()
+                                    && job.data["workspace_id"] == workspace_id.to_string()
+                                    && job.data["lifecycle_id"] != failed_id.to_string()
+                            }) {
+                                break serde_json::from_value::<Uuid>(
+                                    job.data["lifecycle_id"].clone(),
+                                )
+                                .unwrap();
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        };
+                        loop {
+                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                            let jobs: Vec<bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            let processing = jobs
+                                .iter()
+                                .filter(|job| {
+                                    [failed_id.to_string(), waiting_id.to_string()].contains(
+                                        &job.data["lifecycle_id"]
+                                            .as_str()
+                                            .unwrap_or_default()
+                                            .to_owned(),
+                                    ) && job.status == JobStatus::Processing
+                                })
+                                .count();
+                            if processing == 2 && provider.active.load(Ordering::SeqCst) == 1 {
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+                        provider.release.add_permits(1);
+                        loop {
+                            let row = Entity::find_by_id(failed_id)
+                                .one(&ctx.db)
+                                .await
+                                .unwrap()
+                                .unwrap();
+                            if row.status == LifecycleStatus::Failed.as_db_str() {
+                                assert!(row.error.is_some_and(|error| error.contains("HTTP 503")
+                                    && !error.contains("private scripted provider failure")));
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                        provider.release.add_permits(1);
+                        loop {
+                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                            let jobs: Vec<bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            let failed = jobs.iter().any(|job| {
+                                job.data["lifecycle_id"] == failed_id.to_string()
+                                    && job.status == JobStatus::Failed
+                            });
+                            let completed = jobs.iter().any(|job| {
+                                job.data["lifecycle_id"] == waiting_id.to_string()
+                                    && job.status == JobStatus::Completed
+                            });
+                            if failed && completed {
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                        let row = Entity::find_by_id(waiting_id)
                             .one(&ctx.db)
                             .await
                             .unwrap()
                             .unwrap();
-                        if row.status == LifecycleStatus::Failed.as_db_str() {
-                            assert!(row.error.is_some_and(|error| error.contains("HTTP 503")
-                                && !error.contains("private scripted provider failure")));
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        assert_eq!(row.status, LifecycleStatus::Completed.as_db_str());
+                        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+                        assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
+                    },
+                ))
+                .catch_unwind()
+                .await;
+                provider.release.add_permits(2);
+                App::on_shutdown(&worker_ctx).await;
+                queue.shutdown().unwrap();
+                let drained =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), worker).await;
+                queue.close().await.unwrap();
+                match outcome {
+                    Ok(result) => {
+                        result.expect(
+                            "failed delivery releases the permit to the next actual worker",
+                        );
                     }
-                    provider.release.add_permits(1);
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        let failed = jobs.iter().any(|job| {
-                            job.data["lifecycle_id"] == failed_id.to_string()
-                                && job.status == JobStatus::Failed
-                        });
-                        let completed = jobs.iter().any(|job| {
-                            job.data["lifecycle_id"] == waiting_id.to_string()
-                                && job.status == JobStatus::Completed
-                        });
-                        if failed && completed {
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                    let row = Entity::find_by_id(waiting_id)
-                        .one(&ctx.db)
-                        .await
-                        .unwrap()
-                        .unwrap();
-                    assert_eq!(row.status, LifecycleStatus::Completed.as_db_str());
-                    assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
-                    assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
-                },
-            ))
-            .catch_unwind()
-            .await;
-            provider.release.add_permits(2);
-            App::on_shutdown(&worker_ctx).await;
-            queue.shutdown().unwrap();
-            let drained = tokio::time::timeout(std::time::Duration::from_secs(10), worker).await;
-            queue.close().await.unwrap();
-            match outcome {
-                Ok(result) => {
-                    result.expect("failed delivery releases the permit to the next actual worker")
+                    Err(panic) => std::panic::resume_unwind(panic),
                 }
-                Err(panic) => std::panic::resume_unwind(panic),
-            }
-            drained.unwrap().unwrap().unwrap();
-        })
+                drained.unwrap().unwrap().unwrap();
+            },
+        )
         .await;
     }
 
@@ -1191,10 +1184,7 @@ mod conflict {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while harness
                 .observation
-                .owned_count(
-                    &queue_ids,
-                    Some(vec![loco_rs::bgworker::JobStatus::Processing]),
-                )
+                .owned_count(&queue_ids, Some(vec![bgworker::JobStatus::Processing]))
                 .await
                 < 2
             {
@@ -1294,118 +1284,126 @@ mod conflict {
             entered: entered.clone(),
             release: release.clone(),
         });
-        boot_request::<App, _, _>(|request, ctx_a| async move {
-            if !matches!(
-                ctx_a.config.queue,
-                Some(loco_rs::config::QueueConfig::Sqlite(_))
-            ) {
-                return;
-            }
-            let (workspace, entity) = seed(&request, &ctx_a).await;
-            let (transport, _server_a) = provider_a.transport().await;
-            ctx_a.shared_store.insert(transport.clone());
-            let harness_a = QueueHarness::lane(ctx_a, 2).await;
-            let cleanup_release_a = release.clone();
-            let result = std::panic::AssertUnwindSafe(async {
-                let (id_a, _) = harness_a.enqueue(workspace, entity).await;
-                // Deliberately observe arrival before waiting to cover early provider entry.
-                tokio::time::timeout(std::time::Duration::from_secs(3), async {
-                    while entered.available_permits() == 0 {
-                        tokio::task::yield_now().await;
-                    }
-                })
-                .await
-                .unwrap();
-                tokio::time::timeout(std::time::Duration::from_secs(3), entered.acquire())
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .forget();
-                let provider_b = Arc::new(AggregateGatedProvider {
-                    active: AtomicUsize::new(0),
-                    max_active: AtomicUsize::new(0),
-                    aggregate: aggregate.clone(),
-                    aggregate_max: aggregate_max.clone(),
-                    entered: entered.clone(),
-                    release: release.clone(),
-                });
-                boot_request::<App, _, _>(|request_b, ctx_b| async move {
-                    let (workspace_b, entity_b) = seed(&request_b, &ctx_b).await;
-                    let (transport, _server_b) = provider_b.transport().await;
-                    ctx_b.shared_store.insert(transport.clone());
-                    let harness_b = QueueHarness::lane(ctx_b, 2).await;
-                    let cleanup_release_b = release.clone();
-                    let result_b = std::panic::AssertUnwindSafe(async {
-                        let (id_b, _) = harness_b.enqueue(workspace_b, entity_b).await;
-                        tokio::time::timeout(std::time::Duration::from_secs(3), async {
-                            while aggregate.load(Ordering::SeqCst) < 2 {
-                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                            }
-                        })
-                        .await
-                        .unwrap();
-                        release.add_permits(2);
-                        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                            while Entity::find_by_id(id_b)
-                                .one(&harness_b.ctx.db)
-                                .await
-                                .unwrap()
-                                .unwrap()
-                                .status
-                                != LifecycleStatus::Completed.as_db_str()
-                            {
-                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                            }
-                        })
-                        .await
-                        .unwrap();
-                        assert_eq!(provider_b.max_active.load(Ordering::SeqCst), 1);
+        boot_request_with::<App, _, _>(
+            &[("queue.num_workers", 2.into())],
+            |request, ctx_a| async move {
+                if !crate::requests::uses_sqlite_queue(&ctx_a) {
+                    return;
+                }
+                let (workspace, entity) = seed(&request, &ctx_a).await;
+                let (transport, _server_a) = provider_a.transport().await;
+                ctx_a.shared_store.insert(transport.clone());
+                let harness_a = QueueHarness::lane(ctx_a).await;
+                let cleanup_release_a = release.clone();
+                let result = std::panic::AssertUnwindSafe(async {
+                    let (id_a, _) = harness_a.enqueue(workspace, entity).await;
+                    // Deliberately observe arrival before waiting to cover early provider entry.
+                    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                        while entered.available_permits() == 0 {
+                            tokio::task::yield_now().await;
+                        }
                     })
-                    .catch_unwind()
-                    .await;
-                    cleanup_release_b.add_permits(2);
-                    harness_b.shutdown().await;
-                    if let Err(panic) = result_b {
-                        std::panic::resume_unwind(panic);
-                    }
-                })
-                .await;
-                tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                    while Entity::find_by_id(id_a)
-                        .one(&harness_a.ctx.db)
+                    .await
+                    .unwrap();
+                    tokio::time::timeout(std::time::Duration::from_secs(3), entered.acquire())
                         .await
                         .unwrap()
                         .unwrap()
-                        .status
-                        != LifecycleStatus::Completed.as_db_str()
-                    {
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
+                        .forget();
+                    let provider_b = Arc::new(AggregateGatedProvider {
+                        active: AtomicUsize::new(0),
+                        max_active: AtomicUsize::new(0),
+                        aggregate: aggregate.clone(),
+                        aggregate_max: aggregate_max.clone(),
+                        entered: entered.clone(),
+                        release: release.clone(),
+                    });
+                    boot_request_with::<App, _, _>(
+                        &[("queue.num_workers", 2.into())],
+                        |request_b, ctx_b| async move {
+                            let (workspace_b, entity_b) = seed(&request_b, &ctx_b).await;
+                            let (transport, _server_b) = provider_b.transport().await;
+                            ctx_b.shared_store.insert(transport.clone());
+                            let harness_b = QueueHarness::lane(ctx_b).await;
+                            let cleanup_release_b = release.clone();
+                            let result_b = std::panic::AssertUnwindSafe(async {
+                                let (id_b, _) = harness_b.enqueue(workspace_b, entity_b).await;
+                                tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                                    while aggregate.load(Ordering::SeqCst) < 2 {
+                                        tokio::time::sleep(std::time::Duration::from_millis(20))
+                                            .await;
+                                    }
+                                })
+                                .await
+                                .unwrap();
+                                release.add_permits(2);
+                                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                                    while Entity::find_by_id(id_b)
+                                        .one(&harness_b.ctx.db)
+                                        .await
+                                        .unwrap()
+                                        .unwrap()
+                                        .status
+                                        != LifecycleStatus::Completed.as_db_str()
+                                    {
+                                        tokio::time::sleep(std::time::Duration::from_millis(20))
+                                            .await;
+                                    }
+                                })
+                                .await
+                                .unwrap();
+                                assert_eq!(provider_b.max_active.load(Ordering::SeqCst), 1);
+                            })
+                            .catch_unwind()
+                            .await;
+                            cleanup_release_b.add_permits(2);
+                            harness_b.shutdown().await;
+                            if let Err(panic) = result_b {
+                                std::panic::resume_unwind(panic);
+                            }
+                        },
+                    )
+                    .await;
+                    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                        while Entity::find_by_id(id_a)
+                            .one(&harness_a.ctx.db)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .status
+                            != LifecycleStatus::Completed.as_db_str()
+                        {
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(provider_a.max_active.load(Ordering::SeqCst), 1);
+                    assert_eq!(aggregate_max.load(Ordering::SeqCst), 2);
                 })
-                .await
-                .unwrap();
-                assert_eq!(provider_a.max_active.load(Ordering::SeqCst), 1);
-                assert_eq!(aggregate_max.load(Ordering::SeqCst), 2);
-            })
-            .catch_unwind()
-            .await;
-            cleanup_release_a.add_permits(2);
-            harness_a.shutdown().await;
-            if let Err(panic) = result {
-                std::panic::resume_unwind(panic);
-            }
-        })
+                .catch_unwind()
+                .await;
+                cleanup_release_a.add_permits(2);
+                harness_a.shutdown().await;
+                if let Err(panic) = result {
+                    std::panic::resume_unwind(panic);
+                }
+            },
+        )
         .await;
     }
 
     #[tokio::test]
     async fn configured_queue_deliveries_wait_for_embedding_capacity() {
-        boot_request::<App, _, _>(|request, ctx| async move {
-            let (provider, transport, _server) = GatedProvider::start(0).await;
-            ctx.shared_store.insert(transport.clone());
-            run_backend_admission_scenario(&request, QueueHarness::lane(ctx, 2).await, provider)
-                .await;
-        })
+        boot_request_with::<App, _, _>(
+            &[("queue.num_workers", 2.into())],
+            |request, ctx| async move {
+                let (provider, transport, _server) = GatedProvider::start(0).await;
+                ctx.shared_store.insert(transport.clone());
+                run_backend_admission_scenario(&request, QueueHarness::lane(ctx).await, provider)
+                    .await;
+            },
+        )
         .await;
     }
 
@@ -1450,7 +1448,7 @@ mod conflict {
                     async {
                         loop {
                             let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                            let jobs: Vec<loco_rs::bgworker::Job> =
+                            let jobs: Vec<bgworker::Job> =
                                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
                                     .unwrap();
                             if let Some(job) = jobs.iter().find(|job| {
@@ -1571,7 +1569,7 @@ mod conflict {
                     release.add_permits(1);
                     let stale_id = loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
@@ -1606,7 +1604,7 @@ mod conflict {
                     release.add_permits(1);
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
@@ -1686,7 +1684,7 @@ mod conflict {
             let final_statuses = observation.owned_statuses(&owned).await;
             let directory = tempfile::tempdir().unwrap();
             let dump = queue.dump(directory.path(), None, None).await.unwrap();
-            let jobs: Vec<loco_rs::bgworker::Job> =
+            let jobs: Vec<bgworker::Job> =
                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
             queue.close().await.unwrap();
             match outcome {
@@ -1737,7 +1735,7 @@ mod conflict {
                         async {
                             loop {
                                 let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                                let jobs: Vec<loco_rs::bgworker::Job> =
+                                let jobs: Vec<bgworker::Job> =
                                     serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
                                         .unwrap();
                                 if let Some(job) = jobs.iter().find(|job| {
@@ -1837,7 +1835,7 @@ mod conflict {
                 async {
                     loop {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
+                        let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         if let Some(job) = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()

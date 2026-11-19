@@ -59,12 +59,11 @@ fn timezone_defaults_to_utc_and_accepts_strict_iana_names() {
     let mut invalid = settings();
     invalid["timezone"] = "Not/A_Zone".into();
     let invalid: Settings = serde_json::from_value(invalid).unwrap();
-    assert!(yorishiro::time::parse_timezone(&invalid.timezone).is_err());
+    assert!(yorishiro::data::time::parse_timezone(&invalid.timezone).is_err());
 }
 
 #[test]
 fn config_validation_rejects_invalid_timezone_and_accepts_valid_aliases() {
-    let _environment = crate::EnvironmentRead::enter();
     for valid in ["UTC", "Etc/UTC", "Asia/Tokyo", "America/New_York"] {
         assert!(yorishiro::data::config::validate(&config_for_timezone(valid)).is_ok());
     }
@@ -74,23 +73,8 @@ fn config_validation_rejects_invalid_timezone_and_accepts_valid_aliases() {
 }
 
 fn config_for_timezone(timezone: &str) -> loco_rs::config::Config {
-    use loco_rs::{config::Config, environment::Environment};
-    use std::{fs, path::PathBuf};
-
-    let dir = std::env::temp_dir().join(format!("timezone-config-{}", uuid::Uuid::now_v7()));
-    fs::create_dir(&dir).unwrap();
-    let source = include_str!("../../config/test_sqlite.yaml").replace(
-        "<%= get_env(name=\"YORISHIRO_TIMEZONE\", default=\"UTC\") %>",
-        timezone,
-    );
-    fs::write(dir.join("test.yaml"), source).unwrap();
-    let mut config =
-        Config::from_folder(&Environment::Any("test".into()), &PathBuf::from(&dir)).unwrap();
-    config.database.uri = "sqlite::memory:".into();
-    if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {
-        queue.uri = "sqlite::memory:".into();
-    }
-    fs::remove_dir_all(dir).unwrap();
+    let mut config = crate::sqlite_fixture_config("sqlite::memory:");
+    config.settings.as_mut().unwrap()["timezone"] = timezone.into();
     config
 }
 
@@ -117,7 +101,6 @@ fn query_embedding_section_is_optional_and_has_bounded_defaults() {
 
 #[test]
 fn dispatch_timing_is_validated_before_workers_start() {
-    let _environment = crate::EnvironmentRead::enter();
     for timing in [
         serde_json::json!({}),
         serde_json::json!({"poll_interval_ms": 25, "enqueue_timeout_ms": 100, "claim_lease_seconds": 1}),

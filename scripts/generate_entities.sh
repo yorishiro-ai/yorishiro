@@ -41,7 +41,7 @@ port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp
 export DATABASE_URL="postgres://yorishiro:yorishiro@127.0.0.1:$port/yorishiro"
 export QUEUE_URL="$DATABASE_URL"
 export YORISHIRO_EMBEDDING_PROVIDER=none
-export LOCO_ENV=test_postgres
+export LOCO_ENV=test
 
 ./target/debug/yorishiro db migrate
 docker exec "$container" psql -U yorishiro -d yorishiro -c ANALYZE >/dev/null

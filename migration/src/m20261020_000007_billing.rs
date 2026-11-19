@@ -2,7 +2,7 @@ use super::helpers;
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(crate) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -160,10 +160,7 @@ async fn up_compute_credit_ledger(manager: &SchemaManager<'_>) -> Result<(), DbE
                 .name("compute_credit_ledger_workspace_id_created_at_idx")
                 .table(Alias::new("compute_credit_ledger"))
                 .col(Alias::new("workspace_id"))
-                .col((
-                    Alias::new("created_at"),
-                    sea_orm_migration::sea_orm::sea_query::IndexOrder::Desc,
-                ))
+                .col((Alias::new("created_at"), IndexOrder::Desc))
                 .to_owned(),
         )
         .await?;

@@ -259,7 +259,7 @@ pub async fn search_by_vector(
     query_text: &str,
     query: SearchQuery,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         let txn = conn.begin().await.internal()?;
         let ef_search = if vector.len() > PGVECTOR_HNSW_VECTOR_MAX_DIMS {
             EF_SEARCH_HIGH
@@ -298,7 +298,7 @@ async fn search_vectors(
     let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
 
     // SQLite has no JSONB containment operator to replace `data @> filter`.
-    if query.filter.is_some() && conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+    if query.filter.is_some() && crate::db::is_sqlite(conn) {
         return Err(YorishiroError::BackendUnsupported {
             message: "content filtering is not supported on SQLite (no JSONB @> operator)"
                 .to_string(),
@@ -477,9 +477,8 @@ pub fn postgres_rrf_query(
             .replace('_', "\\_")
     );
     // Script properties cover extended Latin without treating Greek/Cyrillic as Latin.
-    let latin = tokenizers::utils::SysRegex::new(r"(?:\p{Latin}\p{M}*)+").map_err(|error| {
-        YorishiroError::Internal(anyhow::anyhow!("Latin term pattern: {error}"))
-    })?;
+    let latin = tokenizers::utils::SysRegex::new(r"(?:\p{Latin}\p{M}*)+")
+        .map_err(|error| YorishiroError::Internal(format!("Latin term pattern: {error}").into()))?;
     let latin_terms: Vec<_> = latin
         .find_iter(text)
         .map(|(start, end)| &text[start..end])

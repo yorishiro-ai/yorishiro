@@ -1,3 +1,5 @@
+//! Schema drift reports and batch migration: dry run, and fill-defaults for entities behind the active schema version.
+
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, PaginatorTrait, QueryOrder, QuerySelect};
 use serde_json::Value;
@@ -19,7 +21,7 @@ pub async fn drift(
     workspace_id: Uuid,
     entity_id: Uuid,
 ) -> Result<EntityDrift, YorishiroError> {
-    let entity = super::crud::get(conn, workspace_id, entity_id).await?;
+    let entity = super::operations::get(conn, workspace_id, entity_id).await?;
     let own =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
     let active =
@@ -33,9 +35,8 @@ pub async fn drift(
         .get(&entity.entity_type)
         .map(|def| &def.fields);
 
-    let missing_fields = active_fields
-        .map(|fields| missing_fields_in_value(&entity.data, fields, ""))
-        .unwrap_or_default();
+    let missing_fields =
+        active_fields.map_or_default(|fields| missing_fields_in_value(&entity.data, fields, ""));
 
     Ok(EntityDrift {
         entity_id: entity.id,
@@ -91,8 +92,9 @@ pub async fn migration_dry_run(
                 .definition
                 .entity_types
                 .get(&row.entity_type)
-                .map(|definition| missing_fields_in_value(&row.data, &definition.fields, ""))
-                .unwrap_or_default()
+                .map_or_default(|definition| {
+                    missing_fields_in_value(&row.data, &definition.fields, "")
+                })
                 .into_iter()
                 .filter(|field| field.required)
                 .map(|field| field.name)

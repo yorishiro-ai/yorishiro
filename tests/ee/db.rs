@@ -16,13 +16,6 @@ fn postgres_test_url() -> Option<String> {
     let is_postgres = url
         .as_deref()
         .is_some_and(|url| url.starts_with("postgres://") || url.starts_with("postgresql://"));
-    if std::env::var("LOCO_ENV").as_deref() == Ok("test_postgres") {
-        assert!(
-            is_postgres,
-            "test_postgres must provide a PostgreSQL DATABASE_URL"
-        );
-        return url;
-    }
     if is_postgres { url } else { None }
 }
 

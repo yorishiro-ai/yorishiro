@@ -1,0 +1,438 @@
+//! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests).
+//! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
+
+use crate::requests::boot_request;
+use crate::requests::boot_request_with;
+use axum::http::StatusCode;
+use axum::http::header;
+use sea_orm::{EntityTrait, TransactionTrait};
+use yorishiro::App;
+use yorishiro::db::AppContextBackend;
+
+/// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
+/// Loopback, not a public hostname, so `discovery::require_https_or_loopback`'s `http://` exemption applies without needing a TLS-terminating stub server.
+const ISSUER_URL: &str = "http://127.0.0.1:1";
+const CLIENT_ID: &str = "test-client";
+const CLIENT_SECRET: &str = "test-client-secret";
+const ISSUER_PATH: &str = "initializers.oauth.issuer_url";
+const CLIENT_ID_PATH: &str = "initializers.oauth.client_id";
+const CLIENT_SECRET_PATH: &str = "initializers.oauth.client_secret";
+
+/// The OAuth provider the apps boot with.
+fn oauth_overrides() -> [crate::requests::Override; 3] {
+    [
+        (ISSUER_PATH, ISSUER_URL.into()),
+        (CLIENT_ID_PATH, CLIENT_ID.into()),
+        (CLIENT_SECRET_PATH, CLIENT_SECRET.into()),
+    ]
+}
+
+/// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
+/// The third state, an issuer set with no `client_id`/`client_secret`, answers 500 instead and belongs to `status_errors_loudly_when_partially_configured` below.
+#[tokio::test]
+async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
+    let overrides = [
+        (ISSUER_PATH, "".into()),
+        (CLIENT_ID_PATH, "".into()),
+        (CLIENT_SECRET_PATH, "".into()),
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let disabled = request.get("/auth/oauth/status").await;
+        assert_eq!(disabled.status_code(), StatusCode::OK);
+        assert_eq!(
+            disabled.json::<serde_json::Value>(),
+            serde_json::json!({ "enabled": false })
+        );
+
+        let unchanged = request.get("/auth/oauth/status").await;
+        assert_eq!(
+            unchanged.json::<serde_json::Value>(),
+            serde_json::json!({"enabled": false})
+        );
+        boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+            if crate::requests::skip_unlicensed(&ctx) {
+                return;
+            }
+            let enabled = request.get("/auth/oauth/status").await;
+            assert_eq!(enabled.status_code(), StatusCode::OK);
+            assert_eq!(
+                enabled.json::<serde_json::Value>(),
+                serde_json::json!({ "enabled": true })
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Partial resolved OAuth configuration must report 500 rather than panic or silently disable login.
+#[tokio::test]
+async fn status_errors_loudly_when_partially_configured() {
+    let overrides = [
+        (ISSUER_PATH, "https://idp.example.com".into()),
+        (CLIENT_ID_PATH, "".into()),
+        (CLIENT_SECRET_PATH, "".into()),
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let response = request.get("/auth/oauth/status").await;
+
+        assert_eq!(
+            response.status_code(),
+            500,
+            "a set issuer with no client_id/client_secret must error, not panic or read as \
+             disabled: {:?}",
+            response.text()
+        );
+    })
+    .await;
+}
+
+/// With no `YORISHIRO_OAUTH_ISSUER_URL` set, `authorize` and `callback` must answer exactly the same `404` a route that does not exist would: a prober must not be able to tell "unconfigured" apart from "absent".
+#[tokio::test]
+async fn authorize_and_callback_404_when_unconfigured() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let authorize = request.get("/auth/oauth/authorize").await;
+        assert_eq!(
+            authorize.status_code(),
+            404,
+            "response: {:?}",
+            authorize.text()
+        );
+
+        let callback = request.get("/auth/oauth/callback?code=abc&state=xyz").await;
+        assert_eq!(
+            callback.status_code(),
+            404,
+            "response: {:?}",
+            callback.text()
+        );
+    })
+    .await;
+}
+
+/// `authorize` reaches the identity provider to fetch its discovery document before it can redirect anywhere, so a configured but unreachable issuer fails loudly with an internal error rather than a redirect to nowhere.
+/// Exercising the redirect itself, and the CSRF cookie it sets, needs a live IdP and is out of scope here (see the module doc comment).
+#[tokio::test]
+async fn authorize_fails_loudly_against_an_unreachable_issuer() {
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let response = request.get("/auth/oauth/authorize").await;
+        assert_eq!(
+            response.status_code(),
+            500,
+            "an unreachable issuer must fail loudly, never redirect: {:?}",
+            response.text()
+        );
+    })
+    .await;
+}
+
+/// The provider itself reporting an error (the user declined consent, an app misconfiguration, ...) redirects to the login page's failure state rather than surfacing raw JSON to a browser mid-redirect, and clears the CSRF cookie so it is never reusable across two attempts.
+#[tokio::test]
+async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let response = request
+            .get("/auth/oauth/callback?error=access_denied&error_description=user+declined")
+            .await;
+
+        assert_eq!(
+            response.status_code(),
+            302,
+            "response: {:?}",
+            response.text()
+        );
+        assert_eq!(
+            response.header(header::LOCATION),
+            "/#/login?error=oauth_failed"
+        );
+        assert!(
+            response
+                .header(header::SET_COOKIE)
+                .to_str()
+                .unwrap()
+                .contains("Max-Age=0"),
+            "the CSRF cookie must be cleared on this path too"
+        );
+    })
+    .await;
+}
+
+/// A callback missing `code` or `state` (hit directly, without ever having visited `authorize`) redirects to the same login-failure state rather than a raw validation error.
+#[tokio::test]
+async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let missing_state = request.get("/auth/oauth/callback?code=abc").await;
+        assert_eq!(missing_state.status_code(), StatusCode::FOUND);
+        assert_eq!(
+            missing_state.header(header::LOCATION),
+            "/#/login?error=oauth_failed"
+        );
+
+        let missing_code = request.get("/auth/oauth/callback?state=xyz").await;
+        assert_eq!(missing_code.status_code(), StatusCode::FOUND);
+        assert_eq!(
+            missing_code.header(header::LOCATION),
+            "/#/login?error=oauth_failed"
+        );
+    })
+    .await;
+}
+
+/// A forged `state` (never issued by this process, so its HMAC signature cannot verify) is rejected with `401` before any provider is contacted: `handle_callback` checks `state` first.
+#[tokio::test]
+async fn callback_rejects_a_state_with_a_bad_signature() {
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let response = request
+            .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
+            .await;
+
+        assert_eq!(
+            response.status_code(),
+            StatusCode::UNAUTHORIZED,
+            "response: {:?}",
+            response.text()
+        );
+    })
+    .await;
+}
+
+/// A `state` value signed correctly (under the deployment's own client secret, so the HMAC check that `callback_rejects_a_state_with_a_bad_signature` covers passes) but too old (older than `STATE_TTL_SECS`) is rejected the same `401` way: `state_token::verify`'s expiry check runs before the CSRF cookie is ever consulted.
+#[tokio::test]
+async fn callback_rejects_an_expired_state() {
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
+        let state = yorishiro::edition::ee::controllers::oauth::state_token::issue_at(
+            CLIENT_SECRET.as_bytes(),
+            issued_at,
+        )
+        .state;
+
+        let response = request
+            .get(&format!("/auth/oauth/callback?code=abc&state={state}"))
+            .await;
+
+        assert_eq!(
+            response.status_code(),
+            401,
+            "response: {:?}",
+            response.text()
+        );
+    })
+    .await;
+}
+
+/// `find_or_create` must not be a backdoor around `YORISHIRO_MAX_TENANTS`: with the cap already met, a brand-new identity (one `find_by_oauth_identity` finds nothing for) is refused rather than silently given a fresh tenant.
+/// The migration's user_users_oauth_identity_idx is partial (oauth_provider IS NOT NULL).
+/// Fresh generation with the lockfile-pinned CLI omits this partial index entirely; no application/test path uses Schema::create_table_from_entity or other entity-based schema creation, so the migration is its only owner.
+/// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
+#[tokio::test]
+async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
+
+        // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
+        for max_tenants in [Some(1), None] {
+            if max_tenants.is_none() && !ctx.is_sqlite() {
+                continue;
+            }
+            let txn = ctx.db.begin().await.expect("begin");
+            let result = yorishiro::edition::ee::models::user_users::find_or_create(
+                &txn,
+                "oidc",
+                "a-brand-new-subject",
+                Some("newcomer@example.com"),
+                None,
+                max_tenants,
+            )
+            .await;
+            // The call is expected to be refused; make the rollback explicit so a
+            // future implementation that retains the transaction cannot leak it.
+            txn.rollback().await.expect("rollback refused provisioning");
+            match result {
+                Err(yorishiro::YorishiroError::Conflict { message }) => {
+                    assert!(
+                        message.contains("tenant limit"),
+                        "wrong Conflict message: {message}"
+                    );
+                }
+                _ => panic!(
+                    "a new identity past the cap must be refused with Conflict naming the \
+                 tenant limit"
+                ),
+            }
+        }
+    })
+    .await;
+}
+
+/// A first login must not leave the auto-provisioned workspace `schema_pending`: there is no admin present afterward to choose a starting schema for it, unlike `controllers::setup::setup`'s own bootstrap workspace.
+/// The workspace is provisioned with a schema from the built-in `general-notes` template and left `active`.
+#[tokio::test]
+async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
+    boot_request::<App, _, _>(|_request, ctx| async move {
+        // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
+        let txn = ctx.db.begin().await.expect("begin");
+        let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
+            &txn,
+            "oidc",
+            "a-first-login-subject",
+            Some("firstlogin@example.com"),
+            None,
+            Some(1),
+        )
+        .await
+        .expect("first login provisioning");
+        // The assertions below read these rows back through `ctx.db`, so an uncommitted transaction would leave them invisible.
+        txn.commit().await.expect("commit provisioning");
+
+        let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
+                .await
+                .unwrap()[0]
+                .id,
+        )
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .expect("the provisioned workspace must exist");
+
+        assert_eq!(
+            workspace.status, "active",
+            "an auto-provisioned workspace must not be left schema_pending"
+        );
+        let schema_id = workspace
+            .schema_id
+            .expect("the workspace must have a schema linked");
+
+        let schema = yorishiro::models::schema_schemas::get_active_schema(
+            &ctx.db,
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
+                .await
+                .unwrap()[0]
+                .id,
+            "general-notes",
+        )
+        .await
+        .expect("the linked schema must be active");
+        assert_eq!(schema.id, schema_id);
+        assert_eq!(schema.name, "general-notes");
+        use sea_orm::{ColumnTrait, QueryFilter};
+        use yorishiro::models::_entities::tenant_memberships;
+        let memberships = tenant_memberships::Entity::find()
+            .filter(tenant_memberships::Column::TenantId.eq(workspace.tenant_id))
+            .all(&ctx.db)
+            .await
+            .expect("OAuth tenant owner");
+        assert_eq!(memberships.len(), 1);
+        let candidates =
+            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, memberships[0].user_id)
+                .await
+                .expect("OAuth workspace discovery");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, workspace.id);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn oauth_provisioning_policy_controls_new_caps() {
+    for (index, value, expected_tenant, expected_entities) in
+        [(0, None, None, None), (1, Some("true"), None, None)]
+    {
+        let overrides = [(
+            "initializers.plan_policy_enabled",
+            value.unwrap_or("false").into(),
+        )];
+        boot_request_with::<App, _, _>(&overrides, |_request, ctx| async move {
+            if crate::requests::skip_unlicensed(&ctx) {
+                return;
+            }
+            let txn = ctx.db.begin().await.expect("begin");
+            let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
+                &txn,
+                "oidc",
+                &format!("policy-subject-{index}"),
+                Some(&format!("policy-{index}@example.com")),
+                None,
+                Some(1),
+            )
+            .await
+            .expect("provisioning");
+            txn.commit().await.expect("commit");
+            let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
+                yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
+                    .await
+                    .unwrap()[0]
+                    .id,
+            )
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+            let tenant =
+                yorishiro::models::tenant_tenants::Model::find_by_id(&ctx.db, workspace.tenant_id)
+                    .await
+                    .expect("provisioned tenant");
+            assert_eq!(tenant.max_workspaces, expected_tenant);
+            assert_eq!(workspace.max_entities, expected_entities);
+        })
+        .await;
+    }
+}
+
+/// The rate limit reaches the OAuth entry points by the paths the edition names when it mounts them, not by anything the limiter itself knows.
+/// `status` is mounted beside them and deliberately left out, so polling it never exhausts a client's budget.
+#[tokio::test]
+async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        for path in ["/auth/oauth/authorize", "/auth/oauth/callback"] {
+            let mut last_status = 0;
+            for _ in 0..15 {
+                last_status = request.get(path).await.status_code().as_u16();
+            }
+            assert_eq!(
+                last_status, 429,
+                "{path} must share the per-IP credential budget"
+            );
+        }
+        for _ in 0..15 {
+            assert_ne!(
+                request.get("/auth/oauth/status").await.status_code(),
+                StatusCode::TOO_MANY_REQUESTS,
+                "status carries no secret and must stay unguarded"
+            );
+        }
+    })
+    .await;
+}

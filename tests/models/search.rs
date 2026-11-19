@@ -1,5 +1,4 @@
 use crate::requests::boot_request;
-#[cfg(feature = "enterprise")]
 use sea_orm::ConnectionTrait;
 use sea_orm::sea_query::ExprTrait;
 use sea_orm::{
@@ -16,12 +15,7 @@ use yorishiro::services::embedding::{
 };
 
 fn note_definition() -> serde_json::Value {
-    serde_json::json!({
-        "name": "note",
-        "entity_types": {
-            "note": { "fields": { "title": { "type": "string", "required": true, "x-embed": true } } }
-        }
-    })
+    crate::requests::fixtures::note_schema("note", true)
 }
 
 #[tokio::test]
@@ -150,7 +144,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
         })
         .collect();
     assert!(corpus.iter().flatten().all(|value| value.is_finite()));
-    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
         schema_schemas::create_schema(
@@ -275,7 +269,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                 }
                 assert!(hnsw_used && candidates_used, "{plan}");
                 } else {
-                    let state = txn.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                    let state = txn.query_one_raw(Statement::from_sql_and_values(
                         sea_orm::DatabaseBackend::Postgres,
                         "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)",
                         [index.clone().into()],
@@ -370,7 +364,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(present.is_none(), "a competing maintenance session must not create the index");
         lock.close().await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
-        let exists = |name: String| sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_sql_and_values(
+        let exists = |name: String| ConnectionTrait::query_one_raw(&ctx.db, Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres, "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)", [name.into()]));
         assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("","indisvalid").unwrap());
         // Execute and EXPLAIN the same production candidate builder without forcing an ANN plan.
@@ -583,11 +577,11 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         assert!(exists(index.clone()).await.unwrap().is_none());
         // Failed concurrent builds leave invalid indexes; recreate that catalog state using a failed unique build.
-        let partition = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(sea_orm::DatabaseBackend::Postgres,
+        let partition = ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(sea_orm::DatabaseBackend::Postgres,
             format!("SELECT tableoid::regclass::text AS name FROM entity_embeddings WHERE workspace_id='{}' LIMIT 1",fixture.workspace_id))).await.unwrap().unwrap().try_get::<String>("","name").unwrap();
         let bad = format!("ysr_hnsw_{}_d13", fixture.workspace_id.simple());
-        sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("DROP INDEX CONCURRENTLY \"{bad}\"")).await.unwrap();
-        assert!(sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE UNIQUE INDEX CONCURRENTLY \"{bad}\" ON {partition}(tenant_id)")).await.is_err());
+        ConnectionTrait::execute_unprepared(&ctx.db,&format!("DROP INDEX CONCURRENTLY \"{bad}\"")).await.unwrap();
+        assert!(ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE UNIQUE INDEX CONCURRENTLY \"{bad}\" ON {partition}(tenant_id)")).await.is_err());
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         assert!(exists(bad.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "invalid promoted graph is rebuilt");
         // Attached partitions need not follow the original p0..p63 naming convention.
@@ -597,7 +591,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(exists(bad).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap());
         ctx.db.execute_unprepared(&format!("ALTER TABLE \"expanded_\"\"p90\" RENAME TO {partition}" )).await.unwrap();
         // Deleting workspace metadata leaves no owned graph after the sweep.
-        sea_orm::ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE INDEX CONCURRENTLY \"{index}\" ON {partition}(workspace_id)")).await.unwrap();
+        ConnectionTrait::execute_unprepared(&ctx.db,&format!("CREATE INDEX CONCURRENTLY \"{index}\" ON {partition}(workspace_id)")).await.unwrap();
         let deletion = ctx.db.begin().await.unwrap();
         workspace_workspaces::Entity::delete_by_id(fixture.workspace_id).exec(&deletion).await.unwrap();
         let (maintenance, committed) = tokio::join!(
@@ -648,7 +642,7 @@ async fn literal_search_corpus() {
             matching.get_or_insert(entity.id);
             corpus_ids.push(entity.id);
         }
-        let sqlite = sea_orm::ConnectionTrait::get_database_backend(&ctx.db)
+        let sqlite = ConnectionTrait::get_database_backend(&ctx.db)
             == sea_orm::DatabaseBackend::Sqlite;
         // Both backends use this exact corpus; only documented SQLite limitations differ.
         for (text, postgres_hit, sqlite_hit) in [
@@ -708,7 +702,7 @@ async fn literal_search_corpus() {
 
 #[tokio::test]
 async fn sqlite_literal_search_shared_corpus() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     literal_search_corpus().await;
@@ -716,7 +710,7 @@ async fn sqlite_literal_search_shared_corpus() {
 
 #[tokio::test]
 async fn postgres_literal_search_shared_corpus() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     literal_search_corpus().await;
@@ -725,7 +719,7 @@ async fn postgres_literal_search_shared_corpus() {
 /// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1107,7 +1101,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 /// not match the vectors actually stored, causing this assertion to fail.
 #[tokio::test]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1160,7 +1154,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         let provider1_clone = provider1.clone();
         let ctx1 = ctx.clone();
         let h1 = tokio::spawn(async move {
-            yorishiro::db::reindex_workspace_with_lock(
+            entity_embeddings::reindex_workspace_with_lock(
                 &ctx1,
                 workspace_id,
                 provider1_clone.as_ref(),
@@ -1173,7 +1167,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         let ctx2 = ctx.clone();
         let provider2_clone = provider2.clone();
         let h2 = tokio::spawn(async move {
-            yorishiro::db::reindex_workspace_with_lock(
+            entity_embeddings::reindex_workspace_with_lock(
                 &ctx2,
                 workspace_id,
                 provider2_clone.as_ref(),
@@ -1190,7 +1184,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 let waiting = LockWait::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
                     "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS waiting",
-                    [yorishiro::db::workspace_reindex_lock_key(workspace_id).into()],
+                    [entity_embeddings::workspace_reindex_lock_key(workspace_id).into()],
                 )).one(&ctx.db).await.expect("observe workspace advisory lock")
                     .expect("lock observation row").waiting;
                 if waiting { break; }
@@ -1263,7 +1257,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             };
             let expected = model_vector(&winner.model_name());
             assert_eq!(
-                stored_vector.as_ref().map(|v| v.as_slice()),
+                stored_vector.as_ref().map(sea_orm::prelude::PgVector::as_slice),
                 Some(expected.as_slice()),
                 "entity {entity_id} embedding must match winner {final_model:?}"
             );
@@ -1283,7 +1277,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 /// `assert_eq!`, a corrupted or zeroed row would pass `assert_ne!` on its own.
 #[tokio::test]
 async fn reindex_overwrites_existing_entity_embeddings() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1341,12 +1335,12 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 
         // Verify the old vectors are stored.
         // Catalog queries verify physical partitioning, which the entity API cannot describe.
-        let layout = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
+        let layout = ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
             sea_orm::DatabaseBackend::Postgres,
             "SELECT count(*) AS partitions FROM pg_inherits WHERE inhparent = 'entity_embeddings'::regclass",
         )).await.unwrap().unwrap();
         assert_eq!(layout.try_get::<i64>("", "partitions").unwrap(), 64);
-        let policy = sea_orm::ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
+        let policy = ConnectionTrait::query_one_raw(&ctx.db, Statement::from_string(
             sea_orm::DatabaseBackend::Postgres,
             "SELECT qual FROM pg_policies WHERE tablename = 'entity_embeddings' AND policyname = 'tenant_isolation'",
         )).await.unwrap().unwrap();
@@ -1379,7 +1373,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                     .and_then(|r| r.embedding)
             };
             assert_eq!(
-                stored.as_ref().map(|v| v.as_slice()),
+                stored.as_ref().map(sea_orm::prelude::PgVector::as_slice),
                 Some(old_v1.as_slice()),
                 "initial embedding must match the old model"
             );
@@ -1395,7 +1389,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 
         // Reindex with the new model provider.
         let (new_provider, _new_provider_server) = model_provider("new-model-b").await;
-        let outcome = yorishiro::models::entity_embeddings::reindex_workspace(
+        let outcome = entity_embeddings::reindex_workspace(
             &ctx.db,
             workspace_id,
             &new_provider,
@@ -1443,7 +1437,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                     .and_then(|r| r.embedding)
             };
             assert_eq!(
-                stored.as_ref().map(|v| v.as_slice()),
+                stored.as_ref().map(sea_orm::prelude::PgVector::as_slice),
                 Some(new_v.as_slice()),
                 "entity {entity_id} embedding must match new model {final_model:?}"
             );
@@ -1455,7 +1449,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 /// Gated PostgreSQL literal text search includes an unembedded entity when its data contains `query_text`; a nonmatching entity must not appear.
 #[tokio::test]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1525,7 +1519,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 /// creation, entity insertion, and trigger-driven index updates.
 #[tokio::test]
 async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
 
@@ -1648,7 +1642,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 /// `tests/requests/search.rs` covers the worker and the HTTP search on both backends.
 #[tokio::test]
 async fn sqlite_document_embed_persist_and_search() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
 
@@ -1863,7 +1857,7 @@ async fn reindex_switches_between_arbitrary_widths() {
                 .unwrap()
                 .unwrap();
             let expected = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                width * std::mem::size_of::<f32>()
+                width * size_of::<f32>()
             } else {
                 width
             };
@@ -1896,7 +1890,7 @@ async fn reindex_switches_between_arbitrary_widths() {
             assert_eq!(
                 retained,
                 if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                    11 * std::mem::size_of::<f32>() as i32
+                    11 * size_of::<f32>() as i32
                 } else {
                     11
                 }

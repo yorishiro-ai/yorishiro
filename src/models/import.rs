@@ -1,3 +1,5 @@
+//! JSON Lines import that reads what `export` writes, re-creating schemas, entities and relations in the caller's tenant.
+
 use std::collections::HashMap;
 use std::io::BufRead;
 

@@ -120,7 +120,7 @@ async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
 /// `undo_migration_job` is recorded on the same transaction as the undo itself.
 #[tokio::test]
 async fn undo_migration_job_is_recorded() {
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&request, &ctx).await;
 
         let definition = serde_json::from_value(serde_json::json!({
@@ -307,7 +307,7 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
     if !crate::require_postgres_backend() {
         return;
     }
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         if super::skip_unlicensed(&ctx) {
             return;
         }

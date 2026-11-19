@@ -54,7 +54,7 @@ impl Task for SqliteAnnBenchmark {
 
     async fn run(&self, ctx: &AppContext, vars: &Vars) -> Result<()> {
         // Only meaningful on SQLite.
-        if ctx.db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
+        if !crate::db::is_sqlite(&ctx.db) {
             return Err(Error::Message(
                 "sqlite_ann_benchmark is only meaningful on SQLite".to_string(),
             ));
@@ -140,7 +140,7 @@ struct EmbeddingRow {
 }
 
 async fn fetch_sample_embedding(
-    conn: &sea_orm::DatabaseConnection,
+    conn: &DatabaseConnection,
     workspace_id: Uuid,
     table_name: &str,
 ) -> std::result::Result<Option<(Uuid, Vec<u8>)>, YorishiroError> {
@@ -244,7 +244,7 @@ async fn run_benchmark(
         } else {
             f64::INFINITY
         };
-        println!("  speedup vs full-scan: {:.1}x", speedup);
+        println!("  speedup vs full-scan: {speedup:.1}x");
     } else {
         println!();
         println!("--- vec0: not available on this deployment ---");
@@ -302,7 +302,7 @@ async fn run_benchmark(
 }
 
 async fn benchmark_phase(
-    conn: &sea_orm::DatabaseConnection,
+    conn: &DatabaseConnection,
     workspace_id: Uuid,
     vector: &[f32],
     table_name: &str,
@@ -326,9 +326,10 @@ async fn benchmark_phase(
             .map(SearchRow::into_hit)
             .collect();
         if hits.is_empty() {
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
+            return Err(YorishiroError::Internal(
                 "benchmark query returned no entities for a workspace with a sample embedding"
-            )));
+                    .into(),
+            ));
         }
         latencies.push(start.elapsed().as_secs_f64() * 1000.0);
     }
@@ -451,7 +452,7 @@ fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Stat
 /// Returns `PhaseResult { available: true }` if the virtual table is found,
 /// `PhaseResult { available: false }` if it is not.
 async fn check_vec0_availability(
-    conn: &sea_orm::DatabaseConnection,
+    conn: &DatabaseConnection,
     table_name: &str,
 ) -> std::result::Result<PhaseResult, YorishiroError> {
     let vec0_table = format!("{table_name}_vec0");

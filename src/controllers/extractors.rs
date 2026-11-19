@@ -1,3 +1,6 @@
+//! Request extractors that authenticate a caller and declare the required API key scope in the handler's type.
+//! `Authorized` also opens the RLS-scoped transaction, so a handler cannot reach tenant data without passing through it.
+
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -19,8 +22,10 @@ fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
     let client = parts
         .extensions
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|ConnectInfo(addr)| addr.ip().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map_or_else(
+            || "unknown".to_string(),
+            |ConnectInfo(addr)| addr.ip().to_string(),
+        );
     tracing::warn!(client = %client, path = %parts.uri.path(), error = %err, "request rejected during authentication");
 }
 
@@ -51,9 +56,9 @@ pub(crate) fn search_token_limiter(
     ctx.shared_store
         .get::<Arc<crate::controllers::middleware::rate_limit::RateLimiter>>()
         .ok_or_else(|| {
-            ApiError(YorishiroError::Internal(anyhow::anyhow!(
-                "search token RateLimiter missing"
-            )))
+            ApiError(YorishiroError::Internal(
+                "search token RateLimiter missing".into(),
+            ))
         })
 }
 
@@ -200,7 +205,7 @@ where
 pub(crate) struct AuditAuthorized {
     app_ctx: AppContext,
     pub ctx: api_keys::AuthContext,
-    txn: std::sync::Arc<tokio::sync::Mutex<sea_orm::DatabaseTransaction>>,
+    txn: Arc<tokio::sync::Mutex<sea_orm::DatabaseTransaction>>,
     _authorization: Option<sea_orm::DatabaseTransaction>,
 }
 
@@ -217,7 +222,7 @@ impl AuditAuthorized {
     }
 
     pub(crate) fn timezone(&self) -> chrono_tz::Tz {
-        crate::time::configured(&self.app_ctx)
+        crate::data::time::configured(&self.app_ctx)
     }
 }
 
@@ -242,7 +247,7 @@ where
             &txn,
             &app_ctx.db,
             &ctx,
-            api_keys::ApiKeyScope::Read,
+            ApiKeyScope::Read,
             crate::models::iam_policy::Action::AuditLogList,
         )
         .await?;
@@ -250,7 +255,7 @@ where
         Ok(AuditAuthorized {
             app_ctx,
             ctx,
-            txn: std::sync::Arc::new(tokio::sync::Mutex::new(txn)),
+            txn: Arc::new(tokio::sync::Mutex::new(txn)),
             _authorization: authorization,
         })
     }

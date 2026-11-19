@@ -138,7 +138,7 @@ class App:
         home.mkdir()
         self.env.update({
             "HOME": str(home), "TMPDIR": str(self.directory), "LANG": "C.UTF-8",
-            "LOCO_ENV": "test_sqlite", "NO_COLOR": "1", "RUST_BACKTRACE": "0",
+            "LOCO_ENV": "test", "NO_COLOR": "1", "RUST_BACKTRACE": "0",
             "DATABASE_URL": f"sqlite://{self.directory}/app.sqlite3?mode=rwc",
             "QUEUE_URL": f"sqlite://{self.directory}/queue.sqlite3?mode=rwc",
             "PORT": str(self.port), "BINDING": "127.0.0.1",
@@ -148,14 +148,14 @@ class App:
             "YORISHIRO_AUTH_RATE_LIMIT_MAX": "10000",
             "YORISHIRO_MCP_ALLOWED_HOSTS": "localhost,127.0.0.1",
         })
-        self.environment = "test_sqlite"
+        self.environment = "test"
         if args.suite == "tenant-postgres":
             require(args.edition == "ee", "cross-tenant contracts require EE")
             database = os.environ.get("YORISHIRO_PUBLIC_POSTGRES_URL", "")
             licence = os.environ.get("YORISHIRO_LICENSE_KEY", "")
             require(database.startswith("postgres://") and licence,
                     "owned PostgreSQL URL and signed EE licence are required")
-            self.environment = "test_postgres"
+            self.environment = "test"
             self.secrets.extend([database, licence])
             self.env.update(DATABASE_URL=database, QUEUE_URL=database, LOCO_ENV=self.environment,
                             YORISHIRO_LICENSE_KEY=licence, YORISHIRO_MAX_TENANTS="0")

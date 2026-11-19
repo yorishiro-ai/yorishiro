@@ -15,11 +15,7 @@ pub(crate) async fn authorize_workspace_action(
     scope: ApiKeyScope,
     action: crate::models::iam_policy::Action,
 ) -> Result<Option<DatabaseTransaction>, YorishiroError> {
-    let authorization = if txn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        Some(crate::db::begin_write(identity).await.internal()?)
-    } else {
-        None
-    };
+    let authorization = crate::db::begin_authorization(identity).await.internal()?;
     require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,
@@ -89,9 +85,8 @@ impl<'a> IamEvaluation<'a> {
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
         let mut credential = current.clone();
-        credential.scope = ApiKeyScope::from_db_str(&key.scope).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("unknown api key scope in database"))
-        })?;
+        credential.scope = ApiKeyScope::from_db_str(&key.scope)
+            .ok_or_else(|| YorishiroError::Internal("unknown api key scope in database".into()))?;
         require_scope(&credential, required)?;
         if assumption && key.role_id.is_some() {
             return Err(YorishiroError::ScopeInsufficient {
@@ -257,9 +252,8 @@ pub async fn identity(
         .await
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
-    let stored_scope = ApiKeyScope::from_db_str(&key.scope).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!("unknown api key scope in database"))
-    })?;
+    let stored_scope = ApiKeyScope::from_db_str(&key.scope)
+        .ok_or_else(|| YorishiroError::Internal("unknown api key scope in database".into()))?;
     let tenant_root = match current.user_id {
         Some(user_id) => {
             crate::models::iam_tenant_roots::Model::contains(conn, current.tenant_id, user_id)
@@ -311,7 +305,7 @@ pub async fn capabilities(
             sea_orm::DatabaseBackend::MySql => "mysql",
             _ => "unknown",
         },
-        row_level_security: conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres,
+        row_level_security: crate::db::is_postgres(conn),
         scopes,
         audit: require_audit(&current).is_ok(),
         tenant_root: identity.tenant_root,

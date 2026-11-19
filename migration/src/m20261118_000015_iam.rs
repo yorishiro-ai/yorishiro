@@ -2,7 +2,7 @@ use super::helpers;
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
-pub struct Migration;
+pub(crate) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -52,7 +52,7 @@ impl MigrationTrait for Migration {
                     .to(Alias::new("tenant_tenants"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             );
-            manager.create_table(create.to_owned()).await?;
+            manager.create_table(create.clone()).await?;
             for (suffix, column) in [("id", "id"), ("name", "name")] {
                 manager
                     .create_index(
@@ -168,7 +168,7 @@ impl MigrationTrait for Migration {
                         .on_delete(ForeignKeyAction::Cascade),
                 );
             }
-            manager.create_table(create.to_owned()).await?;
+            manager.create_table(create.clone()).await?;
             manager
                 .create_index(
                     Index::create()

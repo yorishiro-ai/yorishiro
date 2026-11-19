@@ -4,12 +4,12 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::inference_jobs::{ActiveModel, Column, Entity, Model};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
-    QueryFilter, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter,
+    QuerySelect, Set,
 };
 use uuid::Uuid;
 
-crate::db_enum::db_enum! {
+crate::models::db_enum::db_enum! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum InferenceJobStatus {
         Queued = "queued",
@@ -92,10 +92,7 @@ impl TryFrom<Model> for InferenceJobRecord {
 
     fn try_from(row: Model) -> Result<Self, Self::Error> {
         let status = InferenceJobStatus::from_db_str(&row.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown inference job status: {}",
-                row.status
-            ))
+            YorishiroError::Internal(format!("unknown inference job status: {}", row.status).into())
         })?;
         Ok(Self {
             id: row.id,
@@ -129,7 +126,7 @@ pub async fn create(
         status: Set(InferenceJobStatus::Queued.as_db_str().to_string()),
         applied: Set(0),
         skipped: Set(0),
-        error: ActiveValue::Set(None),
+        error: Set(None),
         attempt: Set(0),
         ..Default::default()
     };
@@ -196,7 +193,7 @@ pub(crate) async fn claim_attempt(
             Expr::value(InferenceJobStatus::Running.as_db_str()),
         )
         .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Queued.as_db_str()));
     if let Some(attempt) = expected_attempt {
@@ -247,7 +244,7 @@ pub async fn reconcile_attempt(
                 Expr::value(InferenceJobStatus::Running.as_db_str()),
             )
             .col_expr(Column::Error, Expr::value(Option::<String>::None))
-            .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+            .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
             .filter(Column::Id.eq(id))
             .filter(Column::Status.eq(InferenceJobStatus::Failed.as_db_str()))
             .filter(Column::Attempt.eq(target_attempt))
@@ -268,7 +265,7 @@ pub async fn reconcile_attempt(
             Expr::value(InferenceJobStatus::Running.as_db_str()),
         )
         .col_expr(Column::Attempt, Expr::value(target_attempt))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Attempt.eq(target_attempt - 1))
         .filter(Column::Status.is_in([
@@ -302,7 +299,7 @@ pub async fn complete_proposals_attempt(
         .col_expr(Column::Applied, Expr::value(0))
         .col_expr(Column::Proposed, Expr::value(proposed))
         .col_expr(Column::Skipped, Expr::value(skipped))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .filter(Column::Attempt.eq(attempt))
@@ -330,7 +327,7 @@ pub async fn fail_attempt(
             Expr::value(InferenceJobStatus::Failed.as_db_str()),
         )
         .col_expr(Column::Error, Expr::value(message))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .filter(Column::Attempt.eq(attempt))
@@ -356,7 +353,7 @@ pub(crate) async fn retry(
             Expr::value(InferenceJobStatus::Queued.as_db_str()),
         )
         .col_expr(Column::Error, Expr::value(message))
-        .col_expr(Column::UpdatedAt, Expr::value(crate::time::now()))
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
         .filter(Column::Attempt.eq(attempt))

@@ -1,7 +1,6 @@
-use super::{boot_request, with_max_tenants};
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
-use serial_test::serial;
 use yorishiro::App;
 
 pub(crate) async fn iam_mcp_call(
@@ -28,10 +27,9 @@ pub(crate) async fn iam_mcp_call(
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
-    with_max_tenants("1", async move {
-        boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
             let response = request
                 .post("/setup")
                 .json(&serde_json::json!({
@@ -712,120 +710,175 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .json(&serde_json::json!({"name":"deleted-denied"})).await.assert_status(StatusCode::FORBIDDEN);
         })
         .await;
-    })
-    .await;
 }
 
 #[tokio::test]
-#[serial(process_environment)]
 async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
-    with_max_tenants("1", async move {
-        boot_request::<App, _, _>(|request, _ctx| async move {
-            macro_rules! bearer {
-                ($key:expr, $builder:expr) => {
-                    $builder.add_header("Authorization", format!("Bearer {}", $key))
-                };
-            }
-            let response = request
-                .post("/setup")
-                .json(&serde_json::json!({
-                    "email": "owner@example.com",
-                    "password": "hunter2-hunter2",
-                }))
-                .await;
-            assert_eq!(response.status_code(), 201, "{}", response.text());
-            let body: serde_json::Value = response.json();
-            let root_key = body["api_key"].as_str().unwrap().to_string();
-            let workspace_id = body["workspace_id"].as_str().unwrap().to_string();
-            let identity = bearer!(root_key, request.get("/api/whoami")).await.json::<serde_json::Value>();
-            let tenant_id = identity["tenant_id"].as_str().unwrap().to_string();
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
+        macro_rules! bearer {
+            ($key:expr, $builder:expr) => {
+                $builder.add_header("Authorization", format!("Bearer {}", $key))
+            };
+        }
+        let response = request
+            .post("/setup")
+            .json(&serde_json::json!({
+                "email": "owner@example.com",
+                "password": "hunter2-hunter2",
+            }))
+            .await;
+        assert_eq!(response.status_code(), 201, "{}", response.text());
+        let body: serde_json::Value = response.json();
+        let root_key = body["api_key"].as_str().unwrap().to_string();
+        let workspace_id = body["workspace_id"].as_str().unwrap().to_string();
+        let identity = bearer!(root_key, request.get("/api/whoami"))
+            .await
+            .json::<serde_json::Value>();
+        let tenant_id = identity["tenant_id"].as_str().unwrap().to_string();
 
-            let user = bearer!(root_key, request.post("/api/members/users"))
-                .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
-                .await;
-            user.assert_status(StatusCode::CREATED);
-            let user_id = user.json::<serde_json::Value>()["user_id"].as_str().unwrap().to_string();
-            let login = request
-                .post("/auth/tenant/login")
-                .add_header("x-tenant-id", &tenant_id)
-                .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
-                .await;
-            login.assert_status_ok();
-            let user_key = login.json::<serde_json::Value>()["api_key"].as_str().unwrap().to_string();
+        let user = bearer!(root_key, request.post("/api/members/users"))
+            .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
+            .await;
+        user.assert_status(StatusCode::CREATED);
+        let user_id = user.json::<serde_json::Value>()["user_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let login = request
+            .post("/auth/tenant/login")
+            .add_header("x-tenant-id", &tenant_id)
+            .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
+            .await;
+        login.assert_status_ok();
+        let user_key = login.json::<serde_json::Value>()["api_key"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
-            let role_policy = bearer!(root_key, request.post("/api/iam/policies"))
-                .json(&serde_json::json!({"name": "role-workspace-reader", "document": {"statements": [
+        let role_policy = bearer!(root_key, request.post("/api/iam/policies"))
+            .json(
+                &serde_json::json!({"name": "role-workspace-reader", "document": {"statements": [
                     {"effect": "allow", "actions": ["workspace_get"],
-                     "resources": [{"type": "all_workspaces", "tenant_id": tenant_id}]}]}}))
-                .await;
-            role_policy.assert_status(StatusCode::CREATED);
-            let role_policy_id = role_policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_string();
-            let trust = |effect: &str| serde_json::json!({"statements": [
-                {"effect": effect, "principals": [{"type": "user", "user_id": user_id}]}]});
-            let role = bearer!(root_key, request.post("/api/iam/roles"))
-                .json(&serde_json::json!({"name": "workspace-reader", "trust_policy": trust("allow")}))
-                .await;
-            role.assert_status(StatusCode::CREATED);
-            let role_id = role.json::<serde_json::Value>()["id"].as_str().unwrap().to_string();
-            bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}/policies/{role_policy_id}")))
-                .await
-                .assert_status(StatusCode::NO_CONTENT);
-            let assume = format!("/api/iam/roles/{role_id}/assume");
+                     "resources": [{"type": "all_workspaces", "tenant_id": tenant_id}]}]}}),
+            )
+            .await;
+        role_policy.assert_status(StatusCode::CREATED);
+        let role_policy_id = role_policy.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let trust = |effect: &str| {
+            serde_json::json!({"statements": [
+                {"effect": effect, "principals": [{"type": "user", "user_id": user_id}]}]})
+        };
+        let role = bearer!(root_key, request.post("/api/iam/roles"))
+            .json(&serde_json::json!({"name": "workspace-reader", "trust_policy": trust("allow")}))
+            .await;
+        role.assert_status(StatusCode::CREATED);
+        let role_id = role.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        bearer!(
+            root_key,
+            request.put(&format!(
+                "/api/iam/roles/{role_id}/policies/{role_policy_id}"
+            ))
+        )
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
+        let assume = format!("/api/iam/roles/{role_id}/assume");
 
-            bearer!(user_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
+        bearer!(user_key, request.post(&assume))
+            .json(&serde_json::json!({}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
 
-            let user_policy = bearer!(root_key, request.post("/api/iam/policies"))
-                .json(&serde_json::json!({"name": "user-assume-and-tenant", "document": {"statements": [
+        let user_policy = bearer!(root_key, request.post("/api/iam/policies"))
+            .json(
+                &serde_json::json!({"name": "user-assume-and-tenant", "document": {"statements": [
                     {"effect": "allow", "actions": ["role_assume"],
                      "resources": [{"type": "role", "tenant_id": tenant_id, "role_id": role_id}]},
                     {"effect": "allow", "actions": ["tenant_get"],
-                     "resources": [{"type": "tenant", "tenant_id": tenant_id}]}]}}))
-                .await;
-            user_policy.assert_status(StatusCode::CREATED);
-            let user_policy_id = user_policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_string();
-            bearer!(root_key, request.put(&format!("/api/iam/users/{user_id}/policies/{user_policy_id}")))
-                .await
-                .assert_status(StatusCode::NO_CONTENT);
+                     "resources": [{"type": "tenant", "tenant_id": tenant_id}]}]}}),
+            )
+            .await;
+        user_policy.assert_status(StatusCode::CREATED);
+        let user_policy_id = user_policy.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        bearer!(
+            root_key,
+            request.put(&format!(
+                "/api/iam/users/{user_id}/policies/{user_policy_id}"
+            ))
+        )
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
 
-            let denied_trust = serde_json::json!({"statements": [
+        let denied_trust = serde_json::json!({"statements": [
                 {"effect": "allow", "principals": [{"type": "tenant"}]},
                 {"effect": "deny", "principals": [{"type": "user", "user_id": user_id}]}]});
-            bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
-                .json(&serde_json::json!({"trust_policy": denied_trust}))
+        bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
+            .json(&serde_json::json!({"trust_policy": denied_trust}))
+            .await
+            .assert_status_ok();
+        bearer!(user_key, request.post(&assume))
+            .json(&serde_json::json!({}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
+            .json(&serde_json::json!({"trust_policy": trust("allow")}))
+            .await
+            .assert_status_ok();
+
+        for seconds in [60, 50_000] {
+            bearer!(user_key, request.post(&assume))
+                .json(&serde_json::json!({"duration_seconds": seconds}))
                 .await
-                .assert_status_ok();
-            bearer!(user_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
-            bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
-                .json(&serde_json::json!({"trust_policy": trust("allow")}))
-                .await
-                .assert_status_ok();
+                .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        let session = bearer!(user_key, request.post(&assume))
+            .json(&serde_json::json!({}))
+            .await;
+        session.assert_status(StatusCode::CREATED);
+        let session = session.json::<serde_json::Value>();
+        let session_key = session["plaintext"].as_str().unwrap().to_string();
 
-            for seconds in [60, 50_000] {
-                bearer!(user_key, request.post(&assume))
-                    .json(&serde_json::json!({"duration_seconds": seconds}))
-                    .await
-                    .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
-            }
-            let session = bearer!(user_key, request.post(&assume)).json(&serde_json::json!({})).await;
-            session.assert_status(StatusCode::CREATED);
-            let session = session.json::<serde_json::Value>();
-            let session_key = session["plaintext"].as_str().unwrap().to_string();
+        let workspace = format!("/api/workspaces/{workspace_id}");
+        bearer!(session_key, request.get(&workspace))
+            .await
+            .assert_status_ok();
+        bearer!(session_key, request.get("/api/tenants/current"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        bearer!(user_key, request.get("/api/tenants/current"))
+            .await
+            .assert_status_ok();
+        bearer!(user_key, request.get(&workspace))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
 
-            let workspace = format!("/api/workspaces/{workspace_id}");
-            bearer!(session_key, request.get(&workspace)).await.assert_status_ok();
-            bearer!(session_key, request.get("/api/tenants/current")).await.assert_status(StatusCode::FORBIDDEN);
-            bearer!(user_key, request.get("/api/tenants/current")).await.assert_status_ok();
-            bearer!(user_key, request.get(&workspace)).await.assert_status(StatusCode::FORBIDDEN);
+        bearer!(session_key, request.post(&assume))
+            .json(&serde_json::json!({}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        bearer!(root_key, request.post(&assume))
+            .json(&serde_json::json!({}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
 
-            bearer!(session_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
-            bearer!(root_key, request.post(&assume)).json(&serde_json::json!({})).await.assert_status(StatusCode::FORBIDDEN);
-
-            bearer!(root_key, request.delete(&format!("/api/iam/roles/{role_id}")))
-                .await
-                .assert_status(StatusCode::NO_CONTENT);
-            bearer!(session_key, request.get(&workspace)).await.assert_status(StatusCode::UNAUTHORIZED);
-        })
-        .await;
+        bearer!(
+            root_key,
+            request.delete(&format!("/api/iam/roles/{role_id}"))
+        )
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
+        bearer!(session_key, request.get(&workspace))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
     })
     .await;
 }

@@ -52,12 +52,12 @@ async fn disable(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_detail),
-        super::route_inventory::path_doc(__path_update),
-        super::route_inventory::path_doc(__path_inventory),
-        super::route_inventory::path_doc(__path_disable),
+        super::openapi::route_inventory::path_doc(__path_detail),
+        super::openapi::route_inventory::path_doc(__path_update),
+        super::openapi::route_inventory::path_doc(__path_inventory),
+        super::openapi::route_inventory::path_doc(__path_disable),
     ]
 }
 

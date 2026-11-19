@@ -1,3 +1,6 @@
+//! The `tenant_retirement_events` table, the record of a tenant's retirement steps.
+//! Its rows are written and read by the tenant retirement code.
+
 pub use crate::models::_entities::tenant_retirement_events::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 

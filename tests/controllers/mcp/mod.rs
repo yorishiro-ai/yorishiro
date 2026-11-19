@@ -139,7 +139,7 @@ use rmcp::handler::server::router::tool::ToolRoute;
 
 use yorishiro::controllers::mcp::{community_tool_router, compose_tool_routers};
 
-fn assert_inventory_contract(label: &str, tools: &[rmcp::model::Tool]) {
+fn assert_inventory_contract(label: &str, tools: &[Tool]) {
     let names: Vec<_> = tools.iter().map(|tool| tool.name.to_string()).collect();
     let mut sorted = names.clone();
     sorted.sort();

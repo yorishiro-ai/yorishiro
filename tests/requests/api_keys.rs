@@ -109,7 +109,7 @@ async fn delegated_expiry_cannot_outlive_the_issuing_key() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let owner = format!("Bearer {}",tenant_key);
+        let owner = format!("Bearer {tenant_key}");
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
         let issued = request.post("/api/api-keys").add_header("Authorization",&owner).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"short-admin","tenant_scoped":true,"expires_at":expiry})).await;
@@ -141,7 +141,7 @@ async fn rotation_preserves_service_identity_and_serializes_with_revocation() {
             Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false)
                 .await
                 .unwrap();
-        let auth = format!("Bearer {}", tenant_key);
+        let auth = format!("Bearer {tenant_key}");
         let path = format!("/api/api-keys/{}/rotate", service.id);
         let (rotated, revoked) = tokio::join!(
             async {
@@ -177,7 +177,7 @@ async fn concurrent_rotation_issues_only_one_replacement() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let auth = format!("Bearer {}", tenant_key);
+        let auth = format!("Bearer {tenant_key}");
         let name = format!("rotation-race-{}", Uuid::new_v4());
         let created = request
             .post("/api/api-keys")
@@ -231,7 +231,7 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let auth = format!("Bearer {}",tenant_key);
+        let auth = format!("Bearer {tenant_key}");
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
         let created = request.post("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"rotate-me","scope":"read","expires_at":expiry})).await;
@@ -502,7 +502,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let member = tenancy::register_member(
             &txn,
             tenant.tenant_id,
-            &super::fixtures::unique_email("tenant-scoped-member"),
+            &fixtures::unique_email("tenant-scoped-member"),
             "hunter2-hunter2",
             None)
         .await
@@ -603,7 +603,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .col_expr(yorishiro::models::_entities::api_keys::Column::ExpiresAt, sea_orm::sea_query::Expr::value(expiry.fixed_offset()))
             .filter(yorishiro::models::_entities::api_keys::Column::Id.eq(read_issuer.id))
             .exec(&ctx.db).await.unwrap();
-        for requested in [serde_json::Value::Null, serde_json::json!(expiry + chrono::Duration::hours(1))] {
+        for requested in [Value::Null, serde_json::json!(expiry + chrono::Duration::hours(1))] {
             request.post("/api/api-keys")
                 .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
                 .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
@@ -619,7 +619,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         // The new key names its workspace per request and appears in the listing.
         let full_key = record["full_key"].as_str().unwrap().to_owned();
         let txn = ctx.db.begin().await.unwrap();
-        let second_name = format!("second-key-target-{}", uuid::Uuid::now_v7());
+        let second_name = format!("second-key-target-{}", Uuid::now_v7());
         let second = tenancy::create_workspace(&txn, tenant.tenant_id, &second_name, None, None).await.unwrap();
         txn.commit().await.unwrap();
         request.get("/api/whoami")

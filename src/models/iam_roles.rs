@@ -1,3 +1,5 @@
+//! IAM role model: role administration and assuming a role for a temporary credential.
+
 pub use crate::models::_entities::iam_roles::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 use serde::Serialize;
@@ -76,10 +78,7 @@ fn clean_max_session(value: Option<i64>) -> Result<i32, YorishiroError> {
 }
 
 fn unique_name_conflict(error: DbErr) -> YorishiroError {
-    if matches!(
-        error.sql_err(),
-        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-    ) {
+    if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
         YorishiroError::Conflict {
             message: "an IAM role with this name already exists".into(),
         }
@@ -379,7 +378,7 @@ impl Model {
         }
 
         let caller_scope = ApiKeyScope::from_db_str(&caller_key.scope)
-            .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("unknown api key scope")))?;
+            .ok_or_else(|| YorishiroError::Internal("unknown api key scope".into()))?;
         let scope = scope.unwrap_or(caller_scope);
         if scope > caller_scope {
             return Err(YorishiroError::ScopeInsufficient {
@@ -396,7 +395,7 @@ impl Model {
             ));
         }
         let mut expires_at: chrono::DateTime<chrono::FixedOffset> =
-            (crate::time::now() + chrono::Duration::seconds(duration)).into();
+            (crate::data::time::now() + chrono::Duration::seconds(duration)).into();
         if let Some(limit) = caller_key.expires_at {
             expires_at = expires_at.min(limit);
         }

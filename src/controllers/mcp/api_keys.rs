@@ -1,3 +1,5 @@
+//! MCP tools for creating, listing, rotating and revoking API keys.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -69,7 +71,7 @@ impl YorishiroMcpServer {
                 prefix: created.key_prefix,
                 full_key: created.plaintext,
                 name: created.name,
-                created_at: crate::time::render(self.app_context(), created.created_at),
+                created_at: crate::data::time::render(self.app_context(), created.created_at),
                 grant: render_grant(self.app_context(), created.grant),
             }),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -102,8 +104,10 @@ impl YorishiroMcpServer {
                     id: key.id,
                     prefix: key.key_prefix,
                     name: key.name,
-                    created_at: crate::time::render(ctx, key.created_at),
-                    last_used_at: key.last_used_at.map(|time| crate::time::render(ctx, time)),
+                    created_at: crate::data::time::render(ctx, key.created_at),
+                    last_used_at: key
+                        .last_used_at
+                        .map(|time| crate::data::time::render(ctx, time)),
                     grant: render_grant(ctx, grant),
                 });
             }
@@ -166,7 +170,7 @@ impl YorishiroMcpServer {
                 prefix: created.key_prefix,
                 full_key: created.plaintext,
                 name: created.name,
-                created_at: crate::time::render(self.app_context(), created.created_at),
+                created_at: crate::data::time::render(self.app_context(), created.created_at),
                 grant: render_grant(self.app_context(), created.grant),
             }),
             Err(error) => Ok(err_to_tool_result(error)),

@@ -4,6 +4,12 @@
 
 use serde::{Serialize, Serializer};
 
+/// The payload of an internal failure: any error, or a message.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// `Result` with a [`BoxError`], for fallible setup code outside the request path.
+pub type BoxResult<T> = Result<T, BoxError>;
+
 /// Every application-level error that flows to an HTTP response or tool result.
 ///
 /// Adding a variant requires two things: a variant in this enum and a matching
@@ -68,7 +74,7 @@ pub enum YorishiroError {
     BackendUnavailable { message: String },
 
     /// An unexpected internal error occurred.
-    Internal(anyhow::Error),
+    Internal(BoxError),
 }
 
 impl std::fmt::Display for YorishiroError {
@@ -106,26 +112,26 @@ impl std::fmt::Display for YorishiroError {
 impl std::error::Error for YorishiroError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Internal(error) => Some(error.as_ref()),
+            Self::Internal(error) => Some(&**error),
             _ => None,
         }
     }
 }
 
-impl From<anyhow::Error> for YorishiroError {
-    fn from(error: anyhow::Error) -> Self {
+impl From<BoxError> for YorishiroError {
+    fn from(error: BoxError) -> Self {
         Self::Internal(error)
     }
 }
 
 /// Reports an internal failure at its transport boundary and returns the safe client message.
-pub(crate) fn report_internal(error: &anyhow::Error) -> &'static str {
+pub(crate) fn report_internal(error: &BoxError) -> &'static str {
     tracing::error!(error = %error, "internal error");
     "internal server error"
 }
 
 /// Applies the same internal-error redaction to MCP protocol failures as REST and tool results.
-pub(crate) fn mcp_internal(error: impl Into<anyhow::Error>) -> rmcp::ErrorData {
+pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
     rmcp::ErrorData::internal_error(report_internal(&error.into()), None)
 }
 
@@ -509,7 +515,7 @@ pub trait ResultExt<T> {
     fn internal(self) -> Result<T, YorishiroError>;
 }
 
-impl<T, E: Into<anyhow::Error>> ResultExt<T> for Result<T, E> {
+impl<T, E: Into<BoxError>> ResultExt<T> for Result<T, E> {
     fn internal(self) -> Result<T, YorishiroError> {
         self.map_err(|err| YorishiroError::Internal(err.into()))
     }

@@ -54,9 +54,9 @@ impl BackgroundWorker<ConfirmProposalsArgs> for ConfirmProposalsWorker {
 
 impl ConfirmProposalsWorker {
     async fn confirm(&self, args: &ConfirmProposalsArgs) -> Result<(), YorishiroError> {
-        let id = args.lifecycle_id.ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!("confirmation lifecycle missing"))
-        })?;
+        let id = args
+            .lifecycle_id
+            .ok_or_else(|| YorishiroError::Internal("confirmation lifecycle missing".into()))?;
         let txn =
             crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id).await?;
         crate::db::lock_for_update(&txn, &format!("confirm-proposals:{id}"))

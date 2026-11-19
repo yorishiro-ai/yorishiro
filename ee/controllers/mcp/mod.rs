@@ -1,3 +1,6 @@
+//! The enterprise MCP tool set and the policy that classifies and gates its tools.
+//! Each submodule defines the tools of one enterprise feature, and `tool_router` composes them for the overlay.
+
 mod dashboard;
 mod embedding;
 mod entity_columns;
@@ -20,7 +23,7 @@ struct ManagementToolPolicy;
 
 impl McpToolPolicy for ManagementToolPolicy {
     fn read_only(&self, name: &str) -> bool {
-        crate::controllers::mcp::read_only_tool(name)
+        crate::controllers::mcp::policy::read_only_tool(name)
             || matches!(
                 name,
                 "get_tenant_overview"

@@ -9,7 +9,7 @@ use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::dtos::search::SearchEntitiesParams;
 use crate::models::search::{self, SearchHit};
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/search", params(("query_text" = String, Query, description = "Text to embed and search for"), ("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query, description = "JSON-encoded containment filter"), ("limit" = Option<i64>, Query)), responses((status = 200, body = [crate::models::search::SearchHit]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["search"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/search", params(("query_text" = String, Query, description = "Text to embed and search for"), ("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query, description = "JSON-encoded containment filter"), ("limit" = Option<i64>, Query)), responses((status = 200, body = [SearchHit]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["search"]))), tag = "community"))]
 pub(crate) async fn search_entities(
     State(ctx): State<AppContext>,
     // `Verified`, not `Authorized`: no connection is acquired here until after the slow embedding call below.
@@ -34,8 +34,10 @@ pub(crate) async fn search_entities(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
-    vec![super::route_inventory::path_doc(__path_search_entities)]
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
+    vec![super::openapi::route_inventory::path_doc(
+        __path_search_entities,
+    )]
 }
 
 pub fn routes() -> Routes {

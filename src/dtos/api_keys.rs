@@ -1,5 +1,5 @@
+use crate::data::time::Timezone;
 use crate::models::api_keys::ApiKeyScope;
-use crate::time::Timezone;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

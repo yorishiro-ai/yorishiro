@@ -1,3 +1,5 @@
+//! Request and response transport types, one module per resource.
+
 pub mod api_keys;
 pub mod auth;
 pub mod common;

@@ -15,7 +15,7 @@ impl Task for TenantReindexScheduler {
     }
 
     async fn run(&self, ctx: &AppContext, vars: &Vars) -> Result<()> {
-        self.run_at(ctx, vars, crate::time::now()).await
+        self.run_at(ctx, vars, crate::data::time::now()).await
     }
 }
 

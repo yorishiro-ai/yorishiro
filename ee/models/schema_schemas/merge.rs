@@ -289,17 +289,16 @@ pub fn apply_plan(
                             .entity_types
                             .entry(field.entity_type.clone())
                             .or_insert_with(|| {
-                                upstream
-                                    .entity_types
-                                    .get(&field.entity_type)
-                                    .map(|t| EntityTypeDef {
-                                        description: t.description.clone(),
-                                        fields: Default::default(),
-                                    })
-                                    .unwrap_or_else(|| EntityTypeDef {
+                                upstream.entity_types.get(&field.entity_type).map_or_else(
+                                    || EntityTypeDef {
                                         description: None,
                                         fields: Default::default(),
-                                    })
+                                    },
+                                    |t| EntityTypeDef {
+                                        description: t.description.clone(),
+                                        fields: Default::default(),
+                                    },
+                                )
                             })
                             .fields
                             .insert(field.field.clone(), def.clone());

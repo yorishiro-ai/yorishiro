@@ -28,7 +28,7 @@ pub struct LedgerEntry {
     pub transaction_type: TransactionType,
 }
 
-crate::db_enum::db_enum! {
+crate::models::db_enum::db_enum! {
     /// Which kind of ledger event this row records.
     #[derive(Clone, Copy, Eq, PartialEq)]
     pub enum TransactionType {
@@ -97,8 +97,8 @@ async fn insert_row(
         workspace_id: ActiveValue::Set(workspace_id),
         amount: ActiveValue::Set(amount),
         transaction_type: ActiveValue::Set(transaction_type.as_db_str().to_string()),
-        created_at: ActiveValue::Set(crate::time::now().into()),
-        updated_at: ActiveValue::Set(crate::time::now().into()),
+        created_at: ActiveValue::Set(crate::data::time::now().into()),
+        updated_at: ActiveValue::Set(crate::data::time::now().into()),
     };
     Entity::insert(active).exec(conn).await.internal()?;
     Ok(())

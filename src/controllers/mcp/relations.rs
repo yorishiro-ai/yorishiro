@@ -1,3 +1,5 @@
+//! MCP tools for entity relations: create, get, list, delete and set status.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

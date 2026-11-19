@@ -44,9 +44,9 @@ pub struct LicenceClaims {
 /// Returns an error if the operation cannot be completed.
 pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, YorishiroError> {
     let key = DecodingKey::from_rsa_pem(public_key_pem).map_err(|err| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "licence public key is not a usable RSA PEM: {err}"
-        ))
+        YorishiroError::Internal(
+            format!("licence public key is not a usable RSA PEM: {err}").into(),
+        )
     })?;
 
     // RS256 only.
@@ -130,7 +130,7 @@ impl LicenceState {
 
     /// Whether enterprise features are currently unlocked: a verified key that has not yet expired.
     pub fn is_active(&self) -> bool {
-        self.is_active_at(crate::time::now().timestamp())
+        self.is_active_at(crate::data::time::now().timestamp())
     }
 
     /// The pure fold [`Self::is_active`] wraps, so expiry is testable without waiting for a clock or mocking one.
@@ -169,7 +169,7 @@ pub(crate) async fn licence_gate(
         return next.run(request).await;
     }
 
-    crate::controllers::error::ApiError(crate::error::YorishiroError::not_found(
+    crate::controllers::error::ApiError(YorishiroError::not_found(
         "this feature requires a licence key (set YORISHIRO_LICENSE_KEY)",
     ))
     .into_response()
@@ -178,8 +178,8 @@ pub(crate) async fn licence_gate(
 /// Marks the OpenAPI operations of a route group that `licence_gate` covers.
 #[cfg(feature = "openapi")]
 pub(crate) fn licence_required(
-    mut docs: Vec<crate::controllers::route_inventory::RouteDoc>,
-) -> Vec<crate::controllers::route_inventory::RouteDoc> {
+    mut docs: Vec<crate::controllers::openapi::route_inventory::RouteDoc>,
+) -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     for doc in &mut docs {
         doc.operation
             .extensions

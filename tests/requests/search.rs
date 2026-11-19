@@ -2,8 +2,8 @@ use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant};
 use super::query_worker::{boot_with_query_worker, boot_with_query_worker_and_drain};
 use crate::http_stub::{keyword_provider, unavailable_provider};
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
-use serial_test::serial;
 use std::sync::Arc;
 use std::time::Duration;
 use yorishiro::App;
@@ -147,7 +147,7 @@ async fn configured_live_provider_embeds_stores_and_searches() {
         ];
         embedded_notes(&ctx, &setup, provider.as_ref(), &documents).await;
         #[cfg(feature = "enterprise")]
-        let session = super::mcp::initialize(&request).await;
+        let session = crate::ee::requests::mcp::initialize(&request).await;
         for (query, expected) in [
             ("A cat sleeps on a warm sofa.", documents[0]),
             ("How do I back up and restore a PostgreSQL database?", documents[1]),
@@ -163,12 +163,12 @@ async fn configured_live_provider_embeds_stores_and_searches() {
             assert!(hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
             #[cfg(feature = "enterprise")]
             {
-                let response = super::mcp::mcp_call(&request, &session, &setup.api_key,
+                let response = crate::ee::requests::mcp::mcp_call(&request, &session, &setup.api_key,
                     20, "tools/call", serde_json::json!({
                         "name":"search_entities", "arguments":{"query_text":query,"limit":3}
                     })).await;
                 assert_eq!(response["result"]["isError"], false, "live MCP search failed");
-                let mcp_hits = super::mcp::tool_result_json(&response);
+                let mcp_hits = crate::ee::requests::mcp::tool_result_json(&response);
                 assert_eq!(titles(&mcp_hits)[0], expected, "live MCP semantic ranking");
                 let ids = |value: &serde_json::Value| value.as_array().unwrap().iter()
                     .map(|hit| hit["entity"]["id"].clone()).collect::<Vec<_>>();
@@ -249,15 +249,12 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
 
 /// With no worker running the search must fail, loudly and boundedly: a lexical fallback would return results the caller did not ask for.
 #[tokio::test]
-#[serial(process_environment)]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
-    let guard = crate::EnvGuard::capture(&[
-        "YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS",
-        "YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS",
-    ]);
-    guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", "300");
-    guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", "50");
-    super::boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [
+        ("settings.query_embedding.timeout_ms", 300.into()),
+        ("settings.query_embedding.poll_interval_ms", 50.into()),
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let setup = TestTenant::create(
             &request,
             &ctx,

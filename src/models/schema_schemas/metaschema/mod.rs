@@ -1,3 +1,5 @@
+//! The metaschema: the definition language for entity and relation types, with its validation, JSON Schema projection and compatibility diff.
+
 mod projection;
 mod types;
 mod validate;

@@ -1,3 +1,5 @@
+//! The application's typed `settings` section and the operator-tunable defaults nested in it.
+
 use serde::{Deserialize, Serialize};
 
 /// Selects the handlers and resources a queue consumer owns.

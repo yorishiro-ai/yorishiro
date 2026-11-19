@@ -13,7 +13,7 @@ impl Task for DeleteDueTenants {
 
     async fn run(&self, ctx: &AppContext, _vars: &task::Vars) -> Result<()> {
         let deleted =
-            crate::models::tenant_tenants::retirement::reap_due(&ctx.db, crate::time::now())
+            crate::models::tenant_tenants::retirement::reap_due(&ctx.db, crate::data::time::now())
                 .await?;
         println!("{}", serde_json::json!({"deleted": deleted}));
         Ok(())

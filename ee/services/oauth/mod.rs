@@ -119,9 +119,9 @@ pub async fn handle_callback(
 /// Returns an error rather than panicking on a malformed `base`, since it comes from an external, unvalidated network response.
 fn url_with_query(base: &str, params: &[(&str, &str)]) -> Result<String, YorishiroError> {
     let mut url = reqwest::Url::parse(base).map_err(|err| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "provider's authorization_endpoint '{base}' is not a valid URL: {err}"
-        ))
+        YorishiroError::Internal(
+            format!("provider's authorization_endpoint '{base}' is not a valid URL: {err}").into(),
+        )
     })?;
     for (key, value) in params {
         url.query_pairs_mut().append_pair(key, value);

@@ -1,12 +1,14 @@
+//! Workspace model: lifecycle in `operations`, plus the embedding provider assignment and the revision fence that guards vector publication.
+
 use sea_orm::entity::prelude::*;
 use sea_orm::{ExprTrait, QuerySelect};
 use serde::Serialize;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
+use crate::models::db_enum::db_enum;
 
-mod tenancy;
+mod operations;
 
 struct AssignedEmbeddingProvider {
     provider: std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>,
@@ -122,7 +124,7 @@ pub(crate) async fn fence_embedding(
             Column::EmbeddingRevision,
             Expr::col(Column::EmbeddingRevision),
         )
-        .filter(crate::models::_entities::workspace_workspaces::Column::Id.eq(workspace_id))
+        .filter(Column::Id.eq(workspace_id))
         .filter(Column::EmbeddingRevision.eq(revision))
         .exec(conn)
         .await
@@ -173,7 +175,7 @@ pub(crate) async fn effective_embedding_metadata(
         .map_err(YorishiroError::Internal)
 }
 
-pub(crate) use tenancy::{
+pub(crate) use operations::{
     delete_workspace, get_workspace, get_workspace_tenant, workspace_count_lock_key,
 };
 
@@ -188,7 +190,7 @@ pub struct WorkspaceSummary {
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -308,7 +310,7 @@ pub(crate) async fn stamped_for_reindex(
 }
 
 pub(crate) async fn list_for_actor(
-    conn: &sea_orm::DatabaseConnection,
+    conn: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
     use crate::models::iam_policy::{Action, Resource};
@@ -379,7 +381,7 @@ pub(crate) async fn get_for_actor(
 }
 
 pub(crate) async fn update_as(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
     id: Uuid,
     input: crate::dtos::workspaces::UpdateWorkspaceRequest,
@@ -461,7 +463,7 @@ pub(crate) async fn detail_for_actor(
             quotas.entities,
         ),
         schema_id: workspace.schema_id,
-        created_at: crate::time::render(ctx, workspace.created_at),
+        created_at: crate::data::time::render(ctx, workspace.created_at),
         entity_count,
         relation_count,
         schema_count,
@@ -518,10 +520,7 @@ impl TryFrom<Model> for WorkspaceRecord {
 
     fn try_from(model: Model) -> Result<Self, Self::Error> {
         let status = WorkspaceStatus::from_db_str(&model.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown workspace status: {}",
-                model.status
-            ))
+            YorishiroError::Internal(format!("unknown workspace status: {}", model.status).into())
         })?;
         Ok(Self {
             id: model.id,
@@ -544,8 +543,6 @@ db_enum! {
         Active = "active",
     }
 }
-
-pub const WORKSPACE_STATUS_ACTIVE: &str = WorkspaceStatus::Active.as_db_str();
 
 /// Whether the workspace is still waiting for its first schema.
 ///

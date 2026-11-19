@@ -78,7 +78,7 @@ async fn source_by_id<C: ConnectionTrait>(
     source_schema_id: Uuid,
 ) -> Result<Option<schema_schemas::Model>, YorishiroError> {
     // PostgreSQL uses the scoped SECURITY DEFINER function so fork source reads can cross workspace RLS; SQLite is single-tenant.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         let query = Query::select()
             .column(Asterisk)
             .from_function(
@@ -112,7 +112,7 @@ async fn latest_source_by_name<C: ConnectionTrait>(
     source_schema_name: &str,
 ) -> Result<Option<schema_schemas::Model>, YorishiroError> {
     // Keep the PostgreSQL RLS crossing in its scoped database function; the SQLite query has no RLS boundary.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         let query = Query::select()
             .column(Asterisk)
             .from_function(
@@ -134,10 +134,7 @@ async fn latest_source_by_name<C: ConnectionTrait>(
         .filter(SchemaColumn::TenantId.eq(tenant_id))
         .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
         .filter(SchemaColumn::Name.eq(source_schema_name))
-        .filter(
-            SchemaColumn::Status
-                .eq(crate::models::schema_schemas::SchemaStatus::Active.as_db_str()),
-        )
+        .filter(SchemaColumn::Status.eq(schema_schemas::SchemaStatus::Active.as_db_str()))
         .order_by_desc(SchemaColumn::Version)
         .one(conn)
         .await
@@ -150,7 +147,7 @@ async fn fork_edges<C: ConnectionTrait>(
     workspace_id: Uuid,
 ) -> Result<Vec<Uuid>, YorishiroError> {
     // The PostgreSQL function traverses fork edges across workspace RLS; SQLite can read the table directly.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         let query = Query::select()
             .column(Alias::new("source_workspace_id"))
             .from_function(
@@ -193,7 +190,7 @@ async fn current_source<C: ConnectionTrait>(
     let source = source_by_id(conn, tenant_id, source_workspace_id, source_schema_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("source schema was not found"))?;
-    if source.status != crate::models::schema_schemas::SchemaStatus::Active.as_db_str() {
+    if source.status != schema_schemas::SchemaStatus::Active.as_db_str() {
         return Err(YorishiroError::ValidationFailed {
             message: "source_schema_id must name the active source schema".into(),
             details: vec![],
@@ -242,8 +239,7 @@ async fn next_version<C: ConnectionTrait>(
         .one(conn)
         .await
         .internal()?
-        .map(|row| row.version)
-        .unwrap_or(0);
+        .map_or(0, |row| row.version);
     Ok(max + 1)
 }
 
@@ -289,7 +285,7 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("fork head is missing")))?;
+        .ok_or_else(|| YorishiroError::Internal("fork head is missing".into()))?;
     let source_active = latest_source_by_name(
         conn,
         row.tenant_id,
@@ -422,10 +418,7 @@ pub async fn create<C: ConnectionTrait>(
         ..Default::default()
     };
     let row = row.insert(conn).await.map_err(|err| {
-        if matches!(
-            err.sql_err(),
-            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-        ) {
+        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
             YorishiroError::Conflict {
                 message: "this workspace already has a fork for that source schema".into(),
             }
@@ -521,7 +514,7 @@ pub async fn update<C: ConnectionTrait>(
     let mut active: ActiveModel = fork.into();
     active.fork_schema_id = ActiveValue::Set(head.id);
     active.customized = ActiveValue::Set(source_update.is_none());
-    active.updated_at = ActiveValue::Set(crate::time::now().into());
+    active.updated_at = ActiveValue::Set(crate::data::time::now().into());
     if let Some(source) = source_update {
         active.source_schema_id = ActiveValue::Set(source.id);
         active.source_schema_version = ActiveValue::Set(source.version);

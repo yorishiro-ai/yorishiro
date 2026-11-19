@@ -1,3 +1,5 @@
+//! REST routes for workspaces and their members.
+
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -14,23 +16,23 @@ use crate::models::tenancy;
 use crate::models::workspace_workspaces;
 use crate::models::workspace_workspaces::WorkspaceRecord;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_list", "workspace_get"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_list", "workspace_get"]))), tag = "community"))]
 pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
-    let records = crate::models::workspace_workspaces::list_for_actor(&ctx.db, &actor)
+    let records = workspace_workspaces::list_for_actor(&ctx.db, &actor)
         .await?
         .into_iter()
         .map(|record| WorkspaceRecord {
-            created_at: crate::time::render(&ctx, record.created_at).fixed_offset(),
+            created_at: crate::data::time::render(&ctx, record.created_at).fixed_offset(),
             ..record
         })
         .collect();
     Ok(Json(records))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = crate::dtos::workspaces::CreateWorkspaceRequest, responses((status = 201, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_create"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = CreateWorkspaceRequest, responses((status = 201, body = WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_create"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -50,7 +52,7 @@ async fn create_workspace(
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::dtos::workspaces::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -64,7 +66,7 @@ async fn get_workspace(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::workspaces::UpdateWorkspaceRequest, responses((status = 200, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::workspaces::UpdateWorkspaceRequest, responses((status = 200, body = WorkspaceRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
 async fn update_workspace(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -87,16 +89,16 @@ pub(crate) async fn delete_workspace(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_list_workspaces),
-        super::route_inventory::path_doc(__path_create_workspace),
-        super::route_inventory::path_doc(__path_get_workspace),
-        super::route_inventory::path_doc(__path_update_workspace),
-        super::route_inventory::path_doc(__path_delete_workspace),
-        super::route_inventory::path_doc(__path_grant_member),
-        super::route_inventory::path_doc(__path_list_members),
-        super::route_inventory::path_doc(__path_revoke_member),
+        super::openapi::route_inventory::path_doc(__path_list_workspaces),
+        super::openapi::route_inventory::path_doc(__path_create_workspace),
+        super::openapi::route_inventory::path_doc(__path_get_workspace),
+        super::openapi::route_inventory::path_doc(__path_update_workspace),
+        super::openapi::route_inventory::path_doc(__path_delete_workspace),
+        super::openapi::route_inventory::path_doc(__path_grant_member),
+        super::openapi::route_inventory::path_doc(__path_list_members),
+        super::openapi::route_inventory::path_doc(__path_revoke_member),
     ]
 }
 

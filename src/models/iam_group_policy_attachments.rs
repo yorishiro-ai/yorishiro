@@ -1,3 +1,5 @@
+//! IAM model for attaching policies to groups.
+
 pub use crate::models::_entities::iam_group_policy_attachments::{
     ActiveModel, Column, Entity, Model,
 };
@@ -88,11 +90,8 @@ impl Model {
             .await
             .map_err(|error| match error {
                 YorishiroError::Internal(ref source)
-                    if source.downcast_ref::<sea_orm::DbErr>().is_some_and(|e| {
-                        matches!(
-                            e.sql_err(),
-                            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-                        )
+                    if source.downcast_ref::<DbErr>().is_some_and(|e| {
+                        matches!(e.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
                     }) =>
                 {
                     YorishiroError::Conflict {

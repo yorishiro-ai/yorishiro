@@ -88,7 +88,7 @@ pub(crate) async fn reviews_as(
 /// The marketplace spans tenants, and SQLite holds one, so its cross-tenant queries are written for PostgreSQL only.
 /// Refusing here answers with `501` instead of a query failure.
 fn require_postgres(conn: &impl ConnectionTrait, what: &str) -> Result<(), YorishiroError> {
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+    if crate::db::is_postgres(conn) {
         return Ok(());
     }
     Err(YorishiroError::BackendUnsupported {
@@ -128,7 +128,7 @@ pub struct TemplateVersionRecord {
     pub created_at: DateTime<Utc>,
 }
 
-crate::db_enum::db_enum! {
+crate::models::db_enum::db_enum! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum TemplateVersionStatus {
         Draft = "draft",
@@ -180,10 +180,9 @@ impl TryFrom<AuthorizedTemplateVersionDbRecord> for TemplateVersionRecord {
 
     fn try_from(row: AuthorizedTemplateVersionDbRecord) -> Result<Self, Self::Error> {
         TemplateVisibility::from_db_str(&row.template_visibility).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template visibility: {}",
-                row.template_visibility
-            ))
+            YorishiroError::Internal(
+                format!("unknown template visibility: {}", row.template_visibility).into(),
+            )
         })?;
         TemplateVersionDbRecord {
             id: row.id,
@@ -203,10 +202,9 @@ impl TryFrom<TemplateVersionDbRecord> for TemplateVersionRecord {
 
     fn try_from(row: TemplateVersionDbRecord) -> Result<Self, Self::Error> {
         let status = TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template version status: {}",
-                row.status
-            ))
+            YorishiroError::Internal(
+                format!("unknown template version status: {}", row.status).into(),
+            )
         })?;
         Ok(Self {
             id: row.id,
@@ -282,10 +280,9 @@ impl TryFrom<AuthorizedTemplateReviewDbRecord> for TemplateReviewRecord {
 
     fn try_from(row: AuthorizedTemplateReviewDbRecord) -> Result<Self, Self::Error> {
         TemplateVisibility::from_db_str(&row.template_visibility).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template visibility: {}",
-                row.template_visibility
-            ))
+            YorishiroError::Internal(
+                format!("unknown template visibility: {}", row.template_visibility).into(),
+            )
         })?;
         Ok(Self {
             id: row.id,
@@ -341,10 +338,9 @@ impl TryFrom<ForkSourceDbRecord> for ForkSource {
 
     fn try_from(row: ForkSourceDbRecord) -> Result<Self, Self::Error> {
         TemplateVisibility::from_db_str(&row.template_visibility).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template visibility: {}",
-                row.template_visibility
-            ))
+            YorishiroError::Internal(
+                format!("unknown template visibility: {}", row.template_visibility).into(),
+            )
         })?;
         Ok(Self {
             name: row.name,
@@ -581,7 +577,7 @@ pub(crate) async fn insert_next_version(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("insert did not return a row")))
+        .ok_or_else(|| YorishiroError::Internal("insert did not return a row".into()))
         .and_then(TemplateVersionRecord::try_from)
 }
 
@@ -669,7 +665,7 @@ pub(crate) async fn upsert_review(
         rating: sea_orm::ActiveValue::Set(request.rating),
         comment: sea_orm::ActiveValue::Set(request.comment.clone()),
         created_by: sea_orm::ActiveValue::Set(user_id),
-        updated_at: sea_orm::ActiveValue::Set(crate::time::now().into()),
+        updated_at: sea_orm::ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
     let row = Entity::insert(active)
@@ -766,10 +762,7 @@ pub(crate) async fn find_forkable_definition(
         return Ok(None);
     };
     let status = TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "unknown template version status: {}",
-            row.status
-        ))
+        YorishiroError::Internal(format!("unknown template version status: {}", row.status).into())
     })?;
 
     Ok((version.is_none() || status != TemplateVersionStatus::Draft).then_some(row.definition))
@@ -815,7 +808,7 @@ pub(crate) async fn insert_fork(
         Err(sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(err)))
             if err
                 .as_database_error()
-                .is_some_and(|db_err| db_err.is_unique_violation()) =>
+                .is_some_and(sea_orm::sqlx::error::DatabaseError::is_unique_violation) =>
         {
             Ok(InsertForkOutcome::NameTaken)
         }

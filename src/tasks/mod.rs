@@ -1,3 +1,5 @@
+//! CLI tasks run through `cargo loco task`: maintenance, tenant retirement, embedding resync and credential recovery.
+
 pub(crate) mod db_load_guard;
 pub(crate) mod delete_due_tenants;
 pub(crate) mod delete_user;

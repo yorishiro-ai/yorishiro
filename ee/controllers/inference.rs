@@ -29,7 +29,7 @@ use crate::edition::ee::models::workspace_llm_keys;
 /// The worker rechecks the credential and IAM policy before inference and proposal storage.
 ///
 /// Poll for completion via `GET /api/inference-jobs/{job_id}`.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_create"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_create"]))), tag = "enterprise"))]
 async fn infer_fill(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -56,7 +56,7 @@ async fn infer_fill(
 ///
 /// Requires authentication and read scope, and only returns a job belonging to the
 /// authenticated workspace.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}", params(("job_id" = String, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::InferJobStatusResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["inference_job_get"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}", params(("job_id" = String, Path)), responses((status = 200, body = InferJobStatusResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["inference_job_get"]))), tag = "enterprise"))]
 async fn infer_job_status(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -245,29 +245,30 @@ async fn delete_llm_key(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_set_llm_key),
-        crate::controllers::route_inventory::path_doc(__path_get_llm_key),
-        crate::controllers::route_inventory::path_doc(__path_delete_llm_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_set_llm_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_get_llm_key),
+        crate::controllers::openapi::route_inventory::path_doc(__path_delete_llm_key),
     ]
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn gated_openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
-    vec![crate::controllers::route_inventory::path_doc(
+pub(crate) fn gated_openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
+    vec![crate::controllers::openapi::route_inventory::path_doc(
         __path_infer_fill,
     )]
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn job_status_openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+pub(crate) fn job_status_openapi_docs()
+-> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::route_inventory::path_doc(__path_infer_job_status),
-        crate::controllers::route_inventory::path_doc(__path_list_proposals),
-        crate::controllers::route_inventory::path_doc(__path_confirm_proposals),
-        crate::controllers::route_inventory::path_doc(__path_confirmation_status),
-        crate::controllers::route_inventory::path_doc(__path_reject_proposals),
-        crate::controllers::route_inventory::path_doc(__path_discard_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_infer_job_status),
+        crate::controllers::openapi::route_inventory::path_doc(__path_list_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_confirm_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_confirmation_status),
+        crate::controllers::openapi::route_inventory::path_doc(__path_reject_proposals),
+        crate::controllers::openapi::route_inventory::path_doc(__path_discard_proposals),
     ]
 }

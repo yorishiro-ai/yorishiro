@@ -7,16 +7,13 @@ use super::fixtures::{TenantArgs, TestTenant};
 
 #[cfg(feature = "enterprise")]
 #[tokio::test]
-#[serial_test::serial(process_environment)]
 async fn entity_plan_quota_expires_but_manual_limit_remains() {
     use axum::http::StatusCode;
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let variable = "YORISHIRO_PLAN_POLICY_ENABLED";
-    let guard = crate::EnvGuard::capture(&[variable]);
-    guard.set(variable, "true");
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [("initializers.plan_policy_enabled", "true".into())];
+    crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::from_value(serde_json::json!({
             "name":"quota-note", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}
@@ -63,7 +60,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
 /// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
-    super::fill_defaults::boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let definition = serde_json::from_value(serde_json::json!({
@@ -213,7 +210,7 @@ async fn undo_an_unknown_job_is_refused() {
 /// renders as HTTP 501 with code `backend_unsupported`.
 #[tokio::test]
 async fn list_entities_with_filter_returns_501_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

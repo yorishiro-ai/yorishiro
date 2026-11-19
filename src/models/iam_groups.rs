@@ -1,3 +1,5 @@
+//! IAM group model: creating, renaming, reading and deleting groups.
+
 pub use crate::models::_entities::iam_groups::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 
@@ -145,7 +147,7 @@ impl Model {
     }
 
     pub(crate) async fn create_as(
-        db: &sea_orm::DatabaseConnection,
+        db: &DatabaseConnection,
         actor: &crate::models::api_keys::AuthContext,
         name: String,
     ) -> Result<Self, YorishiroError> {
@@ -193,10 +195,7 @@ impl Model {
         .insert(txn)
         .await
         .map_err(|error| {
-            if matches!(
-                error.sql_err(),
-                Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-            ) {
+            if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
                 YorishiroError::Conflict {
                     message: "an IAM group with this name already exists".into(),
                 }
@@ -236,10 +235,7 @@ impl Model {
             .exec(txn)
             .await
             .map_err(|error| {
-                if matches!(
-                    error.sql_err(),
-                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-                ) {
+                if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
                     YorishiroError::Conflict {
                         message: "an IAM group with this name already exists".into(),
                     }

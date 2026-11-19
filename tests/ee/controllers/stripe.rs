@@ -1,6 +1,6 @@
 use axum::http::HeaderMap;
-use yorishiro::edition::ee::controllers::hmac_sign;
 use yorishiro::edition::ee::controllers::stripe::SIGNATURE_TOLERANCE_SECS;
+use yorishiro::edition::ee::data::hmac_sign;
 
 use axum::http::HeaderValue;
 use yorishiro::edition::ee::controllers::stripe::inbound::*;

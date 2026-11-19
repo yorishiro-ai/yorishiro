@@ -1,3 +1,5 @@
+//! Per-job entity snapshots and the undo that restores them.
+
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder, SelectExt};
 use uuid::Uuid;

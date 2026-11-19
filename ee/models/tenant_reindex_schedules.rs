@@ -18,7 +18,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_reindex_schedules::{ActiveModel, Column, Entity};
 use loco_rs::prelude::*;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
 
 /// The shortest interval a schedule may name, so a typo cannot make every workspace of a tenant reindex every few seconds.
@@ -62,7 +62,6 @@ fn parse_interval(value: &str) -> Option<chrono::Duration> {
 }
 
 /// Stores or replaces a tenant's reindex schedule.
-#[allow(clippy::too_many_arguments)]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -84,10 +83,12 @@ pub async fn set(
     }
 
     if let Some(tz) = timezone {
-        crate::time::parse_timezone(tz.trim()).map_err(|_| YorishiroError::ValidationFailed {
-            message: format!("timezone {tz:?} is not a recognized IANA time zone"),
-            details: vec![],
-            hint: "Use an IANA time zone name recognized by the application.".into(),
+        crate::data::time::parse_timezone(tz.trim()).map_err(|_| {
+            YorishiroError::ValidationFailed {
+                message: format!("timezone {tz:?} is not a recognized IANA time zone"),
+                details: vec![],
+                hint: "Use an IANA time zone name recognized by the application.".into(),
+            }
         })?;
     }
 
@@ -107,7 +108,7 @@ pub async fn set(
     }
 
     // The first run is one interval from now, and each tick schedules the next one interval after itself.
-    let expected: chrono::DateTime<chrono::FixedOffset> = crate::time::now()
+    let expected: chrono::DateTime<chrono::FixedOffset> = crate::data::time::now()
         .checked_add_signed(every)
         .ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("interval {interval:?} is too long"),
@@ -117,11 +118,11 @@ pub async fn set(
         .into();
 
     let active = ActiveModel {
-        tenant_id: ActiveValue::Set(tenant_id),
-        interval: ActiveValue::Set(interval.to_string()),
-        timezone: ActiveValue::Set(timezone.map(|s| s.trim().to_string())),
-        scheduled_for: ActiveValue::Set(Some(expected)),
-        updated_at: ActiveValue::Set(crate::time::now().into()),
+        tenant_id: Set(tenant_id),
+        interval: Set(interval.to_string()),
+        timezone: Set(timezone.map(|s| s.trim().to_string())),
+        scheduled_for: Set(Some(expected)),
+        updated_at: Set(crate::data::time::now().into()),
         ..Default::default()
     };
     Entity::insert(active)
@@ -179,7 +180,7 @@ pub(crate) async fn tick(
     tick: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
     use crate::db::AppContextBackend;
-    use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
+
     use crate::models::_entities::tenant_tenants as TenantEntity;
     use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
     use crate::workers::reindex::ReindexArgs;
@@ -227,8 +228,8 @@ pub(crate) async fn tick(
             )));
         }
     };
-    let schedules = match ScheduleEntity::Entity::find()
-        .order_by_asc(ScheduleEntity::Column::TenantId)
+    let schedules = match Entity::find()
+        .order_by_asc(Column::TenantId)
         .all(&txn)
         .await
     {
@@ -324,8 +325,8 @@ pub(crate) async fn tick(
 
         // This update commits only if every durable dispatch is recorded successfully.
         let mut active = schedule.clone().into_active_model();
-        active.scheduled_for = ActiveValue::Set(Some(next.into()));
-        active.updated_at = ActiveValue::Set(tick.into());
+        active.scheduled_for = Set(Some(next.into()));
+        active.updated_at = Set(tick.into());
         if let Err(err) = active.update(&txn).await {
             let _ = txn.rollback().await;
             let _ = release_scheduler_ownership(ownership).await;

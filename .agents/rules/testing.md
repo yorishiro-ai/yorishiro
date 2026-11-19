@@ -7,6 +7,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | Command | What it does | Backend |
 |---|---|---|
 | `make test-sqlite` | The whole suite on SQLite (`cargo test`); `EDITION=ce` selects community, the default is `ee` | SQLite |
+| `make test-valkey` | Only the Valkey queue provider tests, with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` (default: the compose `redis` service) | SQLite + Valkey |
 | `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
@@ -27,7 +28,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `DB_MAX_CONNECTIONS` | `100` in CI and the PostgreSQL example | PostgreSQL pool maximum; production defaults are documented separately |
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
 The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
-A Redis queue runs only behind `YORISHIRO_TEST_TOPOLOGY=sqlite-redis` with `YORISHIRO_TEST_REDIS_BASE_URL` naming a server; CI never selects it, and its tests skip otherwise.
+A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` naming a server; the Valkey tests skip otherwise.
 Licensed tests skip unless `YORISHIRO_LICENSE_KEY` holds a valid key; the CI job `ee-postgres-licensed` supplies it.
 The pinned E5 model tests skip unless `models/multilingual-e5-base/` holds the model files.
 `UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff.
@@ -73,7 +74,8 @@ boot_request::<App, _, _>(|request, ctx| async move {
 ```
 
 Outside `tests/requests/`, call it as `crate::requests::skip_unlicensed(&ctx)`.
-A test that must observe the unlicensed cap instead captures and removes `YORISHIRO_LICENSE_KEY` before boot, so the gate never sees a key.
+A test that must observe the unlicensed cap boots with `crate::requests::unlicensed()`, so the gate never sees a key.
+A test changes the booted app's configuration by passing overrides to `boot_request_with(&[crate::requests::max_tenants(1)], ...)`; each override is a dotted path into `Config` such as `queue.num_workers`, applied to that one boot; the process environment is touched only by tests of configuration loading itself, which take `serial(process_environment)`.
 
 ### CI
 
@@ -82,20 +84,20 @@ Each job runs every test; nothing is assigned or inventoried per test, so a new 
 The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
 
-The integration tests are one binary rooted at `tests/mod.rs`:
+The integration tests are one binary rooted at `tests/mod.rs`.
+A test file sits at the same path as the source file it covers; not every source file has tests.
 
-- `tests/licence.rs` — licence verification, expiry boundaries
-- `tests/config/`, `tests/data/` — configuration loading and validation, typed settings, built-in templates
-- `tests/controllers/` — MCP tool routing, route inventory, OpenAPI assembly
-- `tests/db.rs`, `tests/db_enum.rs` — connection primitives and the `db_enum!` conversions
-- `tests/initializers/` — process-lifetime initializers (`db_load_guard`)
-- `tests/metaschema/` — nesting, projection, validation, type resolution, versioning
-- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle
-- `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
-- `tests/services/` — embedding, rate limiting
-- `tests/tasks/` — task commands (reindex_embeddings)
-- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle
-- `tests/ee/` — mirrors `ee/`; compiled only with the `enterprise` feature
+- `tests/controllers/` — MCP tool routing, middleware, route inventory, OpenAPI assembly
+- `tests/data/` — configuration loading and validation (`config/`), typed settings, time, built-in templates
+- `tests/db.rs`, `tests/db/` — connection primitives and migrations
+- `tests/initializers/` — process-lifetime initializers
+- `tests/models/` — one file per table module, with sub-modules for backend-specific or sub-module coverage (`entity_entities/sqlite.rs`, `schema_schemas/metaschema/`)
+- `tests/requests/` — one file per REST feature, driven through `boot_request`
+- `tests/services/` — embedding providers
+- `tests/tasks/` — task commands, named after the task they run
+- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle, targets
+- `tests/integration/` — real child processes
+- `tests/ee/` — mirrors `ee/`, including `ee/requests/` (REST) and `ee/requests/mcp/` (one file per MCP tool group); compiled only with the `enterprise` feature
 
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 
@@ -108,11 +110,16 @@ Test-only seams in production code are not allowed either: a dispatcher is repla
 `tests/` builds without the enterprise feature (`--no-default-features --features community`).
 A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and a test that asserts an enterprise-only behaviour is gated the same way.
 
-## rust-analyzer is authoritative
+## Lints and rust-analyzer
 
-The repository Clippy commands must cover the same targets rust-analyzer checks.
-Run `make clippy-ce` and `make clippy-ee`; both use `--all-targets`, deny warnings, and require `# Errors` and `# Panics` documentation on public APIs.
-Do not dismiss an editor diagnostic because a narrower CI command omits its target or lint.
+Lint levels live in `Cargo.toml` (`[workspace.lints]`) and their settings and banned APIs in `clippy.toml`, so `cargo build`, `cargo clippy` and rust-analyzer report the same findings; `rust-analyzer.toml` makes the editor run Clippy on every target with the `enterprise` feature.
+CI and `make clippy-ce` / `make clippy-ee` add `-D warnings`, so a warning in the editor is an error in CI.
+Do not dismiss an editor diagnostic because a narrower command omits its target.
+
+- Suppress a lint with `#[expect(lint, reason = "...")]`, never a bare `#[allow]`: a stale `expect` is reported.
+- `std::env::var*` is banned outside `src/data/env.rs`; Loco's `get_env` in `config/*.yaml` is the way to read settings.
+- `debug_assert*`, `dbg!`, `todo!` and `unimplemented!` are rejected by the build.
+- New settings belong in these files, not in command-line flags.
 
 ## SQLite gate
 

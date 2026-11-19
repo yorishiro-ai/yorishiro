@@ -11,7 +11,7 @@ use crate::dtos::whoami::WhoAmIResponse;
 ///
 /// # Errors
 /// Rejects stale credentials or invalid target bindings and propagates lookup failures.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = crate::dtos::whoami::WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 async fn whoami(
     State(app): State<AppContext>,
     AuthContext(ctx): AuthContext,
@@ -22,8 +22,8 @@ async fn whoami(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
-    vec![super::route_inventory::path_doc(__path_whoami)]
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
+    vec![super::openapi::route_inventory::path_doc(__path_whoami)]
 }
 
 pub(crate) fn routes() -> Routes {

@@ -178,7 +178,7 @@ async fn durable_claim_excludes_a_second_relay_and_requires_matching_ack_token()
             yorishiro::models::queue_job_lifecycles::Entity::start_at(
                 &db,
                 id,
-                chrono::Utc::now().fixed_offset()
+                Utc::now().fixed_offset()
             )
             .await
             .unwrap(),

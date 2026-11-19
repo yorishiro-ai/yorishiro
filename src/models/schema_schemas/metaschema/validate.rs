@@ -1,3 +1,5 @@
+//! Checks that a metaschema definition is internally consistent, with a bounded nesting depth.
+
 use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 
 use super::types::{ArrayItemType, FieldDef, FieldTypeName, MetaSchemaDefinition};

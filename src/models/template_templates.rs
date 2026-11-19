@@ -8,14 +8,14 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
 use serde::Serialize;
 
-use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::db_enum::db_enum;
 use crate::models::schema_schemas;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
@@ -30,8 +30,8 @@ impl ActiveModelBehavior for ActiveModel {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TemplateRecord {
-    pub id: uuid::Uuid,
-    pub tenant_id: uuid::Uuid,
+    pub id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = serde_json::Value))]
@@ -40,8 +40,8 @@ pub struct TemplateRecord {
     pub locale: Option<String>,
     pub visibility: TemplateVisibility,
     pub author: Option<String>,
-    pub fork_of: Option<uuid::Uuid>,
-    pub created_by: Option<uuid::Uuid>,
+    pub fork_of: Option<Uuid>,
+    pub created_by: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -69,10 +69,9 @@ impl TryFrom<Model> for TemplateRecord {
 
     fn try_from(model: Model) -> Result<Self, Self::Error> {
         let visibility = TemplateVisibility::from_db_str(&model.visibility).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template visibility: {}",
-                model.visibility
-            ))
+            YorishiroError::Internal(
+                format!("unknown template visibility: {}", model.visibility).into(),
+            )
         })?;
         Ok(Self {
             id: model.id,
@@ -113,7 +112,7 @@ impl TemplateVisibility {
 }
 
 /// Templates visible to `tenant_id`: its own templates plus any published with community visibility.
-fn visible_to(tenant_id: uuid::Uuid) -> Condition {
+fn visible_to(tenant_id: Uuid) -> Condition {
     Condition::any()
         .add(Column::TenantId.eq(tenant_id))
         .add(Column::Visibility.eq(TemplateVisibility::Community.as_db_str()))
@@ -125,7 +124,7 @@ fn visible_to(tenant_id: uuid::Uuid) -> Condition {
 /// Returns an error if the operation cannot be completed.
 pub async fn list_templates(
     conn: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
+    tenant_id: Uuid,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<TemplateRecord>, YorishiroError> {
     let rows = Entity::find()
@@ -146,8 +145,8 @@ pub async fn list_templates(
 /// Returns an error if the operation cannot be completed.
 pub async fn get_template(
     conn: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
-    template_id: uuid::Uuid,
+    tenant_id: Uuid,
+    template_id: Uuid,
 ) -> Result<TemplateRecord, YorishiroError> {
     let row = Entity::find()
         .filter(Column::Id.eq(template_id))
@@ -172,10 +171,10 @@ pub async fn get_template(
 /// The returned id is the origin to record: `Some` for a library template, whose later edits the schema can then be told about, and `None` for a built-in, which has no row to point at.
 pub(crate) async fn resolve_template_definition(
     conn: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
+    tenant_id: Uuid,
     template_id: &str,
-) -> Result<(MetaSchemaDefinition, Option<uuid::Uuid>), YorishiroError> {
-    match uuid::Uuid::parse_str(template_id) {
+) -> Result<(MetaSchemaDefinition, Option<Uuid>), YorishiroError> {
+    match Uuid::parse_str(template_id) {
         Ok(id) => {
             let template = get_template(conn, tenant_id, id).await?;
             Ok((template.definition, Some(template.id)))
@@ -210,11 +209,11 @@ pub struct UpdateTemplateInput {
 
 pub(crate) async fn create_template(
     conn: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
-    created_by: Option<uuid::Uuid>,
+    tenant_id: Uuid,
+    created_by: Option<Uuid>,
     input: CreateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
-    crate::models::schema_schemas::metaschema::validate_definition(&input.definition)?;
+    schema_schemas::metaschema::validate_definition(&input.definition)?;
     let name = input.name.clone();
     let definition = serde_json::to_value(&input.definition).internal()?;
 
@@ -232,10 +231,7 @@ pub(crate) async fn create_template(
     };
 
     let row = active.insert(conn).await.map_err(|err| {
-        if matches!(
-            err.sql_err(),
-            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-        ) {
+        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
             YorishiroError::Conflict {
                 message: format!("a template named '{name}' already exists for this tenant"),
             }
@@ -248,7 +244,7 @@ pub(crate) async fn create_template(
 }
 
 pub(crate) async fn list_as(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<TemplateRecord>, YorishiroError> {
@@ -267,9 +263,9 @@ pub(crate) async fn list_as(
 }
 
 pub(crate) async fn get_as(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
-    id: uuid::Uuid,
+    id: Uuid,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_iam_action(
@@ -311,7 +307,7 @@ pub(crate) async fn create_as(
 pub async fn update_as(
     db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
-    template_id: uuid::Uuid,
+    template_id: Uuid,
     input: UpdateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
@@ -333,7 +329,7 @@ pub async fn update_as(
 pub(crate) async fn delete_as(
     db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
-    template_id: uuid::Uuid,
+    template_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::access::require_iam_action(
@@ -353,7 +349,7 @@ pub(crate) async fn delete_as(
 pub(crate) async fn fork_as(
     db: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
-    source_template_id: uuid::Uuid,
+    source_template_id: Uuid,
     name: String,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
@@ -386,8 +382,8 @@ pub(crate) async fn fork_as(
 /// Returns an error if the operation cannot be completed.
 pub async fn update_template(
     conn: &DatabaseTransaction,
-    tenant_id: uuid::Uuid,
-    template_id: uuid::Uuid,
+    tenant_id: Uuid,
+    template_id: Uuid,
     input: UpdateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     // Publication and merge acknowledgement share this transaction-scoped lock.
@@ -395,7 +391,7 @@ pub async fn update_template(
         .await
         .internal()?;
     if let Some(definition) = &input.definition {
-        crate::models::schema_schemas::metaschema::validate_definition(definition)?;
+        schema_schemas::metaschema::validate_definition(definition)?;
     }
 
     if input.name.is_none()
@@ -452,8 +448,8 @@ pub async fn update_template(
 /// Only the owning tenant may delete it.
 pub(crate) async fn delete_template(
     conn: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
-    template_id: uuid::Uuid,
+    tenant_id: Uuid,
+    template_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let result = Entity::delete_many()
         .filter(Column::Id.eq(template_id))
@@ -474,9 +470,9 @@ pub(crate) async fn delete_template(
 /// Copies a template (visible to `tenant_id`, i.e. own or community) into a new template owned by `tenant_id`, recording `fork_of` so the lineage is traceable.
 pub(crate) async fn fork_template(
     conn: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
-    created_by: Option<uuid::Uuid>,
-    source_template_id: uuid::Uuid,
+    tenant_id: Uuid,
+    created_by: Option<Uuid>,
+    source_template_id: Uuid,
     new_name: String,
 ) -> Result<TemplateRecord, YorishiroError> {
     let source = get_template(conn, tenant_id, source_template_id).await?;
@@ -498,10 +494,7 @@ pub(crate) async fn fork_template(
     };
 
     let row = active.insert(conn).await.map_err(|err| {
-        if matches!(
-            err.sql_err(),
-            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-        ) {
+        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
             YorishiroError::Conflict {
                 message: format!("a template named '{name}' already exists for this tenant"),
             }

@@ -1,3 +1,5 @@
+//! Tenant membership operations: adding and removing members, creating tenant-bound users, and previewing the effect of a removal.
+
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect,
@@ -350,10 +352,14 @@ pub(crate) async fn list_members_as(
         },
     )
     .await?;
-    super::list_members(&txn, actor.tenant_id, page).await
+    list_members(&txn, actor.tenant_id, page).await
 }
 
-pub(crate) async fn list_members(
+/// Lists a tenant's members, excluding its root, one page at a time.
+///
+/// # Errors
+/// Returns an error if the query fails.
+pub async fn list_members(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     page: crate::models::pagination::ListParams,

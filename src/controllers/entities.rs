@@ -1,3 +1,5 @@
+//! REST routes for entities, plus the migration-job routes (undo, status, reindex and fill-defaults) that operate on them.
+
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -17,7 +19,7 @@ use crate::models::entity_entities::{self, EntityRecord};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/entities", request_body = crate::dtos::entities::CreateEntityRequest, responses((status = 201, body = crate::models::entity_entities::EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["entity_create"] ))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/entities", request_body = CreateEntityRequest, responses((status = 201, body = EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["entity_create"] ))), tag = "community"))]
 pub(crate) async fn create_entity(
     State(ctx): State<AppContext>,
     mut authorized: Authorized<WriteScope>,
@@ -43,7 +45,7 @@ pub(crate) async fn create_entity(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::models::entity_entities::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["entity_get"] ))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["entity_get"] ))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -59,7 +61,7 @@ async fn get_entity(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::entities::UpdateEntityRequest, responses((status = 200, body = crate::models::entity_entities::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["entity_update"] ))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = UpdateEntityRequest, responses((status = 200, body = EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["entity_update"] ))), tag = "community"))]
 pub(crate) async fn update_entity(
     State(ctx): State<AppContext>,
     mut authorized: Authorized<WriteScope>,
@@ -101,7 +103,7 @@ pub(crate) async fn delete_entity(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities", params(("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query), ("schema_version" = Option<i32>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::entity_entities::EntityRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["entity_list"] ))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities", params(("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query), ("schema_version" = Option<i32>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [EntityRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["entity_list"] ))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -122,7 +124,7 @@ async fn list_entities(
 /// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
 ///
 /// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope that would gate the job that produced the snapshots, e.g. confirming a proposal that writes entities), not an ordinary entity write.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 202, body = crate::dtos::entities::UndoResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["migration_undo"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 202, body = UndoResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["migration_undo"]))), tag = "community"))]
 pub(crate) async fn undo_migration_job(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
@@ -172,7 +174,7 @@ pub(crate) async fn migration_job_status(
 ///
 /// Returns 503 when no queue provider is configured: `perform_later` would silently return
 /// a job ID while discarding the job, which is worse than no endpoint at all.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/reindex", responses((status = 200, body = crate::dtos::entities::ReindexResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["workspace_reindex"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/reindex", responses((status = 200, body = ReindexResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["workspace_reindex"]))), tag = "community"))]
 pub(crate) async fn reindex_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
@@ -187,7 +189,7 @@ pub(crate) async fn reindex_workspace(
 ///
 /// Accepts a durable fill-defaults job and returns its ID before migration starts.
 /// The worker records completed counts in the audit log and uses this ID for undo snapshots.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = crate::dtos::entities::FillDefaultsRequest, responses((status = 202, body = crate::dtos::entities::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["migration_fill_defaults"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = FillDefaultsRequest, responses((status = 202, body = FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["migration_fill_defaults"]))), tag = "community"))]
 pub(crate) async fn fill_defaults(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
@@ -230,16 +232,16 @@ pub fn migration_routes() -> Routes {
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_create_entity),
-        super::route_inventory::path_doc(__path_get_entity),
-        super::route_inventory::path_doc(__path_update_entity),
-        super::route_inventory::path_doc(__path_delete_entity),
-        super::route_inventory::path_doc(__path_list_entities),
-        super::route_inventory::path_doc(__path_undo_migration_job),
-        super::route_inventory::path_doc(__path_migration_job_status),
-        super::route_inventory::path_doc(__path_reindex_workspace),
-        super::route_inventory::path_doc(__path_fill_defaults),
+        super::openapi::route_inventory::path_doc(__path_create_entity),
+        super::openapi::route_inventory::path_doc(__path_get_entity),
+        super::openapi::route_inventory::path_doc(__path_update_entity),
+        super::openapi::route_inventory::path_doc(__path_delete_entity),
+        super::openapi::route_inventory::path_doc(__path_list_entities),
+        super::openapi::route_inventory::path_doc(__path_undo_migration_job),
+        super::openapi::route_inventory::path_doc(__path_migration_job_status),
+        super::openapi::route_inventory::path_doc(__path_reindex_workspace),
+        super::openapi::route_inventory::path_doc(__path_fill_defaults),
     ]
 }

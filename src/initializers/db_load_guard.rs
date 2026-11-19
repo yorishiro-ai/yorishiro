@@ -168,14 +168,12 @@ pub fn run_step(
 }
 
 async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
-    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+    if db::is_sqlite(&ctx.db) {
         return Ok(0);
     }
 
     let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "db_load_guard: DbHandle not found in shared_store"
-        ))
+        YorishiroError::Internal("db_load_guard: DbHandle not found in shared_store".into())
     })?;
     let active = db::active_connections(&handle.identity).await?;
     Ok(active)
@@ -188,7 +186,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
 
     loop {
         ticker.tick().await;
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if db::is_sqlite(&ctx.db) {
             return;
         }
 
@@ -241,7 +239,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
                         "db_load_guard: maintenance state changed concurrently; transition skipped"
                     ),
                     Err(error) => {
-                        tracing::error!(error = %error, "db_load_guard: could not switch maintenance mode")
+                        tracing::error!(error = %error, "db_load_guard: could not switch maintenance mode");
                     }
                 }
             }
@@ -250,7 +248,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
 }
 
 /// Performs one diagnostic task invocation without changing maintenance mode.
-pub(crate) async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
+pub(crate) async fn check_once(ctx: &AppContext) -> Result<()> {
     let settings = crate::data::settings::configured(ctx)?;
     let Some(config) = LoadGuardConfig::from_settings(&settings.db_load_guard) else {
         return Ok(());

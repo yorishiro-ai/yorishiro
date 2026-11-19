@@ -11,7 +11,7 @@ use crate::controllers::extractors::AuthContext;
 use crate::models::tenant_memberships;
 use crate::models::tenant_memberships::MembershipRecord;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members/{user_id}/removal-preview", params(("user_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::models::tenant_memberships::MembershipRemovalPreview), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_delete"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members/{user_id}/removal-preview", params(("user_id" = uuid::Uuid, Path)), responses((status = 200, body = tenant_memberships::MembershipRemovalPreview), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_delete"]))), tag = "community"))]
 async fn preview_removal(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -22,7 +22,7 @@ async fn preview_removal(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::tenant_memberships::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_list"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_user_list"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -75,13 +75,13 @@ async fn remove_member(
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::route_inventory::path_doc(__path_list_members),
-        super::route_inventory::path_doc(__path_remove_member),
-        super::route_inventory::path_doc(__path_create_tenant_user),
-        super::route_inventory::path_doc(__path_reset_tenant_user_password),
-        super::route_inventory::path_doc(__path_preview_removal),
+        super::openapi::route_inventory::path_doc(__path_list_members),
+        super::openapi::route_inventory::path_doc(__path_remove_member),
+        super::openapi::route_inventory::path_doc(__path_create_tenant_user),
+        super::openapi::route_inventory::path_doc(__path_reset_tenant_user_password),
+        super::openapi::route_inventory::path_doc(__path_preview_removal),
     ]
 }
 

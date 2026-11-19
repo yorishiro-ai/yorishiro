@@ -1,3 +1,5 @@
+//! The dispatch outbox: durable records of jobs waiting to be enqueued, so a crash between recording a job and queueing it loses nothing.
+
 use std::fmt;
 
 use sea_orm::entity::prelude::*;
@@ -220,7 +222,7 @@ pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, Yori
         sea_query::{Alias, Func, SimpleExpr},
     };
 
-    let sqlite = db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+    let sqlite = crate::db::is_sqlite(db);
     let retry_at: SimpleExpr = Expr::col((lifecycle::Entity, lifecycle::Column::RetryAt));
     let (retry_at, now, cooldown): (SimpleExpr, SimpleExpr, SimpleExpr) = if sqlite {
         (
@@ -338,7 +340,7 @@ pub async fn claim_dispatch(
     claim_token: Uuid,
     lease_seconds: i64,
 ) -> Result<bool, DbErr> {
-    let lease_until = crate::time::now() + chrono::Duration::seconds(lease_seconds);
+    let lease_until = crate::data::time::now() + chrono::Duration::seconds(lease_seconds);
     let result = outbox::Entity::update_many()
         .col_expr(outbox::Column::LastAttemptAt, Expr::current_timestamp())
         .col_expr(

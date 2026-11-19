@@ -1,3 +1,5 @@
+//! JSON Lines export of a workspace's schemas, entities and relations, bounded in size and record count.
+
 use std::io::{self, Write};
 
 use sea_orm::{

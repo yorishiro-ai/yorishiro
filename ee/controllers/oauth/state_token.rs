@@ -1,6 +1,6 @@
 //! The `state` parameter carried through the OAuth2 authorization-code round trip.
 //!
-//! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::edition::ee::controllers::hmac_sign`], rather than stored server-side and looked up by an opaque id.
+//! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::edition::ee::data::hmac_sign`], rather than stored server-side and looked up by an opaque id.
 //!
 //! The signature alone only proves this process issued *some* `state`, not that the browser presenting it is the one the flow was started for.
 //! That is what the CSRF cookie is for: `authorize` sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it does not match [`verify`]'s `csrf_hash` output.
@@ -10,7 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 
-use crate::edition::ee::controllers::hmac_sign;
+use crate::edition::ee::data::hmac_sign;
 
 /// How long a `state` value remains acceptable after being issued.
 /// Also used as the CSRF cookie's max-age, so the cookie never outlives the `state` that depends on it.
@@ -35,7 +35,7 @@ pub struct VerifiedState {
 
 /// Generates a fresh CSRF cookie value and PKCE verifier, and packs the PKCE verifier plus the CSRF value's hash into a signed `state` value.
 pub fn issue(signing_key: &[u8]) -> IssuedState {
-    issue_at(signing_key, crate::time::now().timestamp())
+    issue_at(signing_key, crate::data::time::now().timestamp())
 }
 
 pub fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
@@ -64,7 +64,7 @@ pub fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
 /// See the module docs.
 /// Callers must separately check the returned `csrf_hash` against the SHA-256 hash of the browser's CSRF cookie.
 pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
-    verify_at(signing_key, state, crate::time::now().timestamp())
+    verify_at(signing_key, state, crate::data::time::now().timestamp())
 }
 
 pub fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState> {

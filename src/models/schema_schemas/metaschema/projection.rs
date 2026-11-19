@@ -1,3 +1,5 @@
+//! Projects an entity type definition onto the JSON Schema used for validating entity data and for MCP input schemas.
+
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
