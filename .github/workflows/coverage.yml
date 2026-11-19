@@ -67,7 +67,7 @@ jobs:
           ignore='(^|/)src/models/_entities/|(^|/)migration/src/|(^|/)src/bin/'
           cargo llvm-cov --locked --workspace --features enterprise --ignore-filename-regex "$ignore" --lcov --output-path lcov.info
           cargo llvm-cov report --ignore-filename-regex "$ignore" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
