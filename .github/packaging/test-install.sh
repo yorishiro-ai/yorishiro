@@ -57,8 +57,8 @@ note "deb on ubuntu:26.04 — the supported case"
 # root verify/atomic restore, then emit all markers to the host for assertion.
 probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":/canonical-example.yaml:ro ubuntu:26.04 bash -c '
   set -euo pipefail
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
+  apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   # Root-owned property checks.
   /usr/bin/yorishiro --help >/dev/null 2>&1 && echo "RUNS"
   getent passwd yorishiro >/dev/null && echo "USER"
@@ -150,9 +150,9 @@ note "every file the package declares survives the install"
 # except one of the licences it is distributed under, on every minimal image.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
   set -euo pipefail
-  apt-get update -qq >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
   dpkg-deb -c /pkg/'"$(basename "$(deb)")"' | awk "\$6 ~ /^\.\// && \$1 !~ /^d/ { print substr(\$6, 2) }" > /tmp/declared
-  apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   while read -r f; do
     [ -e "$f" ] || echo "DROPPED:$f"
   done < /tmp/declared
@@ -214,8 +214,8 @@ note "the systemd unit is valid"
 # `systemd-analyze` resolves ExecStart, so a unit checked without its binary reports a missing
 # command: a failure about the test environment rather than about the unit.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq systemd /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 install -y -qq systemd /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-jobs.service /lib/systemd/system/yorishiro-scheduler.service 2>&1' 2>&1)
 if [ -z "$(echo "$out" | grep -v '^$')" ]; then
   ok "systemd-analyze verify is silent on server and worker units"
@@ -224,8 +224,8 @@ else
 fi
 
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   grep -m1 "^ExecStart=" /lib/systemd/system/yorishiro-worker.service
 ' 2>&1)
 if grep -qx "ExecStart=/usr/bin/yorishiro start --worker=worker-target:shared" <<<"$out"; then
@@ -246,8 +246,8 @@ fi
 # anything under `/proc` or `/sys`, and the optional administrator-created production override.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
   set -euo pipefail
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
+  apt-get -o Acquire::Retries=5 install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
   units="/lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-jobs.service /lib/systemd/system/yorishiro-scheduler.service"
   for unit in $units; do
     [ -f "$unit" ] || { echo "NO_UNIT:$unit"; exit 1; }
@@ -292,8 +292,8 @@ else
 
   docker run -d --name "app-$$" --network "$NET" -v "$PKG_DIR":/pkg:ro ubuntu:26.04 sleep infinity >/dev/null
   docker exec "app-$$" bash -c "
-    apt-get update -qq >/dev/null 2>&1
-    apt-get install -y -qq /pkg/$(basename "$(deb)") curl >/dev/null 2>&1
+    apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
+    apt-get -o Acquire::Retries=5 install -y -qq /pkg/$(basename "$(deb)") curl >/dev/null 2>&1
   " >/dev/null 2>&1
   # Started the way the unit does, since there is no systemd here: the same Loco environment
   # selects the packaged production configuration.

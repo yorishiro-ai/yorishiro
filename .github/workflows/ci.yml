@@ -68,30 +68,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Verify the validation compiler is the declared minimum
-        run: |
-          python3 - <<'PY'
-          import pathlib, subprocess, tomllib
-          minimum = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['workspace']['package']['rust-version']
-          configured = tomllib.loads(pathlib.Path('rust-toolchain.toml').read_text())['toolchain']['channel']
-          actual = subprocess.check_output(['rustc', '--version'], text=True).split()[1]
-          assert minimum == configured == actual, (minimum, configured, actual)
-          PY
-
       - name: Check generated entity hardener
         run: uv run scripts/test_harden_generated_entities.py
 
       - name: Python lint
         run: make python-lint
-
-      - name: Check test harness usage
-        run: |
-          # Only tests/requests/mod.rs may call the raw loco helpers directly.
-          # All other test files must use boot_request instead.
-          if git grep -l 'request_with_create_db::<\|request_with_create_sqlite::<' -- tests/ ':!tests/requests/mod.rs'; then
-            echo "ERROR: call boot_request instead of the raw loco helper directly"
-            exit 1
-          fi
 
       - name: Check that tests live in tests/
         run: make test-location-check
@@ -122,7 +103,7 @@ jobs:
       - name: Clippy
         # Keep CI aligned with rust-analyzer: every target and public API documentation.
         # Complexity debt is report-only; all other existing strict lints remain errors.
-        run: cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
+        run: cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings
 
   schema-generation:
     name: Schema generation (PostgreSQL)

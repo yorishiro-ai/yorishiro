@@ -4,12 +4,6 @@
 # Nothing is released yet, so clippy may suggest changes to public signatures.
 avoid-breaking-exported-api = false
 
-# Thresholds for clippy::cognitive_complexity and clippy::too_many_lines.
-# Both are report-only: CI runs them with --force-warn in its own step, because ~100 existing functions exceed them.
-# New and changed code is expected to stay under them.
-cognitive-complexity-threshold = 7
-too-many-lines-threshold = 50
-
 # Debug-only helpers never ship; assertions live in tests/.
 allow-dbg-in-tests = true
 
