@@ -60,7 +60,7 @@ if [[ $# -gt 0 ]]; then
       --entrypoint yorishiro "$image" start >/dev/null 2>&1 >/dev/null
     host_port=""
     if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" = true ]]; then
-      host_port=$(docker port "$container" 5150/tcp | sed 's/.*://' | head -1)
+      host_port=$(docker port "$container" 5150/tcp 2>/dev/null | sed 's/.*://' | head -1 || true)
     fi
     ready=false
     for _ in $(seq 1 20); do

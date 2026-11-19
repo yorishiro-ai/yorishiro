@@ -42,6 +42,14 @@ The inline `edition` module preserves public paths; there is no separate composi
 Worker tags, Redis queues, and Loco registration derive from one composed `WorkerRegistry`.
 A trait is for a behaviour that really varies at runtime, such as `QueuePolicy` or `Authenticator`, and not for wiring one overlay.
 
+The base still names a few things only the overlay uses, because they belong to the shared schema and to stored data, not to behaviour:
+- the table modules for overlay-only tables (see Model ownership);
+- the `Action` names in `models/iam_policy.rs`: a policy document is stored data, and a tenant that changes edition must still parse every statement it holds;
+- tenant retirement, which deletes the rows of every tenant-scoped table in the schema, including the schema-fork tables, so a retired tenant leaves nothing behind.
+
+None of these is a branch: the base never calls into the overlay for them.
+Behaviour that differs by edition still goes through a trait.
+
 ### Model ownership
 
 `src/models/mod.rs` groups the table modules by domain (tenants, IAM, schemas, entities, queue, billing); look a table up there first.
