@@ -1,5 +1,7 @@
 //! Worker targets: how a target is named and read back, and how it scopes optional concurrency limits.
 
+mod routing;
+
 use uuid::Uuid;
 use yorishiro::workers::embedding_sync::WorkerClass;
 use yorishiro::workers::target::{WorkerTarget, targets_for_start};

@@ -1,3 +1,5 @@
+mod licence;
+
 use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::edition::ee::data::plan::Plan;
 

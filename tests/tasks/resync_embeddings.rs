@@ -1,3 +1,5 @@
+mod queue;
+
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

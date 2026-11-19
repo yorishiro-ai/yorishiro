@@ -702,7 +702,7 @@ async fn literal_search_corpus() {
 
 #[tokio::test]
 async fn sqlite_literal_search_shared_corpus() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     literal_search_corpus().await;
@@ -710,7 +710,7 @@ async fn sqlite_literal_search_shared_corpus() {
 
 #[tokio::test]
 async fn postgres_literal_search_shared_corpus() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     literal_search_corpus().await;
@@ -719,7 +719,7 @@ async fn postgres_literal_search_shared_corpus() {
 /// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1101,7 +1101,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 /// not match the vectors actually stored, causing this assertion to fail.
 #[tokio::test]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1277,7 +1277,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 /// `assert_eq!`, a corrupted or zeroed row would pass `assert_ne!` on its own.
 #[tokio::test]
 async fn reindex_overwrites_existing_entity_embeddings() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1449,7 +1449,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 /// Gated PostgreSQL literal text search includes an unembedded entity when its data contains `query_text`; a nonmatching entity must not appear.
 #[tokio::test]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -1519,7 +1519,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 /// creation, entity insertion, and trigger-driven index updates.
 #[tokio::test]
 async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
 
@@ -1642,7 +1642,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 /// `tests/requests/search.rs` covers the worker and the HTTP search on both backends.
 #[tokio::test]
 async fn sqlite_document_embed_persist_and_search() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
 

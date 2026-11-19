@@ -33,7 +33,7 @@ async fn member_key(
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use sea_orm::ActiveModelTrait;
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     let _config = crate::requests::ConfigOverride::set(&[(
@@ -66,14 +66,7 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
             .json(&serde_json::json!({"name":format!("allowed-{}", Uuid::new_v4())}))
             .await
             .assert_status(StatusCode::CREATED);
-        yorishiro::models::tenant_tenants::ActiveModel {
-            id: Set(tenant.tenant_id),
-            max_workspaces: Set(Some(0)),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::set_workspace_cap(&ctx, tenant.tenant_id, 0).await;
         request
             .post("/api/workspaces")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
@@ -87,7 +80,7 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use sea_orm::ActiveModelTrait;
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     let _config = crate::requests::ConfigOverride::set(&[(
@@ -110,14 +103,7 @@ async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
             .json(&serde_json::json!({"name":format!("off-{}", Uuid::new_v4())}))
             .await
             .assert_status(StatusCode::CREATED);
-        yorishiro::models::tenant_tenants::ActiveModel {
-            id: Set(tenant.tenant_id),
-            max_workspaces: Set(Some(0)),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::set_workspace_cap(&ctx, tenant.tenant_id, 0).await;
         request
             .post("/api/workspaces")
             .add_header("Authorization", format!("Bearer {tenant_key}"))

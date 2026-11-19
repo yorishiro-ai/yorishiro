@@ -1,3 +1,5 @@
+mod scheduler;
+
 use loco_rs::{app::Hooks, task::Tasks};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,

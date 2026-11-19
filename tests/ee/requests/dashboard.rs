@@ -4,7 +4,7 @@ use yorishiro::App;
 
 #[tokio::test]
 async fn overview_distinguishes_billing_manual_and_active_limits() {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use sea_orm::ActiveModelTrait;
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     let _config = crate::requests::ConfigOverride::set(&[(
@@ -16,14 +16,7 @@ async fn overview_distinguishes_billing_manual_and_active_limits() {
         let tenant_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
                 .await;
-        yorishiro::models::tenant_tenants::ActiveModel {
-            id: Set(tenant.tenant_id),
-            max_workspaces: Set(Some(17)),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::set_workspace_cap(&ctx, tenant.tenant_id, 17).await;
         for (exp, plan, effective) in [
             (
                 chrono::Utc::now().timestamp() + 3600,

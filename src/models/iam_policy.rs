@@ -562,15 +562,4 @@ impl Policy {
         }
         allowed
     }
-
-    pub fn allows_any_applicable_action(
-        policies: &[Self],
-        tenant_id: Uuid,
-        target: Resource,
-        owns_workspace: impl Fn(Uuid, Uuid) -> bool,
-    ) -> bool {
-        Action::ALL
-            .iter()
-            .any(|action| Self::allows(policies, tenant_id, *action, target, &owns_workspace))
-    }
 }

@@ -74,7 +74,8 @@ boot_request::<App, _, _>(|request, ctx| async move {
 ```
 
 Outside `tests/requests/`, call it as `crate::requests::skip_unlicensed(&ctx)`.
-A test that must observe the unlicensed cap instead captures and removes `YORISHIRO_LICENSE_KEY` before boot, so the gate never sees a key.
+A test that must observe the unlicensed cap holds `ConfigOverride::unlicensed()` while it boots, so the gate never sees a key.
+A test changes the booted app's configuration with `ConfigOverride::set(&[("settings.max_tenants", 1.into())])` (dotted paths into `Config`); the process environment is touched only by tests of configuration loading itself, which take `serial(process_environment)`.
 
 ### CI
 
@@ -83,20 +84,19 @@ Each job runs every test; nothing is assigned or inventoried per test, so a new 
 The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
 
-The integration tests are one binary rooted at `tests/mod.rs`:
+The integration tests are one binary rooted at `tests/mod.rs`, and each file mirrors the source file it covers:
 
-- `tests/licence.rs` — licence verification, expiry boundaries
-- `tests/config/`, `tests/data/` — configuration loading and validation, typed settings, built-in templates
 - `tests/controllers/` — MCP tool routing, middleware, route inventory, OpenAPI assembly
-- `tests/db.rs` — connection primitives
-- `tests/initializers/` — process-lifetime initializers (`db_load_guard`)
-- `tests/metaschema/` — nesting, projection, validation, type resolution, versioning
-- `tests/models/` — entity CRUD, search, tenancy, templates, API keys, recall, queue lifecycle, the `db_enum!` conversions
-- `tests/requests/` — auth, schemas, workspaces, entities, search, OAuth, Stripe, marketplace, dashboard, embedding, import, queue, etc.
+- `tests/data/` — configuration loading and validation (`config/`), typed settings, time, built-in templates
+- `tests/db.rs`, `tests/db/` — connection primitives and migrations
+- `tests/initializers/` — process-lifetime initializers
+- `tests/models/` — one file per table module, with sub-modules for backend-specific or sub-module coverage (`entity_entities/sqlite.rs`, `schema_schemas/metaschema/`)
+- `tests/requests/` — one file per REST feature, driven through `boot_request`
 - `tests/services/` — embedding providers
 - `tests/tasks/` — task commands, named after the task they run
-- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle
-- `tests/ee/` — mirrors `ee/`; compiled only with the `enterprise` feature
+- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle, targets
+- `tests/integration/` — real child processes
+- `tests/ee/` — mirrors `ee/`, including `ee/requests/` (REST) and `ee/requests/mcp/` (one file per MCP tool group); compiled only with the `enterprise` feature
 
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 

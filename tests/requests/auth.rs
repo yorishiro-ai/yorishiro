@@ -118,7 +118,7 @@ async fn with_db_max_connections<T>(value: u64, fut: impl Future<Output = T>) ->
 /// so the serialisation guarantee does not hold.
 #[tokio::test]
 async fn create_tenant_serializes_on_its_advisory_lock() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     with_db_max_connections(4, async move {

@@ -174,8 +174,8 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-    use yorishiro::models::{api_keys, tenancy, tenant_tenants};
+    use sea_orm::ActiveModelTrait;
+    use yorishiro::models::{api_keys, tenancy};
 
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -193,14 +193,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
         .await
         .unwrap();
         // Set persisted state directly until a fully fenced disable operation is available.
-        tenant_tenants::ActiveModel {
-            id: Set(target.tenant_id),
-            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::disable_tenant(&ctx, target.tenant_id).await;
         for key in [&target.api_key, &service.plaintext] {
             request
                 .get("/api/whoami")

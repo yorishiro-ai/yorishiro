@@ -137,8 +137,8 @@ fn the_job_payload_carries_ids_only() {
 
 #[tokio::test]
 async fn tenant_disabled_while_query_waits_for_capacity_makes_no_provider_call() {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-    use yorishiro::models::_entities::tenant_tenants;
+    use sea_orm::ActiveModelTrait;
+
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
@@ -164,14 +164,7 @@ async fn tenant_disabled_while_query_waits_for_capacity_makes_no_provider_call()
         tokio::time::timeout(Duration::from_millis(100), &mut future)
             .await
             .expect_err("worker waits for embedding capacity");
-        tenant_tenants::ActiveModel {
-            id: Set(tenant.tenant_id),
-            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::disable_tenant(&ctx, tenant.tenant_id).await;
         capacity.add_permits(1);
         assert!(future.await.is_err());
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);

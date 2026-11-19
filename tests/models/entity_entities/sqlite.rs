@@ -31,7 +31,7 @@ async fn seed_schema(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppConte
 
 #[tokio::test]
 async fn content_entities_crud_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -133,7 +133,7 @@ async fn fts_rows(db: &sea_orm::DatabaseConnection) -> i64 {
 /// That nested update must not reach `entity_fts_au`, or every entity would be indexed twice.
 #[tokio::test]
 async fn token_rotation_does_not_duplicate_fts_rows_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

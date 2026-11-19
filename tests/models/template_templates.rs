@@ -75,7 +75,7 @@ fn unknown_persisted_visibility_is_internal_and_input_is_validation_failed() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn list_and_get_respect_tenant_and_community_visibility() {
-    if !super::super::require_postgres_backend() {
+    if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

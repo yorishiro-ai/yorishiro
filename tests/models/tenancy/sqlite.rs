@@ -8,7 +8,7 @@ use yorishiro::models::tenant_tenants::create_tenant;
 
 #[tokio::test]
 async fn a_first_tenant_can_be_created_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -26,7 +26,7 @@ async fn a_first_tenant_can_be_created_on_sqlite() {
 
 #[tokio::test]
 async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

@@ -542,8 +542,6 @@ db_enum! {
     }
 }
 
-pub const WORKSPACE_STATUS_ACTIVE: &str = WorkspaceStatus::Active.as_db_str();
-
 /// Whether the workspace is still waiting for its first schema.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).

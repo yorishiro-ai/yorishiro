@@ -30,6 +30,29 @@ pub(crate) async fn grant_workspace(
     txn.commit().await.expect("commit workspace grant");
 }
 
+/// Caps the tenant's workspaces.
+/// No public operation changes this cap (only a plan does), so this is the one place a test writes it directly.
+pub(crate) async fn set_workspace_cap(ctx: &AppContext, tenant_id: Uuid, cap: i32) {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    yorishiro::models::tenant_tenants::ActiveModel {
+        id: Set(tenant_id),
+        max_workspaces: Set(Some(cap)),
+        ..Default::default()
+    }
+    .update(&ctx.db)
+    .await
+    .expect("set the workspace cap");
+}
+
+/// Disables the tenant through the operator operation the `disable_tenant` task runs.
+pub(crate) async fn disable_tenant(ctx: &AppContext, tenant_id: Uuid) {
+    yorishiro::models::tenant_tenants::retirement::disable_by_operator(
+        &ctx.db, tenant_id, tenant_id,
+    )
+    .await
+    .expect("disable the tenant");
+}
+
 pub(crate) struct TestTenant {
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,

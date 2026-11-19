@@ -81,7 +81,7 @@ fn verify_rejects_a_token_signed_by_a_different_key() {
     };
     let token = sign(&keypair.private_key_path, &claims);
     // The compiled-in production public key, not the test key that actually signed this token.
-    let production_key = include_bytes!("../ee/keys/licence-public.pem");
+    let production_key = include_bytes!("../../../../../ee/keys/licence-public.pem");
     assert!(verify(&token, production_key).is_err());
 }
 

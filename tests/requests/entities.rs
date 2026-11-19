@@ -213,7 +213,7 @@ async fn undo_an_unknown_job_is_refused() {
 /// renders as HTTP 501 with code `backend_unsupported`.
 #[tokio::test]
 async fn list_entities_with_filter_returns_501_on_sqlite() {
-    if !super::super::require_sqlite_backend() {
+    if !crate::require_sqlite_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

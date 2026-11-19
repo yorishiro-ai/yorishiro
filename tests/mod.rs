@@ -13,15 +13,10 @@ mod http_stub;
 mod initializers;
 mod integration;
 
-mod config;
-mod licence;
-mod metaschema;
 mod models;
 mod requests;
 mod services;
 mod tasks;
-mod time;
-mod timezone_state;
 mod workers;
 
 async fn has_active_job(

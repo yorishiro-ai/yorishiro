@@ -28,7 +28,7 @@ async fn a_disabled_tenant_cannot_publish_a_query_embedding() {
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use sea_orm::ActiveModelTrait;
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, ws) = workspace(&request, &ctx, "qe-disabled").await;
         let id = Entity::open(
@@ -40,14 +40,7 @@ async fn a_disabled_tenant_cannot_publish_a_query_embedding() {
         )
         .await
         .unwrap();
-        yorishiro::models::tenant_tenants::ActiveModel {
-            id: Set(tenant_id),
-            disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
+        crate::requests::fixtures::disable_tenant(&ctx, tenant_id).await;
         assert!(
             !Entity::complete(&ctx.db, ws, id, &[1.0], "m")
                 .await

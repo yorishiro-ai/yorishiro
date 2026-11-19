@@ -1,4 +1,5 @@
 mod local;
+mod metadata;
 mod model_fetch;
 mod openai;
 

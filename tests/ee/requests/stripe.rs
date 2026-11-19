@@ -2,13 +2,12 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ActiveValue};
+use sea_orm::ActiveModelTrait;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::edition::ee::models::tenant_billing;
-use yorishiro::models::_entities::tenant_tenants;
 
 const WEBHOOK_SECRET: &str = "whsec_test";
 
@@ -174,14 +173,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
             tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
                 .await
                 .unwrap();
-            tenant_tenants::ActiveModel {
-                id: ActiveValue::Set(tenant_id),
-                max_workspaces: ActiveValue::Set(Some(17)),
-                ..Default::default()
-            }
-            .update(&ctx.db)
-            .await
-            .unwrap();
+            crate::requests::fixtures::set_workspace_cap(&ctx, tenant_id, 17).await;
 
             // Land on Pro first, so the downgrade has somewhere to fall from.
             let up_body = subscription_updated_body("evt_up", 1_000, "cus_cancel");
@@ -249,14 +241,7 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
                 .await
                 .tenant_id;
             // Fault fixture: a legacy custom cap has no public mutation API and must survive webhook changes.
-            tenant_tenants::ActiveModel {
-                id: ActiveValue::Set(tenant_id),
-                max_workspaces: ActiveValue::Set(Some(17)),
-                ..Default::default()
-            }
-            .update(&ctx.db)
-            .await
-            .unwrap();
+            crate::requests::fixtures::set_workspace_cap(&ctx, tenant_id, 17).await;
             tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_grandfathered")
                 .await
                 .unwrap();

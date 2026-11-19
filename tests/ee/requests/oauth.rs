@@ -338,8 +338,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         .expect("the provisioned workspace must exist");
 
         assert_eq!(
-            workspace.status,
-            yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE,
+            workspace.status, "active",
             "an auto-provisioned workspace must not be left schema_pending"
         );
         let schema_id = workspace
