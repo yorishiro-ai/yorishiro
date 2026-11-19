@@ -1,7 +1,7 @@
 use uuid::Uuid;
 use yorishiro::{
     YorishiroError,
-    models::iam_trust_policy::{Caller, Principal, TrustPolicy},
+    models::iam::trust_policy::{Caller, Principal, TrustPolicy},
 };
 
 fn parse(document: serde_json::Value) -> Result<TrustPolicy, YorishiroError> {

@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::iam_policies;
-use crate::models::iam_policy::{Action, Policy};
+use crate::models::iam::policy::{Action, Policy};
 
 pub(crate) const ADMINISTRATOR_POLICY_NAME: &str = "Tenant Administrator";
 pub(crate) const WRITER_POLICY_NAME: &str = "Tenant Writer";
@@ -89,7 +89,7 @@ fn statements(
     resources: serde_json::Value,
 ) -> Vec<serde_json::Value> {
     actions
-        .chunks(crate::models::iam_policy::MAX_ACTIONS)
+        .chunks(crate::models::iam::policy::MAX_ACTIONS)
         .map(|chunk| json!({"effect": effect, "actions": chunk, "resources": resources.clone()}))
         .collect()
 }
@@ -110,14 +110,14 @@ pub(crate) fn policy_documents(tenant_id: Uuid) -> Vec<(String, serde_json::Valu
     let tenant_reads = reads
         .iter()
         .filter(|action| {
-            action.applies_to(crate::models::iam_policy::Resource::Tenant { tenant_id })
+            action.applies_to(crate::models::iam::policy::Resource::Tenant { tenant_id })
         })
         .copied()
         .collect::<Vec<Action>>();
     let workspace_reads = reads
         .iter()
         .filter(|action| {
-            action.applies_to(crate::models::iam_policy::Resource::AllWorkspaces { tenant_id })
+            action.applies_to(crate::models::iam::policy::Resource::AllWorkspaces { tenant_id })
         })
         .copied()
         .collect::<Vec<Action>>();

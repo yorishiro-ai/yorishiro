@@ -52,7 +52,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaForkList)
+            .require_action(crate::models::iam::policy::Action::SchemaForkList)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -82,7 +82,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaForkGet)
+            .require_action(crate::models::iam::policy::Action::SchemaForkGet)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -119,7 +119,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaForkCreate)
+            .require_action(crate::models::iam::policy::Action::SchemaForkCreate)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -158,7 +158,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaForkUpdate)
+            .require_action(crate::models::iam::policy::Action::SchemaForkUpdate)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -210,7 +210,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaForkDelete)
+            .require_action(crate::models::iam::policy::Action::SchemaForkDelete)
             .await
         {
             return Ok(err_to_tool_result(error));

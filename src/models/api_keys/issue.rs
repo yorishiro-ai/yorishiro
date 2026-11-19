@@ -56,7 +56,7 @@ impl Entity {
                 "tenant '{tenant_id}' does not exist"
             )));
         }
-        crate::models::access::require_key_attribution(&txn, tenant_id, user_id).await?;
+        crate::models::iam::access::require_key_attribution(&txn, tenant_id, user_id).await?;
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
@@ -85,7 +85,7 @@ impl Entity {
         user_id: Uuid,
         scope: ApiKeyScope,
     ) -> Result<CreatedTenantApiKey, YorishiroError> {
-        crate::models::access::require_key_attribution(txn, tenant_id, Some(user_id)).await?;
+        crate::models::iam::access::require_key_attribution(txn, tenant_id, Some(user_id)).await?;
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
@@ -119,7 +119,7 @@ impl Entity {
         role_name: &str,
         expires_at: chrono::DateTime<chrono::FixedOffset>,
     ) -> Result<CreatedTenantApiKey, YorishiroError> {
-        crate::models::access::require_key_attribution(txn, tenant_id, user_id).await?;
+        crate::models::iam::access::require_key_attribution(txn, tenant_id, user_id).await?;
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
@@ -187,18 +187,18 @@ impl Entity {
             });
         }
 
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             issuer,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::CredentialCreate,
-            crate::models::iam_policy::Resource::Tenant {
+            crate::models::iam::policy::Action::CredentialCreate,
+            crate::models::iam::policy::Resource::Tenant {
                 tenant_id: issuer.tenant_id,
             },
         )
         .await?;
         let current = Model::current_context(&txn, issuer).await?;
-        crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
+        crate::models::iam::access::require_key_grant(&txn, &current, scope, audit).await?;
         let issuer_key = Entity::find_by_id(issuer.api_key_id)
             .one(&txn)
             .await
@@ -219,7 +219,7 @@ impl Entity {
                 hint: "set expires_at no later than the issuing key's expiry".into(),
             });
         }
-        crate::models::access::require_key_attribution(&txn, issuer.tenant_id, issuer.user_id)
+        crate::models::iam::access::require_key_attribution(&txn, issuer.tenant_id, issuer.user_id)
             .await?;
 
         let (prefix, plaintext) = generate_key();
@@ -286,21 +286,22 @@ impl Entity {
             .internal()?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-        crate::models::access::require_key_attribution(&txn, workspace.tenant_id, user_id).await?;
+        crate::models::iam::access::require_key_attribution(&txn, workspace.tenant_id, user_id)
+            .await?;
 
         if let Some(issuer) = issuer {
-            crate::models::access::require_iam_action(
+            crate::models::iam::access::require_iam_action(
                 &txn,
                 issuer,
                 ApiKeyScope::Read,
-                crate::models::iam_policy::Action::CredentialCreate,
-                crate::models::iam_policy::Resource::Tenant {
+                crate::models::iam::policy::Action::CredentialCreate,
+                crate::models::iam::policy::Resource::Tenant {
                     tenant_id: workspace.tenant_id,
                 },
             )
             .await?;
             let current = Model::current_context(&txn, issuer).await?;
-            crate::models::access::require_key_grant(&txn, &current, scope, audit).await?;
+            crate::models::iam::access::require_key_grant(&txn, &current, scope, audit).await?;
             let issuer_key = Entity::find_by_id(issuer.api_key_id)
                 .one(&txn)
                 .await

@@ -69,7 +69,7 @@ impl FillDefaultsWorker {
             txn.commit().await?;
             return Ok(());
         }
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             authorization.as_ref().unwrap_or(&txn),
             &crate::models::api_keys::AuthContext {
                 tenant_id: args.tenant_id,
@@ -80,8 +80,8 @@ impl FillDefaultsWorker {
                 audit: false,
             },
             crate::models::api_keys::ApiKeyScope::Migration,
-            crate::models::iam_policy::Action::MigrationFillDefaults,
-            crate::models::iam_policy::Resource::Workspace {
+            crate::models::iam::policy::Action::MigrationFillDefaults,
+            crate::models::iam::policy::Resource::Workspace {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,
             },
@@ -123,12 +123,12 @@ pub(crate) async fn enqueue(
 ) -> Result<Uuid, crate::YorishiroError> {
     use crate::error::ResultExt;
     let authorization = crate::db::begin_authorization(&ctx.db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
         crate::models::api_keys::ApiKeyScope::Migration,
-        crate::models::iam_policy::Action::MigrationFillDefaults,
-        crate::models::iam_policy::Resource::Workspace {
+        crate::models::iam::policy::Action::MigrationFillDefaults,
+        crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
         },

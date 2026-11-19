@@ -25,15 +25,15 @@ use uuid::Uuid;
 async fn authorized_transaction(
     db: &sea_orm::DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
-    action: crate::models::iam_policy::Action,
+    action: crate::models::iam::policy::Action,
 ) -> Result<sea_orm::DatabaseTransaction, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
         action,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -49,7 +49,7 @@ pub(crate) async fn list_as(
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam_policy::Action::MarketplaceList,
+        crate::models::iam::policy::Action::MarketplaceList,
     )
     .await?;
     list_marketplace(&txn, page).await
@@ -64,7 +64,7 @@ pub(crate) async fn versions_as(
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam_policy::Action::MarketplaceVersionList,
+        crate::models::iam::policy::Action::MarketplaceVersionList,
     )
     .await?;
     list_versions(&txn, actor.tenant_id, template_id, page).await
@@ -79,7 +79,7 @@ pub(crate) async fn reviews_as(
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam_policy::Action::MarketplaceReviewList,
+        crate::models::iam::policy::Action::MarketplaceReviewList,
     )
     .await?;
     list_reviews(&txn, actor.tenant_id, template_id, page).await

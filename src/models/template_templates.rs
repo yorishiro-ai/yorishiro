@@ -249,12 +249,12 @@ pub(crate) async fn list_as(
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<TemplateRecord>, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TemplateLibraryList,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TemplateLibraryList,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -268,12 +268,12 @@ pub(crate) async fn get_as(
     id: Uuid,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TemplateLibraryGet,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TemplateLibraryGet,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -287,12 +287,12 @@ pub(crate) async fn create_as(
     input: CreateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TemplateLibraryCreate,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TemplateLibraryCreate,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -311,12 +311,12 @@ pub async fn update_as(
     input: UpdateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TemplateLibraryUpdate,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TemplateLibraryUpdate,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -332,12 +332,12 @@ pub(crate) async fn delete_as(
     template_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TemplateLibraryDelete,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TemplateLibraryDelete,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -353,12 +353,12 @@ pub(crate) async fn fork_as(
     name: String,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TemplateLibraryFork,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TemplateLibraryFork,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )

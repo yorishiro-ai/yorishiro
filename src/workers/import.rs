@@ -75,7 +75,7 @@ impl ImportWorker {
         )
         .await?
         {
-            crate::models::access::require_iam_action(
+            crate::models::iam::access::require_iam_action(
                 authorization.as_ref().unwrap_or(&txn),
                 &AuthContext {
                     tenant_id: args.tenant_id,
@@ -86,15 +86,15 @@ impl ImportWorker {
                     audit: false,
                 },
                 crate::models::api_keys::ApiKeyScope::Schema,
-                crate::models::iam_policy::Action::ImportCreate,
-                crate::models::iam_policy::Resource::Workspace {
+                crate::models::iam::policy::Action::ImportCreate,
+                crate::models::iam::policy::Resource::Workspace {
                     tenant_id: args.tenant_id,
                     workspace_id: args.workspace_id,
                 },
             )
             .await?;
             let quotas = crate::quotas(&self.ctx, args.tenant_id).await?;
-            let result = crate::models::import::import_with_quota(
+            let result = crate::models::transfer::import::import_with_quota(
                 &txn,
                 args.tenant_id,
                 args.workspace_id,
@@ -132,12 +132,12 @@ pub(crate) async fn enqueue(
     jsonl: String,
 ) -> Result<Uuid, YorishiroError> {
     let authorization = crate::db::begin_authorization(&ctx.db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
         crate::models::api_keys::ApiKeyScope::Schema,
-        crate::models::iam_policy::Action::ImportCreate,
-        crate::models::iam_policy::Resource::Workspace {
+        crate::models::iam::policy::Action::ImportCreate,
+        crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
         },

@@ -6,8 +6,8 @@ use serde::Serialize;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
-use crate::models::iam_policy::{Action, Resource};
-use crate::models::iam_trust_policy::{Caller, Principal, TrustPolicy};
+use crate::models::iam::policy::{Action, Resource};
+use crate::models::iam::trust_policy::{Caller, Principal, TrustPolicy};
 
 pub const MIN_SESSION_SECONDS: i64 = 900;
 pub const DEFAULT_SESSION_SECONDS: i64 = 3600;
@@ -145,7 +145,7 @@ impl Model {
         params: crate::models::pagination::ListParams,
     ) -> Result<Vec<Self>, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
@@ -173,7 +173,7 @@ impl Model {
         id: Uuid,
     ) -> Result<Self, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
@@ -196,7 +196,7 @@ impl Model {
         input: CreateRole,
     ) -> Result<Self, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
@@ -237,7 +237,7 @@ impl Model {
         input: UpdateRole,
     ) -> Result<Self, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
@@ -281,7 +281,7 @@ impl Model {
     ) -> Result<(), YorishiroError> {
         use crate::models::_entities::api_keys;
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
@@ -328,7 +328,7 @@ impl Model {
         use crate::models::_entities::{api_keys, iam_group_memberships};
         let txn = crate::db::begin_write(db).await.internal()?;
         let evaluation =
-            crate::models::access::IamEvaluation::load_for_assumption(&txn, actor).await?;
+            crate::models::iam::access::IamEvaluation::load_for_assumption(&txn, actor).await?;
         let denied = || YorishiroError::ScopeInsufficient {
             message: "this role cannot be assumed by the caller".into(),
             hint: "the role trust policy and a role_assume permission must both allow it".into(),

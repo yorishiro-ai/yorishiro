@@ -22,8 +22,9 @@ impl Model {
         params: crate::models::pagination::ListParams,
     ) -> Result<Vec<Self>, YorishiroError> {
         use crate::models::{
-            access, api_keys,
-            iam_policy::{Action, Resource},
+            api_keys,
+            iam::access,
+            iam::policy::{Action, Resource},
         };
         let txn = crate::db::begin_write(db).await.internal()?;
         access::require_iam_action(

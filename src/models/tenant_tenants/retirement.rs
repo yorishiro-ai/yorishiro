@@ -49,12 +49,12 @@ pub async fn inventory_as(
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<RetirementInventory, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TenantGet,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TenantGet,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -84,12 +84,12 @@ pub async fn disable_as(
         });
     }
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::TenantUpdate,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::TenantUpdate,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )

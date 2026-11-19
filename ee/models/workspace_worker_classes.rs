@@ -7,7 +7,7 @@
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
-use crate::models::iam_policy::Action;
+use crate::models::iam::policy::Action;
 use crate::workers::embedding_sync::WorkerClass;
 use crate::workers::target::WorkerTarget;
 use loco_rs::app::AppContext;
@@ -41,7 +41,7 @@ pub(crate) async fn set_as(
     actor: &AuthContext,
     worker_class: WorkerClass,
 ) -> Result<(), YorishiroError> {
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         &ctx.db,
         actor,
         ApiKeyScope::Schema,
@@ -95,7 +95,7 @@ pub(crate) async fn clear_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         db,
         actor,
         ApiKeyScope::Schema,
@@ -110,9 +110,13 @@ pub(crate) async fn describe_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<Option<WorkerClassAssignment>, YorishiroError> {
-    let txn =
-        super::access::workspace_transaction(db, actor, ApiKeyScope::Read, Action::WorkerClassGet)
-            .await?;
+    let txn = super::iam::access::workspace_transaction(
+        db,
+        actor,
+        ApiKeyScope::Read,
+        Action::WorkerClassGet,
+    )
+    .await?;
     describe(&txn, actor.require_workspace()?).await
 }
 

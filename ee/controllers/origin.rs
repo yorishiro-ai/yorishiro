@@ -24,7 +24,7 @@ async fn list_upstream_changes(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaUpstreamList)
+        .require_action(crate::models::iam::policy::Action::SchemaUpstreamList)
         .await?;
 
     // Upstream joins templates through the identity pool under the retained IAM fence.
@@ -45,7 +45,7 @@ async fn merge_preview(
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<MergePlan>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaMergePreview)
+        .require_action(crate::models::iam::policy::Action::SchemaMergePreview)
         .await?;
 
     // Workspace content uses the scoped transaction; templates require the identity pool.
@@ -69,7 +69,7 @@ async fn merge_apply(
     Path(schema_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<MergeResponse>), ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaMergeApply)
+        .require_action(crate::models::iam::policy::Action::SchemaMergeApply)
         .await?;
 
     let (schema, diff, summary) = origin::merge_apply(

@@ -7,7 +7,7 @@ use rmcp::{tool, tool_router};
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result};
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::export;
+use crate::models::transfer::export;
 
 #[tool_router(vis = "pub(crate)", router = tool_router_export)]
 impl YorishiroMcpServer {
@@ -30,7 +30,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::Export)
+            .require_action(crate::models::iam::policy::Action::Export)
             .await
         {
             return Ok(err_to_tool_result(error));

@@ -1,7 +1,7 @@
 use uuid::Uuid;
 use yorishiro::{
     YorishiroError,
-    models::iam_policy::{Action, Policy, Resource},
+    models::iam::policy::{Action, Policy, Resource},
 };
 
 const MAX_STATEMENTS: usize = 64;

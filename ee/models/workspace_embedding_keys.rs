@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_embedding_keys::{ActiveModel, Column, Entity};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
-use crate::models::iam_policy::Action;
+use crate::models::iam::policy::Action;
 use crate::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
 };
@@ -24,7 +24,7 @@ pub(crate) async fn configure(
     request: crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest,
 ) -> Result<(), YorishiroError> {
     let workspace_id = actor.require_workspace()?;
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         &ctx.db,
         actor,
         ApiKeyScope::Schema,
@@ -230,7 +230,7 @@ pub(crate) async fn remove(
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
     let workspace_id = actor.require_workspace()?;
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         &ctx.db,
         actor,
         ApiKeyScope::Schema,
@@ -251,7 +251,7 @@ pub(crate) async fn describe_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<Option<EmbeddingKeyDescription>, YorishiroError> {
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         db,
         actor,
         ApiKeyScope::Read,

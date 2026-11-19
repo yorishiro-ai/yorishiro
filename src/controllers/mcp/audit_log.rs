@@ -53,12 +53,12 @@ impl YorishiroMcpServer {
             Ok(id) => id,
             Err(error) => return Ok(err_to_tool_result(error)),
         };
-        let _authorization = match crate::models::access::authorize_workspace_action(
+        let _authorization = match crate::models::iam::access::authorize_workspace_action(
             &txn,
             &self.app_context().db,
             &actor,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::AuditLogList,
+            crate::models::iam::policy::Action::AuditLogList,
         )
         .await
         {

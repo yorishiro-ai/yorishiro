@@ -7,7 +7,7 @@ use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::pr
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
-use crate::models::iam_policy::{Action, Resource};
+use crate::models::iam::policy::{Action, Resource};
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -28,7 +28,7 @@ impl Model {
         params: crate::models::pagination::ListParams,
     ) -> Result<Vec<Self>, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
@@ -64,7 +64,7 @@ impl Model {
         policy_id: Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
@@ -135,7 +135,7 @@ impl Model {
         policy_id: Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,

@@ -71,7 +71,7 @@ impl ConfirmProposalsWorker {
         )
         .await?
         {
-            authorization = crate::ee::models::access::authorize_job_actor(
+            authorization = crate::ee::models::iam::access::authorize_job_actor(
                 &txn,
                 &self.ctx.db,
                 &AuditActor {
@@ -81,7 +81,7 @@ impl ConfirmProposalsWorker {
                     user_id: args.user_id,
                 },
                 crate::models::api_keys::ApiKeyScope::Schema,
-                crate::models::iam_policy::Action::InferenceConfirm,
+                crate::models::iam::policy::Action::InferenceConfirm,
             )
             .await?;
             let report = crate::edition::ee::models::inference_proposals::confirm(
@@ -111,7 +111,7 @@ pub(crate) async fn enqueue(
 ) -> Result<Uuid, YorishiroError> {
     let txn =
         crate::db::begin_workspace_write(ctx, auth.tenant_id, auth.require_workspace()?).await?;
-    let authorization = crate::ee::models::access::authorize_job_actor(
+    let authorization = crate::ee::models::iam::access::authorize_job_actor(
         &txn,
         &ctx.db,
         &AuditActor {
@@ -121,7 +121,7 @@ pub(crate) async fn enqueue(
             user_id: auth.user_id,
         },
         crate::models::api_keys::ApiKeyScope::Schema,
-        crate::models::iam_policy::Action::InferenceConfirm,
+        crate::models::iam::policy::Action::InferenceConfirm,
     )
     .await?;
     crate::edition::ee::models::inference_jobs::workspace_job(

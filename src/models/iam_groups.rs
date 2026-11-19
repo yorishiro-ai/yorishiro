@@ -22,9 +22,9 @@ impl Model {
         actor: &crate::models::api_keys::AuthContext,
         params: crate::models::pagination::ListParams,
     ) -> Result<Vec<Self>, YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -50,9 +50,9 @@ impl Model {
         actor: &crate::models::api_keys::AuthContext,
         id: Uuid,
     ) -> Result<Self, YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -75,9 +75,9 @@ impl Model {
         id: Uuid,
         name: String,
     ) -> Result<Self, YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -120,9 +120,9 @@ impl Model {
         actor: &crate::models::api_keys::AuthContext,
         id: Uuid,
     ) -> Result<(), YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -152,12 +152,12 @@ impl Model {
         name: String,
     ) -> Result<Self, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
-            crate::models::iam_policy::Action::GroupCreate,
-            crate::models::iam_policy::Resource::Tenant {
+            crate::models::iam::policy::Action::GroupCreate,
+            crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )

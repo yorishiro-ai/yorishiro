@@ -22,8 +22,8 @@ pub(crate) struct WhoAmIResponse {
     pub(crate) tenant_root: bool,
 }
 
-impl From<crate::models::access::AccessIdentity> for WhoAmIResponse {
-    fn from(identity: crate::models::access::AccessIdentity) -> Self {
+impl From<crate::models::iam::access::AccessIdentity> for WhoAmIResponse {
+    fn from(identity: crate::models::iam::access::AccessIdentity) -> Self {
         let ctx = identity.current;
         Self {
             workspace_name: identity.workspace_name,

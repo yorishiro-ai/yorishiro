@@ -26,7 +26,7 @@ pub(crate) async fn create_entity(
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityCreate)
+        .require_action(crate::models::iam::policy::Action::EntityCreate)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     let input = body.into();
@@ -54,7 +54,7 @@ async fn get_entity(
     Path(id): Path<Uuid>,
 ) -> Result<Json<EntityRecord>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityGet)
+        .require_action(crate::models::iam::policy::Action::EntityGet)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     let record = entity_entities::get(authorized.txn(), workspace_id, id).await?;
@@ -69,7 +69,7 @@ pub(crate) async fn update_entity(
     Json(body): Json<UpdateEntityRequest>,
 ) -> Result<Json<EntityRecord>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityUpdate)
+        .require_action(crate::models::iam::policy::Action::EntityUpdate)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     let updated_by = authorized.ctx.user_id;
@@ -95,7 +95,7 @@ pub(crate) async fn delete_entity(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityDelete)
+        .require_action(crate::models::iam::policy::Action::EntityDelete)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     entity_entities::delete(authorized.txn(), workspace_id, id).await?;
@@ -112,7 +112,7 @@ async fn list_entities(
     Query(params): Query<ListEntitiesParams>,
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityList)
+        .require_action(crate::models::iam::policy::Action::EntityList)
         .await?;
     let query = params.try_into()?;
 
@@ -148,7 +148,7 @@ pub(crate) async fn migration_job_status(
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::MigrationJobGet)
+        .require_action(crate::models::iam::policy::Action::MigrationJobGet)
         .await?;
     Ok(Json(
         crate::models::queue_job_lifecycles::migration_job_status(

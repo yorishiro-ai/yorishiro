@@ -123,7 +123,7 @@ pub(crate) async fn signup_account(
         max_tenants,
     )
     .await?;
-    crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
+    crate::models::iam::builtin::bootstrap(&txn, tenant.id).await?;
     let user = register_member(&txn, tenant.id, email, password, display_name).await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
@@ -152,7 +152,7 @@ pub(crate) async fn setup_first_account(
         });
     }
     let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
-    crate::models::iam_builtin::bootstrap(&txn, tenant.id).await?;
+    crate::models::iam::builtin::bootstrap(&txn, tenant.id).await?;
     let workspace = create_workspace(&txn, tenant.id, "default", None, None).await?;
     let user = register_member(&txn, tenant.id, email, password, display_name).await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
@@ -309,7 +309,7 @@ async fn login_options(
                 )
                 .await?
                 {
-                    policies.push(crate::models::iam_policy::Policy::parse(
+                    policies.push(crate::models::iam::policy::Policy::parse(
                         &serde_json::to_string(&record.document).internal()?,
                         membership.tenant_id,
                         |tenant, _| tenant == membership.tenant_id,
@@ -321,11 +321,11 @@ async fn login_options(
         for workspace in workspaces {
             let (root, policies) = &permissions[&workspace.tenant_id];
             if !root
-                && !crate::models::iam_policy::Policy::allows(
+                && !crate::models::iam::policy::Policy::allows(
                     policies,
                     workspace.tenant_id,
-                    crate::models::iam_policy::Action::WorkspaceGet,
-                    crate::models::iam_policy::Resource::Workspace {
+                    crate::models::iam::policy::Action::WorkspaceGet,
+                    crate::models::iam::policy::Resource::Workspace {
                         tenant_id: workspace.tenant_id,
                         workspace_id: workspace.id,
                     },
@@ -435,12 +435,12 @@ pub(crate) async fn create_workspace_in_context(
     schema_id: Option<Uuid>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::WorkspaceCreate,
-        crate::models::iam_policy::Resource::Tenant {
+        crate::models::iam::policy::Action::WorkspaceCreate,
+        crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
@@ -472,12 +472,12 @@ pub async fn delete_workspace_as(
     {
         return Err(YorishiroError::not_found("workspace not found"));
     }
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::WorkspaceDelete,
-        crate::models::iam_policy::Resource::Workspace {
+        crate::models::iam::policy::Action::WorkspaceDelete,
+        crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id,
         },

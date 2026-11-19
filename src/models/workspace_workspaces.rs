@@ -313,9 +313,9 @@ pub(crate) async fn list_for_actor(
     conn: &DatabaseConnection,
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
-    use crate::models::iam_policy::{Action, Resource};
+    use crate::models::iam::policy::{Action, Resource};
     let txn = crate::db::begin_write(conn).await.internal()?;
-    let evaluation = crate::models::access::IamEvaluation::load(
+    let evaluation = crate::models::iam::access::IamEvaluation::load(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
@@ -366,12 +366,12 @@ pub(crate) async fn get_for_actor(
     if workspace.tenant_id != actor.tenant_id {
         return Err(YorishiroError::not_found("workspace not found"));
     }
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         conn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::WorkspaceGet,
-        crate::models::iam_policy::Resource::Workspace {
+        crate::models::iam::policy::Action::WorkspaceGet,
+        crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id,
         },
@@ -388,12 +388,12 @@ pub(crate) async fn update_as(
 ) -> Result<WorkspaceRecord, YorishiroError> {
     use sea_orm::ActiveValue::Set;
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::WorkspaceUpdate,
-        crate::models::iam_policy::Resource::Workspace {
+        crate::models::iam::policy::Action::WorkspaceUpdate,
+        crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: id,
         },
@@ -422,12 +422,12 @@ pub(crate) async fn update_as(
     }
     if input.replace_max_entities {
         // Manual quota policy belongs to the tenant, not a delegated workspace administrator.
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
-            crate::models::iam_policy::Action::TenantUpdate,
-            crate::models::iam_policy::Resource::Tenant {
+            crate::models::iam::policy::Action::TenantUpdate,
+            crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )

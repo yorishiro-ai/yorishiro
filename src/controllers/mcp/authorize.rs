@@ -35,9 +35,9 @@ impl Authorized {
 
     pub(crate) async fn require_action(
         &mut self,
-        action: crate::models::iam_policy::Action,
+        action: crate::models::iam::policy::Action,
     ) -> Result<(), YorishiroError> {
-        self.authorization = crate::models::access::authorize_workspace_action(
+        self.authorization = crate::models::iam::access::authorize_workspace_action(
             &self.txn,
             &self.identity,
             &self.ctx,

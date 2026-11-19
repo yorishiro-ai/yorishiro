@@ -17,7 +17,9 @@ async fn whoami(
     AuthContext(ctx): AuthContext,
 ) -> Result<Json<WhoAmIResponse>, super::ApiError> {
     Ok(Json(
-        crate::models::access::identity(&app.db, &ctx).await?.into(),
+        crate::models::iam::access::identity(&app.db, &ctx)
+            .await?
+            .into(),
     ))
 }
 

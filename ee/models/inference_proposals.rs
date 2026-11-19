@@ -20,11 +20,11 @@ pub(crate) async fn for_job_as(
     actor: &crate::models::api_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<Vec<ProposalRecord>, YorishiroError> {
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         db,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam_policy::Action::InferenceProposalList,
+        crate::models::iam::policy::Action::InferenceProposalList,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;
@@ -37,11 +37,11 @@ pub(crate) async fn reject_as(
     actor: &crate::models::api_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         db,
         actor,
         crate::models::api_keys::ApiKeyScope::Schema,
-        crate::models::iam_policy::Action::InferenceReject,
+        crate::models::iam::policy::Action::InferenceReject,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;
@@ -56,11 +56,11 @@ pub(crate) async fn discard_as(
     actor: &crate::models::api_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
-    let txn = super::access::workspace_transaction(
+    let txn = super::iam::access::workspace_transaction(
         db,
         actor,
         crate::models::api_keys::ApiKeyScope::Schema,
-        crate::models::iam_policy::Action::InferenceDiscard,
+        crate::models::iam::policy::Action::InferenceDiscard,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;

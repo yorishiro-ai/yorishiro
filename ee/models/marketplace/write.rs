@@ -6,7 +6,7 @@ use crate::db;
 use crate::edition::ee::models::marketplace;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::AuthContext;
-use crate::models::iam_policy::Action;
+use crate::models::iam::policy::Action;
 use loco_rs::app::AppContext;
 use sea_orm::ConnectionTrait;
 use uuid::Uuid;

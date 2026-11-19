@@ -101,12 +101,12 @@ pub(crate) async fn search_text(
         crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await?;
     check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id).await?;
-    let _authorization = super::access::authorize_workspace_action(
+    let _authorization = super::iam::access::authorize_workspace_action(
         &txn,
         &ctx.db,
         actor,
         super::api_keys::ApiKeyScope::Read,
-        super::iam_policy::Action::Search,
+        super::iam::policy::Action::Search,
     )
     .await?;
     search_by_vector(&txn, workspace_id, vector, text, query).await
@@ -117,12 +117,12 @@ pub(crate) async fn authorize_search(
     actor: &crate::models::api_keys::AuthContext,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    super::access::require_iam_action(
+    super::iam::access::require_iam_action(
         &txn,
         actor,
         super::api_keys::ApiKeyScope::Read,
-        super::iam_policy::Action::Search,
-        super::iam_policy::Resource::Workspace {
+        super::iam::policy::Action::Search,
+        super::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: actor.require_workspace()?,
         },

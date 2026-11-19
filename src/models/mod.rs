@@ -26,18 +26,15 @@ pub mod api_key_audit_log;
 pub mod api_keys;
 
 // IAM: policies, groups, roles and the checks that evaluate them.
-pub mod access;
+pub mod iam;
 pub mod iam_audit_events;
-pub mod iam_builtin;
 pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;
 pub mod iam_policies;
-pub mod iam_policy;
 pub mod iam_role_policy_attachments;
 pub mod iam_roles;
 pub mod iam_tenant_roots;
-pub mod iam_trust_policy;
 pub mod iam_user_policy_attachments;
 
 // Schemas, forks and the template library.
@@ -54,13 +51,14 @@ pub mod entity_embeddings;
 pub mod entity_entities;
 pub mod entity_relations;
 pub mod entity_snapshots;
-pub mod export;
-pub mod import;
 pub mod inference_jobs;
 pub(crate) mod inference_proposals;
 pub mod query_embedding_requests;
 pub mod recall;
 pub mod search;
+
+// Workspace JSONL import and export.
+pub mod transfer;
 
 // Queue bookkeeping and system state.
 pub mod queue_job_dispatch_outbox;

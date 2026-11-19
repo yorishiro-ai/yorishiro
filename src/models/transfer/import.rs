@@ -12,7 +12,7 @@ use crate::models::entity_entities::{self, CreateEntityInput};
 use crate::models::entity_relations::{self, CreateRelationInput};
 use crate::models::schema_schemas;
 
-pub(crate) use crate::models::export::ExportRecord;
+use super::ExportRecord;
 
 /// Outcome of a successful import: how many records of each kind were inserted.
 //

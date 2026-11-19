@@ -28,7 +28,7 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(auth) => auth,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match crate::models::access::capabilities(&self.app_context().db, &auth).await {
+        match crate::models::iam::access::capabilities(&self.app_context().db, &auth).await {
             Ok(capabilities) => {
                 let tools = self.tool_capabilities(&capabilities.scopes, capabilities.audit)?;
                 ok_json(serde_json::json!({
@@ -85,7 +85,7 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         match super::verify(self.app_context(), &parts, self.required_scope("whoami")?).await? {
             VerifyOutcome::Verified(auth) => {
-                match crate::models::access::identity(&self.app_context().db, &auth).await {
+                match crate::models::iam::access::identity(&self.app_context().db, &auth).await {
                     Ok(identity) => ok_json(WhoAmIResponse::from(identity)),
                     Err(error) => Ok(err_to_tool_result(error)),
                 }

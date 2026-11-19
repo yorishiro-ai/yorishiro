@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{tenant_memberships::Column, user_users};
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::iam_policy::{Action, Resource};
+use crate::models::iam::policy::{Action, Resource};
 
 use super::{ActiveModel, Entity, MembershipRecord};
 
@@ -40,7 +40,7 @@ pub async fn preview_removal(
 ) -> Result<super::MembershipRemovalPreview, YorishiroError> {
     use crate::models::_entities::{api_keys, workspace_workspaces};
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         ApiKeyScope::Read,
@@ -198,7 +198,7 @@ pub(crate) async fn create_tenant_user_as(
     input: &crate::dtos::members::CreateTenantUserRequest,
 ) -> Result<MembershipRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         ApiKeyScope::Read,
@@ -234,7 +234,7 @@ pub async fn reset_tenant_user_password(
     password: &str,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         ApiKeyScope::Read,
@@ -279,7 +279,7 @@ pub async fn remove_member_as(
     user_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         ApiKeyScope::Read,
@@ -342,7 +342,7 @@ pub(crate) async fn list_members_as(
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<MembershipRecord>, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         &txn,
         actor,
         ApiKeyScope::Read,

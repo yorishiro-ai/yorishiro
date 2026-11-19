@@ -4,7 +4,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::YorishiroError;
-use crate::models::iam_policy::Effect;
+use crate::models::iam::policy::Effect;
 
 const MAX_STATEMENTS: usize = 16;
 const MAX_PRINCIPALS: usize = 32;
