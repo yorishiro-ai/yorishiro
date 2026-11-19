@@ -2,6 +2,8 @@
 
 [English](README.md) | **日本語**
 
+[![codecov](https://codecov.io/gh/yorishiro-ai/yorishiro/graph/badge.svg)](https://codecov.io/gh/yorishiro-ai/yorishiro) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/yorishiro-ai/yorishiro)
+
 [インストール](#始め方) · [初回起動](https://yorishiro-ai.github.io/wiki/ja/installation/first-run/) · [ドキュメント](https://yorishiro-ai.github.io/wiki/ja/) · [リリース](https://github.com/yorishiro-ai/yorishiro/releases)
 
 **AIエージェントから読み書きできる、スキーマを自分で定義するナレッジストア。**
