@@ -1,3 +1,5 @@
+//! The data types of a metaschema definition: entity types, relation types and field definitions.
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,5 @@
+//! Full reindex of a workspace: recomputes every vector with the current provider and publishes them atomically.
+
 use sea_orm::{ConnectionTrait, DatabaseConnection, ExprTrait};
 use uuid::Uuid;
 

@@ -1,3 +1,5 @@
+//! Entity model: records, the embedding-sync token reads, and the operations in its submodules (CRUD, migration, snapshots, validation).
+
 use chrono::{DateTime, Utc};
 use sea_orm::ExprTrait;
 use sea_orm::QuerySelect;

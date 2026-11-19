@@ -1,3 +1,5 @@
+//! IAM role model: role administration and assuming a role for a temporary credential.
+
 pub use crate::models::_entities::iam_roles::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 use serde::Serialize;

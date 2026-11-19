@@ -1,3 +1,5 @@
+//! IAM policy model: persistence and lookup of policies, including those that apply to a user or a role.
+
 pub use crate::models::_entities::iam_policies::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 

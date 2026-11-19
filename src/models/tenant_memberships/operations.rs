@@ -1,3 +1,5 @@
+//! Tenant membership operations: adding and removing members, creating tenant-bound users, and previewing the effect of a removal.
+
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect,

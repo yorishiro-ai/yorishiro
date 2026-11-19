@@ -1,3 +1,5 @@
+//! REST routes for entity relations.
+
 use axum::Json;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;

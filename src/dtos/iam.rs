@@ -1,3 +1,5 @@
+//! Request and response types for the IAM endpoints, including conversions from the IAM models.
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

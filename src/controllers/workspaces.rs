@@ -1,3 +1,5 @@
+//! REST routes for workspaces and their members.
+
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

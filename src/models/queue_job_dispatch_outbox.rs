@@ -1,3 +1,5 @@
+//! The dispatch outbox: durable records of jobs waiting to be enqueued, so a crash between recording a job and queueing it loses nothing.
+
 use std::fmt;
 
 use sea_orm::entity::prelude::*;

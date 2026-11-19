@@ -1,3 +1,5 @@
+//! Workspace membership model: roles, and listing, granting and revoking workspace members.
+
 pub use crate::models::_entities::workspace_memberships::{ActiveModel, Column, Entity, Model};
 use sea_orm::DatabaseTransaction;
 use sea_orm::entity::prelude::*;

@@ -1,3 +1,5 @@
+//! Embedding provider for any OpenAI-compatible HTTP endpoint, with retry handling and redaction of its API key.
+
 use std::time::Duration;
 
 use loco_rs::prelude::async_trait;

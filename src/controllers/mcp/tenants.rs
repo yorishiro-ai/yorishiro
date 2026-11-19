@@ -1,3 +1,5 @@
+//! MCP tools for the current tenant: reading and updating it, and inspecting or starting its retirement.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

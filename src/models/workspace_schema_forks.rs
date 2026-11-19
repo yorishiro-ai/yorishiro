@@ -1,3 +1,6 @@
+//! The `workspace_schema_forks` table.
+//! Only the overlay schema forks write it, but the base deletes and inspects its rows when a tenant is retired, so every build needs its `ActiveModelBehavior`.
+
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 

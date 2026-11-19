@@ -1,3 +1,6 @@
+//! The Yorishiro application: a Loco app with thin entry points, model-owned logic and background workers.
+//! This file is the only place that assembles the enterprise overlay and implements `Hooks`.
+
 pub mod app;
 pub mod controllers;
 pub mod data;

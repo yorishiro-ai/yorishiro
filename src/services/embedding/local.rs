@@ -1,3 +1,5 @@
+//! In-process embedding provider that runs the pinned multilingual-e5-base model, for closed or offline deployments.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

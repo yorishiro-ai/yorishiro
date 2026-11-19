@@ -1,3 +1,6 @@
+//! The `compute_credit_ledger` table.
+//! Only the overlay writes to it, but every generated entity needs its own module so its `ActiveModelBehavior` is implemented in every build.
+
 pub use crate::models::_entities::compute_credit_ledger::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 

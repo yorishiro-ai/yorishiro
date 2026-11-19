@@ -1,3 +1,5 @@
+//! REST routes for entities, plus the migration-job routes (undo, status, reindex and fill-defaults) that operate on them.
+
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;

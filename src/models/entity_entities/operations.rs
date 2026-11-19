@@ -1,3 +1,5 @@
+//! Entity CRUD and listing, with the entity quota enforced under a workspace advisory lock.
+
 use sea_orm::ConnectionTrait;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;

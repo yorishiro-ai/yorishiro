@@ -1,3 +1,5 @@
+//! Admits jobs to the queue under their concurrency policy and recovers dispatches the outbox still holds.
+
 use futures::{StreamExt, stream};
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
 use uuid::Uuid;

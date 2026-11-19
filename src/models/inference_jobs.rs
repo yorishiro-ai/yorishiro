@@ -1,3 +1,6 @@
+//! The `inference_jobs` table.
+//! Only the overlay reads and writes it, but every generated entity needs its own module so its `ActiveModelBehavior` is implemented in every build.
+
 pub use crate::models::_entities::inference_jobs::{ActiveModel, Column, Entity, Model};
 
 use sea_orm::entity::prelude::*;

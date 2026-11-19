@@ -1,3 +1,5 @@
+//! Schema drift reports and batch migration: dry run, and fill-defaults for entities behind the active schema version.
+
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, PaginatorTrait, QueryOrder, QuerySelect};
 use serde_json::Value;

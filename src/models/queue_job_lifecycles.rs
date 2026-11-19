@@ -1,3 +1,5 @@
+//! The job lifecycle table: enqueue, dispatch, lease heartbeat, deferral and completion state for every background job.
+
 pub use crate::models::_entities::queue_job_lifecycles::{ActiveModel, Column, Entity, Model};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;

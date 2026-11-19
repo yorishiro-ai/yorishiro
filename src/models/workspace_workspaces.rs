@@ -1,3 +1,5 @@
+//! Workspace model: lifecycle in `operations`, plus the embedding provider assignment and the revision fence that guards vector publication.
+
 use sea_orm::entity::prelude::*;
 use sea_orm::{ExprTrait, QuerySelect};
 use serde::Serialize;

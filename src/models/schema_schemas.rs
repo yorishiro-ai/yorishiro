@@ -1,3 +1,5 @@
+//! Schema model: versioned schemas per workspace, with the version lock, archiving and deleting of versions.
+
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;

@@ -1,3 +1,5 @@
+//! REST routes for schemas and the built-in templates.
+
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;

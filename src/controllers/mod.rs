@@ -1,3 +1,6 @@
+//! The entry points that serve HTTP: REST handlers, the MCP server, request middleware and extractors.
+//! Each handler authenticates, parses input, calls a model operation and renders the result.
+
 pub(crate) mod api_keys;
 pub mod audit_log;
 pub mod auth;

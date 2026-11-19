@@ -1,3 +1,5 @@
+//! Builds the text to embed from an entity and syncs its vector, checking the workspace's provider assignment and concurrency token.
+
 use sea_orm::{DatabaseConnection, DbErr};
 use serde_json::Value;
 use uuid::Uuid;

@@ -1,3 +1,5 @@
+//! IAM group membership model: listing, adding and removing group members.
+
 pub use crate::models::_entities::iam_group_memberships::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 

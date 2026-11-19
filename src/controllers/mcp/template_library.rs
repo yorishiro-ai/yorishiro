@@ -1,3 +1,5 @@
+//! MCP tools for the workspace template library: create, update, delete, list, get and fork.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

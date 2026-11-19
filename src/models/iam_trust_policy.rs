@@ -1,3 +1,5 @@
+//! The trust policy document of a role: who may assume it, with size limits and the check against a caller.
+
 use serde::Deserialize;
 use uuid::Uuid;
 

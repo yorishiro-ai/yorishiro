@@ -1,3 +1,6 @@
+//! Request extractors that authenticate a caller and declare the required API key scope in the handler's type.
+//! `Authorized` also opens the RLS-scoped transaction, so a handler cannot reach tenant data without passing through it.
+
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;

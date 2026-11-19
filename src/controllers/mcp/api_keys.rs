@@ -1,3 +1,5 @@
+//! MCP tools for creating, listing, rotating and revoking API keys.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

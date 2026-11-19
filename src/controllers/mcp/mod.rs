@@ -1,3 +1,6 @@
+//! The community MCP server: tool router composition, result rendering and the `/mcp` transport mount.
+//! Each submodule defines the tools of one feature, and the overlay adds its own through `McpToolSet`.
+
 mod api_keys;
 mod audit_log;
 mod authorize;

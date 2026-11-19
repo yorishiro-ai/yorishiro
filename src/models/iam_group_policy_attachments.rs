@@ -1,3 +1,5 @@
+//! IAM model for attaching policies to groups.
+
 pub use crate::models::_entities::iam_group_policy_attachments::{
     ActiveModel, Column, Entity, Model,
 };

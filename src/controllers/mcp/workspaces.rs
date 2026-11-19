@@ -1,3 +1,5 @@
+//! MCP tools for workspaces and their members.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

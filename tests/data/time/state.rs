@@ -123,6 +123,7 @@ async fn postgres_pool_replacement_keeps_uri_settings_without_replaying_startup(
 
 #[tokio::test]
 async fn sqlite_current_timestamp_default_uses_configured_zone_on_each_boot() {
+    let _environment = crate::EnvironmentRead::enter();
     if !crate::require_sqlite_backend() {
         return;
     }

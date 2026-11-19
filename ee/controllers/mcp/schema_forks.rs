@@ -1,3 +1,5 @@
+//! MCP tools for workspace schema forks: listing, creating, updating and deleting a fork of an upstream schema.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

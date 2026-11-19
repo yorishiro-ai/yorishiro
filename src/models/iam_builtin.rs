@@ -1,3 +1,5 @@
+//! The built-in tenant policies (Administrator, Writer, Reader) and their bootstrap for a tenant.
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
     QueryFilter,

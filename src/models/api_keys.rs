@@ -1,3 +1,5 @@
+//! API key model: key shapes, scopes and the authenticated context, with issuing, authentication and management in the submodules.
+
 mod authenticate;
 mod issue;
 mod manage;

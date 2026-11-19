@@ -1,3 +1,5 @@
+//! REST routes for IAM: policies, groups, roles, their attachments and the audit log.
+
 use axum::{Json, extract::State, http::StatusCode, routing::post};
 use loco_rs::{app::AppContext, controller::Routes};
 

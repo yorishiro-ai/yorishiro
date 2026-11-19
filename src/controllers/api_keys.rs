@@ -1,3 +1,5 @@
+//! REST routes for issuing, listing, rotating and revoking API keys.
+
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

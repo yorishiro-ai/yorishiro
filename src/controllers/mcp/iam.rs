@@ -1,3 +1,5 @@
+//! MCP tools for IAM: policies, groups, roles, their attachments, role assumption and the audit log.
+
 use axum::http::request::Parts;
 use rmcp::handler::server::{common::Extension, wrapper::Parameters};
 use rmcp::{ErrorData, model::CallToolResult, tool, tool_router};

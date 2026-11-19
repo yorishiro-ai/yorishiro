@@ -1,3 +1,6 @@
+//! Enterprise REST handlers, MCP tools and request middleware.
+//! Each module mirrors a feature that only the enterprise edition serves.
+
 pub mod dashboard;
 pub mod embedding;
 pub mod entity_columns;

@@ -1,3 +1,5 @@
+//! Tenant model: detail and metadata updates, the infrastructure tenant, and the creation and retirement operations in its submodules.
+
 pub use crate::models::_entities::tenant_tenants::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 

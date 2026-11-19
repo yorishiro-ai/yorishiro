@@ -1,3 +1,6 @@
+//! The enterprise MCP tool set and the policy that classifies and gates its tools.
+//! Each submodule defines the tools of one enterprise feature, and `tool_router` composes them for the overlay.
+
 mod dashboard;
 mod embedding;
 mod entity_columns;

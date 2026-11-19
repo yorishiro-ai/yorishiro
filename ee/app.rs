@@ -1,3 +1,6 @@
+//! The enterprise half of the edition wiring: each function here has a community counterpart in `src/app.rs`, and `src/lib.rs` picks one per build.
+//! Plan-based quotas, worker and embedding lookups, route, worker, MCP tool and task registration, and seeding are overlaid here.
+
 use std::sync::Arc;
 
 use loco_rs::{Result, app::AppContext, task::Tasks};

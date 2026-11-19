@@ -1,3 +1,6 @@
+//! The `entity_snapshots` table, which holds what an entity contained before a migration job overwrote it.
+//! Reads and writes live in `entity_entities`, which owns the job's undo.
+
 pub use crate::models::_entities::entity_snapshots::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 

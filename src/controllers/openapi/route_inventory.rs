@@ -1,3 +1,6 @@
+//! Inventory of every mounted route, built while the route tree is composed.
+//! It checks that each public route has OpenAPI documentation and that anything left undocumented is an explicitly allowed exclusion.
+
 #[cfg(feature = "openapi")]
 use super::swagger::implementation::openapi_method;
 use axum::http::Method;

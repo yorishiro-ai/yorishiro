@@ -1,3 +1,5 @@
+//! Relation model: records and operations, with each relation type validated against the schema of its source entity.
+
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, SqlErr, Statement};
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,6 @@
+//! MCP tools for the template marketplace: browsing, publishing, reviewing, forking and setting visibility.
+//! These tools are licence-gated like their REST routes.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

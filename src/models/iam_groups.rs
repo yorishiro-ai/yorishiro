@@ -1,3 +1,5 @@
+//! IAM group model: creating, renaming, reading and deleting groups.
+
 pub use crate::models::_entities::iam_groups::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 

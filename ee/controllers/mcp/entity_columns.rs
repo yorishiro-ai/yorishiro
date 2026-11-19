@@ -1,3 +1,5 @@
+//! MCP tools for reading and changing which columns the Entities table shows per workspace and entity type.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

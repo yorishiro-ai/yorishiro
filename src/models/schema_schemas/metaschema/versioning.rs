@@ -1,3 +1,5 @@
+//! Compares two metaschema definitions and reports whether the change is backward compatible.
+
 use std::collections::BTreeMap;
 
 use serde::Serialize;

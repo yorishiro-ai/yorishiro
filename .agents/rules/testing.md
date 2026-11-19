@@ -84,7 +84,8 @@ Each job runs every test; nothing is assigned or inventoried per test, so a new 
 The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
 
-The integration tests are one binary rooted at `tests/mod.rs`, and each file mirrors the source file it covers:
+The integration tests are one binary rooted at `tests/mod.rs`.
+A test file sits at the same path as the source file it covers; not every source file has tests.
 
 - `tests/controllers/` — MCP tool routing, middleware, route inventory, OpenAPI assembly
 - `tests/data/` — configuration loading and validation (`config/`), typed settings, time, built-in templates

@@ -1,3 +1,5 @@
+//! IAM model for attaching policies to roles.
+
 pub use crate::models::_entities::iam_role_policy_attachments::{
     ActiveModel, Column, Entity, Model,
 };

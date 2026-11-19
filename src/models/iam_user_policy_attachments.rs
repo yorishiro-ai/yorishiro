@@ -1,3 +1,5 @@
+//! IAM model for attaching policies directly to users.
+
 pub use crate::models::_entities::iam_user_policy_attachments::{
     ActiveModel, Column, Entity, Model,
 };

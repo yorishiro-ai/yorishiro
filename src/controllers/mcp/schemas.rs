@@ -1,3 +1,5 @@
+//! MCP tools for schemas: listing, creating, archiving and deleting versions, reading the active one, and the built-in templates.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;

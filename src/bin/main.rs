@@ -1,3 +1,5 @@
+//! Binary entry point: registers the SQLite extensions, then hands over to the Loco CLI.
+
 use loco_rs::cli;
 use migration::Migrator;
 use yorishiro::App;

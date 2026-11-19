@@ -1,3 +1,5 @@
+//! MCP tools for entities, plus drift reports and the migration tools (dry run, fill defaults, status, reindex, undo).
+
 use axum::http::request::Parts;
 use chrono::{DateTime, Utc};
 use rmcp::ErrorData;

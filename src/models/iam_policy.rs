@@ -1,3 +1,5 @@
+//! The IAM policy document: its actions, resources and effects, parsing with size limits, and the evaluation of whether it allows a request.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

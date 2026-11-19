@@ -1,3 +1,5 @@
+//! MCP tools for tenant membership: creating tenant users, resetting their passwords and previewing or removing members.
+
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
