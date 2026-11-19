@@ -10,7 +10,7 @@ use loco_rs::prelude::async_trait;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 
 use super::EmbeddingProvider;
-use super::model_fetch::LocalModelDef;
+use super::model_fetch::{self, LocalModelDef};
 use crate::error::YorishiroError;
 
 /// Lower bound for `max_sequence_length`.
@@ -358,4 +358,69 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
             ))),
         }
     }
+}
+
+/// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value, or [`model_fetch::DEFAULT_MODEL`] when unset.
+/// An unrecognized value fails startup rather than silently falling back to the default: a typo in this variable is exactly the kind of "this deployment thinks it configured one model but got another" mistake the whole write-time model check exists to catch, and catching the typo at boot is strictly better than catching the resulting stamp mismatch on the first write.
+fn resolve_local_model(requested: &str) -> crate::error::BoxResult<&'static LocalModelDef> {
+    if requested == model_fetch::DEFAULT_MODEL.short_id {
+        Ok(model_fetch::DEFAULT_MODEL)
+    } else {
+        Err(format!(
+            "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
+            model_fetch::DEFAULT_MODEL.short_id
+        )
+        .into())
+    }
+}
+
+/// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`super::build_embedding_provider`].
+/// `YORISHIRO_LOCAL_MODEL` selects which [`model_fetch::LocalModelDef`] to load (default: [`model_fetch::DEFAULT_MODEL`]); see [`resolve_local_model`].
+/// The model and tokenizer files are fetched into `models/<short_id>/` on first use when absent.
+///
+/// There is no pooling variable: every model this provider can load is mean-pooled (see `LocalEmbeddingProvider`'s own doc comment for why that stays a fact rather than a config surface).
+///
+/// Missing model files are downloaded and verified before loading.
+pub(super) async fn build_local_provider(
+    config: &crate::data::settings::Embedding,
+    timeouts: &crate::data::settings::HttpTimeouts,
+) -> crate::error::BoxResult<Arc<dyn EmbeddingProvider>> {
+    let dimensions = config.dimensions;
+    let def = resolve_local_model(&config.local_model)?;
+    if dimensions != def.dimensions {
+        return Err(format!(
+            "YORISHIRO_EMBEDDING_DIMENSIONS={dimensions} does not match {}'s own output width \
+             ({}); unset YORISHIRO_EMBEDDING_DIMENSIONS to use the selected model's own width, \
+             or point YORISHIRO_LOCAL_MODEL at a model that actually produces {dimensions}",
+            def.id, def.dimensions
+        )
+        .into());
+    }
+    let max_sequence_length = config.local_max_sequence_length;
+    let (model_path, tokenizer_path) = model_fetch::ensure_model_files(def, timeouts).await?;
+    let model_path = model_path.display().to_string();
+    let tokenizer_path = tokenizer_path.display().to_string();
+
+    let local_config = LocalEmbeddingConfig {
+        model_path: model_path.clone().into(),
+        tokenizer_path: tokenizer_path.clone().into(),
+        def,
+        max_sequence_length,
+    };
+    let provider = tokio::task::spawn_blocking(move || LocalEmbeddingProvider::load(local_config))
+        .await
+        .map_err(|err| -> crate::error::BoxError {
+            crate::error::BoxError::from(format!("local embedding model loader task failed: {err}"))
+        })?
+        .map_err(|err| -> crate::error::BoxError {
+            format!(
+                "{err}\n\nthe local embedding provider needs '{model_path}' and \
+             '{tokenizer_path}', or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an \
+             OpenAI-compatible endpoint instead"
+            )
+            .into()
+        })?
+        .with_timeouts(*timeouts);
+    tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");
+    Ok(Arc::new(provider))
 }

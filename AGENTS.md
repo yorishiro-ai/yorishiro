@@ -161,10 +161,7 @@ Detailed project rules live under `.agents/rules/`.
 
 Read and follow the applicable rule files before making changes:
 
-- `.agents/rules/loco-architecture.md` — repository layout, migrations, models, SeaORM entity API, two-pool `db.rs` architecture
 - `.agents/rules/editions.md` — `ee/` boundary, BUSL-1.1 vs. `ee/LICENSE`, edition decisions, licence gate
-- `.agents/rules/error-handling.md` — `YorishiroError`, `ResultExt`, `into_http_parts()`
-- `.agents/rules/module-structure.md` — MCP tool handler exits, router merge, visibility, column lists
 - `.agents/rules/testing.md` — integration-test pattern, pool-closing, race-gate pitfalls
 - `.agents/rules/git-workflow.md` — branching, PR checklist, versioning, releases
 - `.agents/rules/prose.md` — dashes, one sentence per line, in Markdown and comments

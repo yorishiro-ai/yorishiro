@@ -159,10 +159,14 @@ fn sqlite_queue_cleanup_removes_database_and_journal_siblings() {
     }
     assert_ne!(first, second);
     remove_sqlite_files(first.to_str().expect("UTF-8 queue path"));
-    assert!(!first.exists());
-    assert!(second.exists());
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        assert!(!std::path::Path::new(&format!("{}{suffix}", first.display())).exists());
+        assert!(std::path::Path::new(&format!("{}{suffix}", second.display())).exists());
+    }
     remove_sqlite_files(second.to_str().expect("UTF-8 queue path"));
-    assert!(!second.exists());
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        assert!(!std::path::Path::new(&format!("{}{suffix}", second.display())).exists());
+    }
 }
 
 /// SQLite variant of `close_app_pools`.

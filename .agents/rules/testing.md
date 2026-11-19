@@ -47,17 +47,8 @@ DATABASE_URL=postgres://user:pass@host:5432/db \
 make entities
 ```
 
-1. Starts `docker compose up -d testdb` (pgvector:pg18 on port 15432).
-2. Waits 10 seconds for startup.
-3. Runs `yorishiro db migrate` against the container.
-4. Regenerates `src/models/_entities/*.rs`.
-5. Tears down the container and volume.
-
-**SQLite is not supported.** `entities` requires PostgreSQL because `cargo loco db entities` introspects the database schema, which differs between backends. Guard in the Makefile:
-
-```sh
-@if echo '$(DATABASE_URL)' | grep -q '^sqlite://'; then echo "ERROR: entities requires PostgreSQL" >&2; exit 1; fi
-```
+Uses an isolated disposable pgvector container on a dynamically assigned port, waits for readiness, migrates, regenerates `src/models/_entities/*.rs`, and removes the container and volume.
+Development databases are not used; entity generation requires PostgreSQL.
 
 ## Test structure
 
