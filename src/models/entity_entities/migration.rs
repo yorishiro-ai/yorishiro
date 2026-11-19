@@ -19,7 +19,7 @@ pub async fn drift(
     workspace_id: Uuid,
     entity_id: Uuid,
 ) -> Result<EntityDrift, YorishiroError> {
-    let entity = super::crud::get(conn, workspace_id, entity_id).await?;
+    let entity = super::operations::get(conn, workspace_id, entity_id).await?;
     let own =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
     let active =

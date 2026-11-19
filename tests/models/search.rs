@@ -1154,7 +1154,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         let provider1_clone = provider1.clone();
         let ctx1 = ctx.clone();
         let h1 = tokio::spawn(async move {
-            yorishiro::db::reindex_workspace_with_lock(
+            entity_embeddings::reindex_workspace_with_lock(
                 &ctx1,
                 workspace_id,
                 provider1_clone.as_ref(),
@@ -1167,7 +1167,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         let ctx2 = ctx.clone();
         let provider2_clone = provider2.clone();
         let h2 = tokio::spawn(async move {
-            yorishiro::db::reindex_workspace_with_lock(
+            entity_embeddings::reindex_workspace_with_lock(
                 &ctx2,
                 workspace_id,
                 provider2_clone.as_ref(),
@@ -1184,7 +1184,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 let waiting = LockWait::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
                     "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS waiting",
-                    [yorishiro::db::workspace_reindex_lock_key(workspace_id).into()],
+                    [entity_embeddings::workspace_reindex_lock_key(workspace_id).into()],
                 )).one(&ctx.db).await.expect("observe workspace advisory lock")
                     .expect("lock observation row").waiting;
                 if waiting { break; }

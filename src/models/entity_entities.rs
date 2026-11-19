@@ -7,8 +7,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 mod backend;
-mod crud;
 mod migration;
+mod operations;
 mod snapshots;
 pub(crate) use snapshots::require_job_snapshots;
 mod validation;
@@ -37,10 +37,10 @@ impl std::fmt::Debug for Model {
     }
 }
 
-pub(crate) use crud::create_with_quota;
-pub use crud::{count, create, delete, get, list, update};
 pub(crate) use migration::fill_defaults;
 pub use migration::{drift, migration_dry_run};
+pub(crate) use operations::create_with_quota;
+pub use operations::{count, create, delete, get, list, update};
 pub use snapshots::undo_job;
 pub use snapshots::{delete_snapshot, snapshot};
 pub use validation::validate_data;

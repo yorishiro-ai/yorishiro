@@ -160,7 +160,7 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
         let before_vectors = stored_vectors().all(&ctx.db).await.unwrap();
 
         let (provider, _server) = http_provider("intfloat/multilingual-e5-base", 1).await;
-        let outcome = yorishiro::db::reindex_workspace_with_lock(&ctx, workspace_id, &provider)
+        let outcome = entity_embeddings::reindex_workspace_with_lock(&ctx, workspace_id, &provider)
             .await
             .expect("reindex_workspace runs even with per-entity failures");
 
@@ -192,7 +192,7 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
         let second = insert_entity(&ctx, workspace_id, "second entity").await;
 
         let (provider, _server) = http_provider("intfloat/multilingual-e5-base", usize::MAX).await;
-        let outcome = yorishiro::db::reindex_workspace_with_lock(
+        let outcome = entity_embeddings::reindex_workspace_with_lock(
             &ctx,
             workspace_id,
             &provider,
@@ -302,7 +302,7 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
 
         let gated = gated_provider("intfloat/multilingual-e5-base").await;
         let (entered, release, provider) = (&gated.entered, &gated.release, &gated.provider);
-        let reindex = yorishiro::db::reindex_workspace_with_lock(&ctx, workspace_id, provider);
+        let reindex = entity_embeddings::reindex_workspace_with_lock(&ctx, workspace_id, provider);
         let modify =
             async {
                 entered.notified().await;
@@ -341,7 +341,7 @@ async fn reindex_rejects_entities_added_after_enumeration() {
 
         let gated = gated_provider("intfloat/multilingual-e5-base").await;
         let (entered, release, provider) = (&gated.entered, &gated.release, &gated.provider);
-        let reindex = yorishiro::db::reindex_workspace_with_lock(&ctx, workspace_id, provider);
+        let reindex = entity_embeddings::reindex_workspace_with_lock(&ctx, workspace_id, provider);
         let modify = async {
             entered.notified().await;
             insert_entity(&ctx, workspace_id, "added while provider was paused").await;

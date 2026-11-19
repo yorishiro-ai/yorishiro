@@ -20,7 +20,7 @@ struct ManagementToolPolicy;
 
 impl McpToolPolicy for ManagementToolPolicy {
     fn read_only(&self, name: &str) -> bool {
-        crate::controllers::mcp::read_only_tool(name)
+        crate::controllers::mcp::policy::read_only_tool(name)
             || matches!(
                 name,
                 "get_tenant_overview"

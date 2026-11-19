@@ -6,7 +6,7 @@ use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
 use crate::models::db_enum::db_enum;
 
-mod tenancy;
+mod operations;
 
 struct AssignedEmbeddingProvider {
     provider: std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>,
@@ -173,7 +173,7 @@ pub(crate) async fn effective_embedding_metadata(
         .map_err(YorishiroError::Internal)
 }
 
-pub(crate) use tenancy::{
+pub(crate) use operations::{
     delete_workspace, get_workspace, get_workspace_tenant, workspace_count_lock_key,
 };
 

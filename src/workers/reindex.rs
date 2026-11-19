@@ -105,7 +105,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .acquire_owned()
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    let outcome = crate::db::reindex_workspace_with_actor(
+    let outcome = crate::models::entity_embeddings::reindex_workspace_with_actor(
         ctx,
         args.workspace_id,
         provider.as_ref(),
