@@ -1,4 +1,5 @@
 use super::boot_request;
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use yorishiro::App;
 #[tokio::test]
@@ -48,8 +49,8 @@ async fn signup_without_invite_creates_its_own_tenant() {
 /// `YORISHIRO_MAX_TENANTS` bounds invite-less signup the same way it bounds `/setup`: once the cap is reached, further signups are refused rather than growing the tenant count unbounded.
 #[tokio::test]
 async fn signup_without_invite_respects_the_tenant_cap() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(1);
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
         let first = request
             .post("/auth/signup")
             .json(&serde_json::json!({
@@ -86,9 +87,11 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
     if !crate::require_postgres_backend() {
         return;
     }
-    let _licence = crate::requests::ConfigOverride::unlicensed();
-    let _cap = crate::requests::ConfigOverride::max_tenants(100);
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    let overrides = [
+        crate::requests::unlicensed(),
+        crate::requests::max_tenants(100),
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
         for email in ["first@example.com", "second@example.com"] {
             let response = request
                 .post("/auth/signup")
@@ -107,12 +110,6 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
     .await;
 }
 
-/// Widens the connection pool past `config/test.yaml`'s default, which would starve the second connection before it ever reaches the advisory lock.
-async fn with_db_max_connections<T>(value: u64, fut: impl Future<Output = T>) -> T {
-    let _config =
-        crate::requests::ConfigOverride::set(&[("database.max_connections", value.into())]);
-    fut.await
-}
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.
 /// This test is PostgreSQL-only: `lock_for_update` is a no-op on SQLite,
 /// so the serialisation guarantee does not hold.
@@ -121,8 +118,10 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
     if !crate::require_postgres_backend() {
         return;
     }
-    with_db_max_connections(4, async move {
-        boot_request::<App, _, _>(|_request, ctx| async move {
+    // The default pool is too small for a second connection to ever reach the advisory lock.
+    boot_request_with::<App, _, _>(
+        &[("database.max_connections", 4.into())],
+        |_request, ctx| async move {
             let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
             yorishiro::db::lock_for_update(&holder, "create_tenant")
                 .await
@@ -161,9 +160,8 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
             .await;
             assert!(result.is_ok(), "result: {result:?}");
             txn.commit().await.unwrap();
-        })
-        .await;
-    })
+        },
+    )
     .await;
 }
 #[tokio::test]

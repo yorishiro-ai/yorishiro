@@ -36,6 +36,7 @@
 //! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
 use crate::requests::boot_request;
+use crate::requests::boot_request_with;
 use yorishiro::App;
 use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
@@ -74,8 +75,8 @@ const UNGATED: &[&str] = &[
 
 #[tokio::test]
 async fn gated_routes_are_absent_without_a_licence() {
-    let _licence = crate::requests::ConfigOverride::unlicensed();
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    let overrides = [crate::requests::unlicensed()];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
         // Boot the real verifier without a key, even when licensed cases have one available.
         for path in GATED {
             let response = request.get(path).await;

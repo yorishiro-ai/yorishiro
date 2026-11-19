@@ -44,55 +44,40 @@ pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
     true
 }
 
-thread_local! {
-    static CONFIG_OVERRIDES: std::cell::RefCell<Vec<(&'static str, serde_json::Value)>> = const { std::cell::RefCell::new(Vec::new()) };
+/// Whether the booted app's queue provider is Redis (Valkey).
+pub(crate) fn uses_redis_queue(ctx: &loco_rs::app::AppContext) -> bool {
+    matches!(
+        ctx.config.queue,
+        Some(loco_rs::config::QueueConfig::Redis(_))
+    )
 }
 
-/// Overrides the booted apps' configuration at dotted paths such as `settings.max_tenants` until the guard drops.
-///
-/// Request tests poll their whole future on the test thread, so a thread-local scope is private to the test; the process environment is never touched.
-pub(crate) struct ConfigOverride(usize);
-
-impl ConfigOverride {
-    pub(crate) fn set(overrides: &[(&'static str, serde_json::Value)]) -> Self {
-        CONFIG_OVERRIDES.with_borrow_mut(|stack| {
-            let depth = stack.len();
-            stack.extend_from_slice(overrides);
-            Self(depth)
-        })
-    }
-
-    /// Caps the tenants a booted app accepts.
-    pub(crate) fn max_tenants(limit: u64) -> Self {
-        Self::set(&[("settings.max_tenants", limit.into())])
-    }
-
-    /// Boots apps without a licence key, whatever the ambient environment holds.
-    pub(crate) fn unlicensed() -> Self {
-        Self::set(&[("initializers.licence_key", "".into())])
-    }
+/// Whether the booted app's queue provider is SQLite.
+pub(crate) fn uses_sqlite_queue(ctx: &loco_rs::app::AppContext) -> bool {
+    matches!(
+        ctx.config.queue,
+        Some(loco_rs::config::QueueConfig::Sqlite(_))
+    )
 }
 
-impl Drop for ConfigOverride {
-    fn drop(&mut self) {
-        CONFIG_OVERRIDES.with_borrow_mut(|stack| stack.truncate(self.0));
-    }
+/// One configuration change for a booted app: a dotted path into `Config` such as `settings.max_tenants`, and its value.
+pub(crate) type Override = (&'static str, serde_json::Value);
+
+/// Caps the tenants a booted app accepts.
+pub(crate) fn max_tenants(limit: u64) -> Override {
+    ("settings.max_tenants", limit.into())
 }
 
-/// Sets how many consumers the context's queue runs, whatever its backend.
-pub(crate) fn set_queue_workers(ctx: &mut loco_rs::app::AppContext, workers: u32) {
-    use loco_rs::config::QueueConfig;
-    match ctx.config.queue.as_mut().expect("configured queue") {
-        QueueConfig::Sqlite(config) => config.num_workers = workers,
-        QueueConfig::Postgres(config) => config.num_workers = workers,
-        QueueConfig::Redis(config) => config.num_workers = workers,
-        _ => unreachable!("supported queue backends"),
-    }
+/// Boots the app without a licence key, whatever the ambient environment holds.
+pub(crate) fn unlicensed() -> Override {
+    ("initializers.licence_key", "".into())
 }
 
-/// Applies the scoped overrides to a freshly loaded configuration.
-fn apply_config_overrides(config: loco_rs::config::Config) -> loco_rs::config::Config {
-    let overrides = CONFIG_OVERRIDES.with_borrow(Clone::clone);
+/// Applies the overrides to a freshly loaded configuration; the process environment is never touched.
+fn apply_config_overrides(
+    config: loco_rs::config::Config,
+    overrides: &[Override],
+) -> loco_rs::config::Config {
     if overrides.is_empty() {
         return config;
     }
@@ -109,7 +94,7 @@ fn apply_config_overrides(config: loco_rs::config::Config) -> loco_rs::config::C
                 *node = serde_json::json!({});
             }
         }
-        *node = value;
+        *node = value.clone();
     }
     serde_json::from_value(document).expect("overridden config stays valid")
 }
@@ -217,14 +202,23 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: Future<Output = ()>,
 {
+    boot_request_with::<H, _, _>(&[], callback).await;
+}
+
+/// `boot_request` with the configuration changed by `overrides`.
+pub(crate) async fn boot_request_with<H: Hooks, F, Fut>(overrides: &[Override], callback: F)
+where
+    F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
+    Fut: Future<Output = ()>,
+{
     let _environment = crate::EnvironmentRead::enter();
     if is_sqlite_backend() {
-        boot_sqlite::<H, _, _>(callback).await;
+        boot_sqlite::<H, _, _>(overrides, callback).await;
         return;
     }
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
-        .map(apply_config_overrides)
+        .map(|config| apply_config_overrides(config, overrides))
         .expect("load postgres config");
     let database = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
         .expect("prepare test database");
@@ -253,7 +247,7 @@ where
     }
 }
 
-async fn boot_sqlite<H: Hooks, F, Fut>(callback: F)
+async fn boot_sqlite<H: Hooks, F, Fut>(overrides: &[Override], callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: Future<Output = ()>,
@@ -266,7 +260,7 @@ where
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()))
         .to_string_lossy()
         .into_owned();
-    request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
+    request_with_create_sqlite::<H, _, _>(db_path.clone(), overrides, |request, ctx| {
         let result =
             std::panic::AssertUnwindSafe(Box::pin(callback(request, ctx.clone()))).catch_unwind();
         async move {
@@ -290,8 +284,7 @@ pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: Future<Output = ()>,
 {
-    let _timezone = ConfigOverride::set(&[("settings.timezone", timezone.into())]);
-    boot_request::<H, _, _>(callback).await;
+    boot_request_with::<H, _, _>(&[("settings.timezone", timezone.into())], callback).await;
 }
 
 /// SQLite variant of loco's `request_with_create_db`.
@@ -299,15 +292,18 @@ pub(crate) async fn boot_request_with_timezone<H: Hooks, F, Fut>(
 /// Instead of `CREATE DATABASE` (which SQLite has no equivalent for), this generates a
 /// unique temp file path, overrides the database URI to the generated file, then boots via
 /// `H::boot(StartMode::ServerOnly, ...)`.
-pub(crate) async fn request_with_create_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
-where
+async fn request_with_create_sqlite<H: Hooks, F, Fut>(
+    db_path: String,
+    overrides: &[Override],
+    callback: F,
+) where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: Future<Output = ()>,
 {
     // Load the configured test app, then override only its isolated database and queue files.
     let mut config = H::load_config(&loco_rs::environment::Environment::Test)
         .await
-        .map(apply_config_overrides)
+        .map(|config| apply_config_overrides(config, overrides))
         .expect("load sqlite config");
     config.database.uri = format!("sqlite://{db_path}?mode=rwc");
     if let Some(loco_rs::config::QueueConfig::Sqlite(queue)) = config.queue.as_mut() {

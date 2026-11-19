@@ -1,4 +1,5 @@
 use crate::requests::boot_request;
+use crate::requests::boot_request_with;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use yorishiro::App;
 
@@ -6,11 +7,8 @@ use yorishiro::App;
 async fn overview_distinguishes_billing_manual_and_active_limits() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let _config = crate::requests::ConfigOverride::set(&[(
-        "initializers.plan_policy_enabled",
-        "true".into(),
-    )]);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [("initializers.plan_policy_enabled", "true".into())];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)

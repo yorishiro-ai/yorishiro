@@ -1,4 +1,4 @@
-use super::boot_request;
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use yorishiro::App;
@@ -28,8 +28,8 @@ pub(crate) async fn iam_mcp_call(
 
 #[tokio::test]
 async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(1);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
             let response = request
                 .post("/setup")
                 .json(&serde_json::json!({
@@ -714,8 +714,8 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
 
 #[tokio::test]
 async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(1);
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
         macro_rules! bearer {
             ($key:expr, $builder:expr) => {
                 $builder.add_header("Authorization", format!("Bearer {}", $key))

@@ -35,11 +35,8 @@ async fn member_key(
 async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let _config = crate::requests::ConfigOverride::set(&[(
-        "initializers.plan_policy_enabled",
-        "true".into(),
-    )]);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [("initializers.plan_policy_enabled", "true".into())];
+    crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
@@ -81,11 +78,8 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
 async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let _config = crate::requests::ConfigOverride::set(&[(
-        "initializers.plan_policy_enabled",
-        "false".into(),
-    )]);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [("initializers.plan_policy_enabled", "false".into())];
+    crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
             super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;

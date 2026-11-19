@@ -1,4 +1,5 @@
 use crate::requests::boot_request;
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use serde_json::json;
 use uuid::Uuid;
@@ -31,8 +32,8 @@ async fn listings(request: &loco_rs::TestServer, key: &str) -> Vec<serde_json::V
 /// An unlicensed deployment answers 404, matching an unconfigured setup wizard: the deployment genuinely does not serve this, not 401/403, which would confirm the route exists.
 #[tokio::test]
 async fn without_a_licence_the_marketplace_is_not_served() {
-    let _licence = crate::requests::ConfigOverride::unlicensed();
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::unlicensed()];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
@@ -52,8 +53,8 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 /// The gate runs before authentication: an unlicensed deployment answers the same 404 whether or not the caller holds a valid key, so an anonymous prober cannot tell the route exists.
 #[tokio::test]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let _licence = crate::requests::ConfigOverride::unlicensed();
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    let overrides = [crate::requests::unlicensed()];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
         let response = request
             .get("/api/marketplace")
             .add_header("Authorization", "Bearer ysr_not_a_real_key")

@@ -2,6 +2,7 @@
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
 
 use crate::requests::boot_request;
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use axum::http::header;
 use sea_orm::{EntityTrait, TransactionTrait};
@@ -17,25 +18,25 @@ const ISSUER_PATH: &str = "initializers.oauth.issuer_url";
 const CLIENT_ID_PATH: &str = "initializers.oauth.client_id";
 const CLIENT_SECRET_PATH: &str = "initializers.oauth.client_secret";
 
-/// Boots every app inside the future with the OAuth provider configured.
-async fn with_oauth_env<T>(fut: impl Future<Output = T>) -> T {
-    let _config = crate::requests::ConfigOverride::set(&[
+/// The OAuth provider the apps boot with.
+fn oauth_overrides() -> [crate::requests::Override; 3] {
+    [
         (ISSUER_PATH, ISSUER_URL.into()),
         (CLIENT_ID_PATH, CLIENT_ID.into()),
         (CLIENT_SECRET_PATH, CLIENT_SECRET.into()),
-    ]);
-    fut.await
+    ]
 }
+
 /// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
 /// The third state, an issuer set with no `client_id`/`client_secret`, answers 500 instead and belongs to `status_errors_loudly_when_partially_configured` below.
 #[tokio::test]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
-    let _config = crate::requests::ConfigOverride::set(&[
+    let overrides = [
         (ISSUER_PATH, "".into()),
         (CLIENT_ID_PATH, "".into()),
         (CLIENT_SECRET_PATH, "".into()),
-    ]);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
@@ -46,24 +47,21 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
             serde_json::json!({ "enabled": false })
         );
 
-        with_oauth_env(async {
-            let unchanged = request.get("/auth/oauth/status").await;
+        let unchanged = request.get("/auth/oauth/status").await;
+        assert_eq!(
+            unchanged.json::<serde_json::Value>(),
+            serde_json::json!({"enabled": false})
+        );
+        boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+            if crate::requests::skip_unlicensed(&ctx) {
+                return;
+            }
+            let enabled = request.get("/auth/oauth/status").await;
+            assert_eq!(enabled.status_code(), StatusCode::OK);
             assert_eq!(
-                unchanged.json::<serde_json::Value>(),
-                serde_json::json!({"enabled": false})
+                enabled.json::<serde_json::Value>(),
+                serde_json::json!({ "enabled": true })
             );
-            boot_request::<App, _, _>(|request, ctx| async move {
-                if crate::requests::skip_unlicensed(&ctx) {
-                    return;
-                }
-                let enabled = request.get("/auth/oauth/status").await;
-                assert_eq!(enabled.status_code(), StatusCode::OK);
-                assert_eq!(
-                    enabled.json::<serde_json::Value>(),
-                    serde_json::json!({ "enabled": true })
-                );
-            })
-            .await;
         })
         .await;
     })
@@ -73,12 +71,12 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 /// Partial resolved OAuth configuration must report 500 rather than panic or silently disable login.
 #[tokio::test]
 async fn status_errors_loudly_when_partially_configured() {
-    let _config = crate::requests::ConfigOverride::set(&[
+    let overrides = [
         (ISSUER_PATH, "https://idp.example.com".into()),
         (CLIENT_ID_PATH, "".into()),
         (CLIENT_SECRET_PATH, "".into()),
-    ]);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
@@ -125,20 +123,17 @@ async fn authorize_and_callback_404_when_unconfigured() {
 /// Exercising the redirect itself, and the CSRF cookie it sets, needs a live IdP and is out of scope here (see the module doc comment).
 #[tokio::test]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
-    with_oauth_env(async {
-        boot_request::<App, _, _>(|request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
-            let response = request.get("/auth/oauth/authorize").await;
-            assert_eq!(
-                response.status_code(),
-                500,
-                "an unreachable issuer must fail loudly, never redirect: {:?}",
-                response.text()
-            );
-        })
-        .await;
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let response = request.get("/auth/oauth/authorize").await;
+        assert_eq!(
+            response.status_code(),
+            500,
+            "an unreachable issuer must fail loudly, never redirect: {:?}",
+            response.text()
+        );
     })
     .await;
 }
@@ -146,35 +141,32 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 /// The provider itself reporting an error (the user declined consent, an app misconfiguration, ...) redirects to the login page's failure state rather than surfacing raw JSON to a browser mid-redirect, and clears the CSRF cookie so it is never reusable across two attempts.
 #[tokio::test]
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
-    with_oauth_env(async {
-        boot_request::<App, _, _>(|request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
-            let response = request
-                .get("/auth/oauth/callback?error=access_denied&error_description=user+declined")
-                .await;
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let response = request
+            .get("/auth/oauth/callback?error=access_denied&error_description=user+declined")
+            .await;
 
-            assert_eq!(
-                response.status_code(),
-                302,
-                "response: {:?}",
-                response.text()
-            );
-            assert_eq!(
-                response.header(header::LOCATION),
-                "/#/login?error=oauth_failed"
-            );
-            assert!(
-                response
-                    .header(header::SET_COOKIE)
-                    .to_str()
-                    .unwrap()
-                    .contains("Max-Age=0"),
-                "the CSRF cookie must be cleared on this path too"
-            );
-        })
-        .await;
+        assert_eq!(
+            response.status_code(),
+            302,
+            "response: {:?}",
+            response.text()
+        );
+        assert_eq!(
+            response.header(header::LOCATION),
+            "/#/login?error=oauth_failed"
+        );
+        assert!(
+            response
+                .header(header::SET_COOKIE)
+                .to_str()
+                .unwrap()
+                .contains("Max-Age=0"),
+            "the CSRF cookie must be cleared on this path too"
+        );
     })
     .await;
 }
@@ -182,26 +174,23 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 /// A callback missing `code` or `state` (hit directly, without ever having visited `authorize`) redirects to the same login-failure state rather than a raw validation error.
 #[tokio::test]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
-    with_oauth_env(async {
-        boot_request::<App, _, _>(|request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
-            let missing_state = request.get("/auth/oauth/callback?code=abc").await;
-            assert_eq!(missing_state.status_code(), StatusCode::FOUND);
-            assert_eq!(
-                missing_state.header(header::LOCATION),
-                "/#/login?error=oauth_failed"
-            );
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let missing_state = request.get("/auth/oauth/callback?code=abc").await;
+        assert_eq!(missing_state.status_code(), StatusCode::FOUND);
+        assert_eq!(
+            missing_state.header(header::LOCATION),
+            "/#/login?error=oauth_failed"
+        );
 
-            let missing_code = request.get("/auth/oauth/callback?state=xyz").await;
-            assert_eq!(missing_code.status_code(), StatusCode::FOUND);
-            assert_eq!(
-                missing_code.header(header::LOCATION),
-                "/#/login?error=oauth_failed"
-            );
-        })
-        .await;
+        let missing_code = request.get("/auth/oauth/callback?state=xyz").await;
+        assert_eq!(missing_code.status_code(), StatusCode::FOUND);
+        assert_eq!(
+            missing_code.header(header::LOCATION),
+            "/#/login?error=oauth_failed"
+        );
     })
     .await;
 }
@@ -209,19 +198,20 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 /// A forged `state` (never issued by this process, so its HMAC signature cannot verify) is rejected with `401` before any provider is contacted: `handle_callback` checks `state` first.
 #[tokio::test]
 async fn callback_rejects_a_state_with_a_bad_signature() {
-    with_oauth_env(async {
-        boot_request::<App, _, _>(|request, ctx| async move {
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
-            let response = request
-                .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
-                .await;
+        let response = request
+            .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
+            .await;
 
-            assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED, "response: {:?}", response.text());
-
-        })
-        .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::UNAUTHORIZED,
+            "response: {:?}",
+            response.text()
+        );
     })
     .await;
 }
@@ -229,30 +219,27 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 /// A `state` value signed correctly (under the deployment's own client secret, so the HMAC check that `callback_rejects_a_state_with_a_bad_signature` covers passes) but too old (older than `STATE_TTL_SECS`) is rejected the same `401` way: `state_token::verify`'s expiry check runs before the CSRF cookie is ever consulted.
 #[tokio::test]
 async fn callback_rejects_an_expired_state() {
-    with_oauth_env(async {
-        boot_request::<App, _, _>(|request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
-            let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
-            let state = yorishiro::edition::ee::controllers::oauth::state_token::issue_at(
-                CLIENT_SECRET.as_bytes(),
-                issued_at,
-            )
-            .state;
+    boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
+        let state = yorishiro::edition::ee::controllers::oauth::state_token::issue_at(
+            CLIENT_SECRET.as_bytes(),
+            issued_at,
+        )
+        .state;
 
-            let response = request
-                .get(&format!("/auth/oauth/callback?code=abc&state={state}"))
-                .await;
+        let response = request
+            .get(&format!("/auth/oauth/callback?code=abc&state={state}"))
+            .await;
 
-            assert_eq!(
-                response.status_code(),
-                401,
-                "response: {:?}",
-                response.text()
-            );
-        })
-        .await;
+        assert_eq!(
+            response.status_code(),
+            401,
+            "response: {:?}",
+            response.text()
+        );
     })
     .await;
 }
@@ -380,11 +367,11 @@ async fn oauth_provisioning_policy_controls_new_caps() {
     for (index, value, expected_tenant, expected_entities) in
         [(0, None, None, None), (1, Some("true"), None, None)]
     {
-        let _policy = crate::requests::ConfigOverride::set(&[(
+        let overrides = [(
             "initializers.plan_policy_enabled",
             value.unwrap_or("false").into(),
-        )]);
-        boot_request::<App, _, _>(|_request, ctx| async move {
+        )];
+        boot_request_with::<App, _, _>(&overrides, |_request, ctx| async move {
             if crate::requests::skip_unlicensed(&ctx) {
                 return;
             }

@@ -1,13 +1,12 @@
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use sea_orm::{EntityTrait, PaginatorTrait};
 use yorishiro::App;
 
-use super::boot_request;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_setup_creates_only_one_account() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(1);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let first = request.post("/setup").json(&serde_json::json!({
             "email": "first@example.com", "password": "hunter2-hunter2",
         }));
@@ -37,8 +36,8 @@ async fn concurrent_setup_creates_only_one_account() {
 
 #[tokio::test]
 async fn failed_setup_rolls_back_before_a_valid_retry() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(1);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         yorishiro::models::user_users::create_user(
             &ctx.db,
             "taken@example.com",
@@ -75,9 +74,11 @@ async fn failed_setup_rolls_back_before_a_valid_retry() {
 /// The source default enables first-run setup with a single-tenant cap, even when the environment does not define an override.
 #[tokio::test]
 async fn setup_uses_the_single_tenant_source_default() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(0);
-    let _licence = crate::requests::ConfigOverride::unlicensed();
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    let overrides = [
+        crate::requests::max_tenants(0),
+        crate::requests::unlicensed(),
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), StatusCode::OK);
         let body: serde_json::Value = status.json();
@@ -104,8 +105,8 @@ async fn setup_uses_the_single_tenant_source_default() {
 /// A second call must be refused with 409 rather than creating a second tenant, and `GET /setup/status` must report `setup_required: false` once the first call has landed.
 #[tokio::test]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(1);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), StatusCode::OK);
         let body: serde_json::Value = status.json();

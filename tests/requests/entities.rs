@@ -12,11 +12,8 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    let _config = crate::requests::ConfigOverride::set(&[(
-        "initializers.plan_policy_enabled",
-        "true".into(),
-    )]);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [("initializers.plan_policy_enabled", "true".into())];
+    crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::from_value(serde_json::json!({
             "name":"quota-note", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}

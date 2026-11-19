@@ -524,129 +524,137 @@ async fn two_jobs_for_one_workspace_never_run_together() {
 
     let (llm, in_flight, peak, entered, release) = controlled_llm().await;
     let base_url = llm.url.clone();
-    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let setup = crate::requests::fixtures::TestTenant::create(
-            &request,
-            &ctx,
-            crate::requests::fixtures::TenantArgs::default(),
-        )
-        .await;
-        crate::ee::requests::inference::create_entity(&request, &setup).await;
-        // A second version leaves the entity on an outdated schema, which is what infer-fill walks.
-        let next = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .json(&serde_json::json!({
-                "name": "note",
-                "entity_types": { "note": { "fields": {
-                    "title": { "type": "string", "required": true },
-                    "summary": { "type": "string" },
-                    "extra": { "type": "string" }
-                } } }
-            }))
+    crate::requests::boot_request_with::<yorishiro::App, _, _>(
+        &[("queue.num_workers", 2.into())],
+        |request, ctx| async move {
+            let setup = crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
             .await;
-        assert_eq!(next.status_code(), 201, "{:?}", next.text());
-        let key = request
-            .put("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .json(&serde_json::json!({
-                "base_url": base_url,
-                "model": "test-model",
-                "api_key": "sk-test"
-            }))
-            .await;
-        assert_eq!(key.status_code(), 204, "{:?}", key.text());
-
-        let mut jobs = Vec::new();
-        for _ in 0..2 {
-            jobs.push(
-                enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
-                    .await
-                    .expect("enqueue competing inference job")
-                    .parse::<Uuid>()
-                    .unwrap(),
-            );
-        }
-        let jobs = [jobs[0], jobs[1]];
-        // Two real consumers must contend while the first external call is held.
-        let mut worker_ctx = ctx.clone();
-        crate::requests::set_queue_workers(&mut worker_ctx, 2);
-        let queue =
-            crate::requests::query_worker::job_target_queue(&mut worker_ctx, WorkerTarget::Shared)
+            crate::ee::requests::inference::create_entity(&request, &setup).await;
+            // A second version leaves the entity on an outdated schema, which is what infer-fill walks.
+            let next = request
+                .post("/api/schemas")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .json(&serde_json::json!({
+                    "name": "note",
+                    "entity_types": { "note": { "fields": {
+                        "title": { "type": "string", "required": true },
+                        "summary": { "type": "string" },
+                        "extra": { "type": "string" }
+                    } } }
+                }))
                 .await;
-        let running = queue.clone();
-        let runner =
-            tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.job_tag()]).await });
-        let directory = tempfile::tempdir().unwrap();
-        let result =
-            std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
-                entered.notified().await;
-                loop {
-                    let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                    let queued: Vec<loco_rs::bgworker::Job> =
-                        serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                    if queued.iter().any(|job| {
-                        jobs.iter().any(|id| job.data["job_id"] == id.to_string())
-                            && job.status == JobStatus::Completed
-                    }) {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                assert_eq!(
-                    in_flight.load(Ordering::SeqCst),
-                    1,
-                    "the first LLM call is still held"
+            assert_eq!(next.status_code(), 201, "{:?}", next.text());
+            let key = request
+                .put("/api/workspace/llm-key")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                .json(&serde_json::json!({
+                    "base_url": base_url,
+                    "model": "test-model",
+                    "api_key": "sk-test"
+                }))
+                .await;
+            assert_eq!(key.status_code(), 204, "{:?}", key.text());
+
+            let mut jobs = Vec::new();
+            for _ in 0..2 {
+                jobs.push(
+                    enqueue_infer_fill(&ctx, &actor(&ctx, &setup.api_key).await, "note".into())
+                        .await
+                        .expect("enqueue competing inference job")
+                        .parse::<Uuid>()
+                        .unwrap(),
                 );
-                release.add_permits(2);
-                loop {
-                    let mut completed = 0;
-                    for id in jobs {
-                        if inference_jobs::get(&ctx.db, id)
-                            .await
-                            .unwrap()
-                            .unwrap()
-                            .status
-                            == InferenceJobStatus::Completed
-                        {
-                            completed += 1;
+            }
+            let jobs = [jobs[0], jobs[1]];
+            // Two real consumers must contend while the first external call is held.
+            let mut worker_ctx = ctx.clone();
+            let queue = crate::requests::query_worker::job_target_queue(
+                &mut worker_ctx,
+                WorkerTarget::Shared,
+            )
+            .await;
+            let running = queue.clone();
+            let runner =
+                tokio::spawn(
+                    async move { running.run(vec![WorkerTarget::Shared.job_tag()]).await },
+                );
+            let directory = tempfile::tempdir().unwrap();
+            let result = std::panic::AssertUnwindSafe(tokio::time::timeout(
+                Duration::from_secs(10),
+                async {
+                    entered.notified().await;
+                    loop {
+                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                        let queued: Vec<loco_rs::bgworker::Job> =
+                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                        if queued.iter().any(|job| {
+                            jobs.iter().any(|id| job.data["job_id"] == id.to_string())
+                                && job.status == JobStatus::Completed
+                        }) {
+                            break;
                         }
+                        tokio::time::sleep(Duration::from_millis(20)).await;
                     }
-                    if completed == jobs.len() {
-                        break;
+                    assert_eq!(
+                        in_flight.load(Ordering::SeqCst),
+                        1,
+                        "the first LLM call is still held"
+                    );
+                    release.add_permits(2);
+                    loop {
+                        let mut completed = 0;
+                        for id in jobs {
+                            if inference_jobs::get(&ctx.db, id)
+                                .await
+                                .unwrap()
+                                .unwrap()
+                                .status
+                                == InferenceJobStatus::Completed
+                            {
+                                completed += 1;
+                            }
+                        }
+                        if completed == jobs.len() {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(20)).await;
                     }
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-            }))
+                },
+            ))
             .catch_unwind()
             .await;
-        release.add_permits(2);
-        yorishiro::App::on_shutdown(&worker_ctx).await;
-        queue.shutdown().unwrap();
-        let drained = tokio::time::timeout(Duration::from_secs(10), runner).await;
-        queue.close().await.unwrap();
-        match result {
-            Ok(result) => {
-                result.expect("competing delivery defers and is redelivered by the real queue");
+            release.add_permits(2);
+            yorishiro::App::on_shutdown(&worker_ctx).await;
+            queue.shutdown().unwrap();
+            let drained = tokio::time::timeout(Duration::from_secs(10), runner).await;
+            queue.close().await.unwrap();
+            match result {
+                Ok(result) => {
+                    result.expect("competing delivery defers and is redelivered by the real queue");
+                }
+                Err(panic) => std::panic::resume_unwind(panic),
             }
-            Err(panic) => std::panic::resume_unwind(panic),
-        }
-        drained.unwrap().unwrap().unwrap();
+            drained.unwrap().unwrap().unwrap();
 
-        assert_eq!(peak.load(Ordering::SeqCst), 1, "LLM calls overlapped");
-        assert_eq!(in_flight.load(Ordering::SeqCst), 0);
-        for job_id in jobs {
-            let job = inference_jobs::get(&ctx.db, job_id)
-                .await
-                .expect("read job")
-                .expect("job exists");
-            assert_eq!(job.status, InferenceJobStatus::Completed, "{job:?}");
-            let proposals = inference_proposals::for_job(&ctx.db, setup.workspace_id, job_id)
-                .await
-                .expect("read proposals");
-            assert_eq!(proposals.len(), 1, "one proposal per job: {proposals:?}");
-        }
-    })
+            assert_eq!(peak.load(Ordering::SeqCst), 1, "LLM calls overlapped");
+            assert_eq!(in_flight.load(Ordering::SeqCst), 0);
+            for job_id in jobs {
+                let job = inference_jobs::get(&ctx.db, job_id)
+                    .await
+                    .expect("read job")
+                    .expect("job exists");
+                assert_eq!(job.status, InferenceJobStatus::Completed, "{job:?}");
+                let proposals = inference_proposals::for_job(&ctx.db, setup.workspace_id, job_id)
+                    .await
+                    .expect("read proposals");
+                assert_eq!(proposals.len(), 1, "one proposal per job: {proposals:?}");
+            }
+        },
+    )
     .await;
 }
 

@@ -16,10 +16,7 @@ async fn sql_queue_close_releases_pool_and_retained_worker_context() {
     use loco_rs::app::Hooks;
 
     crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-        if matches!(
-            ctx.config.queue,
-            Some(loco_rs::config::QueueConfig::Redis(_))
-        ) {
+        if crate::requests::uses_redis_queue(&ctx) {
             return;
         }
         let mut worker_ctx = ctx.clone();
@@ -58,10 +55,7 @@ async fn redis_claim_refreshes_age_and_fences_reaped_completion_and_failure() {
 
     for fail_first in [false, true] {
         crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-            if !matches!(
-                ctx.config.queue,
-                Some(loco_rs::config::QueueConfig::Redis(_))
-            ) {
+            if !crate::requests::uses_redis_queue(&ctx) {
                 return;
             }
             let fixture =

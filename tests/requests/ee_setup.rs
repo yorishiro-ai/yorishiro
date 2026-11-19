@@ -1,14 +1,14 @@
 //! Verifies `App::seed`'s official-templates publisher tenant does not make base's `/setup` wizard read as already set up.
 
-use super::boot_request;
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use loco_rs::app::Hooks;
 use yorishiro::App;
 
 #[tokio::test]
 async fn setup_still_works_after_hooks_seed_has_run() {
-    let _cap = crate::requests::ConfigOverride::max_tenants(1);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::max_tenants(1)];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         App::seed(&ctx, std::path::Path::new("does-not-need-to-exist"))
             .await
             .expect("Hooks::seed");
@@ -44,9 +44,11 @@ async fn unlicensed_ee_cannot_raise_the_tenant_cap() {
     if !crate::require_postgres_backend() {
         return;
     }
-    let _licence = crate::requests::ConfigOverride::unlicensed();
-    let _cap = crate::requests::ConfigOverride::max_tenants(100);
-    boot_request::<App, _, _>(|request, _ctx| async move {
+    let overrides = [
+        crate::requests::unlicensed(),
+        crate::requests::max_tenants(100),
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
             let first = request
                 .post("/auth/signup")
                 .json(&serde_json::json!({"email":"first-ee@example.com","password":"correct-horse-battery-staple"}))

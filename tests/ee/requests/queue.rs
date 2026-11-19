@@ -386,84 +386,87 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
         }),
     ))
     .await;
-    crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let provider = Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-            base_url: server.url.clone(),
-            api_key: "priority-test".into(),
-            model: "priority-test".into(),
-            dimensions: 768,
-            send_dimensions_param: false,
-            query_instruction: String::new(),
-            document_prefix: String::new(),
-        })) as Arc<dyn EmbeddingProvider>;
-        ctx.shared_store.insert(provider);
-        let mut worker_ctx = ctx.clone();
-        // Ordering is observable with one consumer, as with a single-worker deployment.
-        crate::requests::set_queue_workers(&mut worker_ctx, 1);
-        let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
-        let mut ids = Vec::new();
-        // Fault-inject competing provider deliveries with explicit priorities; request creation and execution use production models and workers.
-        for (text, priority) in [("low", 100), ("high", 300)] {
-            let request_id = Requests::open(
-                &ctx.db,
-                tenant.workspace_id,
-                text,
-                60,
-                Utc::now().fixed_offset() + chrono::Duration::minutes(1),
-            )
-            .await
-            .unwrap();
-            ids.push(
-                queue
-                    .enqueue(
-                        QueryEmbeddingWorker::class_name(),
-                        Some(WorkerTarget::Shared.queue()),
-                        QueryEmbeddingArgs {
-                            request_id,
-                            workspace_id: tenant.workspace_id,
-                        },
-                        Some(vec![WorkerTarget::Shared.tag()]),
-                        Some(priority),
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap(),
-            );
-        }
-        let running = queue.clone();
-        let worker =
-            tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
-        let outcome =
-            std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(5), async {
-                assert_eq!(arrivals.recv().await.as_deref(), Some("high"));
-                assert_eq!(arrivals.recv().await.as_deref(), Some("low"));
-                let directory = tempfile::tempdir().unwrap();
-                loop {
-                    let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                    let jobs: Vec<loco_rs::bgworker::Job> =
-                        serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                    if ids.iter().all(|id| {
-                        jobs.iter()
-                            .any(|job| job.id == *id && job.status == JobStatus::Completed)
-                    }) {
-                        break;
+    crate::requests::boot_request_with::<App, _, _>(
+        &[("queue.num_workers", 1.into())],
+        |request, ctx| async move {
+            let tenant =
+                crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default())
+                    .await;
+            let provider = Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+                base_url: server.url.clone(),
+                api_key: "priority-test".into(),
+                model: "priority-test".into(),
+                dimensions: 768,
+                send_dimensions_param: false,
+                query_instruction: String::new(),
+                document_prefix: String::new(),
+            })) as Arc<dyn EmbeddingProvider>;
+            ctx.shared_store.insert(provider);
+            let mut worker_ctx = ctx.clone();
+            // Ordering is observable with one consumer, as with a single-worker deployment.
+            let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
+            let mut ids = Vec::new();
+            // Fault-inject competing provider deliveries with explicit priorities; request creation and execution use production models and workers.
+            for (text, priority) in [("low", 100), ("high", 300)] {
+                let request_id = Requests::open(
+                    &ctx.db,
+                    tenant.workspace_id,
+                    text,
+                    60,
+                    Utc::now().fixed_offset() + chrono::Duration::minutes(1),
+                )
+                .await
+                .unwrap();
+                ids.push(
+                    queue
+                        .enqueue(
+                            QueryEmbeddingWorker::class_name(),
+                            Some(WorkerTarget::Shared.queue()),
+                            QueryEmbeddingArgs {
+                                request_id,
+                                workspace_id: tenant.workspace_id,
+                            },
+                            Some(vec![WorkerTarget::Shared.tag()]),
+                            Some(priority),
+                        )
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                );
+            }
+            let running = queue.clone();
+            let worker =
+                tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
+            let outcome =
+                std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(5), async {
+                    assert_eq!(arrivals.recv().await.as_deref(), Some("high"));
+                    assert_eq!(arrivals.recv().await.as_deref(), Some("low"));
+                    let directory = tempfile::tempdir().unwrap();
+                    loop {
+                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                        let jobs: Vec<loco_rs::bgworker::Job> =
+                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                        if ids.iter().all(|id| {
+                            jobs.iter()
+                                .any(|job| job.id == *id && job.status == JobStatus::Completed)
+                        }) {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(20)).await;
                     }
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-            }))
-            .catch_unwind()
-            .await;
-        App::on_shutdown(&worker_ctx).await;
-        queue.shutdown().unwrap();
-        let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;
-        queue.close().await.unwrap();
-        match outcome {
-            Ok(result) => result.expect("priority deliveries complete"),
-            Err(panic) => std::panic::resume_unwind(panic),
-        }
-        drained.unwrap().unwrap().unwrap();
-    })
+                }))
+                .catch_unwind()
+                .await;
+            App::on_shutdown(&worker_ctx).await;
+            queue.shutdown().unwrap();
+            let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;
+            queue.close().await.unwrap();
+            match outcome {
+                Ok(result) => result.expect("priority deliveries complete"),
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+            drained.unwrap().unwrap().unwrap();
+        },
+    )
     .await;
 }

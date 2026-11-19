@@ -74,23 +74,23 @@ async fn disabled_policy_bypasses_resolution_even_with_valid_licence() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
-    let _config = crate::requests::ConfigOverride::set(&[(
-        "initializers.plan_policy_enabled",
-        "false".into(),
-    )]);
-    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-        ctx.shared_store
-            .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-                sub: "queue-policy".into(),
-                plan: "pro".into(),
-                exp: chrono::Utc::now().timestamp() + 3600,
-            })));
-        let policy = concurrency_for(&ctx, uuid::Uuid::new_v4(), WorkerClass::Official)
-            .await
-            .unwrap();
-        assert_eq!(policy.plan, "community");
-        assert_eq!(policy.limit, None);
-    })
+    let overrides = [("initializers.plan_policy_enabled", "false".into())];
+    crate::requests::boot_request_with::<yorishiro::App, _, _>(
+        &overrides,
+        |_request, ctx| async move {
+            ctx.shared_store
+                .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+                    sub: "queue-policy".into(),
+                    plan: "pro".into(),
+                    exp: chrono::Utc::now().timestamp() + 3600,
+                })));
+            let policy = concurrency_for(&ctx, uuid::Uuid::new_v4(), WorkerClass::Official)
+                .await
+                .unwrap();
+            assert_eq!(policy.plan, "community");
+            assert_eq!(policy.limit, None);
+        },
+    )
     .await;
 }
 
@@ -100,44 +100,45 @@ async fn enabled_policy_rechecks_licence_before_each_admission() {
     use std::sync::Arc;
     use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
-    let _config = crate::requests::ConfigOverride::set(&[(
-        "initializers.plan_policy_enabled",
-        "true".into(),
-    )]);
-    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let now = chrono::Utc::now().timestamp();
-        ctx.shared_store
-            .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-                sub: "queue-policy".into(),
-                plan: "pro".into(),
-                exp: now + 3600,
-            })));
-        let active = concurrency_for(&ctx, fixture.workspace_id, WorkerClass::Official)
-            .await
-            .unwrap();
-        assert_eq!(active.plan, "pro");
-        assert!(active.limit.is_some());
+    let overrides = [("initializers.plan_policy_enabled", "true".into())];
+    crate::requests::boot_request_with::<yorishiro::App, _, _>(
+        &overrides,
+        |request, ctx| async move {
+            let fixture =
+                crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default())
+                    .await;
+            let now = chrono::Utc::now().timestamp();
+            ctx.shared_store
+                .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+                    sub: "queue-policy".into(),
+                    plan: "pro".into(),
+                    exp: now + 3600,
+                })));
+            let active = concurrency_for(&ctx, fixture.workspace_id, WorkerClass::Official)
+                .await
+                .unwrap();
+            assert_eq!(active.plan, "pro");
+            assert!(active.limit.is_some());
 
-        ctx.shared_store
-            .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-                sub: "queue-policy".into(),
-                plan: "pro".into(),
-                exp: now - 1,
-            })));
-        let expired = concurrency_for(&ctx, uuid::Uuid::new_v4(), WorkerClass::Official)
-            .await
-            .unwrap();
-        assert_eq!(expired.plan, "community");
-        assert_eq!(expired.limit, None);
+            ctx.shared_store
+                .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+                    sub: "queue-policy".into(),
+                    plan: "pro".into(),
+                    exp: now - 1,
+                })));
+            let expired = concurrency_for(&ctx, uuid::Uuid::new_v4(), WorkerClass::Official)
+                .await
+                .unwrap();
+            assert_eq!(expired.plan, "community");
+            assert_eq!(expired.limit, None);
 
-        ctx.shared_store.insert(Arc::new(LicenceState::default()));
-        let absent = concurrency_for(&ctx, uuid::Uuid::new_v4(), WorkerClass::Official)
-            .await
-            .unwrap();
-        assert_eq!(absent.plan, "community");
-        assert_eq!(absent.limit, None);
-    })
+            ctx.shared_store.insert(Arc::new(LicenceState::default()));
+            let absent = concurrency_for(&ctx, uuid::Uuid::new_v4(), WorkerClass::Official)
+                .await
+                .unwrap();
+            assert_eq!(absent.plan, "community");
+            assert_eq!(absent.limit, None);
+        },
+    )
     .await;
 }

@@ -297,35 +297,38 @@ mod concurrency {
 
     #[tokio::test]
     async fn same_tenant_private_jobs_keep_their_key_without_a_default_cap() {
-        let _config = crate::requests::ConfigOverride::set(&[
+        let overrides = [
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.tenant_private", "1".into()),
-        ]);
-        crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-            let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
-            let a_second = workspace_of(&ctx, tenant_a).await;
-            let b_first = workspace_of(&ctx, tenant_a).await;
+        ];
+        crate::requests::boot_request_with::<yorishiro::App, _, _>(
+            &overrides,
+            |request, ctx| async move {
+                let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
+                let a_second = workspace_of(&ctx, tenant_a).await;
+                let b_first = workspace_of(&ctx, tenant_a).await;
 
-            let first = dispatch(&ctx, a_first, WorkerClass::TenantPrivate).await;
-            let second = dispatch(&ctx, a_second, WorkerClass::TenantPrivate).await;
-            let other = dispatch(&ctx, b_first, WorkerClass::TenantPrivate).await;
+                let first = dispatch(&ctx, a_first, WorkerClass::TenantPrivate).await;
+                let second = dispatch(&ctx, a_second, WorkerClass::TenantPrivate).await;
+                let other = dispatch(&ctx, b_first, WorkerClass::TenantPrivate).await;
 
-            assert_eq!(
-                first.concurrency_key.as_deref(),
-                Some(format!("tenant_private:tenant:{tenant_a}").as_str())
-            );
-            assert_eq!(second.concurrency_key, first.concurrency_key);
-            assert_eq!(
-                other.concurrency_key.as_deref(),
-                Some(format!("tenant_private:tenant:{tenant_a}").as_str())
-            );
-            assert_eq!(first.concurrency_limit, None);
+                assert_eq!(
+                    first.concurrency_key.as_deref(),
+                    Some(format!("tenant_private:tenant:{tenant_a}").as_str())
+                );
+                assert_eq!(second.concurrency_key, first.concurrency_key);
+                assert_eq!(
+                    other.concurrency_key.as_deref(),
+                    Some(format!("tenant_private:tenant:{tenant_a}").as_str())
+                );
+                assert_eq!(first.concurrency_limit, None);
 
-            assert!(started(&start(&ctx, &first).await));
-            assert!(started(&start(&ctx, &second).await));
-            // Another workspace's job is not held back by it.
-            assert!(started(&start(&ctx, &other).await));
-        })
+                assert!(started(&start(&ctx, &first).await));
+                assert!(started(&start(&ctx, &second).await));
+                // Another workspace's job is not held back by it.
+                assert!(started(&start(&ctx, &other).await));
+            },
+        )
         .await;
     }
 
@@ -335,71 +338,77 @@ mod concurrency {
         if !crate::require_postgres_backend() {
             return;
         }
-        let _config = crate::requests::ConfigOverride::set(&[
+        let overrides = [
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.tenant_private", "1".into()),
-        ]);
-        crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
-            let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
-            let a_second = workspace_of(&ctx, tenant_a).await;
-            let (tenant_b, b_first) = workspace_of_new_tenant(&request, &ctx).await;
-            assert_ne!(tenant_a, tenant_b);
+        ];
+        crate::requests::boot_request_with::<yorishiro::App, _, _>(
+            &overrides,
+            |request, ctx| async move {
+                if crate::requests::skip_unlicensed(&ctx) {
+                    return;
+                }
+                let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
+                let a_second = workspace_of(&ctx, tenant_a).await;
+                let (tenant_b, b_first) = workspace_of_new_tenant(&request, &ctx).await;
+                assert_ne!(tenant_a, tenant_b);
 
-            let first = dispatch(&ctx, a_first, WorkerClass::TenantPrivate).await;
-            let second = dispatch(&ctx, a_second, WorkerClass::TenantPrivate).await;
-            let other = dispatch(&ctx, b_first, WorkerClass::TenantPrivate).await;
+                let first = dispatch(&ctx, a_first, WorkerClass::TenantPrivate).await;
+                let second = dispatch(&ctx, a_second, WorkerClass::TenantPrivate).await;
+                let other = dispatch(&ctx, b_first, WorkerClass::TenantPrivate).await;
 
-            assert_eq!(
-                first.concurrency_key.as_deref(),
-                Some(format!("tenant_private:tenant:{tenant_a}").as_str())
-            );
-            assert_eq!(second.concurrency_key, first.concurrency_key);
-            assert_eq!(
-                other.concurrency_key.as_deref(),
-                Some(format!("tenant_private:tenant:{tenant_b}").as_str())
-            );
-            assert_ne!(other.concurrency_key, first.concurrency_key);
-            assert_eq!(first.concurrency_limit, None);
+                assert_eq!(
+                    first.concurrency_key.as_deref(),
+                    Some(format!("tenant_private:tenant:{tenant_a}").as_str())
+                );
+                assert_eq!(second.concurrency_key, first.concurrency_key);
+                assert_eq!(
+                    other.concurrency_key.as_deref(),
+                    Some(format!("tenant_private:tenant:{tenant_b}").as_str())
+                );
+                assert_ne!(other.concurrency_key, first.concurrency_key);
+                assert_eq!(first.concurrency_limit, None);
 
-            assert!(started(&start(&ctx, &first).await));
-            assert!(started(&start(&ctx, &second).await));
-            assert!(started(&start(&ctx, &other).await));
-        })
+                assert!(started(&start(&ctx, &first).await));
+                assert!(started(&start(&ctx, &second).await));
+                assert!(started(&start(&ctx, &other).await));
+            },
+        )
         .await;
     }
 
     #[tokio::test]
     async fn same_tenant_shared_and_official_jobs_keep_their_keys_without_default_caps() {
-        let _config = crate::requests::ConfigOverride::set(&[
+        let overrides = [
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.shared", "1".into()),
             ("initializers.worker_admission.official", "1".into()),
-        ]);
-        crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-            let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
-            for (class, key) in [
-                (WorkerClass::Shared, "shared:shared"),
-                (WorkerClass::Official, "official:official"),
-            ] {
-                let first_workspace = workspace_of(&ctx, tenant_id).await;
-                let second_workspace = workspace_of(&ctx, tenant_id).await;
-                let first = dispatch(&ctx, first_workspace, class).await;
-                let second = dispatch(&ctx, second_workspace, class).await;
+        ];
+        crate::requests::boot_request_with::<yorishiro::App, _, _>(
+            &overrides,
+            |request, ctx| async move {
+                let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
+                for (class, key) in [
+                    (WorkerClass::Shared, "shared:shared"),
+                    (WorkerClass::Official, "official:official"),
+                ] {
+                    let first_workspace = workspace_of(&ctx, tenant_id).await;
+                    let second_workspace = workspace_of(&ctx, tenant_id).await;
+                    let first = dispatch(&ctx, first_workspace, class).await;
+                    let second = dispatch(&ctx, second_workspace, class).await;
 
-                assert_eq!(first.concurrency_key.as_deref(), Some(key));
-                assert_eq!(second.concurrency_key.as_deref(), Some(key));
-                assert_eq!(
-                    first.concurrency_limit, None,
-                    "the default {key} cap is disabled"
-                );
+                    assert_eq!(first.concurrency_key.as_deref(), Some(key));
+                    assert_eq!(second.concurrency_key.as_deref(), Some(key));
+                    assert_eq!(
+                        first.concurrency_limit, None,
+                        "the default {key} cap is disabled"
+                    );
 
-                assert!(started(&start(&ctx, &first).await), "{key}");
-                assert!(started(&start(&ctx, &second).await), "{key}");
-            }
-        })
+                    assert!(started(&start(&ctx, &first).await), "{key}");
+                    assert!(started(&start(&ctx, &second).await), "{key}");
+                }
+            },
+        )
         .await;
     }
 
@@ -409,38 +418,41 @@ mod concurrency {
         if !crate::require_postgres_backend() {
             return;
         }
-        let _config = crate::requests::ConfigOverride::set(&[
+        let overrides = [
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.shared", "1".into()),
             ("initializers.worker_admission.official", "1".into()),
-        ]);
-        crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
-            let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
-            for (class, key) in [
-                (WorkerClass::Shared, "shared:shared"),
-                (WorkerClass::Official, "official:official"),
-            ] {
-                let first_workspace = workspace_of(&ctx, tenant_id).await;
-                let (other_tenant, second_workspace) =
-                    workspace_of_new_tenant(&request, &ctx).await;
-                assert_ne!(tenant_id, other_tenant);
-                let first = dispatch(&ctx, first_workspace, class).await;
-                let second = dispatch(&ctx, second_workspace, class).await;
+        ];
+        crate::requests::boot_request_with::<yorishiro::App, _, _>(
+            &overrides,
+            |request, ctx| async move {
+                if crate::requests::skip_unlicensed(&ctx) {
+                    return;
+                }
+                let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
+                for (class, key) in [
+                    (WorkerClass::Shared, "shared:shared"),
+                    (WorkerClass::Official, "official:official"),
+                ] {
+                    let first_workspace = workspace_of(&ctx, tenant_id).await;
+                    let (other_tenant, second_workspace) =
+                        workspace_of_new_tenant(&request, &ctx).await;
+                    assert_ne!(tenant_id, other_tenant);
+                    let first = dispatch(&ctx, first_workspace, class).await;
+                    let second = dispatch(&ctx, second_workspace, class).await;
 
-                assert_eq!(first.concurrency_key.as_deref(), Some(key));
-                assert_eq!(second.concurrency_key.as_deref(), Some(key));
-                assert_eq!(
-                    first.concurrency_limit, None,
-                    "the default {key} cap is disabled"
-                );
+                    assert_eq!(first.concurrency_key.as_deref(), Some(key));
+                    assert_eq!(second.concurrency_key.as_deref(), Some(key));
+                    assert_eq!(
+                        first.concurrency_limit, None,
+                        "the default {key} cap is disabled"
+                    );
 
-                assert!(started(&start(&ctx, &first).await), "{key}");
-                assert!(started(&start(&ctx, &second).await), "{key}");
-            }
-        })
+                    assert!(started(&start(&ctx, &first).await), "{key}");
+                    assert!(started(&start(&ctx, &second).await), "{key}");
+                }
+            },
+        )
         .await;
     }
 

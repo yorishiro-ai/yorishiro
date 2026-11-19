@@ -74,8 +74,8 @@ boot_request::<App, _, _>(|request, ctx| async move {
 ```
 
 Outside `tests/requests/`, call it as `crate::requests::skip_unlicensed(&ctx)`.
-A test that must observe the unlicensed cap holds `ConfigOverride::unlicensed()` while it boots, so the gate never sees a key.
-A test changes the booted app's configuration with `ConfigOverride::set(&[("settings.max_tenants", 1.into())])` (dotted paths into `Config`); the process environment is touched only by tests of configuration loading itself, which take `serial(process_environment)`.
+A test that must observe the unlicensed cap boots with `crate::requests::unlicensed()`, so the gate never sees a key.
+A test changes the booted app's configuration by passing overrides to `boot_request_with(&[crate::requests::max_tenants(1)], ...)`; each override is a dotted path into `Config` such as `queue.num_workers`, applied to that one boot; the process environment is touched only by tests of configuration loading itself, which take `serial(process_environment)`.
 
 ### CI
 

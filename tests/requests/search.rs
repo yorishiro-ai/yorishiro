@@ -2,6 +2,7 @@ use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant};
 use super::query_worker::{boot_with_query_worker, boot_with_query_worker_and_drain};
 use crate::http_stub::{keyword_provider, unavailable_provider};
+use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -249,11 +250,11 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
 /// With no worker running the search must fail, loudly and boundedly: a lexical fallback would return results the caller did not ask for.
 #[tokio::test]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
-    let _config = crate::requests::ConfigOverride::set(&[
+    let overrides = [
         ("settings.query_embedding.timeout_ms", 300.into()),
         ("settings.query_embedding.poll_interval_ms", 50.into()),
-    ]);
-    boot_request::<App, _, _>(|request, ctx| async move {
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let setup = TestTenant::create(
             &request,
             &ctx,

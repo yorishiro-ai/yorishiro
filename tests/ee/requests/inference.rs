@@ -1,4 +1,5 @@
 use crate::requests::boot_request;
+use crate::requests::boot_request_with;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
@@ -179,8 +180,8 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 /// Matches `marketplace`'s and `dashboard`'s own tests for the same gate.
 #[tokio::test]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let _licence = crate::requests::ConfigOverride::unlicensed();
-    boot_request::<App, _, _>(|request, ctx| async move {
+    let overrides = [crate::requests::unlicensed()];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let with_key = request
