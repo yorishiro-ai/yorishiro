@@ -73,15 +73,16 @@ fn checkout_completed_body(event_id: &str, created: i64, tenant_id: Uuid) -> Vec
 #[tokio::test]
 #[serial(process_environment)]
 async fn a_duplicate_event_id_is_not_reapplied() {
+    // Captured before boot: a guard cannot be taken inside a booted test's scope.
+    let changed = crate::EnvGuard::capture(&[
+        "YORISHIRO_STRIPE_WEBHOOK_SECRET",
+        "YORISHIRO_STRIPE_PRICE_PRO",
+        "YORISHIRO_STRIPE_PRICE_TEAM",
+    ]);
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
-        let changed = crate::EnvGuard::capture(&[
-            "YORISHIRO_STRIPE_WEBHOOK_SECRET",
-            "YORISHIRO_STRIPE_PRICE_PRO",
-            "YORISHIRO_STRIPE_PRICE_TEAM",
-        ]);
         changed.set(
             "YORISHIRO_STRIPE_WEBHOOK_SECRET",
             "changed-after-config-load",
