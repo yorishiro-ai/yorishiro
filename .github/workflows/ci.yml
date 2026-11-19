@@ -5,8 +5,7 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # Temporary: also run for PRs stacked on #620; remove with the commit that follows its merge.
-    branches: [develop, refactor/consolidate-backends]
+    branches: [develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
