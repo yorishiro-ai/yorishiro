@@ -5,23 +5,12 @@ use std::io::{self, Write};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
 };
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::entity_entities::{self, EntityRecord};
-use crate::models::entity_relations::{self, RelationRecord};
-use crate::models::schema_schemas::{self, SchemaRecord};
+use crate::models::{entity_entities, entity_relations, schema_schemas};
 
-/// One line of a JSONL export: a tagged union so schema/entity/relation records can be told apart on read-back without a separate line-position convention.
-/// `Deserialize` is derived so `models::import::import_jsonl` can read the same shape back in.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "record", rename_all = "snake_case")]
-pub(crate) enum ExportRecord {
-    Schema(SchemaRecord),
-    Entity(EntityRecord),
-    Relation(RelationRecord),
-}
+use super::{EntityRecord, ExportRecord};
 
 const MAX_EXPORT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_EXPORT_RECORDS: usize = 10_000;

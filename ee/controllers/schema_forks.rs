@@ -15,7 +15,7 @@ async fn list(
     mut authorized: Authorized<ReadScope>,
 ) -> Result<Json<Vec<model::ForkRecord>>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaForkList)
+        .require_action(crate::models::iam::policy::Action::SchemaForkList)
         .await?;
     Ok(Json(
         model::list(
@@ -33,7 +33,7 @@ async fn get(
     Path(fork_id): Path<Uuid>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaForkGet)
+        .require_action(crate::models::iam::policy::Action::SchemaForkGet)
         .await?;
     Ok(Json(
         model::get(
@@ -52,7 +52,7 @@ async fn create(
     Json(input): Json<model::CreateInput>,
 ) -> Result<(StatusCode, Json<model::ForkRecord>), ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaForkCreate)
+        .require_action(crate::models::iam::policy::Action::SchemaForkCreate)
         .await?;
     let fork = model::create(
         authorized.txn(),
@@ -72,7 +72,7 @@ async fn update(
     Json(input): Json<model::UpdateInput>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaForkUpdate)
+        .require_action(crate::models::iam::policy::Action::SchemaForkUpdate)
         .await?;
     let fork = model::update(
         authorized.txn(),
@@ -92,7 +92,7 @@ async fn delete(
     Path(fork_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::SchemaForkDelete)
+        .require_action(crate::models::iam::policy::Action::SchemaForkDelete)
         .await?;
     model::delete(
         authorized.txn(),

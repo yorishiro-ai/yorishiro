@@ -1,5 +1,5 @@
-use yorishiro::models::access;
 use yorishiro::models::api_keys::{ApiKeyScope, AuthContext};
+use yorishiro::models::iam::access;
 
 #[test]
 fn audit_and_content_scope_are_independent() {

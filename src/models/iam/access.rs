@@ -13,7 +13,7 @@ pub(crate) async fn authorize_workspace_action(
     identity: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
     scope: ApiKeyScope,
-    action: crate::models::iam_policy::Action,
+    action: crate::models::iam::policy::Action,
 ) -> Result<Option<DatabaseTransaction>, YorishiroError> {
     let authorization = crate::db::begin_authorization(identity).await.internal()?;
     require_iam_action(
@@ -21,7 +21,7 @@ pub(crate) async fn authorize_workspace_action(
         actor,
         scope,
         action,
-        crate::models::iam_policy::Resource::Workspace {
+        crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: actor.require_workspace()?,
         },
@@ -34,8 +34,8 @@ pub(crate) async fn require_iam_action(
     txn: &DatabaseTransaction,
     actor: &AuthContext,
     required: ApiKeyScope,
-    action: crate::models::iam_policy::Action,
-    target: crate::models::iam_policy::Resource,
+    action: crate::models::iam::policy::Action,
+    target: crate::models::iam::policy::Resource,
 ) -> Result<(), YorishiroError> {
     IamEvaluation::load(txn, actor, required)
         .await?
@@ -48,7 +48,7 @@ pub(crate) struct IamEvaluation<'a> {
     current: AuthContext,
     bound_workspace_id: Option<Uuid>,
     root: bool,
-    policies: Vec<crate::models::iam_policy::Policy>,
+    policies: Vec<crate::models::iam::policy::Policy>,
 }
 
 impl<'a> IamEvaluation<'a> {
@@ -73,7 +73,7 @@ impl<'a> IamEvaluation<'a> {
         required: ApiKeyScope,
         assumption: bool,
     ) -> Result<Self, YorishiroError> {
-        use crate::models::iam_policy::Policy;
+        use crate::models::iam::policy::Policy;
         use sea_orm::EntityTrait;
         crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
             .await
@@ -138,10 +138,10 @@ impl<'a> IamEvaluation<'a> {
 
     pub(crate) async fn require(
         &self,
-        action: crate::models::iam_policy::Action,
-        target: crate::models::iam_policy::Resource,
+        action: crate::models::iam::policy::Action,
+        target: crate::models::iam::policy::Resource,
     ) -> Result<(), YorishiroError> {
-        use crate::models::iam_policy::{Policy, Resource};
+        use crate::models::iam::policy::{Policy, Resource};
         if !action.applies_to(target) {
             return Err(YorishiroError::Unauthenticated);
         }

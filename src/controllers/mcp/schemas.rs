@@ -83,7 +83,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaArchive)
+            .require_action(crate::models::iam::policy::Action::SchemaArchive)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -119,7 +119,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaDelete)
+            .require_action(crate::models::iam::policy::Action::SchemaDelete)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -157,7 +157,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaList)
+            .require_action(crate::models::iam::policy::Action::SchemaList)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -192,7 +192,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaGet)
+            .require_action(crate::models::iam::policy::Action::SchemaGet)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -229,7 +229,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaGet)
+            .require_action(crate::models::iam::policy::Action::SchemaGet)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -265,7 +265,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaCreate)
+            .require_action(crate::models::iam::policy::Action::SchemaCreate)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -412,7 +412,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaGet)
+            .require_action(crate::models::iam::policy::Action::SchemaGet)
             .await
         {
             return Ok(err_to_tool_result(error));

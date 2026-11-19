@@ -61,7 +61,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaUpstreamList)
+            .require_action(crate::models::iam::policy::Action::SchemaUpstreamList)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -102,7 +102,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaMergePreview)
+            .require_action(crate::models::iam::policy::Action::SchemaMergePreview)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -148,7 +148,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::SchemaMergeApply)
+            .require_action(crate::models::iam::policy::Action::SchemaMergeApply)
             .await
         {
             return Ok(err_to_tool_result(error));

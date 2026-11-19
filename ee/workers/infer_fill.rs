@@ -155,12 +155,12 @@ async fn perform_infer_fill(
 
     if !batches.is_empty() {
         let proposal_txn = open_workspace_write_scope(ctx, args.workspace_id).await?;
-        let authorization = crate::ee::models::access::authorize_job_actor(
+        let authorization = crate::ee::models::iam::access::authorize_job_actor(
             &proposal_txn,
             &ctx.db,
             &args.actor,
             crate::models::api_keys::ApiKeyScope::Schema,
-            crate::models::iam_policy::Action::InferenceCreate,
+            crate::models::iam::policy::Action::InferenceCreate,
         )
         .await
         .map_err(|error| Error::Message(error.to_string()))?;
@@ -484,7 +484,7 @@ pub async fn enqueue_infer_fill(
     let txn = db::begin_workspace_write(ctx, tenant_id, workspace_id)
         .await
         .internal()?;
-    let authorization = crate::ee::models::access::authorize_job_actor(
+    let authorization = crate::ee::models::iam::access::authorize_job_actor(
         &txn,
         &ctx.db,
         &crate::models::api_key_audit_log::AuditActor {
@@ -494,7 +494,7 @@ pub async fn enqueue_infer_fill(
             user_id: auth.user_id,
         },
         crate::models::api_keys::ApiKeyScope::Schema,
-        crate::models::iam_policy::Action::InferenceCreate,
+        crate::models::iam::policy::Action::InferenceCreate,
     )
     .await?;
     if workspace_llm_keys::get(authorization.as_ref().unwrap_or(&txn), workspace_id)
@@ -542,12 +542,12 @@ async fn check_actor(ctx: &AppContext, args: &InferFillArgs) -> Result<(), crate
         return Err(crate::YorishiroError::Unauthenticated);
     }
     let txn = db::begin_workspace_write(ctx, args.actor.tenant_id, args.workspace_id).await?;
-    let authorization = crate::ee::models::access::authorize_job_actor(
+    let authorization = crate::ee::models::iam::access::authorize_job_actor(
         &txn,
         &ctx.db,
         &args.actor,
         crate::models::api_keys::ApiKeyScope::Schema,
-        crate::models::iam_policy::Action::InferenceCreate,
+        crate::models::iam::policy::Action::InferenceCreate,
     )
     .await?;
     txn.commit().await.internal()?;

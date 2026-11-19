@@ -113,7 +113,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::RelationCreate)
+            .require_action(crate::models::iam::policy::Action::RelationCreate)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -148,7 +148,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::RelationGet)
+            .require_action(crate::models::iam::policy::Action::RelationGet)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -180,7 +180,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::RelationDelete)
+            .require_action(crate::models::iam::policy::Action::RelationDelete)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -213,7 +213,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::RelationList)
+            .require_action(crate::models::iam::policy::Action::RelationList)
             .await
         {
             return Ok(err_to_tool_result(error));
@@ -255,7 +255,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         if let Err(error) = authorized
-            .require_action(crate::models::iam_policy::Action::RelationUpdate)
+            .require_action(crate::models::iam::policy::Action::RelationUpdate)
             .await
         {
             return Ok(err_to_tool_result(error));

@@ -131,7 +131,7 @@ pub enum Action {
 }
 
 impl Action {
-    /// Keep it in lockstep with the enum: the count test in `tests/models/iam_policy.rs` fails when a variant is added or removed.
+    /// Keep it in lockstep with the enum: the count test in `tests/models/iam/policy.rs` fails when a variant is added or removed.
     pub const ALL: &'static [Self] = &[
         Self::TenantGet,
         Self::TenantUpdate,

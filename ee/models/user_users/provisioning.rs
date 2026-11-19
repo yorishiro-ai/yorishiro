@@ -69,7 +69,7 @@ pub async fn find_or_create(
 
     let tenant_name = tenant_name_from_email(email);
     let tenant = tenant_tenants::create_tenant(conn, &tenant_name, max_tenants).await?;
-    crate::models::iam_builtin::bootstrap(conn, tenant.id).await?;
+    crate::models::iam::builtin::bootstrap(conn, tenant.id).await?;
     let workspace = tenancy::create_workspace(conn, tenant.id, "default", None, None).await?;
 
     // A schema requires an existing `workspace_id`, so it is created after the workspace and the workspace is then updated to point at it, moving its `status` to `active`.

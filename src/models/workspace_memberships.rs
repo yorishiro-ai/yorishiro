@@ -31,12 +31,12 @@ impl Model {
     ) -> Result<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>, YorishiroError> {
         use sea_orm::QueryOrder;
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::WorkspaceGet,
-            crate::models::iam_policy::Resource::Workspace {
+            crate::models::iam::policy::Action::WorkspaceGet,
+            crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id,
             },
@@ -75,12 +75,12 @@ impl Model {
         role: WorkspaceRole,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::WorkspaceUpdate,
-            crate::models::iam_policy::Resource::Workspace {
+            crate::models::iam::policy::Action::WorkspaceUpdate,
+            crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id,
             },
@@ -101,12 +101,12 @@ impl Model {
         user_id: Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::WorkspaceUpdate,
-            crate::models::iam_policy::Resource::Workspace {
+            crate::models::iam::policy::Action::WorkspaceUpdate,
+            crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id,
             },

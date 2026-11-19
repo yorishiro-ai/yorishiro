@@ -4,7 +4,7 @@ pub use crate::models::_entities::iam_policies::{ActiveModel, Column, Entity, Mo
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::{_entities::workspace_workspaces, iam_policy::Policy};
+use crate::models::{_entities::workspace_workspaces, iam::policy::Policy};
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -42,9 +42,9 @@ impl Model {
         actor: &crate::models::api_keys::AuthContext,
         params: crate::models::pagination::ListParams,
     ) -> Result<Vec<Self>, YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -70,9 +70,9 @@ impl Model {
         actor: &crate::models::api_keys::AuthContext,
         id: Uuid,
     ) -> Result<Self, YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -96,9 +96,9 @@ impl Model {
         name: String,
         document: serde_json::Value,
     ) -> Result<Self, YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -111,7 +111,7 @@ impl Model {
         let before = Self::find(&txn, actor.tenant_id, id)
             .await?
             .ok_or_else(|| YorishiroError::not_found("IAM policy was not found"))?;
-        if crate::models::iam_builtin::is_builtin_policy_name(&before.name) {
+        if crate::models::iam::builtin::is_builtin_policy_name(&before.name) {
             return Err(YorishiroError::Conflict {
                 message: "system-managed policies cannot be updated".into(),
             });
@@ -140,9 +140,9 @@ impl Model {
         actor: &crate::models::api_keys::AuthContext,
         id: Uuid,
     ) -> Result<(), YorishiroError> {
-        use crate::models::iam_policy::{Action, Resource};
+        use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
@@ -155,7 +155,7 @@ impl Model {
         let policy = Self::find(&txn, actor.tenant_id, id)
             .await?
             .ok_or_else(|| YorishiroError::not_found("IAM policy was not found"))?;
-        if crate::models::iam_builtin::is_builtin_policy_name(&policy.name) {
+        if crate::models::iam::builtin::is_builtin_policy_name(&policy.name) {
             return Err(YorishiroError::Conflict {
                 message: "system-managed policies cannot be deleted".into(),
             });
@@ -179,12 +179,12 @@ impl Model {
         document: serde_json::Value,
     ) -> Result<Self, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Read,
-            crate::models::iam_policy::Action::PolicyCreate,
-            crate::models::iam_policy::Resource::Tenant {
+            crate::models::iam::policy::Action::PolicyCreate,
+            crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
@@ -197,7 +197,7 @@ impl Model {
                 hint: "provide a non-empty name of at most 100 characters".into(),
             });
         }
-        if crate::models::iam_builtin::is_builtin_policy_name(name) {
+        if crate::models::iam::builtin::is_builtin_policy_name(name) {
             return Err(YorishiroError::Conflict {
                 message: "this policy name is reserved for a system-managed policy".into(),
             });

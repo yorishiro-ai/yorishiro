@@ -60,19 +60,19 @@ pub(crate) async fn overview_as(
     use crate::edition::ee::models::tenant_billing;
     use crate::models::tenant_memberships;
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    let evaluation = crate::models::access::IamEvaluation::load(
+    let evaluation = crate::models::iam::access::IamEvaluation::load(
         &txn,
         actor,
         crate::models::api_keys::ApiKeyScope::Read,
     )
     .await?;
     let tenant_id = actor.tenant_id;
-    let target = crate::models::iam_policy::Resource::Tenant { tenant_id };
+    let target = crate::models::iam::policy::Resource::Tenant { tenant_id };
     evaluation
-        .require(crate::models::iam_policy::Action::TenantGet, target)
+        .require(crate::models::iam::policy::Action::TenantGet, target)
         .await?;
     evaluation
-        .require(crate::models::iam_policy::Action::TenantUserList, target)
+        .require(crate::models::iam::policy::Action::TenantUserList, target)
         .await?;
     let tenant = crate::models::tenant_tenants::Model::find_by_id(&txn, tenant_id).await?;
     let billing = tenant_billing::get_billing(&txn, tenant_id).await?;

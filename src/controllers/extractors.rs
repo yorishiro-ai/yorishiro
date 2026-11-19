@@ -154,12 +154,12 @@ impl<R> Authorized<R> {
 impl<R> Authorized<R> {
     pub(crate) async fn require_action(
         &mut self,
-        action: crate::models::iam_policy::Action,
+        action: crate::models::iam::policy::Action,
     ) -> Result<(), ApiError>
     where
         R: RequiredScope,
     {
-        self.authorization = crate::models::access::authorize_workspace_action(
+        self.authorization = crate::models::iam::access::authorize_workspace_action(
             &self.txn,
             &self.identity,
             &self.ctx,
@@ -243,12 +243,12 @@ where
             .authorize_audit(presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
-        let authorization = crate::models::access::authorize_workspace_action(
+        let authorization = crate::models::iam::access::authorize_workspace_action(
             &txn,
             &app_ctx.db,
             &ctx,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::AuditLogList,
+            crate::models::iam::policy::Action::AuditLogList,
         )
         .await?;
 

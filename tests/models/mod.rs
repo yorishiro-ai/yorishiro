@@ -3,13 +3,11 @@ mod queue_job_dispatch_outbox;
 mod queue_job_lifecycles;
 mod workspace_workspaces;
 
-mod access;
 mod api_keys;
 #[cfg(feature = "enterprise")]
 mod compute_credit_ledger;
 mod db_enum;
-mod iam_policy;
-mod iam_trust_policy;
+mod iam;
 #[cfg(feature = "enterprise")]
 mod inference_jobs;
 #[cfg(feature = "enterprise")]

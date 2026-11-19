@@ -126,7 +126,7 @@ pub fn default_authenticator() -> Arc<dyn Authenticator> {
     Arc::new(DefaultAuthenticator)
 }
 
-pub use crate::models::access::{require_audit, require_scope};
+pub use crate::models::iam::access::{require_audit, require_scope};
 
 /// Request authentication shared by transport adapters through the installed policy.
 pub(crate) struct RequestAuth<'a> {

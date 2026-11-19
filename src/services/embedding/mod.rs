@@ -235,7 +235,7 @@ pub async fn build_embedding_provider(
             }))
         }
         crate::data::settings::EmbeddingProvider::Local => {
-            build_local_provider(config, &settings.http_timeouts).await
+            local::build_local_provider(config, &settings.http_timeouts).await
         }
         crate::data::settings::EmbeddingProvider::Openai => {
             tracing::info!(
@@ -244,74 +244,4 @@ pub async fn build_embedding_provider(
             Err("embedding provider openai requires base_url and model".into())
         }
     }
-}
-
-/// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value, or [`model_fetch::DEFAULT_MODEL`] when unset.
-/// An unrecognized value fails startup rather than silently falling back to the default: a typo in this variable is exactly the kind of "this deployment thinks it configured one model but got another" mistake the whole write-time model check exists to catch, and catching the typo at boot is strictly better than catching the resulting stamp mismatch on the first write.
-fn resolve_local_model(
-    requested: &str,
-) -> crate::error::BoxResult<&'static model_fetch::LocalModelDef> {
-    if requested == model_fetch::DEFAULT_MODEL.short_id {
-        Ok(model_fetch::DEFAULT_MODEL)
-    } else {
-        Err(format!(
-            "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
-            model_fetch::DEFAULT_MODEL.short_id
-        )
-        .into())
-    }
-}
-
-/// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
-/// `YORISHIRO_LOCAL_MODEL` selects which [`model_fetch::LocalModelDef`] to load (default: [`model_fetch::DEFAULT_MODEL`]); see [`resolve_local_model`].
-/// The model and tokenizer files are fetched into `models/<short_id>/` on first use when absent.
-///
-/// There is no pooling variable: every model this provider can load is mean-pooled (see `local::LocalEmbeddingProvider`'s own doc comment for why that stays a fact rather than a config surface).
-///
-/// Missing model files are downloaded and verified before loading.
-async fn build_local_provider(
-    config: &crate::data::settings::Embedding,
-    timeouts: &crate::data::settings::HttpTimeouts,
-) -> crate::error::BoxResult<std::sync::Arc<dyn EmbeddingProvider>> {
-    let dimensions = config.dimensions;
-    let def = resolve_local_model(&config.local_model)?;
-    if dimensions != def.dimensions {
-        return Err(format!(
-            "YORISHIRO_EMBEDDING_DIMENSIONS={dimensions} does not match {}'s own output width \
-             ({}); unset YORISHIRO_EMBEDDING_DIMENSIONS to use the selected model's own width, \
-             or point YORISHIRO_LOCAL_MODEL at a model that actually produces {dimensions}",
-            def.id, def.dimensions
-        )
-        .into());
-    }
-    let max_sequence_length = config.local_max_sequence_length;
-    let (model_path, tokenizer_path) = model_fetch::ensure_model_files(def, timeouts).await?;
-    let model_path = model_path.display().to_string();
-    let tokenizer_path = tokenizer_path.display().to_string();
-
-    let local_config = local::LocalEmbeddingConfig {
-        model_path: model_path.clone().into(),
-        tokenizer_path: tokenizer_path.clone().into(),
-        def,
-        max_sequence_length,
-    };
-    let provider =
-        tokio::task::spawn_blocking(move || local::LocalEmbeddingProvider::load(local_config))
-            .await
-            .map_err(|err| -> crate::error::BoxError {
-                crate::error::BoxError::from(format!(
-                    "local embedding model loader task failed: {err}"
-                ))
-            })?
-            .map_err(|err| -> crate::error::BoxError {
-                format!(
-                    "{err}\n\nthe local embedding provider needs '{model_path}' and \
-             '{tokenizer_path}', or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an \
-             OpenAI-compatible endpoint instead"
-                )
-                .into()
-            })?
-            .with_timeouts(*timeouts);
-    tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");
-    Ok(std::sync::Arc::new(provider))
 }

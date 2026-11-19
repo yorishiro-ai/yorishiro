@@ -21,7 +21,7 @@ pub(crate) async fn create_relation(
     Json(body): Json<CreateRelationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::RelationCreate)
+        .require_action(crate::models::iam::policy::Action::RelationCreate)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     let input = body.into();
@@ -36,7 +36,7 @@ pub(crate) async fn get_relation(
     Path(id): Path<Uuid>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::RelationGet)
+        .require_action(crate::models::iam::policy::Action::RelationGet)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     let record = entity_relations::get(authorized.txn(), workspace_id, id).await?;
@@ -49,7 +49,7 @@ pub(crate) async fn delete_relation(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::RelationDelete)
+        .require_action(crate::models::iam::policy::Action::RelationDelete)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     entity_relations::delete(authorized.txn(), workspace_id, id).await?;
@@ -63,7 +63,7 @@ pub(crate) async fn list_relations(
     Query(params): Query<ListRelationsParams>,
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::RelationList)
+        .require_action(crate::models::iam::policy::Action::RelationList)
         .await?;
     let query = params.try_into()?;
 
@@ -79,7 +79,7 @@ pub(crate) async fn set_relation_status(
     Json(body): Json<SetRelationStatusRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::RelationUpdate)
+        .require_action(crate::models::iam::policy::Action::RelationUpdate)
         .await?;
     let workspace_id = authorized.ctx.require_workspace()?;
     let record = entity_relations::set_status(

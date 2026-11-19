@@ -20,7 +20,7 @@ async fn list_columns(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<ColumnPreference>>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityColumnsGet)
+        .require_action(crate::models::iam::policy::Action::EntityColumnsGet)
         .await?;
     let stored = entity_column_preferences::list(
         authorized.txn(),
@@ -39,7 +39,7 @@ async fn set_columns(
     Json(body): Json<SetColumnsRequest>,
 ) -> Result<Json<ColumnPreference>, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityColumnsUpdate)
+        .require_action(crate::models::iam::policy::Action::EntityColumnsUpdate)
         .await?;
     let stored = entity_column_preferences::set(
         authorized.txn(),
@@ -59,7 +59,7 @@ async fn reset_columns(
     Path(entity_type): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     authorized
-        .require_action(crate::models::iam_policy::Action::EntityColumnsDelete)
+        .require_action(crate::models::iam::policy::Action::EntityColumnsDelete)
         .await?;
     entity_column_preferences::clear(
         authorized.txn(),

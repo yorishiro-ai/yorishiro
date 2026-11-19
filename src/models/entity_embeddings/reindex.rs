@@ -88,12 +88,12 @@ pub(crate) async fn reindex_workspace_as(
 
     let txn = crate::db::begin_write(conn).await.internal()?;
     if let Some(actor) = actor {
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Migration,
-            crate::models::iam_policy::Action::WorkspaceReindex,
-            crate::models::iam_policy::Resource::Workspace {
+            crate::models::iam::policy::Action::WorkspaceReindex,
+            crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id,
             },
@@ -151,12 +151,12 @@ pub(crate) async fn reindex_workspace_as(
         // Mutation triggers take this same row lock before changing entities or provider settings.
         let txn = crate::db::begin_write(conn).await.internal()?;
         if let Some(actor) = actor {
-            crate::models::access::require_iam_action(
+            crate::models::iam::access::require_iam_action(
                 &txn,
                 actor,
                 crate::models::api_keys::ApiKeyScope::Migration,
-                crate::models::iam_policy::Action::WorkspaceReindex,
-                crate::models::iam_policy::Resource::Workspace {
+                crate::models::iam::policy::Action::WorkspaceReindex,
+                crate::models::iam::policy::Resource::Workspace {
                     tenant_id: actor.tenant_id,
                     workspace_id,
                 },

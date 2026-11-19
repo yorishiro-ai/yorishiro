@@ -72,12 +72,12 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         });
     if let Some(actor) = &actor {
         let txn = crate::db::begin_write(&ctx.db).await?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Migration,
-            crate::models::iam_policy::Action::WorkspaceReindex,
-            crate::models::iam_policy::Resource::Workspace {
+            crate::models::iam::policy::Action::WorkspaceReindex,
+            crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id: args.workspace_id,
             },
@@ -208,12 +208,12 @@ pub(crate) async fn enqueue_requested(
         });
     }
     let authorization = crate::db::begin_authorization(&ctx.db).await.internal()?;
-    crate::models::access::require_iam_action(
+    crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,
         crate::models::api_keys::ApiKeyScope::Migration,
-        crate::models::iam_policy::Action::WorkspaceReindex,
-        crate::models::iam_policy::Resource::Workspace {
+        crate::models::iam::policy::Action::WorkspaceReindex,
+        crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: actor.require_workspace()?,
         },

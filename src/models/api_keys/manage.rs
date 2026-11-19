@@ -31,12 +31,12 @@ impl Entity {
         actor: &AuthContext,
     ) -> Result<Vec<(Model, KeyGrant)>, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::CredentialList,
-            crate::models::iam_policy::Resource::Tenant {
+            crate::models::iam::policy::Action::CredentialList,
+            crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
@@ -95,12 +95,12 @@ impl Entity {
         key_id: Uuid,
     ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::CredentialRevoke,
-            crate::models::iam_policy::Resource::Tenant {
+            crate::models::iam::policy::Action::CredentialRevoke,
+            crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
@@ -132,12 +132,12 @@ impl Entity {
         key_id: Uuid,
     ) -> Result<CreatedApiKey, YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
-        crate::models::access::require_iam_action(
+        crate::models::iam::access::require_iam_action(
             &txn,
             actor,
             ApiKeyScope::Read,
-            crate::models::iam_policy::Action::CredentialRotate,
-            crate::models::iam_policy::Resource::Tenant {
+            crate::models::iam::policy::Action::CredentialRotate,
+            crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
@@ -168,7 +168,7 @@ impl Entity {
         }
         let scope = stored_scope(&old.scope)?;
         let current = Model::current_context(&txn, actor).await?;
-        crate::models::access::require_key_grant(&txn, &current, scope, old.audit).await?;
+        crate::models::iam::access::require_key_grant(&txn, &current, scope, old.audit).await?;
         if let Some(limit) = issuer_binding.expires_at
             && old.expires_at.is_none_or(|expiry| expiry > limit)
         {
@@ -177,7 +177,8 @@ impl Entity {
                 hint: "rotate using a credential with sufficient lifetime".into(),
             });
         }
-        crate::models::access::require_key_attribution(&txn, old.tenant_id, old.user_id).await?;
+        crate::models::iam::access::require_key_attribution(&txn, old.tenant_id, old.user_id)
+            .await?;
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(old.tenant_id),
